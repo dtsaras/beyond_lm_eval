@@ -1,0 +1,35 @@
+experiment_name: "gem_geometry_demo"
+
+global:
+  device: "cuda"
+  output_dir: "results/gem_demo"
+  batch_size: 1
+
+model:
+  name: "hf"
+  # Replace with actual path or huggingface id
+  path: "HuggingFaceTB/SmolLM2-135M" 
+
+tasks:
+  # Geometry
+  geometry_categories:
+    categories_path: "src/blme/assets/categories.json"
+    projection_method: "pca" # Use 'umap' if installed
+    k_purity: 20
+    
+  geometry_hubness:
+    k_values: [5, 20]
+    n_sample: 2000
+    
+  # Dynamics
+  dynamics_trajectories:
+    prompts:
+      - ["The bank", [" was", " river"]]
+      
+  # Steering
+  steering_concept:
+    method: "hidden_normalized"
+    scales: [1.0]
+    positive_prompts: ["I am happy"]
+    negative_prompts: ["I am sad"]
+    target_prompts: ["I feel"]

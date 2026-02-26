@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blme"
+version = "0.1.0"
+description = "Beyond LM Eval - specific diagnostics for LLMs"
+readme = "README.md"
+authors = [
+  { name = "GEM Team", email = "gem@example.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy",
+    "tqdm",
+    "scipy",
+    "scikit-learn",
+    "lm-eval",  # The core dependency
+    "wandb",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/dtsaras/beyond_lm_eval"

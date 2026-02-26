@@ -1,0 +1,633 @@
+{
+  "passed": [
+    "geometry_svd",
+    "geometry_intrinsic_dim",
+    "geometry_cka",
+    "geometry_spectral",
+    "geometry_hubness",
+    "geometry_collapse",
+    "geometry_mutual_info",
+    "geometry_consistency",
+    "geometry_perplexity",
+    "geometry_categories",
+    "geometry_unembedding",
+    "geometry_lid",
+    "geometry_lipschitz",
+    "geometry_rsa",
+    "geometry_mahalanobis",
+    "geometry_information_fisher",
+    "geometry_positional_decay",
+    "geometry_matrix_entropy",
+    "geometry_correlation_dimension",
+    "interpretability_attention_entropy",
+    "interpretability_induction_heads",
+    "interpretability_logit_lens",
+    "interpretability_attribution",
+    "interpretability_prediction_entropy",
+    "interpretability_probing",
+    "interpretability_sparsity",
+    "interpretability_waa",
+    "interpretability_attention_polysemanticity",
+    "consistency_calibration",
+    "consistency_paraphrase",
+    "consistency_logical",
+    "consistency_contrastive",
+    "dynamics_stability",
+    "dynamics_interpolation",
+    "dynamics_coe",
+    "gem_alignment",
+    "gem_substitution",
+    "gem_editing",
+    "gem_trajectories",
+    "causality_tracing",
+    "causality_ablation",
+    "causality_attention_knockout",
+    "topology_homology",
+    "topology_persistence_entropy",
+    "topology_betti_curve",
+    "repe_task_vectors",
+    "repe_concept_separability",
+    "interpretability_attention_graph"
+  ],
+  "failed": [
+    [
+      "interpretability_sae_features",
+      "Returned error: sae_lens library not installed. Skipping SAE Feature Dimensionality module. Install with: pip install sae-lens"
+    ]
+  ],
+  "results": {
+    "geometry_svd": {
+      "svd_auc": 0.9479832649230957,
+      "cond_number": 220020048.0,
+      "avg_cosine_similarity": 0.010955797508358955,
+      "effective_rank": 24.40621566772461,
+      "participation_ratio": 2.033867597579956
+    },
+    "geometry_intrinsic_dim": {
+      "intrinsic_dimension": 11.126024692664,
+      "sample_size": 50257
+    },
+    "geometry_cka": {
+      "cka_matrix": [
+        [
+          1.0,
+          0.9938176836229271,
+          0.9946129695067634,
+          0.9949572204833348,
+          0.9952018189632279,
+          0.6232385680468061
+        ],
+        [
+          0.9938176836229271,
+          1.0,
+          0.9999242268924919,
+          0.9998644112139161,
+          0.9997245873408052,
+          0.624823658133738
+        ],
+        [
+          0.9946129695067634,
+          0.9999242268924919,
+          1.0,
+          0.9999586796210718,
+          0.9997604827049206,
+          0.6245787495241819
+        ],
+        [
+          0.9949572204833348,
+          0.9998644112139161,
+          0.9999586796210718,
+          1.0,
+          0.9998163276298953,
+          0.624347813918299
+        ],
+        [
+          0.9952018189632279,
+          0.9997245873408052,
+          0.9997604827049206,
+          0.9998163276298953,
+          1.0,
+          0.6243026448683578
+        ],
+        [
+          0.6232385680468061,
+          0.624823658133738,
+          0.6245787495241819,
+          0.624347813918299,
+          0.6243026448683578,
+          1.0
+        ]
+      ],
+      "layers": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "avg_adjacent_cka": 0.9235639125269488
+    },
+    "geometry_spectral": {
+      "avg_alpha": 5.247146129608154,
+      "avg_stable_rank": 3.6133618354797363,
+      "min_alpha": 5.247146129608154,
+      "max_alpha": 5.247146129608154
+    },
+    "geometry_hubness": {
+      "hubness_k5_skew": 34.50610049722211,
+      "hubness_k5_max": 1138,
+      "hubness_k5_top1pct": 0.1485842768171598,
+      "hubness_k5_gini": 0.4447617845068279
+    },
+    "geometry_collapse": {
+      "erank_per_layer": [
+        27.899520874023438,
+        6.556177139282227,
+        7.8287858963012695,
+        10.09576416015625,
+        13.92994499206543,
+        27.92837142944336
+      ],
+      "max_erank": 27.92837142944336,
+      "min_erank": 6.556177139282227,
+      "collapse_ratio": 0.2347497116273014,
+      "max_drop": -21.34334373474121,
+      "max_drop_layer": 1
+    },
+    "geometry_mutual_info": {
+      "adjacent_mi": [
+        0.9937876368569923,
+        0.9999241872537971,
+        0.999958197357907,
+        0.9998159568890064,
+        0.6242852398722551
+      ],
+      "avg_adjacent_mi": 0.9235542436459916,
+      "min_adjacent_mi": 0.6242852398722551,
+      "input_to_layer_mi": [
+        1.0,
+        0.9937876368569923,
+        0.9945833206440311,
+        0.994929815057981,
+        0.9951767402993769,
+        0.6232241950843348
+      ],
+      "information_compression_ratio": 0.6232241950837115
+    },
+    "geometry_consistency": {
+      "cosine_consistency_mean": -0.11692236418073827,
+      "cosine_consistency_std": 0.013535287082704954
+    },
+    "geometry_perplexity": {
+      "ppl_rare": Infinity,
+      "ppl_freq": 149.54911588874438
+    },
+    "geometry_categories": {
+      "pronouns_intra": 0.7157989740371704,
+      "pronouns_inter": 0.8093826174736023,
+      "pronouns_separation": 0.09358364343643188,
+      "determiners_intra": 0.6948599815368652,
+      "determiners_inter": 0.8173254132270813,
+      "determiners_separation": 0.12246543169021606,
+      "prepositions_intra": 0.706314742565155,
+      "prepositions_inter": 0.8176310062408447,
+      "prepositions_separation": 0.1113162636756897,
+      "months_intra": 0.4697026312351227,
+      "months_inter": 0.758247971534729,
+      "months_separation": 0.2885453402996063,
+      "seasons_intra": 0.5133548974990845,
+      "seasons_inter": 0.7590304017066956,
+      "seasons_separation": 0.24567550420761108,
+      "digits_intra": 0.4498993456363678,
+      "digits_inter": 0.836178719997406,
+      "digits_separation": 0.3862793743610382,
+      "multi_digit_intra": 0.5580954551696777,
+      "multi_digit_inter": 0.7927022576332092,
+      "multi_digit_separation": 0.2346068024635315,
+      "currencies_intra": 0.5515086054801941,
+      "currencies_inter": 0.7705190777778625,
+      "currencies_separation": 0.21901047229766846,
+      "units_intra": 0.6674719452857971,
+      "units_inter": 0.7721149325370789,
+      "units_separation": 0.10464298725128174,
+      "punctuation_intra": 0.7224580645561218,
+      "punctuation_inter": 0.833379864692688,
+      "punctuation_separation": 0.11092180013656616,
+      "colors_intra": 0.5687392950057983,
+      "colors_inter": 0.7755014300346375,
+      "colors_separation": 0.2067621350288391,
+      "emotions_intra": 0.602961003780365,
+      "emotions_inter": 0.7318142652511597,
+      "emotions_separation": 0.12885326147079468,
+      "singular_plural_intra": 0.70772385597229,
+      "singular_plural_inter": 0.7484011650085449,
+      "singular_plural_separation": 0.04067730903625488,
+      "present_past_intra": 0.6974061131477356,
+      "present_past_inter": 0.7590156197547913,
+      "present_past_separation": 0.061609506607055664,
+      "pronouns_purity": 0.39705882352941174,
+      "determiners_purity": 0.20227272727272733,
+      "prepositions_purity": 0.35405405405405405,
+      "months_purity": 0.9107843137254903,
+      "seasons_purity": 0.49000000000000005,
+      "digits_purity": 0.51,
+      "multi_digit_purity": 0.43508771929824563,
+      "currencies_purity": 0.2384615384615385,
+      "units_purity": 0.2459677419354839,
+      "punctuation_purity": 0.21180555555555555,
+      "colors_purity": 0.6649122807017542,
+      "emotions_purity": 0.15499999999999997,
+      "singular_plural_purity": 0.0857142857142857,
+      "present_past_purity": 0.07857142857142858,
+      "pronouns_hub_skew": 0.6859496063971477,
+      "pronouns_hub_max": 13,
+      "determiners_hub_skew": 0.6127734494848349,
+      "determiners_hub_max": 13,
+      "prepositions_hub_skew": 1.778394862796827,
+      "prepositions_hub_max": 18,
+      "months_hub_skew": -0.19205189030943842,
+      "months_hub_max": 10,
+      "seasons_hub_skew": 0.1632993161855452,
+      "seasons_hub_max": 10,
+      "digits_hub_skew": 0.09751321935466284,
+      "digits_hub_max": 9,
+      "multi_digit_hub_skew": 0.8176915541907035,
+      "multi_digit_hub_max": 10,
+      "currencies_hub_skew": -0.24186773244895649,
+      "currencies_hub_max": 7,
+      "units_hub_skew": 0.5061533817381453,
+      "units_hub_max": 12,
+      "punctuation_hub_skew": 1.4717336715588183,
+      "punctuation_hub_max": 15,
+      "colors_hub_skew": 0.9399543871912084,
+      "colors_hub_max": 14,
+      "emotions_hub_skew": 0.6608719339461375,
+      "emotions_hub_max": 14,
+      "singular_plural_hub_skew": 0.6964315071188877,
+      "singular_plural_hub_max": 15,
+      "present_past_hub_skew": 1.5883054379014838,
+      "present_past_hub_max": 22,
+      "singular_plural_consistency": 0.1034458726644516,
+      "singular_plural_analogy_acc_top1": 0.585,
+      "singular_plural_analogy_acc_top5": 0.89,
+      "present_past_consistency": 0.12109647691249847,
+      "present_past_analogy_acc_top1": 0.25,
+      "present_past_analogy_acc_top5": 0.57
+    },
+    "geometry_unembedding": {
+      "unembedding_is_tied": true,
+      "unembedding_eff_rank": 704.2633666992188,
+      "unembedding_purity_mean": 0.0
+    },
+    "geometry_lid": {
+      "lid_mean": 7.684997081756592,
+      "lid_std": 2.891572952270508,
+      "lid_min": 2.192362070083618,
+      "lid_max": 18.966920852661133,
+      "lid_median": 7.153804302215576,
+      "num_estimates": 50
+    },
+    "geometry_lipschitz": {
+      "lipschitz_mean": 0.7716843485832214,
+      "lipschitz_max": 1.1532365083694458,
+      "lipschitz_std": 0.28728197723846544,
+      "lipschitz_max_layer": 4,
+      "mean_contraction_rate": 1.3671636700630188,
+      "contraction_std": 0.29034646171464074
+    },
+    "geometry_rsa": {
+      "rsa_adjacent_mean": 0.8460050265568458,
+      "rsa_adjacent_min": 0.573148636400506,
+      "rsa_adjacent_std": 0.14488505097798454,
+      "rsa_early_late": 0.5318058785440406,
+      "rsa_first_middle": 0.7660477469394906,
+      "rsa_min_continuity_layer": 4
+    },
+    "geometry_mahalanobis": {
+      "mean_mahalanobis_id": 6.846439891948704,
+      "mean_mahalanobis_ood": 10446.075963544521,
+      "ood_separation_gap": 10439.229523652572,
+      "ood_separation_ratio": 1525.7675709428088
+    },
+    "geometry_information_fisher": {
+      "empirical_fisher_trace": 4.331967665435193,
+      "fisher_trace_std": 0.6601310340308948,
+      "num_samples_analyzed": 5
+    },
+    "geometry_positional_decay": {
+      "mean_positional_decay_correlation": -0.2613930763865682,
+      "interpretation": "Strong negative values (e.g. -0.5 to -1.0) indicate structurally sound local positional geometry."
+    },
+    "geometry_matrix_entropy": {
+      "mean_matrix_entropy": 1.0244080424308777,
+      "layer_matrix_entropies": {
+        "layer_0": 1.2894058227539062,
+        "layer_1": 0.6833144426345825,
+        "layer_2": 0.795217752456665,
+        "layer_3": 1.0004374980926514,
+        "layer_4": 1.2336511611938477,
+        "layer_5": 1.1444215774536133
+      },
+      "interpretation": "Lower downstream matrix entropy indicates a stronger information bottleneck (semantic compression)."
+    },
+    "geometry_correlation_dimension": {
+      "correlation_dimension": 2.1959157104045173,
+      "num_points": 10,
+      "interpretation": "The fractional dimension of the representations. Normally between 5.0 and 15.0 for complex natural language semantic manifolds."
+    },
+    "interpretability_attention_entropy": {
+      "avg_entropy_per_layer": [
+        1.0359703302383423,
+        1.008766531944275,
+        0.7493409514427185,
+        0.5893543362617493,
+        0.6405590176582336,
+        0.7791498303413391
+      ],
+      "avg_entropy_total": 0.8005235195159912,
+      "min_entropy_head": 0.038353726267814636,
+      "max_entropy_head": 1.401303768157959
+    },
+    "interpretability_induction_heads": {
+      "max_induction_score": 0.846699852772333,
+      "avg_induction_score": 0.1039147422643561,
+      "top_induction_heads": [
+        "L3H10: 0.8467",
+        "L3H2: 0.6848",
+        "L3H11: 0.5627",
+        "L4H6: 0.5172",
+        "L4H9: 0.4426"
+      ]
+    },
+    "interpretability_logit_lens": {
+      "layer0_acc": 0.3461538602908452,
+      "layer0_entropy": 0.6302424073219299,
+      "layer1_acc": 0.3538461724917094,
+      "layer1_entropy": 0.4680756727854411,
+      "layer2_acc": 0.26153846581776935,
+      "layer2_entropy": 0.3736402591069539,
+      "layer3_acc": 0.31282052397727966,
+      "layer3_entropy": 0.21132447818915048,
+      "layer4_acc": 0.3205128361781438,
+      "layer4_entropy": 0.11257825543483098,
+      "layer5_acc": 1.0,
+      "layer5_entropy": 5.107495625813802
+    },
+    "interpretability_attribution": {
+      "component_coherence_mean": 0.4827433736787902,
+      "component_coherence_std": 0.09123207852477905
+    },
+    "interpretability_prediction_entropy": {
+      "mean_entropy": 4.910486840208372,
+      "std_entropy": 1.639374976510354,
+      "median_entropy": 4.6470348834991455,
+      "p90_entropy": 7.595165348052979,
+      "mean_top1_prob": 0.2202689392492175,
+      "mean_top5_prob": 0.43109743607540923
+    },
+    "interpretability_probing": {
+      "probing_accuracy_per_layer": [
+        0.09090909090909091,
+        0.09090909090909091,
+        0.09090909090909091,
+        0.09090909090909091,
+        0.0,
+        0.09090909090909091,
+        0.0
+      ],
+      "max_probing_accuracy": 0.09090909090909091,
+      "best_layer": 0,
+      "num_classes": 40
+    },
+    "interpretability_sparsity": {
+      "layer_l0_rates": [
+        1.0,
+        1.0,
+        0.9999566078186035,
+        0.9999666213989258,
+        0.9999666213989258,
+        1.0
+      ],
+      "layer_kurtosis": [
+        6206.317545572917,
+        8338.398274739584,
+        3879.1363118489585,
+        635.9107666015625,
+        164.7503407796224,
+        180.18404134114584
+      ],
+      "global_mean_l0": 0.9999816417694092,
+      "global_mean_kurtosis": 3234.116213480631
+    },
+    "interpretability_waa": {
+      "mean_waa_alignment": 0.18787113421907028,
+      "layer_waa_alignments": {
+        "0": 0.06814105808734894,
+        "1": 0.6742401719093323,
+        "2": 0.21971401572227478,
+        "3": 0.02203012816607952,
+        "4": 0.06637664884328842,
+        "5": 0.07672478258609772
+      }
+    },
+    "interpretability_attention_polysemanticity": {
+      "mean_attention_svd_entropy": 1.702674130598704,
+      "max_superposition_entropy": 2.3880233764648438,
+      "interpretation": "Higher entropy means the attention mechanism is highly polysemantic (superposition of dimensions). Lower means monosemantic (rank-1)."
+    },
+    "consistency_calibration": {
+      "ece": 0.13489697866819123,
+      "num_predictions": 55
+    },
+    "consistency_paraphrase": {
+      "mean_paraphrase_l2_dist": 10.26768684387207,
+      "mean_unrelated_l2_dist": 16.34006643295288,
+      "mean_paraphrase_cos_sim": 0.9977242648601532,
+      "mean_unrelated_cos_sim": 0.9960418939590454,
+      "isometry_ratio_l2": 0.6283748530645694
+    },
+    "consistency_logical": {
+      "mean_premise_prob": 0.005100081441923976,
+      "mean_conclusion_prob": 0.003439845924731344,
+      "logical_violation_rate": 0.0
+    },
+    "consistency_contrastive": {
+      "mean_factual_prob": 0.004619990766514093,
+      "mean_exclusive_prob": 0.003656647983007133,
+      "mean_rejection_ratio": 0.8461699421522544
+    },
+    "dynamics_stability": {
+      "stability_mean": 1.0,
+      "stability_std": 0.0
+    },
+    "dynamics_interpolation": {
+      "interp_entropy_0.0": 4.474290370941162,
+      "interp_entropy_0.2": 4.524343490600586,
+      "interp_entropy_0.5": 4.542217413584392,
+      "interp_entropy_0.8": 4.551888465881348,
+      "interp_entropy_1.0": 4.573853413263957,
+      "convexity_gap": 0.018145521481831572
+    },
+    "dynamics_coe": {
+      "mean_magnitude_change": 35.805083417892455,
+      "std_magnitude_change": 28.244910210681013,
+      "mean_angle_change": 0.18983525310953459,
+      "std_angle_change": 0.13045606213075603,
+      "per_sample_mean_magnitude": [
+        25.307911920547486,
+        48.695970153808595,
+        33.411368179321286
+      ],
+      "per_sample_mean_angle": [
+        0.12468803003430366,
+        0.2331492558121681,
+        0.21166847348213197
+      ]
+    },
+    "gem_alignment": {
+      "alignment_k4_cosine_sim_mean": -0.1435567702759396,
+      "alignment_k4_l2_dist_mean": 153.55409171364525
+    },
+    "gem_substitution": {
+      "substitution_kl_mean": 3.0120811570774424,
+      "substitution_top1_match": 0.8787878787878788,
+      "substitution_top1_agreement": 0.8787878787878788
+    },
+    "gem_editing": {
+      "edit_drop_kl": 0.01240586512722075,
+      "edit_swap_kl": 0.0013492223806679249,
+      "edit_boost_kl": 0.003496374818496406
+    },
+    "gem_trajectories": {
+      "trajectory_containment_mean": 0.11992788594216108,
+      "trajectory_smoothness_mean": 1.0257274621502284
+    },
+    "causality_tracing": {
+      "layer_0_aie": 0.8715090978724935,
+      "layer_1_aie": 0.9156009428166777,
+      "layer_2_aie": 0.6994332304323128,
+      "layer_3_aie": 0.319815857724131,
+      "layer_4_aie": 0.1410621338809964,
+      "layer_5_aie": 0.0,
+      "max_causal_layer": "layer_1_aie",
+      "max_aie": 0.9156009428166777,
+      "causal_entropy": 1.4512538726123072
+    },
+    "causality_ablation": {
+      "baseline_loss": 5.700314203898112,
+      "loss_ablate_5pct": 5.662966251373291,
+      "degradation_5pct": -0.03734795252482126,
+      "loss_ablate_20pct": 6.042016824086507,
+      "degradation_20pct": 0.3417026201883946,
+      "area_under_degradation_curve": 0.022826600074768003
+    },
+    "causality_attention_knockout": {
+      "baseline_loss": 5.195019721984863,
+      "max_knockout_impact": 0.12328028678894043,
+      "mean_knockout_impact": 0.013757526874542236,
+      "head_impact_gini_coefficient": 0.6982074380345202
+    },
+    "topology_homology": {
+      "layer_0_mean_persistance_h0": 14.168543577194214,
+      "layer_0_max_persistance_h0": 16.08783531188965,
+      "layer_0_mean_persistance_h1": 0.0,
+      "layer_0_num_loops_h1": 0,
+      "layer_3_mean_persistance_h0": 38.1095085144043,
+      "layer_3_max_persistance_h0": 47.804962158203125,
+      "layer_3_mean_persistance_h1": 0.0,
+      "layer_3_num_loops_h1": 0,
+      "layer_5_mean_persistance_h0": 12.729776620864868,
+      "layer_5_max_persistance_h0": 16.725767135620117,
+      "layer_5_mean_persistance_h1": 0.2855863571166992,
+      "layer_5_num_loops_h1": 1
+    },
+    "topology_persistence_entropy": {
+      "layer_0_pe_h0": 1.3818269340481688,
+      "layer_0_pe_h1": 0.0,
+      "layer_0_num_features_h0": 4,
+      "layer_0_num_features_h1": 0,
+      "layer_3_pe_h0": 1.3751357932909984,
+      "layer_3_pe_h1": 0.0,
+      "layer_3_num_features_h0": 4,
+      "layer_3_num_features_h1": 0,
+      "layer_5_pe_h0": 1.3706671121200105,
+      "layer_5_pe_h1": 0.0,
+      "layer_5_num_features_h0": 4,
+      "layer_5_num_features_h1": 1,
+      "pe_simplification_ratio": 0.9919238642313443
+    },
+    "topology_betti_curve": {
+      "betti_0_curve": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "betti_1_curve": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "betti_0_first": 3,
+      "betti_0_last": 3,
+      "simplification_ratio": 1.0,
+      "betti_0_decay_rate": -7.1104819549512e-17,
+      "max_betti_1_layer": 5,
+      "max_betti_1": 1
+    },
+    "repe_task_vectors": {
+      "layer_task_vector_norms": [
+        1.2937296628952026,
+        2.9874024391174316,
+        3.9073002338409424,
+        4.779601573944092,
+        6.564627647399902,
+        1.6138274669647217
+      ],
+      "layer_task_vector_cosine_sim": [
+        0.9995758533477783,
+        0.9982643127441406,
+        0.9976852536201477,
+        0.99871826171875,
+        0.9992636442184448,
+        0.9999702572822571
+      ],
+      "max_norm_layer": 4,
+      "mean_vector_norm": 3.524414837360382
+    },
+    "repe_concept_separability": {
+      "layer_separability_auc": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666
+      ],
+      "layer_separability_acc": [
+        0.19444444444444442,
+        0.3055555555555555,
+        0.3055555555555555,
+        0.3055555555555555,
+        0.3055555555555555,
+        0.3055555555555555
+      ],
+      "max_auc_layer": 5,
+      "max_auc": 0.6666666666666666,
+      "mean_auc": 0.38888888888888884
+    },
+    "interpretability_attention_graph": {
+      "mean_sink_pagerank": 0.7548340790245813,
+      "max_sink_pagerank": 0.8646330176632893,
+      "bos_sink_ratio": 0.9472222222222222,
+      "mean_edge_gini": 0.832930862903595,
+      "num_graphs_analyzed": 360
+    }
+  }
+}
