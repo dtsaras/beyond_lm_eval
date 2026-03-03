@@ -5,6 +5,8 @@ import numpy as np
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("causality_ablation")
 class AblationRobustnessTask(DiagnosticTask):
@@ -18,8 +20,8 @@ class AblationRobustnessTask(DiagnosticTask):
     - "Investigating Neuron Ablation in Attention Heads: The Case for Peak Activation Centering" (2024)
     - "Causal Scrubbing: a method for rigorously testing interpretability hypotheses" (Chan et al., 2022)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Ablation Robustness Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Ablation Robustness Analysis...")
         num_samples = self.config.get("num_samples", 5)
         ablation_percentages = self.config.get("ablation_percentages", [0.01, 0.05, 0.1, 0.25])
         
@@ -38,7 +40,7 @@ class AblationRobustnessTask(DiagnosticTask):
                     # The prompt + target_true provides a factual statement.
                     dataset.append({"text": item["prompt"] + item["target_true"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {"text": "A quick brown fox jumps over the lazy dog."}
                 ] * num_samples
@@ -139,6 +141,6 @@ class AblationRobustnessTask(DiagnosticTask):
         # Summary metrics
         # If the curve grows very fast, the model is brittle.
         # If the curve grows slowly, the model is redundant.
-        results["area_under_degradation_curve"] = float(np.trapz(degradation_curve, ablation_percentages))
+        results["area_under_degradation_curve"] = float(np.trapezoid(degradation_curve, ablation_percentages))
         
         return results

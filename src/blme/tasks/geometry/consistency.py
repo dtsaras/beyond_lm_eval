@@ -5,15 +5,20 @@ from .utils import collect_prediction_stats
 import torch
 import torch.nn.functional as F
 import numpy as np
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_consistency")
 class ConsistencyTask(DiagnosticTask):
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Geometric Consistency Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Geometric Consistency Analysis...")
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
             
-        stats, embeddings = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+        if cache is not None and cache.is_populated:
+            stats, embeddings = cache.get_prediction_stats()
+        else:
+            stats, embeddings = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
         
         if embeddings is None:
             # Fallback to shared utility

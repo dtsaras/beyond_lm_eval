@@ -4,6 +4,8 @@ from .utils import collect_hidden_states
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_mutual_info")
@@ -15,8 +17,8 @@ class MutualInformationTask(DiagnosticTask):
          Networks via Information", 2017. arXiv:1703.00810
     """
 
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Mutual Information Analysis (HSIC proxy)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Mutual Information Analysis (HSIC proxy)...")
 
         if dataset is None:
             dataset = [
@@ -27,7 +29,10 @@ class MutualInformationTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
 
         # Collect all layer activations
-        layer_activations = collect_hidden_states(
+        if cache is not None and cache.is_populated:
+            layer_activations = cache.get_hidden_states(layer_idx="all")
+        else:
+            layer_activations = collect_hidden_states(
             model, tokenizer, dataset, num_samples=num_samples, layer_idx="all"
         )
 
@@ -46,7 +51,7 @@ class MutualInformationTask(DiagnosticTask):
             shared_perm = None
 
         # Precompute centered Gram matrices for each layer
-        print("  Computing Gram matrices...")
+        logger.info("  Computing Gram matrices...")
         gram_matrices = {}
         for idx in tqdm(layers, desc="Gram Matrices"):
             X = layer_activations[idx].float()
@@ -65,7 +70,7 @@ class MutualInformationTask(DiagnosticTask):
         # Compute HSIC between pairs of layers
         # HSIC(X, Y) = (1/(n-1)^2) * trace(K_X @ K_Y)
         # Normalized HSIC (CKA-like): HSIC(X,Y) / sqrt(HSIC(X,X) * HSIC(Y,Y))
-        print("  Computing pairwise HSIC...")
+        logger.info("  Computing pairwise HSIC...")
 
         # Self-HSIC for normalization
         self_hsic = {}

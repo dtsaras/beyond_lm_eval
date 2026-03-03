@@ -5,6 +5,8 @@ import torch
 import numpy as np
 import random
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("interpretability_induction_heads")
 class InductionHeadTask(DiagnosticTask):
@@ -13,8 +15,8 @@ class InductionHeadTask(DiagnosticTask):
     that followed a previous occurrence of the current token.
     Ref: Olsson et al., "In-context Learning and Induction Heads" (2022)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Induction Head Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Induction Head Analysis...")
         
         # We need a synthetic dataset of repeated random tokens to isolate induction behavior
         # "A B ... A B" pattern.
@@ -38,7 +40,7 @@ class InductionHeadTask(DiagnosticTask):
                 outputs = model(input_ids, output_attentions=True)
                 attentions = outputs.attentions # (L, B, H, T, T)
                 
-                if attentions is None or attentions[0] is None:
+                if not attentions or attentions is None or len(attentions) == 0 or attentions[0] is None:
                     return {"error": "Model does not return attention weights. Reload with attn_implementation='eager'."}
                 
                 # We analyze the second half of the sequence (the repetition)
@@ -109,9 +111,10 @@ class InductionHeadTask(DiagnosticTask):
             
         avg_scores = np.mean(np.stack(scores), axis=0) # (L, H)
         
-        top_heads_indices = np.unravel_index(np.argsort(avg_scores, axis=None)[::-1][:5], avg_scores.shape)
+        num_top = min(5, avg_scores.size)
+        top_heads_indices = np.unravel_index(np.argsort(avg_scores, axis=None)[::-1][:num_top], avg_scores.shape)
         top_heads = []
-        for i in range(5):
+        for i in range(num_top):
             l = top_heads_indices[0][i]
             h = top_heads_indices[1][i]
             top_heads.append(f"L{l}H{h}: {avg_scores[l, h]:.4f}")

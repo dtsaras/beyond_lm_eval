@@ -19,6 +19,8 @@ import numpy as np
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .utils import collect_hidden_states
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_matrix_entropy")
@@ -27,8 +29,8 @@ class MatrixEntropyTask(DiagnosticTask):
     Computes the Information Bottleneck geometry of hidden representations
     via von Neumann spectral entropy over the internal covariance matrix.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Matrix Entropy (Information Bottleneck) Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Matrix Entropy (Information Bottleneck) Analysis...")
         num_samples = self.config.get("num_samples", 10)
         
         if dataset is None:
@@ -37,21 +39,32 @@ class MatrixEntropyTask(DiagnosticTask):
         samples = list(dataset)[:num_samples]
         if not samples:
              return {"error": "Need at least 1 sample."}
-             
-        device = next(model.parameters()).device
-        all_hidden_states = []
-        
-        with torch.no_grad():
-            for s in samples:
-                text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-                
-                out = model(**inputs, output_hidden_states=True)
-                # Filter out the embedding layer (index 0)
-                hiddens = out.hidden_states[1:] 
-                # Take average over sequence length for macro-level state
-                h_mean = [h.mean(dim=1).detach().cpu() for h in hiddens]
-                all_hidden_states.append(h_mean)
+
+        # Cache-first path: use cached all-layer hidden states
+        if cache is not None and cache.is_populated:
+            all_layers = cache.get_hidden_states(layer_idx="all")
+            if all_layers:
+                n_layers = len(all_layers)
+                # Reconstruct per-layer mean from cached flat tensors
+                # Each layer tensor is (N_total_tokens, D); we just use the mean
+                all_hidden_states = [[all_layers[li].mean(dim=0, keepdim=True) for li in range(n_layers)]]
+            else:
+                all_hidden_states = []
+        else:
+            device = next(model.parameters()).device
+            all_hidden_states = []
+            
+            with torch.no_grad():
+                for s in samples:
+                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
+                    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
+                    
+                    out = model(**inputs, output_hidden_states=True)
+                    # Filter out the embedding layer (index 0)
+                    hiddens = out.hidden_states[1:] 
+                    # Take average over sequence length for macro-level state
+                    h_mean = [h.mean(dim=1).detach().cpu() for h in hiddens]
+                    all_hidden_states.append(h_mean)
                 
         if not all_hidden_states:
             return {"error": "Could not collect hidden states."}

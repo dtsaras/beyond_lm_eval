@@ -18,6 +18,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("interpretability_attention_polysemanticity")
@@ -26,8 +28,8 @@ class AttentionHeadPolysemanticityTask(DiagnosticTask):
     Measures the SVD entropy of isolated attention head outputs to evaluate 
     attention superposition.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Attention Head Polysemanticity (Superposition) Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Attention Head Polysemanticity (Superposition) Analysis...")
         num_samples = self.config.get("num_samples", 3)
         
         if dataset is None:
@@ -38,7 +40,7 @@ class AttentionHeadPolysemanticityTask(DiagnosticTask):
                  for i in range(min(num_samples, len(dset))):
                      dataset.append({"text": dset[i]["text"]})
              except ImportError:
-                 print("Warning: `datasets` library not found. Falling back to default examples.")
+                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                  dataset = [{"text": "Polysemantic attention heads compress multiple atomic units into superposition."}] * num_samples
         samples = list(dataset)[:num_samples]
         if not samples:

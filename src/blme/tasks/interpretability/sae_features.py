@@ -5,6 +5,8 @@ import warnings
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 try:
     from sae_lens import SAE
@@ -20,8 +22,8 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
     and measures the average number of active features (L0 norm of feature activations)
     per token.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running SAE Feature Dimensionality (Optional)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running SAE Feature Dimensionality (Optional)...")
         num_samples = self.config.get("num_samples", 5)
         
         sae_release = self.config.get("sae_release", "gpt2-small-res-jb")
@@ -29,19 +31,19 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         
         if not HAS_SAE_LENS:
             msg = "sae_lens library not installed. Skipping SAE Feature Dimensionality module. Install with: pip install sae-lens"
-            print("  " + msg)
+            logger.info("  " + msg)
             return {"error": msg}
             
         device = next(model.parameters()).device
         
         try:
-            print(f"  Attempting to load SAE: release={sae_release}, id={sae_id}")
+            logger.info(f"  Attempting to load SAE: release={sae_release}, id={sae_id}")
             # Loading the SAE requires an internet connection on first run to download from HF
             sae, _, _ = SAE.from_pretrained(release=sae_release, sae_id=sae_id, device=str(device))
             sae.eval()
         except Exception as e:
             msg = f"Failed to load SAE {sae_release}/{sae_id}. This might be due to a mismatch with the model or internet access. Error: {e}"
-            print("  " + msg)
+            logger.info("  " + msg)
             return {"error": msg}
 
         if dataset is None:

@@ -4,6 +4,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("consistency_contrastive")
 class ContrastiveConsistencyTask(DiagnosticTask):
@@ -12,8 +14,8 @@ class ContrastiveConsistencyTask(DiagnosticTask):
     Evaluates whether the model strongly rejects mutually exclusive 
     alternatives (B) when it assigns high probability to a factual baseline (A).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Contrastive Consistency Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Contrastive Consistency Analysis...")
         num_samples = self.config.get("num_samples", 3)
         
         device = next(model.parameters()).device
@@ -31,7 +33,7 @@ class ContrastiveConsistencyTask(DiagnosticTask):
                     exclusive = prompt + item["target_false"]
                     dataset.append({"factual": factual, "exclusive": exclusive})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {"factual": "The capital of France is Paris.", "exclusive": "The capital of France is London."},
                     {"factual": "Water boils at 100 degrees Celsius.", "exclusive": "Water boils at 0 degrees Celsius."},

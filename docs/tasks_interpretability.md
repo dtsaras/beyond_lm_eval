@@ -49,7 +49,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **How are we measuring**: Computing the gradient of the predicted logit with respect to the input embeddings, taking the L2 norm (InputXGradient).
 * **Hypothesis**: Not all context tokens are equal. Saliency mapping reveals which entities heavily bias the model's specific outputs.
 * **Citation/Paper**: `Simonyan, K., Vedaldi, A., & Zisserman, A. (2013). Deep inside convolutional networks: Visualising image classification models and saliency maps.` (General Saliency)
-* **File & Function**: `src/blme/tasks/interpretability/attribution.py` -> `InputAttributionTask`
+* **File & Function**: `src/blme/tasks/interpretability/attribution.py` -> `ComponentAttributionTask`
 * **Critical Info**: Gradients can be noisy. This requires a backward pass, which is much slower and more memory-intensive than standard inference.
 
 ## 7. Prediction Entropy

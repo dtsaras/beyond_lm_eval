@@ -7,6 +7,8 @@ from scipy.stats import kurtosis
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("interpretability_sparsity")
 class ActivationSparsityTask(DiagnosticTask):
@@ -15,8 +17,8 @@ class ActivationSparsityTask(DiagnosticTask):
     These metrics are crucial for understanding representation efficiency, finding
     feature polysemanticity, and preparing for quantization (e.g., KurTail).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Activation Sparsity...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Activation Sparsity...")
         num_samples = self.config.get("num_samples", 5)
         
         device = next(model.parameters()).device

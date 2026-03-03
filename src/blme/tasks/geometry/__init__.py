@@ -9,7 +9,6 @@ from .cka import CKATask
 from .spectral import WeightSpectralTask
 from .collapse import RepresentationCollapseTask
 from .mutual_info import MutualInformationTask
-from .alignment import AlignmentResidualTask, SubstitutionConsistencyTask
 from .lid import LocalIntrinsicDimensionalityTask
 from .lipschitz import LipschitzContinuityTask
 from .rsa import RepresentationalSimilarityTask

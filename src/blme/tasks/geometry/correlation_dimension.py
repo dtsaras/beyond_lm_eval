@@ -19,6 +19,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_correlation_dimension")
@@ -27,8 +29,8 @@ class CorrelationDimensionTask(DiagnosticTask):
     Computes the Grassberger-Procaccia fractional correlation dimension
     on the final representation space to evaluate fractal complexity.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Correlation Dimension (Fractal Geometry) Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Correlation Dimension (Fractal Geometry) Analysis...")
         # Need a larger number of samples to approximate spatial distances accurately
         num_samples = self.config.get("num_samples", 50) 
         

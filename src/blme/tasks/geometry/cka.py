@@ -5,6 +5,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from .utils import collect_hidden_states
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_cka")
 class CKATask(DiagnosticTask):
@@ -13,8 +15,8 @@ class CKATask(DiagnosticTask):
     Focuses on Linear CKA which is efficient for N > D.
     Ref: Kornblith et al. (2019)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running CKA Layer Similarity Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running CKA Layer Similarity Analysis...")
         
         if dataset is None:
             # Mock dataset if missing
@@ -28,8 +30,11 @@ class CKATask(DiagnosticTask):
         # For CKA, we need X (N, D). If N=10k, D=4k, X is 40MB. 32 layers -> 1.2GB. Feasible.
         
         num_samples = self.config.get("num_samples", 100)
-        print(f"  Collecting hidden states for {num_samples} samples...")
-        layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples, layer_idx="all")
+        logger.info(f"  Collecting hidden states for {num_samples} samples...")
+        if cache is not None and cache.is_populated:
+            layer_activations = cache.get_hidden_states(layer_idx="all")
+        else:
+            layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples, layer_idx="all")
         
         layers = sorted(layer_activations.keys())
         n_layers = len(layers)
@@ -41,7 +46,7 @@ class CKATask(DiagnosticTask):
         # where X, Y are centered.
         # Centering: equivalent to subtracting mean from each column.
         
-        print("  Centering activations...")
+        logger.info("  Centering activations...")
         centered_acts = {}
         norms = {} # ||X^T X||_F
         
@@ -62,7 +67,7 @@ class CKATask(DiagnosticTask):
             
             # Free original X if memory tight? No need yet.
             
-        print("  Computing CKA Matrix...")
+        logger.info("  Computing CKA Matrix...")
         cka_matrix = np.zeros((n_layers, n_layers))
         
         for i in tqdm(range(n_layers), desc="CKA Rows"):

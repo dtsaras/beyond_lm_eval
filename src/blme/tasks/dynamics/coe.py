@@ -6,6 +6,8 @@ from collections import defaultdict
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("dynamics_coe")
 class ChainOfEmbeddingTask(DiagnosticTask):
@@ -14,8 +16,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
     Measures Magnitude Change and Angle Change between adjacent hidden states
     during the generation trajectory, serving as an output-free self-evaluation.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Chain-of-Embedding (CoE)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Chain-of-Embedding (CoE)...")
         num_samples = self.config.get("num_samples", 5)
         generation_steps = self.config.get("generation_steps", 10)
         
@@ -29,7 +31,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 for i in range(min(num_samples, len(dset))):
                     dataset.append({"text": dset[i]["text"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [{"text": "The capital of France is Paris."}] * num_samples        
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:

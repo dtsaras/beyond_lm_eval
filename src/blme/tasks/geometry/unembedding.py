@@ -5,6 +5,8 @@ import torch
 import numpy as np
 import json
 import os
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_unembedding")
 class UnembeddingDiagnosticsTask(DiagnosticTask):
@@ -12,8 +14,8 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
     Analyzes the output embedding matrix (unembedding).
     Checks if weights are tied and measures effective rank and category purity of the unembedding space.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Unembedding Diagnostics...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Unembedding Diagnostics...")
         n_sample = self.config.get("n_sample", 2000)
         k = self.config.get("k", 20)
         categories_path = self.config.get("categories_path", None)
@@ -45,7 +47,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             U, S, Vt = np.linalg.svd(W_centered, full_matrices=False)
             S_norm = S / S.sum()
             eff_rank = np.exp(-np.sum(S_norm * np.log(S_norm + 1e-10)))
-        except:
+        except Exception:
             eff_rank = 0.0
             
         # Category Purity
@@ -92,7 +94,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                     purity_mean = np.mean(scores)
                     
             except Exception as e:
-                print(f"Error computing purity: {e}")
+                logger.info(f"Error computing purity: {e}")
 
         return {
             "unembedding_is_tied": is_tied,

@@ -36,14 +36,13 @@ def run_from_yaml(config_path: str):
     
     # Run
     evaluate(
-        model=model_name,
         model_args=model_args,
         tasks=task_list,
         task_configs=tasks_dict,
         batch_size=batch_size,
         device=device,
         limit=limit,
-        output_dir=output_dir
+        output_dir=output_dir,
     )
 
 def main():

@@ -4,6 +4,8 @@ from .utils import collect_hidden_states
 import numpy as np
 import torch
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_collapse")
@@ -15,8 +17,8 @@ class RepresentationCollapseTask(DiagnosticTask):
          Self-supervised Learning", ICLR 2021. arXiv:2011.09348
     """
 
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Representation Collapse Detection...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Representation Collapse Detection...")
 
         if dataset is None:
             dataset = [
@@ -27,7 +29,10 @@ class RepresentationCollapseTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
 
         # Collect hidden states from all layers
-        layer_activations = collect_hidden_states(
+        if cache is not None and cache.is_populated:
+            layer_activations = cache.get_hidden_states(layer_idx="all")
+        else:
+            layer_activations = collect_hidden_states(
             model, tokenizer, dataset, num_samples=num_samples, layer_idx="all"
         )
 

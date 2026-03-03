@@ -5,6 +5,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from ..geometry.utils import collect_prediction_stats
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("consistency_calibration")
 class CalibrationTask(DiagnosticTask):
@@ -12,8 +14,9 @@ class CalibrationTask(DiagnosticTask):
     Computes Expected Calibration Error (ECE).
     Ref: Guo et al. (2017)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Calibration Analysis (ECE)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Calibration Analysis (ECE)...")
+        num_samples = self.config.get("num_samples", 100)
         
         if dataset is None:
              try:
@@ -23,9 +26,12 @@ class CalibrationTask(DiagnosticTask):
                  for i in range(min(num_samples, len(dset))):
                      dataset.append({"text": dset[i]["text"]})
              except ImportError:
-                 print("Warning: `datasets` library not found. Falling back to default examples.")
+                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                  dataset = [{"text": "The quick brown fox jumps over the lazy dog."}]
-        stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+        if cache is not None and cache.is_populated:
+            stats, _ = cache.get_prediction_stats()
+        else:
+            stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
         
         logits = torch.cat(stats["logits"], dim=0)  # (TotalTokens, V)
         labels = torch.cat(stats["labels"], dim=0)  # (TotalTokens,)

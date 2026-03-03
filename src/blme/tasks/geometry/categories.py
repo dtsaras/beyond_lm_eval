@@ -7,11 +7,13 @@ import os
 from scipy.spatial.distance import cosine as cosine_dist
 from scipy.stats import skew
 from typing import Dict, List, Tuple
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_categories")
 class CategoryGeometryTask(DiagnosticTask):
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Category Geometry Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Category Geometry Analysis...")
         
         # 1. Load Categories
         categories_path = self.config.get("categories_path")
@@ -42,30 +44,30 @@ class CategoryGeometryTask(DiagnosticTask):
         results = {}
         
         # Separation
-        print(" Computing Separation...")
+        logger.info(" Computing Separation...")
         sep_results = self._compute_separation(E, cat_tokens)
         results.update(sep_results)
         
         # Purity
         k = self.config.get("k_purity", 20)
-        print(f" Computing Purity (k={k})...")
+        logger.info(f" Computing Purity (k={k})...")
         purity_results = self._compute_purity(E, cat_tokens, cat_labels, k=k)
         results.update(purity_results)
         
         # Hubness
-        print(" Computing Category Hubness...")
+        logger.info(" Computing Category Hubness...")
         hub_results = self._compute_hubness(E, tokenizer, cat_tokens)
         results.update(hub_results)
         
         # Projection (UMAP/t-SNE)
         projection_method = self.config.get("projection_method", None) # "umap", "tsne", "pca"
         if projection_method:
-            print(f" Computing {projection_method.upper()} Projection...")
+            logger.info(f" Computing {projection_method.upper()} Projection...")
             proj_results = self._compute_projection(E, cat_tokens, method=projection_method)
             results.update(proj_results)
 
         # Relation Consistency (Singular/Plural, Present/Past)
-        print(" Computing Relation Consistency...")
+        logger.info(" Computing Relation Consistency...")
         if hasattr(self, 'relation_pairs') and self.relation_pairs:
             rel_results = self._compute_relation_consistency(E, self.relation_pairs, tokenizer)
             results.update(rel_results)
@@ -373,7 +375,7 @@ class CategoryGeometryTask(DiagnosticTask):
                     reducer = umap.UMAP(n_components=2, random_state=42)
                     coords = reducer.fit_transform(X)
                 except ImportError:
-                    print("  Warning: umap-learn not installed. Skipping UMAP.")
+                    logger.info("  Warning: umap-learn not installed. Skipping UMAP.")
                     return {"projection_error": "umap-learn not installed"}
                     
             elif method.lower() == "tsne":
@@ -384,7 +386,7 @@ class CategoryGeometryTask(DiagnosticTask):
                     reducer = TSNE(n_components=2, perplexity=perp, random_state=42, init='pca', learning_rate='auto')
                     coords = reducer.fit_transform(X)
                 except ImportError:
-                    print("  Warning: sklearn not installed. Skipping t-SNE.")
+                    logger.info("  Warning: sklearn not installed. Skipping t-SNE.")
                     return {"projection_error": "scikit-learn not installed"}
                     
             elif method.lower() == "pca":
@@ -408,7 +410,7 @@ class CategoryGeometryTask(DiagnosticTask):
                 results["projection_points"] = points
                 
         except Exception as e:
-            print(f"  Projection failed: {e}")
+            logger.info(f"  Projection failed: {e}")
             results["projection_error"] = str(e)
             
         return results

@@ -4,6 +4,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from .utils import collect_hidden_states
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_intrinsic_dim")
@@ -12,22 +14,25 @@ class IntrinsicDimensionTask(DiagnosticTask):
     Estimates the Intrinsic Dimension (ID) of the embedding manifold using the Two-NN estimator.
     Ref: 'Estimating the intrinsic dimension of datasets by a minimal neighborhood information' (Facco et al., 2017)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Intrinsic Dimension Estimation (Two-NN)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Intrinsic Dimension Estimation (Two-NN)...")
         
         # Check mode: Embeddings (static) or Layer-wise Activations (dynamic)
         layerwise = self.config.get("layerwise", False)
         
         if layerwise:
-            print("  Mode: Layer-wise Activations")
+            logger.info("  Mode: Layer-wise Activations")
             if dataset is None:
                 # Mock dataset if missing
                 dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
                 
             # Collect states from all layers
-            print("  Collecting hidden states...")
+            logger.info("  Collecting hidden states...")
             # Use 'all' to get dict of {layer_idx: tensor}
-            layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100), layer_idx="all")
+            if cache is not None and cache.is_populated:
+                layer_activations = cache.get_hidden_states(layer_idx="all")
+            else:
+                layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100), layer_idx="all")
             
             results = {}
             # Compute ID for each layer
@@ -50,7 +55,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
             return results
             
         else:
-             print("  Mode: Static Embeddings")
+             logger.info("  Mode: Static Embeddings")
              # 1. Get Embeddings
              from ..common import get_embeddings as _get_emb
              E = _get_emb(model)
@@ -96,7 +101,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
                 intrinsic_dim = 0.0
                 
         except ImportError:
-            print("sklearn not installed, skipping ID estimation")
+            logger.info("sklearn not installed, skipping ID estimation")
             intrinsic_dim = 0.0
 
         return {

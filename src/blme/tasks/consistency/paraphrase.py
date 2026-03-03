@@ -4,6 +4,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("consistency_paraphrase")
 class ParaphraseInvarianceTask(DiagnosticTask):
@@ -13,8 +15,8 @@ class ParaphraseInvarianceTask(DiagnosticTask):
     that mean the exact same thing but are syntactically different, compared 
     to completely unrelated sentences.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Paraphrase Invariance...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Paraphrase Invariance...")
         num_samples = self.config.get("num_samples", 5)
         
         device = next(model.parameters()).device
@@ -49,7 +51,7 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                         unrelated = grouped[other_rel][0]
                         dataset.append({"text1": text1, "text2": text2, "unrelated": unrelated})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {
                         "text1": "The quick brown fox jumps over the lazy dog.",

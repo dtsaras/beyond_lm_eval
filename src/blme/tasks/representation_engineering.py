@@ -1,13 +1,20 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import roc_auc_score, accuracy_score
+
+try:
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import roc_auc_score, accuracy_score
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 from .base import DiagnosticTask
 from ..registry import register_task
 from .common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("repe_task_vectors")
 class TaskVectorGeometryTask(DiagnosticTask):
@@ -18,8 +25,8 @@ class TaskVectorGeometryTask(DiagnosticTask):
     of the activations at the last token. Measures the geometry (norm, distinctness)
     of the resulting vector.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Task Vector Geometry (RepE)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Task Vector Geometry (RepE)...")
         num_samples = self.config.get("num_samples", 5)
         
         device = next(model.parameters()).device
@@ -109,8 +116,8 @@ class ConceptSeparabilityTask(DiagnosticTask):
     Following Zou et al. (2023), tests if activating concepts can be linearly
     separated (A prerequisite for Representation Engineering).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Concept Separability Analysis (RepE)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Concept Separability Analysis (RepE)...")
         num_samples = self.config.get("num_samples", 20)
         
         if dataset is None:

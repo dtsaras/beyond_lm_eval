@@ -4,6 +4,8 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("interpretability_attention_entropy")
 class AttentionEntropyTask(DiagnosticTask):
@@ -11,8 +13,8 @@ class AttentionEntropyTask(DiagnosticTask):
     Computes the entropy of attention distributions.
     Ref: Clark et al., "What Does BERT Look At?" (2019)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Attention Entropy Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Attention Entropy Analysis...")
         
         if dataset is None:
              dataset = [{"text": "The quick brown fox jumps over the lazy dog."}]
@@ -38,6 +40,9 @@ class AttentionEntropyTask(DiagnosticTask):
                 # Forward pass with attentions
                 outputs = model(**inputs, output_attentions=True)
                 attentions = outputs.attentions # Tuple of (B, H, T, T) tensors, one per layer
+                
+                if not attentions or attentions is None or len(attentions) == 0:
+                    return {"error": "Model does not return attention weights. Reload with attn_implementation='eager'."}
                 
                 # attention[layer] shape: (B, H, T, T)
                 # Compute entropy per head

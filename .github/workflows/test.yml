@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install scikit-learn  # needed for probing task tests
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short -x
+
+      - name: Check imports
+        run: |
+          python -c "from blme.core import evaluate; print('Core OK')"
+          python -c "from blme.cli import main; print('CLI OK')"
+          python -c "from blme.cache import ModelOutputCache; print('Cache OK')"

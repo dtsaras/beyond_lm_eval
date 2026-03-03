@@ -3,6 +3,8 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("interpretability_prediction_entropy")
@@ -14,8 +16,8 @@ class PredictionEntropyTask(DiagnosticTask):
          ICLR 2020. arXiv:1904.09751
     """
 
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Prediction Entropy Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Prediction Entropy Analysis...")
 
         if dataset is None:
             dataset = [

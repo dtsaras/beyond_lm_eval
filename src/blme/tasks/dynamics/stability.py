@@ -6,6 +6,8 @@ import numpy as np
 from tqdm import tqdm
 import os
 from transformers import AutoModelForCausalLM
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("dynamics_stability")
 class NeighborhoodStabilityTask(DiagnosticTask):
@@ -15,8 +17,8 @@ class NeighborhoodStabilityTask(DiagnosticTask):
     Otherwise, compares model against itself (sanity check = 1.0) or different seed/noise if implemented.
     For now, standard usage requires a reference.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Neighborhood Stability Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Neighborhood Stability Analysis...")
         k = self.config.get("k", 50)
         n_sample = self.config.get("n_sample", 5000)
         ref_path = self.config.get("reference_model_path", None)
@@ -27,7 +29,7 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         E1 = E1.to(device)
         
         if ref_path:
-            print(f"Loading reference model from {ref_path}...")
+            logger.info(f"Loading reference model from {ref_path}...")
             # This is heavy. Optimally we just load embeddings if possible.
             # But assume we load model for compatibility.
             # Warning: Memory usage.
@@ -43,7 +45,7 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             except Exception as e:
                 return {"error": f"Failed to load ref model: {e}"}
         else:
-            print("No reference model provided. Calculating self-stability (should be 1.0).")
+            logger.info("No reference model provided. Calculating self-stability (should be 1.0).")
             E2 = E1
             
         # Compute Stability

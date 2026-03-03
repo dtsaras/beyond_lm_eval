@@ -4,6 +4,8 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_spectral")
 class WeightSpectralTask(DiagnosticTask):
@@ -13,8 +15,8 @@ class WeightSpectralTask(DiagnosticTask):
     - Stable Rank: ||W||_F^2 / ||W||_2^2 (Bartlett et al., 2020)
     - Power Law Alpha: Fit to singular value distribution (Martin & Mahoney, 2021)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Weight Spectral Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Weight Spectral Analysis...")
         
         # No dataset needed for weight analysis
         # But base class expects it. Usually ignored.
@@ -39,7 +41,7 @@ class WeightSpectralTask(DiagnosticTask):
                 if "weight" in module._parameters and module.weight is not None:
                     modules_to_scan.append((name, module))
                     
-        print(f"  Found {len(modules_to_scan)} linear modules.")
+        logger.info(f"  Found {len(modules_to_scan)} linear modules.")
         
         for name, module in tqdm(modules_to_scan, desc="Analyzing Weights"):
             W = module.weight.detach().float()
@@ -106,7 +108,7 @@ class WeightSpectralTask(DiagnosticTask):
                 stable_ranks.append(stable_rank)
                 
             except Exception as e:
-                print(f"Error analyzing {name}: {e}")
+                logger.info(f"Error analyzing {name}: {e}")
                 continue
                 
         # Aggregate

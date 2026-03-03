@@ -5,6 +5,8 @@ import torch
 import numpy as np
 from scipy.stats import skew
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_hubness")
 class GlobalHubnessTask(DiagnosticTask):
@@ -12,8 +14,8 @@ class GlobalHubnessTask(DiagnosticTask):
     Analyzes the "hubness" of the embedding space: the skewness of the distribution
     of k-nearest neighbor occurrences.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Global Hubness Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Global Hubness Analysis...")
         k_values = self.config.get("k_values", [10, 50, 100])
         batch_size = self.config.get("batch_size", 2000)
         

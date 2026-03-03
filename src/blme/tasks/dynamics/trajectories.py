@@ -1,11 +1,12 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings, apply_lm_head
-from ..gem.trajectories import MixtureTrajectoriesTask as _GemMixtureTrajectoriesTask
 import torch
 import torch.nn.functional as F
 import numpy as np
 from collections import defaultdict
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("dynamics_interpolation")
@@ -14,8 +15,8 @@ class LatentInterpolationTask(DiagnosticTask):
     Interpolates between two hidden states in latent space.
     Measures entropy of decoded predictions along the path (Convexity check).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Latent Interpolation...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Latent Interpolation...")
         num_pairs = self.config.get("num_pairs", 50)
         steps = self.config.get("steps", 10)
         num_samples = self.config.get("num_samples", 10)
@@ -30,7 +31,7 @@ class LatentInterpolationTask(DiagnosticTask):
                 for i in range(min(num_samples, len(dset))):
                     dataset.append({"text": dset[i]["text"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [{"text": f"Sample {i}"} for i in range(num_samples)]
 
         samples = list(dataset)
@@ -87,8 +88,3 @@ class LatentInterpolationTask(DiagnosticTask):
 
         return results
 
-
-@register_task("dynamics_trajectories")
-class MixtureTrajectoriesTask(_GemMixtureTrajectoriesTask):
-    """Backward-compatible alias of the GEM trajectory task."""
-    pass

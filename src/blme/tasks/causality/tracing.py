@@ -5,6 +5,8 @@ import numpy as np
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers, get_embeddings
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("causality_tracing")
 class CausalTracingTask(DiagnosticTask):
@@ -13,8 +15,8 @@ class CausalTracingTask(DiagnosticTask):
     Corrupts the embedding of a token and measures how much restoring a
     specific hidden state at a specific layer rescues the original prediction.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Causal Tracing...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Causal Tracing...")
         num_samples = self.config.get("num_samples", 3)
         noise_std = self.config.get("noise_std", 0.1)
         
@@ -40,7 +42,7 @@ class CausalTracingTask(DiagnosticTask):
                     # The prompt + target_true provides a factual statement.
                     dataset.append({"text": item["prompt"] + item["target_true"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {"text": "The Space Needle is located in the city of Seattle"},
                     {"text": "Eiffel Tower is located in the city of Paris"},

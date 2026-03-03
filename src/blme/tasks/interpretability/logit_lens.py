@@ -4,6 +4,8 @@ from ..common import get_embeddings, get_layers, apply_lm_head
 import torch
 import torch.nn.functional as F
 import numpy as np
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("interpretability_logit_lens")
 class LogitLensTask(DiagnosticTask):
@@ -11,8 +13,8 @@ class LogitLensTask(DiagnosticTask):
     Decodes hidden states at each layer using the final LM head (Logit Lens).
     Computes accuracy of intermediate layers relative to the final prediction.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Logit Lens Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Logit Lens Analysis...")
         num_samples = self.config.get("num_samples", 100)
         
         device = next(model.parameters()).device

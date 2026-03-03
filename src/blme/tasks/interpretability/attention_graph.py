@@ -21,6 +21,8 @@ import warnings
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 
 def _power_iteration_pagerank(adj_matrix, alpha=0.85, max_iter=100, tol=1e-6):
@@ -69,8 +71,8 @@ class AttentionGraphTopologyTask(DiagnosticTask):
       (the classic BOS attention sink).
     - Edge Gini: Using Gini coefficient on edge weights to measure sparsity.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Attention Graph Topology Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Attention Graph Topology Analysis...")
         if dataset is None:
             dataset = [
                 {"text": "Attention is a graph. In this graph, some tokens acts as sinks. This is a robust mechanism."}
@@ -99,6 +101,9 @@ class AttentionGraphTopologyTask(DiagnosticTask):
                 out = model(**inputs, output_attentions=True)
                 attentions = out.attentions # Tuple of (batch, num_heads, seq_len, seq_len)
                 
+                if attentions is None:
+                    return {"error": "Model does not return attention weights. Reload with attn_implementation='eager'."}
+                
                 seq_len = inputs['input_ids'].shape[1]
                 if seq_len < 3:
                      continue
@@ -106,6 +111,8 @@ class AttentionGraphTopologyTask(DiagnosticTask):
                 # Take the attention matrices from the last layer as representative,
                 # or average across all layers for a global view. Let's compute globally.
                 for l_idx, layer_attn in enumerate(attentions):
+                    if layer_attn is None:
+                        continue
                     # layer_attn shape: (1, num_heads, seq_len, seq_len)
                     layer_attn = layer_attn[0].cpu().numpy() # (num_heads, seq_len, seq_len)
                     num_heads = layer_attn.shape[0]

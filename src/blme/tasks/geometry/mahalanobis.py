@@ -20,6 +20,8 @@ from scipy.spatial.distance import mahalanobis
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .utils import collect_hidden_states
+import logging
+logger = logging.getLogger("blme")
 
 
 def _compute_mahalanobis_distances(X_train, X_test):
@@ -54,7 +56,7 @@ def _compute_mahalanobis_distances(X_train, X_test):
             
         return distances
     except Exception as e:
-        print(f"Error computing Mahalanobis: {e}")
+        logger.info(f"Error computing Mahalanobis: {e}")
         return []
 
 
@@ -66,8 +68,8 @@ class MahalanobisOODTask(DiagnosticTask):
     
     Reports the average ID distance vs OOD distance, and the separation gap.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Latent Mahalanobis OOD Detection...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Latent Mahalanobis OOD Detection...")
         num_samples = self.config.get("num_samples", 50)
         
         # We need two pseudo-datasets for structural evaluation if none provided:

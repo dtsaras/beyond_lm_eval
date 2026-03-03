@@ -20,6 +20,8 @@ from scipy.stats import spearmanr
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_positional_decay")
@@ -29,8 +31,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
     and attention probability to measure the structural integrity of 
     positional encodings.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Positional Attention Decay Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Positional Attention Decay Analysis...")
         num_samples = self.config.get("num_samples", 5)
         
         # We need reasonably long sequences to measure positional decay gracefully
@@ -58,13 +60,16 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                    continue
                    
                 out = model(**inputs, output_attentions=True)
-                if not out.attentions:
+                if out.attentions is None or len(out.attentions) == 0:
                     return {"error": "Model did not return attentions. Cannot compute Positional Decay."}
                     
                 # attentions shape: (num_layers, batch, num_heads, seq_len, seq_len)
                 # We analyze the middle layer as a representative heuristic for structure
                 mid_layer = len(out.attentions) // 2
-                attn_matrix = out.attentions[mid_layer][0] # (num_heads, seq_len, seq_len)
+                attn_entry = out.attentions[mid_layer]
+                if attn_entry is None:
+                    return {"error": "Attention weights at selected layer are None. Model may use SDPA."}
+                attn_matrix = attn_entry[0] # (num_heads, seq_len, seq_len)
                 
                 # Average attention across heads to get the macro positional structure
                 mean_attn = attn_matrix.mean(dim=0).cpu().numpy() # (seq_len, seq_len)

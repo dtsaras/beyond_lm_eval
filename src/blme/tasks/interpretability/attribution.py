@@ -3,6 +3,8 @@ from ...registry import register_task
 from ..common import get_embeddings, get_num_layers
 import torch
 import numpy as np
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("interpretability_attribution")
 class ComponentAttributionTask(DiagnosticTask):
@@ -10,8 +12,8 @@ class ComponentAttributionTask(DiagnosticTask):
     Analyzes the coherence of layer updates (deltas) in the token space.
     Projects delta = h_out - h_in onto vocabulary and checks if top-k tokens are semantically related.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Component Attribution Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Component Attribution Analysis...")
         num_samples = self.config.get("num_samples", 50)
         
         device = next(model.parameters()).device

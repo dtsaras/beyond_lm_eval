@@ -3,23 +3,25 @@ from ...registry import register_task
 from .utils import collect_hidden_states
 import numpy as np
 import torch
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_svd")
 class SVDIsotropyTask(DiagnosticTask):
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running SVD Analysis...")
-        # Use a default dataset if none provided (e.g. huggingface/fineweb-edu sample)
-        # For now, we mock it or expect it passed
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running SVD Analysis...")
         if dataset is None:
-            # Create dummy dataset of prompts
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
-            
-        X = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+
+        if cache is not None and cache.is_populated:
+            X = cache.get_hidden_states(layer_idx=-1)
+        else:
+            X = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
         X = X.float().numpy()
         # Filter NaN/Inf rows (can happen with fp16 models)
         finite_mask = np.all(np.isfinite(X), axis=1)
         if not np.all(finite_mask):
-            print(f"  Warning: Filtered {(~finite_mask).sum()} non-finite rows out of {len(X)}")
+            logger.info(f"  Warning: Filtered {(~finite_mask).sum()} non-finite rows out of {len(X)}")
             X = X[finite_mask]
         if len(X) < 10:
             return {"error": "Too few finite hidden states for SVD"}
@@ -38,7 +40,7 @@ class SVDIsotropyTask(DiagnosticTask):
         explained_variance = np.cumsum(singular_vals**2) / np.sum(singular_vals**2)
         
         # Calculate AUC of explained variance curve (lower = more isotropic)
-        auc = np.trapz(explained_variance) / max(1, len(explained_variance))
+        auc = np.trapezoid(explained_variance) / max(1, len(explained_variance))
         
         # Effective Rank (Roy & Vetterli, EUSIPCO 2007)
         # erank(X) = exp(H(p_1, ..., p_n)) where p_i = sigma_i / sum(sigma_j)

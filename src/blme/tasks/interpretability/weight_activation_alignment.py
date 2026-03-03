@@ -18,25 +18,9 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-
-def get_layers(model):
-    """
-    Heuristic to extract the transformer layers from various HF architectures.
-    """
-    if hasattr(model, "model") and hasattr(model.model, "layers"):
-        return model.model.layers # Llama / Mistral
-    elif hasattr(model, "transformer") and hasattr(model.transformer, "h"):
-        return model.transformer.h # GPT-2
-    elif hasattr(model, "base_model") and hasattr(model.base_model, "encoder"):
-        return model.base_model.encoder.layer # BERT
-    elif hasattr(model, "encoder") and hasattr(model.encoder, "layer"):
-        return model.encoder.layer
-    else:
-        # Fallback to searching for ModuleLists
-        for name, module in model.named_modules():
-             if isinstance(module, torch.nn.ModuleList) and ("layer" in name.lower() or "h" in name.lower() or "block" in name.lower()):
-                 return module
-        raise ValueError(f"Could not automatically locate transformer layers in architecture: {model.__class__.__name__}")
+from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("interpretability_waa")
@@ -45,8 +29,8 @@ class WeightActivationAlignmentTask(DiagnosticTask):
     Computes structural alignment between static layer weights (via SVD) 
     and empirical activation vectors (via PCA).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Weight-Activation Alignment...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Weight-Activation Alignment...")
         num_samples = self.config.get("num_samples", 5)
         
         if dataset is None:
@@ -57,7 +41,7 @@ class WeightActivationAlignmentTask(DiagnosticTask):
                  for i in range(min(num_samples, len(dset))):
                      dataset.append({"text": dset[i]["text"]})
              except ImportError:
-                 print("Warning: `datasets` library not found. Falling back to default examples.")
+                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                  dataset = [{"text": "The geometry of activations defines the expressivity of the model."}] * num_samples
         samples = list(dataset)[:num_samples]
         if not samples:

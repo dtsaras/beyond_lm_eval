@@ -27,6 +27,8 @@ import numpy as np
 import torch
 from scipy.stats import spearmanr
 from scipy.spatial.distance import pdist
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_rsa")
@@ -39,8 +41,8 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     Then computes the Spearman rank correlation between RDMs of adjacent layers
     and between early/late layers.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Representational Similarity Analysis (RSA)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Representational Similarity Analysis (RSA)...")
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
             
@@ -48,7 +50,10 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         max_tokens_per_layer = self.config.get("max_tokens", 200)
         
         # Collect hidden states from ALL layers
-        all_layers = collect_hidden_states(model, tokenizer, dataset,
+        if cache is not None and cache.is_populated:
+            all_layers = cache.get_hidden_states(layer_idx="all")
+        else:
+            all_layers = collect_hidden_states(model, tokenizer, dataset,
                                            num_samples=num_samples,
                                            layer_idx="all")
         

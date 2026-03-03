@@ -5,6 +5,8 @@ import numpy as np
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("causality_attention_knockout")
 class AttentionKnockoutTask(DiagnosticTask):
@@ -20,8 +22,8 @@ class AttentionKnockoutTask(DiagnosticTask):
       (for targeted attention head knockouts via mean ablation).
     - "Lost in the Prompt Order: Revealing the Limitations of Causal Attention..." (2026)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Attention Knockout Specialization...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Attention Knockout Specialization...")
         num_samples = self.config.get("num_samples", 3)
         
         device = next(model.parameters()).device
@@ -37,7 +39,7 @@ class AttentionKnockoutTask(DiagnosticTask):
                     item = dset[i]
                     dataset.append({"text": item["text"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {"text": "John gave a book to Mary. Mary gave a pencil to"}
                 ] * num_samples

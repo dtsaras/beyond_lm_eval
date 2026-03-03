@@ -8,15 +8,15 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local degrees of freedom of the representation manifold around a specific point.
 * **How are we measuring**: Using Maximum Likelihood Estimation (MLE) on the nearest neighbor distances (typically k=10 or k=20) to compute the local non-integer dimensionality.
 * **Hypothesis**: Models with excessively high LID might suffer from the curse of dimensionality and overfitting, while very low LID implies over-compression.
-* **Citation/Paper**: `Amsaleg, L., et al. (2015). Estimating local intrinsic dimensionality.` [ACM KDD 2015, DOI: 10.1145/2783258.2783405] (ArXiv equivalent: 1905.12784 for related work)
-* **File & Function**: `src/blme/tasks/geometry/lid.py` -> `LocalIntrinsicDimensionTask`
+* **Citation/Paper**: `Amsaleg, L., et al. (2015). Estimating local intrinsic dimensionality.` [ACM KDD 2015, DOI: 10.1145/2783258.2783405] (Extended version: ArXiv: 2006.12880)
+* **File & Function**: `src/blme/tasks/geometry/lid.py` -> `LocalIntrinsicDimensionalityTask`
 * **Critical Info**: LID changes drastically from shallow layers to deep layers, often forming an "intrinsic dimension bottleneck."
 
 ## 2. Lipschitz Continuity Analysis
 * **What are we measuring**: The local smoothness and sensitivity of the model to small perturbations in the input space.
 * **How are we measuring**: Practically estimated by computing the ratio of the distance between output representations to the distance between input representations for closely neighbored points.
 * **Hypothesis**: High Lipschitz constants indicate an unstable, highly chaotic representation space vulnerable to adversarial perturbations. Low constants indicate smooth, stable generalization.
-* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz constant estimation.` [ArXiv: 1811.05381]
+* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ArXiv: 1811.05381]
 * **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LipschitzContinuityTask`
 * **Critical Info**: Extremely hard to measure analytically; this task uses an empirical local approximation based on sampled neighbors.
 
@@ -25,7 +25,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: By computing a Representational Dissimilarity Matrix (RDM) of pairwise distances for a set of inputs, and then finding the Spearman rank correlation between the upper triangles of two RDMs.
 * **Hypothesis**: Two networks might have different exact geometries but computationally identical relative similarity structures. RSA allows comparison across models with different hidden dimensions.
 * **Citation/Paper**: `Kriegeskorte, N., Mur, M., & Bandettini, P. A. (2008). Representational similarity analysis-connecting the branches of systems neuroscience.` [Frontiers in Systems Neuroscience]
-* **File & Function**: `src/blme/tasks/geometry/rsa.py` -> `RSATask`
+* **File & Function**: `src/blme/tasks/geometry/rsa.py` -> `RepresentationalSimilarityTask`
 * **Critical Info**: Because RSA is $O(N^2)$, the `max_tokens` parameter controls the computational cost.
 
 ## 4. Latent Mahalanobis OOD Distance
@@ -48,7 +48,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The data compression capabilities of the LLM layers over inference.
 * **How are we measuring**: By computing the von Neumann spectral entropy over the internal covariance matrix of the hidden states at each layer.
 * **Hypothesis**: As information passes through an LLM, the model actively filters out noise. A decreasing or low layer-wise matrix entropy indicates the model is actively forming a tighter semantic "Information Bottleneck".
-* **Citation/Paper**: `Wei, L., Tan, Z., Li, C., Wang, J., & Huang, W. (2024). Large Language Model Evaluation via Matrix Entropy.` [ArXiv: 2401.17139]
+* **Citation/Paper**: `Wei, L., Tan, Z., Li, C., Wang, J., & Huang, W. (2024). Diff-eRank: A Novel Rank-Based Metric for Evaluating Large Language Models.` [ArXiv: 2401.17139]
 * **File & Function**: `src/blme/tasks/geometry/matrix_entropy.py` -> `MatrixEntropyTask`
 * **Critical Info**: Values typically decrease monotonically in deeper layers as the network compresses raw syntax into refined semantic logic.
 
@@ -73,7 +73,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: Decomposing the hidden state matrix with SVD and calculating the ratio of the top singular value to the sum of all singular values, or looking at the variance drop-off.
 * **Hypothesis**: Highly anisotropic spaces (e.g., dominating outlier dimensions) collapse semantics into a narrow cone, degrading similarity metrics. Isotropic spaces utilize capacity more uniformly.
 * **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [ArXiv: 1909.00512]
-* **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `SvdIsotropyTask`
+* **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `SVDIsotropyTask`
 * **Critical Info**: Language models almost always suffer from an "anisotropy cone" unless explicitly regularized or normalized.
 
 ## 10. Hubness
@@ -81,7 +81,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: Computing pairwise cosine similarities and tracking the skewed distribution of incoming Nearest Neighbor (1-NN) edges. High skew/max indicates severe hubness.
 * **Hypothesis**: The "Curse of Dimensionality" leads to spatial hubs in high dimensions. These hubs crowd semantic spaces and degrade zero-shot retrieval and generation.
 * **Citation/Paper**: `Radovanovic, M., Nanopoulos, A., & Ivanovic, M. (2010). Hubs in space: Popular nearest neighbors in high-dimensional data.` [Journal of Machine Learning Research (JMLR) Vol 11]
-* **File & Function**: `src/blme/tasks/geometry/hubness.py` -> `HubnessTask`
+* **File & Function**: `src/blme/tasks/geometry/hubness.py` -> `GlobalHubnessTask`
 * **Critical Info**: Highly sensitive to the choice of similarity metric (L2 distance vs Cosine). Usually worse under Euclidean distance.
 
 ## 11. Category Separation
@@ -97,7 +97,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: Computing the difference in successive output hidden states during auto-regressive decoding.
 * **Hypothesis**: Abrupt erratic jumps in successive generation steps often precede hallucinatory behavior, while stable steps indicate confident predictions.
 * **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
-* **File & Function**: `src/blme/tasks/geometry/consistency.py` -> `GeometryConsistencyTask`
+* **File & Function**: `src/blme/tasks/geometry/consistency.py` -> `ConsistencyTask`
 * **Critical Info**: Heavily dependent on generation parameters like temperature and top-p.
 
 ## 13. Representation Collapse
@@ -112,8 +112,8 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The rate at which the capacity of the model's intermediate dimensions is effectively utilized.
 * **How are we measuring**: By fitting a power-law exponent (alpha) to the spectrum of eigenvalues from the hidden space covariance.
 * **Hypothesis**: If alpha is too low, the manifold is overly noisy. If alpha is highly peaked, the manifold is collapsed. The "1/f" spectral decay is considered optimal for learning architectures.
-* **Citation/Paper**: `Stringer, C., Pachitariu, M., Steinmetz, N., Carandini, M., & Harris, K. D. (2019). High-dimensional geometry of population responses in visual cortex.` [ArXiv: 1808.03612]
-* **File & Function**: `src/blme/tasks/geometry/spectral.py` -> `SpectralAnalysisTask`
+* **Citation/Paper**: `Stringer, C., Pachitariu, M., Steinmetz, N., Carandini, M., & Harris, K. D. (2019). High-dimensional geometry of population responses in visual cortex.` [Nature 571, 361–365]
+* **File & Function**: `src/blme/tasks/geometry/spectral.py` -> `WeightSpectralTask`
 * **Critical Info**: Shows strong parallels between biological neural networks and artificial models.
 
 ## 15. Mutual Information (Geometric)
@@ -121,7 +121,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: Analyzing kernel similarity matrices in hidden spaces across layers to detect whether the information content is preserved or transformed.
 * **Hypothesis**: Information Bottleneck theory posits that models first maximize MI with inputs, then progressively forget (minimize MI) extraneous details, compressing semantics.
 * **Citation/Paper**: `Shwartz-Ziv, R., & Tishby, N. (2017). Opening the black box of deep neural networks via information.` [ArXiv: 1703.00810]
-* **File & Function**: `src/blme/tasks/geometry/mutual_info.py` -> `MutualInfoTask`
+* **File & Function**: `src/blme/tasks/geometry/mutual_info.py` -> `MutualInformationTask`
 * **Critical Info**: Computationally demanding. Requires careful bandwidth tuning for the KDE calculation.
 
 ## 16. CKA (Centered Kernel Alignment)
@@ -137,7 +137,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: Looking at the angles (cosine similarity) and norms between the highest logit token vectors and the actual dynamic context state vectors. 
 * **Hypothesis**: The final language modeling head forces representations into distinct regions of the LM head space. The "Unembedding" operation exhibits severe bias due to token frequency in the pre-training set.
 * **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
-* **File & Function**: `src/blme/tasks/geometry/unembedding.py` -> `UnembeddingGeometryTask`
+* **File & Function**: `src/blme/tasks/geometry/unembedding.py` -> `UnembeddingDiagnosticsTask`
 * **Critical Info**: Typically reveals that frequent tokens dominate the manifold geometry by pushing less frequent tokens away from the origin computationally.
 
 ## 18. Perplexity (Baseline Geometry)
@@ -145,31 +145,13 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: The exponentiated average negative log-likelihood of a sequence.
 * **Hypothesis**: As the foundational sanity check, it proves the model can actually model text. Used purely as a baseline correlate for other intrinsic measures.
 * **Citation/Paper**: Canonical language modeling metric. 
-* **File & Function**: `src/blme/tasks/geometry/perplexity.py` -> `PerplexityTask`
+* **File & Function**: `src/blme/tasks/geometry/perplexity.py` -> `RarePPLTask`
 * **Critical Info**: Lower is better. Included primarily to compute correlations with the more advanced geometric variables.
 
-## 19. Backward-Compatible Alignment (geometry_alignment)
-* **What are we measuring**: (Legacy) Measuring alignment with golden expert models.
-* **How are we measuring**: Routing to GEM metrics.
-* **Hypothesis**: Retained only for API compatibility with legacy systems.
-* **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
-* **File & Function**: `src/blme/tasks/geometry/alignment.py` -> `AlignmentResidualTask`
-* **Critical Info**: Alias task that simply routes arguments to GEM.
-
-## 20. Backward-Compatible Substitution (geometry_substitution)
-* **What are we measuring**: (Legacy) Measuring word-level substitutions.
-* **How are we measuring**: Routing to GEM substitutions module.
-* **Hypothesis**: Retained only for API compatibility.
-* **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
-* **File & Function**: `src/blme/tasks/geometry/alignment.py` -> `SubstitutionConsistencyTask`
-* **Critical Info**: Alias task.
-
-## 21. Global Intrinsic Dimension (geometry_intrinsic_dim / PDE)
+## 19. Global Intrinsic Dimension (geometry_intrinsic_dim / PDE)
 * **What are we measuring**: The global effective dimensionality of the dataset within the model's space.
 * **How are we measuring**: Using TwoNN (Two Nearest Neighbors algorithm) across the entire manifold.
 * **Hypothesis**: Models that operate heavily on distinct subspaces lower the overall effective dimension. A model perfectly memorizing data tends to have very sparse high dimensions.
-* **Citation/Paper**: `Facco, E., d’Errico, M., Rodriguez, A., & Laio, A. (2017). Estimating the intrinsic dimension of datasets by a minimal neighborhood information.` [Scientific Reports]
+* **Citation/Paper**: `Facco, E., d'Errico, M., Rodriguez, A., & Laio, A. (2017). Estimating the intrinsic dimension of datasets by a minimal neighborhood information.` [Scientific Reports]
 * **File & Function**: `src/blme/tasks/geometry/intrinsic_dim.py` -> `IntrinsicDimensionTask`
 * **Critical Info**: Returns a single global scalar, contrasting with Local Intrinsic Dimensionality (LID) which assesses local point neighborhoods.
-
-*(Note: There is an index 22, but `geometry/` also contains files like `information_geometry.py`, `matrix_entropy.py` which are already listed above).*

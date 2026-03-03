@@ -4,6 +4,8 @@ from ..geometry.utils import collect_hidden_states
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("interpretability_probing")
@@ -16,8 +18,8 @@ class LinearProbingTask(DiagnosticTask):
          Classifier Probes", ICLR 2017 Workshop. arXiv:1610.01644
     """
 
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Linear Probing Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Linear Probing Analysis...")
 
         if dataset is None:
             dataset = [

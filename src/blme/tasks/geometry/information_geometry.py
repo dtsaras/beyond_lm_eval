@@ -24,6 +24,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 
 @register_task("geometry_information_fisher")
@@ -35,8 +37,8 @@ class FisherInformationTraceTask(DiagnosticTask):
     A lower trace generally correlates with flatter minima, better generalization,
     and a robust topological manifold.
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Information Geometry (Fisher Trace) Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Information Geometry (Fisher Trace) Analysis...")
         num_samples = self.config.get("num_samples", 20)
         
         if dataset is None:

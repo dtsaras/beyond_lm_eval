@@ -1,0 +1,172 @@
+# ===========================================================
+# BLME Default Task Configurations
+# ===========================================================
+# Each task name maps to its default parameters.
+# These are used when no per-task config is provided in a recipe.
+# Override any parameter by specifying it in your recipe YAML.
+# ===========================================================
+
+# ---- Geometry Tasks ----
+geometry_svd:
+  num_samples: 100
+
+geometry_hubness:
+  k_values: [10, 50, 100]
+  batch_size: 2000
+
+geometry_collapse:
+  num_samples: 100
+
+geometry_lid:
+  k: 20
+  num_samples: 50
+
+geometry_information_fisher:
+  num_samples: 20
+
+geometry_correlation_dimension:
+  num_samples: 50
+
+geometry_matrix_entropy:
+  num_samples: 10
+
+geometry_rsa:
+  num_samples: 20
+  max_tokens: 200
+
+geometry_lipschitz:
+  num_samples: 20
+
+geometry_perplexity:
+  num_samples: 100
+
+geometry_spectral: {}
+
+geometry_positional_decay:
+  num_samples: 5
+
+geometry_cka:
+  num_samples: 100
+
+geometry_unembedding:
+  n_sample: 2000
+  k: 20
+  categories_path: null
+
+geometry_intrinsic_dim:
+  layerwise: false
+  num_samples: 100
+
+geometry_mutual_info:
+  num_samples: 100
+  max_mi_tokens: 2000
+
+geometry_consistency:
+  num_samples: 100
+
+geometry_categories:
+  categories_path: null
+  k_purity: 20
+  projection_method: null
+
+geometry_mahalanobis:
+  num_samples: 50
+
+# ---- Topology Tasks ----
+topology_homology:
+  num_samples: 20
+
+topology_betti_curve:
+  num_samples: 20
+
+topology_persistence_entropy:
+  num_samples: 20
+
+# ---- Causality Tasks ----
+causality_tracing:
+  num_samples: 3
+  noise_std: 0.1
+
+causality_attention_knockout:
+  num_samples: 3
+
+causality_ablation:
+  num_samples: 5
+  ablation_percentages: [0.01, 0.05, 0.1, 0.25]
+
+# ---- Interpretability Tasks ----
+interpretability_logit_lens:
+  num_samples: 100
+
+interpretability_attention_entropy:
+  batch_size: 1
+  num_samples: 100
+
+interpretability_prediction_entropy:
+  num_samples: 100
+
+interpretability_induction_heads:
+  seq_len: 30
+  num_samples: 20
+
+interpretability_sae_features:
+  num_samples: 5
+  sae_release: "gpt2-small-res-jb"
+  sae_id: "blocks.8.hook_resid_pre"
+
+interpretability_sparsity:
+  num_samples: 5
+
+interpretability_waa:
+  num_samples: 5
+
+interpretability_attention_polysemanticity:
+  num_samples: 3
+
+interpretability_probing:
+  num_samples: 50
+  max_tokens: 128
+  max_probe_samples: 5000
+
+interpretability_attention_graph:
+  num_samples: 10
+
+interpretability_attribution:
+  num_samples: 50
+
+# ---- Dynamics Tasks ----
+dynamics_stability:
+  k: 50
+  n_sample: 5000
+  reference_model_path: null
+
+dynamics_interpolation:
+  num_pairs: 50
+  steps: 10
+  num_samples: 10
+
+dynamics_coe:
+  num_samples: 5
+  generation_steps: 10
+
+# ---- Consistency Tasks ----
+consistency_contrastive:
+  num_samples: 3
+
+consistency_logical:
+  num_samples: 3
+  margin: 0.1
+
+consistency_calibration:
+  num_samples: 100
+  n_bins: 10
+
+consistency_paraphrase:
+  num_samples: 5
+
+# ---- Representation Engineering Tasks ----
+repe_task_vectors:
+  num_samples: 5
+
+repe_concept_separability:
+  num_samples: 20

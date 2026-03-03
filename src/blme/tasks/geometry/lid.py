@@ -18,6 +18,8 @@ from ...registry import register_task
 from .utils import collect_hidden_states
 import numpy as np
 import torch
+import logging
+logger = logging.getLogger("blme")
 
 
 def _lid_mle(distances, k):
@@ -60,8 +62,8 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     Outputs the mean, std, min, and max LID across all samples for
     the specified layer(s).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Local Intrinsic Dimensionality (LID) Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Local Intrinsic Dimensionality (LID) Analysis...")
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
             
@@ -69,7 +71,10 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 50)
         
         # Collect hidden states from the last layer
-        X = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples)
+        if cache is not None and cache.is_populated:
+            X = cache.get_hidden_states(layer_idx=-1)
+        else:
+            X = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples)
         X = X.float().numpy()
         
         # Filter non-finite rows

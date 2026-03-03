@@ -5,6 +5,8 @@ import warnings
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
+import logging
+logger = logging.getLogger("blme")
 
 try:
     from ripser import ripser
@@ -21,13 +23,13 @@ class PersistentHomologyTask(DiagnosticTask):
     using the Vietoris-Rips complex, specifically extracting Betti-0 and Betti-1
     persistent features (holes/clusters in the manifold).
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Persistent Homology (TDA)...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Persistent Homology (TDA)...")
         num_samples = self.config.get("num_samples", 20)
         
         if not HAS_RIPSER:
             msg = "Ripser library not installed. Skipping TDA module. Install with: pip install ripser"
-            print(msg)
+            logger.info(msg)
             return {"error": msg}
             
         device = next(model.parameters()).device
@@ -40,7 +42,7 @@ class PersistentHomologyTask(DiagnosticTask):
                 for i in range(min(num_samples, len(dset))):
                     dataset.append({"text": dset[i]["text"]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [{"text": f"Random sample {i} for topological analysis of language models."} for i in range(num_samples)]
         samples = list(dataset)[:num_samples]
         if len(samples) < 3:

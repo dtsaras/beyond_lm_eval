@@ -4,15 +4,20 @@ from .utils import collect_prediction_stats
 import torch
 import torch.nn.functional as F
 import numpy as np
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("geometry_perplexity")
 class RarePPLTask(DiagnosticTask):
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Rare Token PPL Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Rare Token PPL Analysis...")
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
             
-        stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+        if cache is not None and cache.is_populated:
+            stats, _ = cache.get_prediction_stats()
+        else:
+            stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
         
         # Categorize tokens
         token_counts = stats["token_counts"]

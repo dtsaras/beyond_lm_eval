@@ -16,7 +16,7 @@ This module contains metrics that utilize Computational Topological Data Analysi
 * **What are we measuring**: The topological disorder and structural noise of the representation manifold.
 * **How are we measuring**: Extracting the 'birth' and 'death' parameters from the persistent homology diagram, treating them as a probability distribution of feature lifespans, and computing the Shannon entropy. 
 * **Hypothesis**: High persistence entropy implies the space contains many small, chaotic, short-lived topological artifacts. Low persistence entropy means a few massive, dominant, globally robust semantic features structure the space.
-* **Citation/Paper**: `Chintakunta, H., et al. (2015). Entropy of Persistence Diagrams.` [Available on ArXiv indirectly through related works]. 
+* **Citation/Paper**: `Chintakunta, H., Gentimis, T., Gonzalez-Diaz, R., Jimenez, M.-J., & Krim, H. (2015). An entropy-based persistence barcode.` [ArXiv: 1512.07613] 
 * **File & Function**: `src/blme/tasks/topology/persistence_entropy.py` -> `PersistenceEntropyTask`
 * **Critical Info**: Directly translates the visual scatter-plot of persistence diagrams into a single rigorous scalar summarizing topological complexity.
 
@@ -24,6 +24,6 @@ This module contains metrics that utilize Computational Topological Data Analysi
 * **What are we measuring**: How the shape of language data transforms mathematically from syntax (shallow layers) to abstraction (deep layers).
 * **How are we measuring**: Tracking the evolution of the Betti-0 curve area across sequential transformer layers.
 * **Hypothesis**: Input layers contain highly disconnected, messy word tokens (high Betti curves). Deep conceptual layers merge these into unified structural representations, causing Betti curves to collapse and simplify.
-* **Citation/Paper**: `Olsson, C., et al. (2022). In-context Learning and Induction Heads.` (Indirectly related via layer transition theory).
+* **Citation/Paper**: Derived from general topological data analysis applied layer-wise. (No single conference paper; related to persistent homology layer analysis literature).
 * **File & Function**: `src/blme/tasks/topology/betti_curve.py` -> `BettiCurveSimplificationTask`
 * **Critical Info**: The task compares the area-under-the-curve (AUC) of the Betti plot across layers. A negative delta indicates topological simplification as information flows through the network.

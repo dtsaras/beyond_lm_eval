@@ -17,7 +17,7 @@ This module contains metrics that utilize causal interventions (ablations, traci
 * **How are we measuring**: Calculating the baseline prediction, physically zeroing out or mean-ablating the activation of a target component during the forward pass, and measuring the resulting drop in probability for the target token.
 * **Hypothesis**: The model has redundant pathways. Components that, upon ablation, severely degrade performance are "critical path" components. Mean ablation is preferred over zero-ablation as it preserves the overall norm geometry.
 * **Citation/Paper**: Standard mechanistic practice popularized in: `Wang, K., et al. (2022). Interpretability in the Wild: a Circuit for Indirect Object Identification in GPT-2 small.` [ArXiv: 2211.00593]
-* **File & Function**: `src/blme/tasks/causality/ablation.py` -> `ActivationAblationTask`
+* **File & Function**: `src/blme/tasks/causality/ablation.py` -> `AblationRobustnessTask`
 * **Critical Info**: Simply observing activation magnitude is insufficient for importance; a neuron may fire strongly but be ignored by downstream components. Interventional ablation confirms causality.
 
 ## 3. Attention Knockout

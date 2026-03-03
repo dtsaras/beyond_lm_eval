@@ -34,6 +34,8 @@ _LAYER_ATTRS = [
     ("gpt_neox", "layers"),       # Pythia, GPT-NeoX
     ("model.decoder", "layers"),  # OPT
     ("transformer", "blocks"),    # MPT, Falcon (new)
+    ("bert.encoder", "layer"),    # BertLMHeadModel
+    ("encoder", "layer"),         # BERT-encoder style
     ("model", "embed_tokens"),    # Skip — not layers, but check next
 ]
 

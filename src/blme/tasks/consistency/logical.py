@@ -4,6 +4,8 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+import logging
+logger = logging.getLogger("blme")
 
 @register_task("consistency_logical")
 class LogicalConsistencyTask(DiagnosticTask):
@@ -16,8 +18,8 @@ class LogicalConsistencyTask(DiagnosticTask):
     References:
     - "Measuring and Improving Consistency in Pretrained Language Models" (Elazar et al., 2021)
     """
-    def evaluate(self, model, tokenizer, dataset):
-        print("Running Logical Consistency Analysis...")
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Logical Consistency Analysis...")
         num_samples = self.config.get("num_samples", 3)
         
         device = next(model.parameters()).device
@@ -35,7 +37,7 @@ class LogicalConsistencyTask(DiagnosticTask):
                     mid = len(text) // 2
                     dataset.append({"premise": text[:mid], "conclusion": text[mid:]})
             except ImportError:
-                print("Warning: `datasets` library not found. Falling back to default examples.")
+                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                 dataset = [
                     {"premise": "John is a bachelor.", "conclusion": "John is unmarried."},
                     {"premise": "The car is completely destroyed.", "conclusion": "The car cannot be driven."},
