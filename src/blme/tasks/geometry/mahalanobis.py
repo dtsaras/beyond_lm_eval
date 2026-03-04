@@ -71,20 +71,32 @@ class MahalanobisOODTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Mahalanobis OOD Detection...")
         num_samples = self.config.get("num_samples", 50)
-        
+        ood_strategy = self.config.get("ood_strategy", "scramble")  # "scramble" or "random"
+
         # We need two pseudo-datasets for structural evaluation if none provided:
         # 1. ID: Normal English
-        # 2. OOD: Random ascii noise / structurally broken English
+        # 2. OOD: Depends on ood_strategy
         if dataset is None:
              dataset_id = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(num_samples)]
-             dataset_ood = [{"text": "jf8923h f82h3 f9283h f9283hf 9238h f."} for _ in range(num_samples)]
+             if ood_strategy == "random":
+                 # Generate random token sequences
+                 import string
+                 rng = np.random.RandomState(42)
+                 dataset_ood = [{"text": " ".join("".join(rng.choice(list(string.ascii_lowercase), size=rng.randint(3, 8))) for _ in range(10))} for _ in range(num_samples)]
+             else:
+                 dataset_ood = [{"text": "jf8923h f82h3 f9283h f9283hf 9238h f."} for _ in range(num_samples)]
         else:
             # For standard benchmark, we split the given dataset in half and perturb the second half
             samples = list(dataset)[:num_samples*2]
             mid = max(1, len(samples) // 2)
             dataset_id = samples[:mid]
-            # Create OOD by scrambling characters
-            dataset_ood = [{"text": "".join(np.random.permutation(list(s["text"] if isinstance(s, dict) and "text" in s else str(s))))} for s in samples[mid:]]
+            if ood_strategy == "random":
+                import string
+                rng = np.random.RandomState(42)
+                dataset_ood = [{"text": " ".join("".join(rng.choice(list(string.ascii_lowercase), size=rng.randint(3, 8))) for _ in range(10))} for _ in samples[mid:]]
+            else:
+                # Create OOD by scrambling characters
+                dataset_ood = [{"text": "".join(np.random.permutation(list(s["text"] if isinstance(s, dict) and "text" in s else str(s))))} for s in samples[mid:]]
             
         if len(dataset_id) < 5 or len(dataset_ood) < 5:
             return {"error": "Need at least 5 ID and 5 OOD samples to compute stable covariance."}

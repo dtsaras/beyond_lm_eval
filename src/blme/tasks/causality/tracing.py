@@ -113,12 +113,13 @@ class CausalTracingTask(DiagnosticTask):
                         def patch_hook(module, input, output):
                             # Patch the hidden states at the corrupt indices
                             if isinstance(output, tuple):
-                                out_tensor = output[0]
+                                out_tensor = output[0].clone()
                                 out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
                                 return (out_tensor,) + output[1:]
                             else:
-                                output[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
-                                return output
+                                out_tensor = output.clone()
+                                out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
+                                return out_tensor
                         return patch_hook
                         
                     # hidden_states stores [embedding_out, layer_0_out, ...]

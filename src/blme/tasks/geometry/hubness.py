@@ -55,10 +55,8 @@ class GlobalHubnessTask(DiagnosticTask):
                 # optimization: argpartition for top k
                 top_k_indices = np.argpartition(sims, -k, axis=1)[:, -k:]
                 
-                # Update occurrence counts
-                # flattening is faster
-                for idx in top_k_indices.flatten():
-                    n_occ[idx] += 1
+                # Update occurrence counts (vectorized)
+                np.add.at(n_occ, top_k_indices.flatten(), 1)
             
             # Metrics
             hub_skew = skew(n_occ)

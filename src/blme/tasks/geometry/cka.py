@@ -85,7 +85,8 @@ class CKATask(DiagnosticTask):
                 ytx = Y.t() @ X
                 numerator = torch.norm(ytx, p='fro').item() ** 2
                 
-                cka = numerator / (norm_x * norm_y)
+                denom = norm_x * norm_y
+                cka = numerator / denom if denom > 1e-12 else 0.0
                 cka_matrix[i, j] = cka
                 cka_matrix[j, i] = cka
                 

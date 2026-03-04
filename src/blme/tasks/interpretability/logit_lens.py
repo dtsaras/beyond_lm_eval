@@ -12,6 +12,11 @@ class LogitLensTask(DiagnosticTask):
     """
     Decodes hidden states at each layer using the final LM head (Logit Lens).
     Computes accuracy of intermediate layers relative to the final prediction.
+
+    Caveat: Assumes the residual stream is directly interpretable through the
+    unembedding matrix at every layer. This may not hold when features are
+    stored in superposition or when intermediate layer norms differ
+    significantly from the final layer norm.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Logit Lens Analysis...")

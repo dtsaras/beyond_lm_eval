@@ -11,9 +11,13 @@ logger = logging.getLogger("blme")
 class ParaphraseInvarianceTask(DiagnosticTask):
     """
     Measures Paraphrase Invariance (Semantic Isometry).
-    Evaluates how much the representation distance changes between sentences 
-    that mean the exact same thing but are syntactically different, compared 
+    Evaluates how much the representation distance changes between sentences
+    that mean the exact same thing but are syntactically different, compared
     to completely unrelated sentences.
+
+    Caveat: This metric can be gamed via superficial pattern matching
+    (e.g., lexical overlap). Results are most meaningful with diverse
+    paraphrases that share semantics but differ substantially in surface form.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Paraphrase Invariance...")

@@ -12,14 +12,14 @@ logger = logging.getLogger("blme")
 class AttentionKnockoutTask(DiagnosticTask):
     """
     Measures Attention Specialization using Attention Head Knockouts.
-    Independently knocks out specific attention heads and records the 
-    resulting drop in performance. Calculates the Gini Coefficient of the 
-    performance drops. High Gini = High Specialization (few heads do all the work).
+    Independently knocks out specific attention heads via zero ablation
+    (setting head outputs to zero) and records the resulting drop in
+    performance. Calculates the Gini Coefficient of the performance drops.
+    High Gini = High Specialization (few heads do all the work).
     Low Gini = High Polysemanticity/Distribution.
-    
+
     References:
-    - "Mechanisms of Prompt-Induced Hallucination in Vision-Language Models" (2026) 
-      (for targeted attention head knockouts via mean ablation).
+    - "Mechanisms of Prompt-Induced Hallucination in Vision-Language Models" (2026)
     - "Lost in the Prompt Order: Revealing the Limitations of Causal Attention..." (2026)
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):

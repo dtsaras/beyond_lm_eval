@@ -30,17 +30,23 @@ logger = logging.getLogger("blme")
 
 
 @register_task("geometry_lipschitz")
+@register_task("geometry_layer_change_ratio")
 class LipschitzContinuityTask(DiagnosticTask):
     """
-    Estimates the empirical Lipschitz constant between consecutive layers.
-    
+    Estimates the relative layer-wise change ratio between consecutive layers.
+
+    Note: This metric is sometimes called "empirical Lipschitz constant", but
+    it measures ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)|| — the relative change
+    in representations — rather than the true operator Lipschitz constant of
+    the layer transformation (which would require sup over all input pairs).
+
     For each pair of adjacent layers (l, l+1), computes:
       - The ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)|| for each token x
       - Takes the mean and max over all tokens as estimates
-    
-    A model with uniform, moderate Lipschitz constants across layers has
-    smoother, more stable transformations. Spike patterns indicate layers
-    where representations undergo dramatic restructuring.
+
+    A model with uniform, moderate ratios across layers has smoother, more
+    stable transformations. Spike patterns indicate layers where
+    representations undergo dramatic restructuring.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Lipschitz Continuity Analysis...")

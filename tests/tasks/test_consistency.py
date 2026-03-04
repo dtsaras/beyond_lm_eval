@@ -71,6 +71,47 @@ def test_logical_consistency(mock_model, mock_tokenizer):
     assert 0 <= results["logical_violation_rate"] <= 1.0
 
 
+def test_contamination_detection(mock_model, mock_tokenizer):
+    """Data contamination detection via min-k% probability method."""
+    from blme.tasks.consistency.contamination import ContaminationDetectionTask
+
+    task = ContaminationDetectionTask(config={"num_samples": 3, "k_pct": 20})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "contamination_score" in results
+        assert "min_k_pct_prob" in results
+        assert "mean_token_logprob" in results
+
+
+def test_knowledge_capacity(mock_model, mock_tokenizer):
+    """Knowledge capacity — memorization vs generalization."""
+    from blme.tasks.consistency.knowledge_capacity import KnowledgeCapacityTask
+
+    dataset = [
+        {
+            "prompt": "The capital of France is",
+            "exact": " Paris",
+            "rephrased": " the city of Paris",
+        },
+        {
+            "prompt": "Water boils at",
+            "exact": " 100 degrees Celsius",
+            "rephrased": " one hundred degrees C",
+        },
+    ]
+
+    task = KnowledgeCapacityTask(config={"num_samples": 2})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "memorization_score" in results
+        assert "generalization_score" in results
+        assert "generalization_ratio" in results
+
+
 def test_paraphrase_invariance(mock_model, mock_tokenizer):
     """Paraphrase invariance — semantic isometry of representations."""
     from blme.tasks.consistency.paraphrase import ParaphraseInvarianceTask

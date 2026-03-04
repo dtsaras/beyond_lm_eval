@@ -71,6 +71,10 @@ geometry_categories:
 
 geometry_mahalanobis:
   num_samples: 50
+  ood_strategy: scramble  # "scramble" or "random"
+
+geometry_layer_change_ratio:
+  num_samples: 20
 
 # ---- Topology Tasks ----
 topology_homology:
@@ -93,6 +97,10 @@ causality_attention_knockout:
 causality_ablation:
   num_samples: 5
   ablation_percentages: [0.01, 0.05, 0.1, 0.25]
+
+causality_circuit_quality:
+  num_samples: 3
+  top_k_pct: 25
 
 # ---- Interpretability Tasks ----
 interpretability_logit_lens:
@@ -134,6 +142,10 @@ interpretability_attention_graph:
 interpretability_attribution:
   num_samples: 50
 
+interpretability_superposition:
+  num_samples: 5
+  max_neurons: 256
+
 # ---- Dynamics Tasks ----
 dynamics_stability:
   k: 50
@@ -164,9 +176,21 @@ consistency_calibration:
 consistency_paraphrase:
   num_samples: 5
 
+consistency_contamination:
+  num_samples: 10
+  k_pct: 20
+
+consistency_knowledge_capacity:
+  num_samples: 5
+
 # ---- Representation Engineering Tasks ----
 repe_task_vectors:
   num_samples: 5
 
 repe_concept_separability:
   num_samples: 20
+
+repe_steering_effectiveness:
+  num_samples: 3
+  steering_alpha: 1.0
+  steering_threshold: 0.01

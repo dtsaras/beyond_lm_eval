@@ -284,7 +284,7 @@ class TestRegistry:
 
         _register_all_tasks()
         tasks = list_tasks()
-        assert len(tasks) == 45
+        assert len(tasks) == 51
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "interpretability_attention_entropy" in tasks

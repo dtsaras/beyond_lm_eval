@@ -43,6 +43,22 @@ def test_ablation_robustness(mock_model, mock_tokenizer):
         assert results["baseline_loss"] >= 0
 
 
+def test_circuit_quality(mock_model, mock_tokenizer):
+    """Circuit quality — faithfulness and minimality of identified circuits."""
+    from blme.tasks.causality.circuit_quality import CircuitQualityTask
+
+    task = CircuitQualityTask(config={"num_samples": 2, "top_k_pct": 50})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "circuit_faithfulness" in results
+        assert "circuit_minimality" in results
+        assert "circuit_quality_score" in results
+        assert 0 <= results["circuit_faithfulness"] <= 1.0
+        assert 0 <= results["circuit_minimality"] <= 1.0
+
+
 def test_attention_knockout(mock_model, mock_tokenizer):
     """Attention head knockout — specialization via Gini coefficient."""
     from blme.tasks.causality.attention_knockout import AttentionKnockoutTask

@@ -101,7 +101,7 @@ class ModelOutputCache:
             self.populate(need_hidden=True)
 
         if self._hidden_states is None:
-            return torch.empty(0)
+            return None
 
         if layer_idx == "all":
             return self._hidden_states
@@ -110,7 +110,7 @@ class ModelOutputCache:
         actual = layer_idx if layer_idx >= 0 else n_layers + layer_idx
         actual = max(0, min(actual, n_layers - 1))
 
-        return self._hidden_states.get(actual, torch.empty(0))
+        return self._hidden_states.get(actual, None)
 
     def get_attentions(self) -> Optional[Dict[int, List[torch.Tensor]]]:
         """Return cached attention weights ``{layer: [batch_attn, ...]}``."""

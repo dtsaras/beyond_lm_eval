@@ -3,13 +3,16 @@ Meta-test: verifies that ALL expected tasks are registered and instantiable.
 Catches silent registration failures (missing imports, decorator issues, etc.).
 """
 import pytest
-from blme.core import evaluate  # triggers all task imports
+from blme.core import _register_all_tasks
 from blme.registry import list_tasks, get_task
+
+# Ensure all tasks are registered before tests run
+_register_all_tasks()
 
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (19) ---
+    # --- Geometry (20) ---
     "geometry_svd",
     "geometry_categories",
     "geometry_cka",
@@ -19,6 +22,7 @@ EXPECTED_TASKS = [
     "geometry_hubness",
     "geometry_information_fisher",
     "geometry_intrinsic_dim",
+    "geometry_layer_change_ratio",
     "geometry_lid",
     "geometry_lipschitz",
     "geometry_mahalanobis",
@@ -29,7 +33,7 @@ EXPECTED_TASKS = [
     "geometry_rsa",
     "geometry_spectral",
     "geometry_unembedding",
-    # --- Interpretability (11) ---
+    # --- Interpretability (12) ---
     "interpretability_attention_entropy",
     "interpretability_attention_graph",
     "interpretability_attention_polysemanticity",
@@ -40,26 +44,31 @@ EXPECTED_TASKS = [
     "interpretability_probing",
     "interpretability_sae_features",
     "interpretability_sparsity",
+    "interpretability_superposition",
     "interpretability_waa",
-    # --- Consistency (4) ---
+    # --- Consistency (6) ---
     "consistency_calibration",
+    "consistency_contamination",
     "consistency_contrastive",
+    "consistency_knowledge_capacity",
     "consistency_logical",
     "consistency_paraphrase",
     # --- Dynamics (3) ---
     "dynamics_coe",
     "dynamics_interpolation",
     "dynamics_stability",
-    # --- Causality (3) ---
+    # --- Causality (4) ---
     "causality_ablation",
     "causality_attention_knockout",
+    "causality_circuit_quality",
     "causality_tracing",
     # --- Topology (3) ---
     "topology_betti_curve",
     "topology_homology",
     "topology_persistence_entropy",
-    # --- Representation Engineering (2) ---
+    # --- Representation Engineering (3) ---
     "repe_concept_separability",
+    "repe_steering_effectiveness",
     "repe_task_vectors",
 ]
 

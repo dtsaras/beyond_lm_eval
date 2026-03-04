@@ -41,6 +41,33 @@ def test_task_vector_geometry(mock_model, mock_tokenizer):
         assert isinstance(results["layer_task_vector_norms"], list)
 
 
+def test_steering_effectiveness(mock_model, mock_tokenizer):
+    """Steering vector effectiveness — KL divergence from injected task vectors."""
+    from blme.tasks.representation_engineering import SteeringEffectivenessTask
+
+    dataset = [
+        {
+            "text_pos": "This is absolutely true and correct.",
+            "text_neg": "This is completely false and wrong.",
+            "neutral": "The weather today is",
+        },
+        {
+            "text_pos": "I am very happy and joyful.",
+            "text_neg": "I am very sad and miserable.",
+            "neutral": "The color of the sky is",
+        },
+    ]
+
+    task = SteeringEffectivenessTask(config={"num_samples": 2})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "best_steering_layer" in results
+        assert "steering_success_rate" in results
+        assert "layer_steering_kl_divergence" in results
+
+
 def test_concept_separability(mock_model, mock_tokenizer):
     """Linear separability (AUC) of target concepts at each layer."""
     from blme.tasks.representation_engineering import ConceptSeparabilityTask

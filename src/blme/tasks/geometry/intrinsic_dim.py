@@ -96,7 +96,10 @@ class IntrinsicDimensionTask(DiagnosticTask):
             if len(mus) > 0:
                 # Facco et al. Eq 11
                 full_sum = np.sum(np.log(mus))
-                intrinsic_dim = len(mus) / full_sum
+                if full_sum <= 0:
+                    intrinsic_dim = 0.0
+                else:
+                    intrinsic_dim = len(mus) / full_sum
             else:
                 intrinsic_dim = 0.0
                 

@@ -127,6 +127,20 @@ def test_probing(mock_model, mock_tokenizer):
         assert "max_probing_accuracy" in results
 
 
+def test_superposition_index(mock_model, mock_tokenizer):
+    """Superposition index — neuron polysemanticity measurement."""
+    from blme.tasks.interpretability.superposition import SuperpositionIndexTask
+
+    task = SuperpositionIndexTask(config={"num_samples": 2, "max_neurons": 32})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "mean_polysemanticity_index" in results
+        assert "polysemanticity_per_layer" in results
+        assert "neuron_utilization_rate" in results
+
+
 def test_sparsity(mock_model, mock_tokenizer):
     """Activation sparsity (L0) and kurtosis of MLP blocks."""
     from blme.tasks.interpretability.sparsity import ActivationSparsityTask

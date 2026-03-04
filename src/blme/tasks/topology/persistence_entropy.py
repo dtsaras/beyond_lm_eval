@@ -111,15 +111,27 @@ class PersistenceEntropyTask(DiagnosticTask):
                 warnings.simplefilter("ignore")
                 dgms = ripser(data, maxdim=1)['dgms']
             
-            # H0 lifespans
+            # H0 lifespans (excluding infinite-lifespan component)
             lifespans_h0 = [d - b for b, d in dgms[0] if d != np.inf]
             # H1 lifespans
             lifespans_h1 = [d - b for b, d in dgms[1] if d != np.inf]
-            
+
             pe_h0 = _persistence_entropy(lifespans_h0)
             pe_h1 = _persistence_entropy(lifespans_h1)
-            
+
+            # pe_h0_full: approximate infinite component with 2x max finite lifespan
+            finite_h0 = [d - b for b, d in dgms[0] if d != np.inf]
+            inf_births = [b for b, d in dgms[0] if d == np.inf]
+            if finite_h0 and inf_births:
+                max_finite = max(finite_h0)
+                approx_inf = max_finite * 2.0
+                lifespans_h0_full = finite_h0 + [approx_inf] * len(inf_births)
+                pe_h0_full = _persistence_entropy(lifespans_h0_full)
+            else:
+                pe_h0_full = pe_h0
+
             results[f"layer_{l_idx}_pe_h0"] = pe_h0
+            results[f"layer_{l_idx}_pe_h0_full"] = pe_h0_full
             results[f"layer_{l_idx}_pe_h1"] = pe_h1
             results[f"layer_{l_idx}_num_features_h0"] = len(lifespans_h0)
             results[f"layer_{l_idx}_num_features_h1"] = len(lifespans_h1)

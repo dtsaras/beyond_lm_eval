@@ -118,8 +118,12 @@ class ConceptSeparabilityTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Concept Separability Analysis (RepE)...")
+
+        if not HAS_SKLEARN:
+            return {"error": "scikit-learn is required for concept separability. Install via: pip install scikit-learn"}
+
         num_samples = self.config.get("num_samples", 20)
-        
+
         if dataset is None:
             dataset = [{"text": f"This is clearly a wonderful and true statement number {i}.", "label": 1} for i in range(num_samples)] + \
                       [{"text": f"This is an absolutely terrible and false lie number {i}.", "label": 0} for i in range(num_samples)]
@@ -185,5 +189,149 @@ class ConceptSeparabilityTask(DiagnosticTask):
             "max_auc_layer": int(np.argmax(layer_aucs)),
             "max_auc": float(np.max(layer_aucs)),
             "mean_auc": float(np.mean(layer_aucs))
+        }
+
+
+@register_task("repe_steering_effectiveness")
+class SteeringEffectivenessTask(DiagnosticTask):
+    """
+    Measures the effectiveness of representation steering by extracting
+    task vectors (reusing the contrastive approach) and injecting them
+    during forward passes on neutral prompts, measuring output shift
+    via KL divergence.
+
+    Returns layer_steering_kl_divergence, best_steering_layer,
+    and steering_success_rate.
+    """
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running Steering Vector Effectiveness...")
+        num_samples = self.config.get("num_samples", 3)
+        steering_alpha = self.config.get("steering_alpha", 1.0)
+
+        device = next(model.parameters()).device
+        layers = get_layers(model)
+        if layers is None:
+            return {"error": "Could not detect model layers."}
+        num_layers = len(layers)
+
+        # Contrastive dataset for task vector extraction
+        if dataset is None:
+            dataset = [
+                {"text_pos": "This is absolutely true and correct.",
+                 "text_neg": "This is completely false and wrong.",
+                 "neutral": "The weather today is"},
+            ] * num_samples
+
+        samples = list(dataset)[:num_samples]
+        if not samples:
+            return {"error": "Need at least 1 sample."}
+
+        required = {"text_pos", "text_neg", "neutral"}
+        # If dataset lacks neutral, provide a default
+        for s in samples:
+            if "neutral" not in s:
+                s["neutral"] = "The weather today is"
+            if "text_pos" not in s or "text_neg" not in s:
+                return {"error": "Dataset must contain 'text_pos' and 'text_neg' keys."}
+
+        # Step 1: Extract task vectors at each layer
+        task_vectors = {}
+        with torch.no_grad():
+            pos_acts = {l: [] for l in range(num_layers)}
+            neg_acts = {l: [] for l in range(num_layers)}
+
+            for s in samples:
+                ids_pos = tokenizer.encode(s["text_pos"], return_tensors="pt",
+                                           truncation=True, max_length=128).to(device)
+                out_pos = model(ids_pos, output_hidden_states=True)
+
+                ids_neg = tokenizer.encode(s["text_neg"], return_tensors="pt",
+                                           truncation=True, max_length=128).to(device)
+                out_neg = model(ids_neg, output_hidden_states=True)
+
+                for l in range(num_layers):
+                    pos_acts[l].append(out_pos.hidden_states[l + 1][0, -1].cpu().float())
+                    neg_acts[l].append(out_neg.hidden_states[l + 1][0, -1].cpu().float())
+
+            for l in range(num_layers):
+                mean_pos = torch.stack(pos_acts[l]).mean(dim=0)
+                mean_neg = torch.stack(neg_acts[l]).mean(dim=0)
+                task_vectors[l] = mean_pos - mean_neg
+
+        # Step 2: For each layer, inject task vector and measure KL divergence
+        layer_kl_divs = []
+
+        # Sample layers to test (avoid testing all for speed)
+        if num_layers > 10:
+            test_layers = [0, num_layers // 4, num_layers // 2,
+                           3 * num_layers // 4, num_layers - 1]
+        else:
+            test_layers = list(range(num_layers))
+
+        with torch.no_grad():
+            for s in samples:
+                neutral_ids = tokenizer.encode(s["neutral"], return_tensors="pt",
+                                               truncation=True, max_length=128).to(device)
+
+                # Baseline output distribution
+                base_out = model(neutral_ids)
+                base_probs = F.softmax(base_out.logits[0, -1], dim=-1)
+                base_log_probs = F.log_softmax(base_out.logits[0, -1], dim=-1)
+
+                for l_idx in test_layers:
+                    tv = task_vectors[l_idx].to(device)
+
+                    def get_steering_hook(vec, alpha):
+                        def hook(module, input, output):
+                            if isinstance(output, tuple):
+                                out_t = output[0].clone()
+                                out_t[:, -1, :] += alpha * vec
+                                return (out_t,) + output[1:]
+                            else:
+                                out_t = output.clone()
+                                out_t[:, -1, :] += alpha * vec
+                                return out_t
+                        return hook
+
+                    handle = layers[l_idx].register_forward_hook(
+                        get_steering_hook(tv, steering_alpha)
+                    )
+                    try:
+                        steered_out = model(neutral_ids)
+                        steered_log_probs = F.log_softmax(
+                            steered_out.logits[0, -1], dim=-1
+                        )
+                        # KL(base || steered)
+                        kl = F.kl_div(steered_log_probs, base_probs,
+                                      reduction='sum', log_target=False).item()
+                        layer_kl_divs.append((l_idx, max(0.0, kl)))
+                    finally:
+                        handle.remove()
+
+        if not layer_kl_divs:
+            return {"error": "No steering results computed."}
+
+        # Aggregate per-layer
+        from collections import defaultdict
+        kl_by_layer = defaultdict(list)
+        for l_idx, kl in layer_kl_divs:
+            kl_by_layer[l_idx].append(kl)
+
+        layer_mean_kl = {l: float(np.mean(kls)) for l, kls in kl_by_layer.items()}
+        kl_values = list(layer_mean_kl.values())
+        kl_layers = list(layer_mean_kl.keys())
+
+        best_idx = int(np.argmax(kl_values))
+        best_layer = kl_layers[best_idx]
+
+        # Success rate: fraction of layers where KL > threshold
+        threshold = self.config.get("steering_threshold", 0.01)
+        success_rate = sum(1 for v in kl_values if v > threshold) / len(kl_values)
+
+        return {
+            "layer_steering_kl_divergence": layer_mean_kl,
+            "best_steering_layer": int(best_layer),
+            "best_steering_kl": float(kl_values[best_idx]),
+            "steering_success_rate": float(success_rate),
         }
 

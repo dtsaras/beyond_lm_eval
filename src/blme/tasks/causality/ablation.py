@@ -113,7 +113,7 @@ class AblationRobustnessTask(DiagnosticTask):
                         
                         def get_ablation_hook(indices, mean_vals):
                             def hook(module, input, output):
-                                out_tensor = output[0] if isinstance(output, tuple) else output
+                                out_tensor = (output[0] if isinstance(output, tuple) else output).clone()
                                 # Replace selected features with their sequence-mean
                                 out_tensor[..., indices] = mean_vals[..., indices]
                                 if isinstance(output, tuple):

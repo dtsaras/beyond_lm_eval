@@ -24,6 +24,7 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from ..common import apply_lm_head
 import logging
 logger = logging.getLogger("blme")
 
@@ -73,16 +74,11 @@ class FisherInformationTraceTask(DiagnosticTask):
             # to compute gradients of the log probabilities w.r.t the hidden state.
             h = final_hidden.detach().requires_grad_(True)
             
-            # Reconstruct LM head forward pass (varies by model architecture)
-            if hasattr(model, "lm_head"):
-                logits = model.lm_head(h)
-            elif hasattr(model, "cls"): # Some BERT variants
-                logits = model.cls(h)
-            else:
-                # Fallback: just use the raw logits from the original output, 
-                # but we can't backprop to our detached `h` easily unless we 
-                # use a backward hook on the hidden states. 
-                # Let's use a backward hook on the full model pass instead to be architecture agnostic.
+            # Project hidden states to logits using universal LM head access
+            try:
+                logits = apply_lm_head(model, h)
+            except RuntimeError:
+                # Architecture not supported by apply_lm_head; fall through to backward hook path
                 break
                 
             # Efficient Empirical Fisher Trace computation:

@@ -16,6 +16,11 @@ class LinearProbingTask(DiagnosticTask):
     Default probe: predict the token identity from its hidden state.
     Ref: Alain & Bengio, "Understanding Intermediate Layers Using Linear
          Classifier Probes", ICLR 2017 Workshop. arXiv:1610.01644
+
+    Caveat: High probe accuracy doesn't confirm that the model mechanistically
+    uses the probed feature (Hewitt & Liang, 2019). A control task or
+    selectivity metric is needed to distinguish true encoding from
+    high-dimensional noise.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

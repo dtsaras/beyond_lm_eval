@@ -83,8 +83,8 @@ class MatrixEntropyTask(DiagnosticTask):
             # Compute Covariance Matrix: C = (H^T H) / N
             # For numerical stability on high-dim spaces, we can work directly with the SVD
             # of H, since the eigenvalues of C are the squared singular values of H.
-            U, S, V = torch.svd(H_l, compute_uv=False)
-            
+            S = torch.linalg.svdvals(H_l)
+
             # True singular values, square to get covariance eigenvalues
             eigenvalues = (S ** 2) / (H_l.shape[0] - 1 + 1e-12)
             

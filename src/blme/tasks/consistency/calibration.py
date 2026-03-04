@@ -50,8 +50,11 @@ class CalibrationTask(DiagnosticTask):
         total_samples = confidences.numel()
         
         for i in range(n_bins):
-            # Bin range: [bin_boundaries[i], bin_boundaries[i+1]]
-            mask = (confidences > bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
+            # Bin range: [bin_boundaries[i], bin_boundaries[i+1]] — first bin uses >= to include 0
+            if i == 0:
+                mask = (confidences >= bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
+            else:
+                mask = (confidences > bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
             
             if mask.any():
                 bin_conf = confidences[mask].mean().item()

@@ -12,6 +12,10 @@ class AttentionEntropyTask(DiagnosticTask):
     """
     Computes the entropy of attention distributions.
     Ref: Clark et al., "What Does BERT Look At?" (2019)
+
+    Caveat: Attention weights don't always correlate with information flow
+    (Jain & Wallace, 2019). High/low entropy may not reflect true feature
+    importance. Use in combination with gradient-based attribution methods.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Attention Entropy Analysis...")
@@ -57,9 +61,8 @@ class AttentionEntropyTask(DiagnosticTask):
                     # We compute entropy over the last dim (attention to other tokens)
                     # Avg over B and T (query tokens)
                     
-                    # Add epsilon for log
-                    atts = layer_att + 1e-9
-                    entropy = -torch.sum(atts * torch.log(atts), dim=-1) # (B, H, T)
+                    # Epsilon inside log to avoid log(0) without biasing the sum
+                    entropy = -torch.sum(layer_att * torch.log(layer_att + 1e-9), dim=-1) # (B, H, T)
                     
                     # Avg over Batch and Query Tokens
                     avg_head_entropy = entropy.mean(dim=[0, 2]).cpu().numpy() # (H,)

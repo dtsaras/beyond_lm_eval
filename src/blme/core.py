@@ -102,8 +102,10 @@ def evaluate(
         # Determine what the tasks need so We can populate the cache once
         _HIDDEN_TASK_PREFIXES = (
             "geometry_", "topology_", "repe_",
-            "interpretability_probing",
+            "interpretability_probing", "interpretability_superposition",
             "consistency_calibration", "consistency_paraphrase",
+            "consistency_contamination", "consistency_knowledge_capacity",
+            "causality_circuit_quality",
         )
         _ATTN_TASK_PREFIXES = (
             "interpretability_attention", "interpretability_induction",
