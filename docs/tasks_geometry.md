@@ -16,7 +16,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local smoothness and sensitivity of the model to small perturbations in the input space.
 * **How are we measuring**: Practically estimated by computing the ratio of the distance between output representations to the distance between input representations for closely neighbored points.
 * **Hypothesis**: High Lipschitz constants indicate an unstable, highly chaotic representation space vulnerable to adversarial perturbations. Low constants indicate smooth, stable generalization.
-* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ArXiv: 1811.05381]
+* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ICML 2019, ArXiv: 1811.05381]
 * **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LipschitzContinuityTask`
 * **Critical Info**: Extremely hard to measure analytically; this task uses an empirical local approximation based on sampled neighbors.
 
@@ -40,7 +40,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local curvature and sharpness of the representation manifold.
 * **How are we measuring**: By computing the Trace of the Empirical Fisher Information Matrix (FIM) of the token representations with respect to the output logits/probabilities.
 * **Hypothesis**: A "sharp" minimum (high trace) often correlates with poor generalization out-of-distribution, while a "flat" minimum (low trace) suggests robust generalization.
-* **Citation/Paper**: `Information Geometry of Large Language Models` (2024/2025). [Ongoing literature, no single unified conference paper].
+* **Citation/Paper**: `Amari, S. (1998). Natural gradient works efficiently in learning.` [Neural Computation, Vol 10(2)] — foundational reference for information geometry of neural networks. Application to LLMs is an active area of research.
 * **File & Function**: `src/blme/tasks/geometry/information_geometry.py` -> `FisherInformationTraceTask`
 * **Critical Info**: FIM is computationally intractable to store entirely; the trace is an efficient scalar summary of total curvature.
 
@@ -48,7 +48,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The data compression capabilities of the LLM layers over inference.
 * **How are we measuring**: By computing the von Neumann spectral entropy over the internal covariance matrix of the hidden states at each layer.
 * **Hypothesis**: As information passes through an LLM, the model actively filters out noise. A decreasing or low layer-wise matrix entropy indicates the model is actively forming a tighter semantic "Information Bottleneck".
-* **Citation/Paper**: `Wei, L., Tan, Z., Li, C., Wang, J., & Huang, W. (2024). Diff-eRank: A Novel Rank-Based Metric for Evaluating Large Language Models.` [ArXiv: 2401.17139]
+* **Citation/Paper**: `Wei, L., Tan, Z., Li, C., Wang, J., & Huang, W. (2024). Diff-eRank: A Novel Rank-Based Metric for Evaluating Large Language Models.` [NeurIPS 2024, ArXiv: 2401.17139]
 * **File & Function**: `src/blme/tasks/geometry/matrix_entropy.py` -> `MatrixEntropyTask`
 * **Critical Info**: Values typically decrease monotonically in deeper layers as the network compresses raw syntax into refined semantic logic.
 
@@ -104,7 +104,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: Severe rank collapse or dimension degeneration in the hidden states of identical repeated input tokens or near-duplicated data.
 * **How are we measuring**: Computing the cosine similarity between outputs that should have been distinguishable but degenerate to the same vector due to depth.
 * **Hypothesis**: Specifically in deep transformers, representations can over-smooth and lose their distinct individual token identities.
-* **Citation/Paper**: `Dong, Y., Cordonnier, J. B., & Loukas, A. (2021). Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth.` [ArXiv: 2103.03404]
+* **Citation/Paper**: `Dong, Y., Cordonnier, J. B., & Loukas, A. (2021). Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth.` [ICML 2021, ArXiv: 2103.03404]
 * **File & Function**: `src/blme/tasks/geometry/collapse.py` -> `RepresentationCollapseTask`
 * **Critical Info**: More pronounced in deep networks lacking robust layernorms or residual pathway scaling.
 
@@ -128,7 +128,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The similarity between the underlying structures of two sets of representations without requiring them to have the same features.
 * **How are we measuring**: Computing the Frobenius norm of cross-covariance matrices. Equivalent to computing the correlation of dot-product similarity matrices.
 * **Hypothesis**: Permits diagnosing whether two distinct layers (or models) are learning structurally analogous concepts, ignoring rotations or isotropic scalings. 
-* **Citation/Paper**: `Kornblith, S., Norouzi, M., Lee, H., & Hinton, G. (2019). Similarity of neural network representations revisited.` [ArXiv: 1905.00414]
+* **Citation/Paper**: `Kornblith, S., Norouzi, M., Lee, H., & Hinton, G. (2019). Similarity of neural network representations revisited.` [ICML 2019, ArXiv: 1905.00414]
 * **File & Function**: `src/blme/tasks/geometry/cka.py` -> `CKATask`
 * **Critical Info**: Less prone to the scaling artifacts that affect normal canonical correlation analysis (CCA).
 
@@ -160,6 +160,6 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The relative magnitude of representation change between consecutive transformer layers.
 * **How are we measuring**: Computing `||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||` — the relative change in hidden state norms for each pair of adjacent layers, averaged across tokens.
 * **Hypothesis**: Models with uniform, moderate ratios across layers have smoother, more stable transformations. Spike patterns indicate layers where representations undergo dramatic restructuring.
-* **Citation/Paper**: Related to `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` [ICLR 2018] and `Virmaux, A. & Scaman, K. (2018). Lipschitz Regularity of Deep Neural Networks.`
+* **Citation/Paper**: Related to `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` [ICLR 2018] and `Scaman, K. & Virmaux, A. (2018). Lipschitz regularity of deep neural networks: analysis and efficient estimation.` [NeurIPS 2018, ArXiv: 1805.10965]
 * **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LayerChangeRatioTask` (alias of `LipschitzContinuityTask`)
 * **Critical Info**: This is a more accurately named alias of `geometry_lipschitz`. The metric measures relative layer-wise change, not the true operator Lipschitz constant (which would require supremum over all input pairs).

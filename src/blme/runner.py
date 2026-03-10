@@ -35,7 +35,7 @@ def run_from_yaml(config_path: str):
     limit = global_config.get("limit", None)
     
     # Run
-    evaluate(
+    return evaluate(
         model_args=model_args,
         tasks=task_list,
         task_configs=tasks_dict,

@@ -8,7 +8,7 @@ This module contains metrics that analyze and manipulate high-level concepts usi
 * **What are we measuring**: The presence and effectiveness of linear "Task Vectors" that guide In-Context Learning (ICL).
 * **How are we measuring**: Computing the average difference in hidden states between a prompt that includes in-context examples (the "learn" phase) and a zero-shot prompt. We then explicitly add this extracted "Task Vector" to a zero-shot prompt (the "apply" phase) to see if it replicates few-shot performance without the actual context.
 * **Hypothesis**: In-Context Learning operates mechanistically by compressing the given training examples into a singular, linear task vector in the latent space.
-* **Citation/Paper**: `Hendel, R., Geva, M., & Globerson, A. (2023). In-Context Learning Creates Task Vectors.` [ArXiv: 2310.15916]
+* **Citation/Paper**: `Hendel, R., Geva, M., & Globerson, A. (2023). In-Context Learning Creates Task Vectors.` [EMNLP 2023 Findings, ArXiv: 2310.15916]
 * **File & Function**: `src/blme/tasks/representation_engineering.py` -> `TaskVectorGeometryTask`
 * **Critical Info**: Validates that prompt engineering is fundamentally just shifting the hidden geometric space by a single static vector.
 

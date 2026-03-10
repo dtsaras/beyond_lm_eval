@@ -152,6 +152,10 @@ def _cmd_evaluate(args):
     )
 
     if args.recipe:
+        import os
+        if not os.path.isfile(args.recipe):
+            print(f"Error: recipe file not found: {args.recipe}")
+            sys.exit(1)
         from blme.runner import run_from_yaml
         run_from_yaml(args.recipe)
         return

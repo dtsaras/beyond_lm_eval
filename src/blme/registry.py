@@ -1,4 +1,4 @@
-from typing import Type, Dict
+from typing import Type, Dict, Optional
 from .tasks.base import DiagnosticTask
 
 _TASK_REGISTRY: Dict[str, Type[DiagnosticTask]] = {}
@@ -10,7 +10,7 @@ def register_task(name: str):
         return cls
     return decorator
 
-def get_task(name: str) -> Type[DiagnosticTask]:
+def get_task(name: str) -> Optional[Type[DiagnosticTask]]:
     return _TASK_REGISTRY.get(name)
 
 def list_tasks() -> list[str]:

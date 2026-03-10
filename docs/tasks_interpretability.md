@@ -64,7 +64,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The frequency of inactive (zeroed-out or highly negative) neurons in the MLP feed-forward blocks.
 * **How are we measuring**: Computing the L0 pseudo-norm fraction (percentage of active neurons) and the Kurtosis (heavy-tailedness) of the post-GELU/SwiGLU activations.
 * **Hypothesis**: LLMs demonstrate severe activation sparsity; only a tiny fraction of the network fires for a given token. This translates to efficient computation and specialized feature maps.
-* **Citation/Paper**: `Liu, Z., et al. (2023). Deja Vu: Contextual Sparsity for Efficient LLMs at Inference Time.` [ArXiv: 2310.17157]
+* **Citation/Paper**: `Liu, Z., et al. (2023). Deja Vu: Contextual Sparsity for Efficient LLMs at Inference Time.` [ICML 2023, ArXiv: 2310.17157]
 * **File & Function**: `src/blme/tasks/interpretability/sparsity.py` -> `ActivationSparsityTask`
 * **Critical Info**: Relu networks have hard sparsity (true 0s), whereas GELU models have soft sparsity (negative values near 0). The task supports thresholding for soft sparsity.
 
@@ -72,7 +72,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: How linearly accessible a specific high-level concept (e.g., Parts of Speech) is within the hidden states.
 * **How are we measuring**: Extracting hidden states and training a simple supervised Logistic Regression classifier to separate the concepts. Evaluated via Cross-Entropy or Accuracy.
 * **Hypothesis**: If a linear probe can retrieve the concept with high accuracy, the model has actively constructed a structural geometric boundary for that concept in its primary representation space.
-* **Citation/Paper**: `Belinkov, Y. (2022). Probing classifiers: Promises, shortcomings, and advances.` [ArXiv: 2102.12452]
+* **Citation/Paper**: `Belinkov, Y. (2022). Probing classifiers: Promises, shortcomings, and advances.` [Computational Linguistics, Vol 48(1), ArXiv: 2102.12452]
 * **File & Function**: `src/blme/tasks/interpretability/probing.py` -> `LinearProbingTask`
 * **Critical Info**: The metric is essentially measuring the capacity of the *probe*, not just the model, so high regularisation is required to prevent the probe from learning the task entirely.
 
@@ -88,7 +88,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The structural sparsity and disentanglement of the representation using a Sparse Autoencoder (SAE).
 * **How are we measuring**: Running the inputs through pre-trained SAE dictionaries (via `sae-lens`) to extract L0 norms and active feature counts.
 * **Hypothesis**: Traditional hidden states are in superposition. SAEs force features to be sparse and disentangled. Analyzing the SAE features reveals the true atomic semantic variables the model operates on.
-* **Citation/Paper**: `Cunningham, H., et al. (2023). Sparse Autoencoders Find Highly Interpretable Features in Language Models.` [ArXiv: 2309.08600]
+* **Citation/Paper**: `Cunningham, H., et al. (2023). Sparse Autoencoders Find Highly Interpretable Features in Language Models.` [ICLR 2024, ArXiv: 2309.08600]
 * **File & Function**: `src/blme/tasks/interpretability/sae_features.py` -> `SAEFeatureDimensionalityTask`
 * **Critical Info**: Strictly requires the external `sae-lens` library to map to established SAE dictionaries for the specific tested model.
 
@@ -96,6 +96,6 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The degree of superposition (polysemanticity) in model neurons — whether individual neurons encode multiple unrelated features.
 * **How are we measuring**: Analyzing the bimodality coefficient of per-neuron activation distributions within MLP layers. A bimodal activation distribution suggests a neuron encodes multiple features (fires strongly for distinct, unrelated inputs). Also measures neuron utilization rate — the fraction of neurons with non-trivial activation variance.
 * **Hypothesis**: In superposition, individual neurons compress multiple unrelated features into their activation range. High polysemanticity (bimodality coefficient > 0.555) indicates severe superposition, while low values indicate cleaner, monosemantic neurons.
-* **Citation/Paper**: `Elhage, N., et al. (2022). Toy Models of Superposition.` [ArXiv: 2209.10652] and `Templeton, A., et al. (2024). Scaling Monosemanticity.`
+* **Citation/Paper**: `Elhage, N., et al. (2022). Toy Models of Superposition.` [ArXiv: 2209.10652] and `Templeton, A., et al. (2024). Scaling Monosemanticity.` [Transformer Circuits Thread]
 * **File & Function**: `src/blme/tasks/interpretability/superposition.py` -> `SuperpositionIndexTask`
 * **Critical Info**: The bimodality coefficient (BC) uses skewness and kurtosis: BC = (skewness^2 + 1) / kurtosis. Values > 0.555 suggest bimodality. Higher mean_polysemanticity_index indicates more severe superposition across the model.

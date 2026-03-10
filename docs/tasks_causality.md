@@ -8,7 +8,7 @@ This module contains metrics that utilize causal interventions (ablations, traci
 * **What are we measuring**: The precise location (layer and token position) where specific factual associations are injected into the residual stream.
 * **How are we measuring**: By corrupting the input embedding to destroy factual recall, and then systematically restoring the clean hidden states at specific layers to see exactly which restoration recovers the original output probability.
 * **Hypothesis**: Factual knowledge is highly localized in early-middle MLP modules, acting as key-value stores. Causal tracing maps this retrieval process.
-* **Citation/Paper**: `Meng, K., Bau, D., Andonian, A., & Belinkov, Y. (2022). Locating and Editing Factual Associations in GPT.` [ArXiv: 2202.05262]
+* **Citation/Paper**: `Meng, K., Bau, D., Andonian, A., & Belinkov, Y. (2022). Locating and Editing Factual Associations in GPT.` [NeurIPS 2022, ArXiv: 2202.05262]
 * **File & Function**: `src/blme/tasks/causality/tracing.py` -> `CausalTracingTask`
 * **Critical Info**: Computationally expensive as it requires $L \times T$ forward passes (where $L$ is layers and $T$ is tokens) for a single factual prompt to construct the causal heatmap.
 
@@ -32,6 +32,6 @@ This module contains metrics that utilize causal interventions (ablations, traci
 * **What are we measuring**: Whether a small subset of model layers (a "circuit") can faithfully reproduce the full model's behavior.
 * **How are we measuring**: Using mean ablation to rank each layer's causal importance, identifying the top-k% most important layers as the circuit, then ablating all non-circuit layers and measuring how closely the circuit's output distribution matches the full model's via KL divergence. The final score is the harmonic mean of faithfulness (circuit reproduces full model) and minimality (circuit uses few layers).
 * **Hypothesis**: If a compact circuit faithfully reproduces model behavior, the model's computation is concentrated in a small subset of layers. Low circuit quality suggests distributed computation across many layers.
-* **Citation/Paper**: `Chan, L., et al. (2022). Causal Scrubbing.` and `Conmy, A., et al. (2023). Towards Automated Circuit Discovery for Mechanistic Interpretability.` [ArXiv: 2304.14997]
+* **Citation/Paper**: `Chan, L., et al. (2022). Causal Scrubbing.` and `Conmy, A., et al. (2023). Towards Automated Circuit Discovery for Mechanistic Interpretability.` [NeurIPS 2023, ArXiv: 2304.14997]
 * **File & Function**: `src/blme/tasks/causality/circuit_quality.py` -> `CircuitQualityTask`
 * **Critical Info**: Computationally expensive — requires multiple forward passes per layer for importance ranking, plus additional passes for faithfulness evaluation.

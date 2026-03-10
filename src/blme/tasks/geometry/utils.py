@@ -52,67 +52,73 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
     use_offload = use_disk_offload or (os.environ.get("BLME_DISK_OFFLOAD", "0") == "1")
     all_hidden = {}  # layer_index -> list of (N_tokens, D) tensors
 
-    with torch.no_grad():
-        for i, sample in enumerate(tqdm(dataset, desc="Collecting states")):
-            if i >= num_samples:
-                break
+    try:
+        with torch.no_grad():
+            for i, sample in enumerate(tqdm(dataset, desc="Collecting states")):
+                if i >= num_samples:
+                    break
 
-            if isinstance(sample, str):
-                inputs = tokenizer(sample, return_tensors="pt").to(model.device)
-            else:
-                text = sample.get("text", "")
-                inputs = tokenizer(text, return_tensors="pt").to(model.device)
+                if isinstance(sample, str):
+                    inputs = tokenizer(sample, return_tensors="pt").to(model.device)
+                else:
+                    text = sample.get("text", "")
+                    inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
-            outputs = model(**inputs, output_hidden_states=True)
-            hidden_states = outputs.hidden_states  # tuple of (1, T, D)
+                outputs = model(**inputs, output_hidden_states=True)
+                hidden_states = outputs.hidden_states  # tuple of (1, T, D)
 
-            # hidden_states[0] = embedding output
-            # hidden_states[i+1] = output of layer i
-            n_layers = len(hidden_states) - 1  # subtract embedding layer
+                # hidden_states[0] = embedding output
+                # hidden_states[i+1] = output of layer i
+                n_layers = len(hidden_states) - 1  # subtract embedding layer
 
-            if layer_idx == "all":
-                for li in range(n_layers):
-                    h = hidden_states[li + 1]  # skip embedding layer
+                if layer_idx == "all":
+                    for li in range(n_layers):
+                        h = hidden_states[li + 1]  # skip embedding layer
+                        h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
+                        if use_offload:
+                            if li not in all_hidden:
+                                path = _get_temp_dat_path()
+                                f = open(path, "wb")
+                                all_hidden[li] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
+                            f = all_hidden[li]["handle"]
+                            f.write(h_flat.numpy().tobytes())
+                            all_hidden[li]["count"] += h_flat.shape[0]
+                        else:
+                            if li not in all_hidden:
+                                all_hidden[li] = []
+                            all_hidden[li].append(h_flat)
+                else:
+                    # Resolve negative index
+                    actual_idx = layer_idx if layer_idx >= 0 else n_layers + layer_idx
+                    # Clamp
+                    actual_idx = max(0, min(actual_idx, n_layers - 1))
+
+                    h = hidden_states[actual_idx + 1]  # +1 to skip embedding
+
+                    # Subsample tokens for single-layer mode
+                    T = h.shape[1]
+                    if T > 10:
+                        indices = torch.randperm(T)[:10]
+                        h = h[:, indices, :]
+
                     h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
                     if use_offload:
-                        if li not in all_hidden:
+                        if layer_idx not in all_hidden:
                             path = _get_temp_dat_path()
                             f = open(path, "wb")
-                            all_hidden[li] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
-                        f = all_hidden[li]["handle"]
+                            all_hidden[layer_idx] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
+                        f = all_hidden[layer_idx]["handle"]
                         f.write(h_flat.numpy().tobytes())
-                        all_hidden[li]["count"] += h_flat.shape[0]
+                        all_hidden[layer_idx]["count"] += h_flat.shape[0]
                     else:
-                        if li not in all_hidden:
-                            all_hidden[li] = []
-                        all_hidden[li].append(h_flat)
-            else:
-                # Resolve negative index
-                actual_idx = layer_idx if layer_idx >= 0 else n_layers + layer_idx
-                # Clamp
-                actual_idx = max(0, min(actual_idx, n_layers - 1))
-
-                h = hidden_states[actual_idx + 1]  # +1 to skip embedding
-
-                # Subsample tokens for single-layer mode
-                T = h.shape[1]
-                if T > 10:
-                    indices = torch.randperm(T)[:10]
-                    h = h[:, indices, :]
-
-                h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
-                if use_offload:
-                    if layer_idx not in all_hidden:
-                        path = _get_temp_dat_path()
-                        f = open(path, "wb")
-                        all_hidden[layer_idx] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
-                    f = all_hidden[layer_idx]["handle"]
-                    f.write(h_flat.numpy().tobytes())
-                    all_hidden[layer_idx]["count"] += h_flat.shape[0]
-                else:
-                    if layer_idx not in all_hidden:
-                        all_hidden[layer_idx] = []
-                    all_hidden[layer_idx].append(h_flat)
+                        if layer_idx not in all_hidden:
+                            all_hidden[layer_idx] = []
+                        all_hidden[layer_idx].append(h_flat)
+    finally:
+        if use_offload:
+            for meta in all_hidden.values():
+                if isinstance(meta, dict) and "handle" in meta and not meta["handle"].closed:
+                    meta["handle"].close()
 
     # Concatenate or MemMap
     results = {}
@@ -164,47 +170,53 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
 
     embeddings = get_embeddings(model)
 
-    with torch.no_grad():
-        for i, sample in enumerate(tqdm(dataset, desc="Collecting prediction stats")):
-            if i >= num_samples:
-                break
+    try:
+        with torch.no_grad():
+            for i, sample in enumerate(tqdm(dataset, desc="Collecting prediction stats")):
+                if i >= num_samples:
+                    break
 
-            if isinstance(sample, str):
-                inputs = tokenizer(sample, return_tensors="pt").to(model.device)
-            else:
-                text = sample.get("text", "")
-                inputs = tokenizer(text, return_tensors="pt").to(model.device)
+                if isinstance(sample, str):
+                    inputs = tokenizer(sample, return_tensors="pt").to(model.device)
+                else:
+                    text = sample.get("text", "")
+                    inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
-            outputs = model(**inputs, output_hidden_states=True)
-            logits = outputs.logits.float().detach().cpu()
+                outputs = model(**inputs, output_hidden_states=True)
+                logits = outputs.logits.float().detach().cpu()
 
-            input_ids = inputs["input_ids"].cpu()
-            labels = input_ids[:, 1:]
-            logits = logits[:, :-1, :]
+                input_ids = inputs["input_ids"].cpu()
+                labels = input_ids[:, 1:]
+                logits = logits[:, :-1, :]
 
-            # Last hidden state (before LM head)
-            h = outputs.hidden_states[-1].float().detach().cpu()
-            h_pred = h[:, :-1, :]
+                # Last hidden state (before LM head)
+                h = outputs.hidden_states[-1].float().detach().cpu()
+                h_pred = h[:, :-1, :]
 
-            l_flat = logits.reshape(-1, logits.shape[-1]).numpy()
-            y_flat = labels.reshape(-1).numpy()
-            h_flat = h_pred.reshape(-1, h_pred.shape[-1]).numpy()
+                l_flat = logits.reshape(-1, logits.shape[-1]).numpy()
+                y_flat = labels.reshape(-1).numpy()
+                h_flat = h_pred.reshape(-1, h_pred.shape[-1]).numpy()
 
-            if use_offload:
-                f_logits.write(l_flat.tobytes())
-                f_labels.write(y_flat.tobytes())
-                f_hidden.write(h_flat.tobytes())
-                c_logits += l_flat.shape[0]
-                c_labels += y_flat.shape[0]
-                c_hidden += h_flat.shape[0]
-                D_logits, D_hidden = l_flat.shape[-1], h_flat.shape[-1]
-            else:
-                stats["logits"].append(torch.from_numpy(l_flat))
-                stats["labels"].append(torch.from_numpy(y_flat))
-                stats["hidden"].append(torch.from_numpy(h_flat))
+                if use_offload:
+                    f_logits.write(l_flat.tobytes())
+                    f_labels.write(y_flat.tobytes())
+                    f_hidden.write(h_flat.tobytes())
+                    c_logits += l_flat.shape[0]
+                    c_labels += y_flat.shape[0]
+                    c_hidden += h_flat.shape[0]
+                    D_logits, D_hidden = l_flat.shape[-1], h_flat.shape[-1]
+                else:
+                    stats["logits"].append(torch.from_numpy(l_flat))
+                    stats["labels"].append(torch.from_numpy(y_flat))
+                    stats["hidden"].append(torch.from_numpy(h_flat))
 
-            ids_flat = input_ids.view(-1).numpy()
-            np.add.at(stats["token_counts"], ids_flat, 1)
+                ids_flat = input_ids.view(-1).numpy()
+                np.add.at(stats["token_counts"], ids_flat, 1)
+    finally:
+        if use_offload:
+            for fh in (f_logits, f_labels, f_hidden):
+                if not fh.closed:
+                    fh.close()
 
     if use_offload:
         f_logits.close()

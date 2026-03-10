@@ -8,7 +8,7 @@ This module evaluates the mathematical reliability and internal logical coherenc
 * **What are we measuring**: Whether the model assigns symmetrically identical likelihoods to sentences that differ in syntax but share exact semantic meaning.
 * **How are we measuring**: Computing the variance or difference in the output probabilities of a target concept when conditioned on syntactically varied but semantically equivalent prefixes. 
 * **Hypothesis**: A robust latent space should map paraphrases to nearly identical geometric subspaces before tokenization forces them apart. Severe likelihood shifts indicate failure of abstraction.
-* **Citation/Paper**: `Elazar, Y., Kassner, N., Ravfogel, S., Abnar, S., Hovy, E., Schütze, H., & Goldberg, Y. (2021). Measuring and improving consistency in pretrained language models.` Transactions of the Association for Computational Linguistics. [ArXiv: 2102.01017]
+* **Citation/Paper**: `Elazar, Y., Kassner, N., Ravfogel, S., Ravichander, A., Hovy, E., Schütze, H., & Goldberg, Y. (2021). Measuring and improving consistency in pretrained language models.` Transactions of the Association for Computational Linguistics. [ArXiv: 2102.01017]
 * **File & Function**: `src/blme/tasks/consistency/paraphrase.py` -> `ParaphraseInvarianceTask`
 * **Critical Info**: Generally uses cosine similarity of the final representation layer or simply the KL-divergence of the output logits.
 
@@ -16,7 +16,7 @@ This module evaluates the mathematical reliability and internal logical coherenc
 * **What are we measuring**: How accurately the model's self-reported mathematical probability (softmax output) correlates with ground-truth correctness.
 * **How are we measuring**: Extracting the exact probability assigned to the correct answer versus incorrect answers, and computing Expected Calibration Error (ECE) or Brier Score over a dataset.
 * **Hypothesis**: Over-parameterized LLMs often suffer from severe overconfidence, assigning 99% probability even when hallucinating. A well-calibrated geometric space prevents the probabilities from skewing uncontrollably.
-* **Citation/Paper**: `Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). On calibration of modern neural networks.` [ArXiv: 1706.04599]
+* **Citation/Paper**: `Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). On calibration of modern neural networks.` [ICML 2017, ArXiv: 1706.04599]
 * **File & Function**: `src/blme/tasks/consistency/calibration.py` -> `CalibrationTask`
 * **Critical Info**: Base models are generally better calibrated than RLHF (Instruction-Tuned) models, which often suffer severe calibration collapse during safety training.
 
@@ -48,6 +48,6 @@ This module evaluates the mathematical reliability and internal logical coherenc
 * **What are we measuring**: Whether the model has generalized factual knowledge or merely memorized specific surface forms.
 * **How are we measuring**: Comparing the token-level log probability of exact factual completions versus semantically equivalent rephrasings. A model that assigns similar probability to both has generalized; one that strongly prefers the exact form has memorized it.
 * **Hypothesis**: Generalized knowledge should be robust to surface-level rephrasing. A large gap between exact and rephrased probabilities indicates brittle memorization rather than deep understanding.
-* **Citation/Paper**: Related to `Tirumala, K., et al. (2022). Memorization Without Overfitting.` and `Carlini, N., et al. (2023). Quantifying Memorization Across Neural Language Models.`
+* **Citation/Paper**: Related to `Tirumala, K., et al. (2022). Memorization Without Overfitting.` [NeurIPS 2022, ArXiv: 2205.10770] and `Carlini, N., et al. (2023). Quantifying Memorization Across Neural Language Models.` [ICLR 2023, ArXiv: 2202.07646]
 * **File & Function**: `src/blme/tasks/consistency/knowledge_capacity.py` -> `KnowledgeCapacityTask`
 * **Critical Info**: Requires paired datasets with "prompt", "exact", and "rephrased" keys. The generalization ratio (closer to 1.0 = better generalization) is the primary diagnostic metric.
