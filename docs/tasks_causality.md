@@ -27,3 +27,11 @@ This module contains metrics that utilize causal interventions (ablations, traci
 * **Citation/Paper**: General methodology related to attention head pruning and causal abstractions.
 * **File & Function**: `src/blme/tasks/causality/attention_knockout.py` -> `AttentionKnockoutTask`
 * **Critical Info**: Works via sophisticated PyTorch forward hooks that directly intercept and clone-modify the `attn_weights` tensor before it multiplies the Value matrix.
+
+## 4. Circuit Quality (Faithfulness and Minimality)
+* **What are we measuring**: Whether a small subset of model layers (a "circuit") can faithfully reproduce the full model's behavior.
+* **How are we measuring**: Using mean ablation to rank each layer's causal importance, identifying the top-k% most important layers as the circuit, then ablating all non-circuit layers and measuring how closely the circuit's output distribution matches the full model's via KL divergence. The final score is the harmonic mean of faithfulness (circuit reproduces full model) and minimality (circuit uses few layers).
+* **Hypothesis**: If a compact circuit faithfully reproduces model behavior, the model's computation is concentrated in a small subset of layers. Low circuit quality suggests distributed computation across many layers.
+* **Citation/Paper**: `Chan, L., et al. (2022). Causal Scrubbing.` and `Conmy, A., et al. (2023). Towards Automated Circuit Discovery for Mechanistic Interpretability.` [ArXiv: 2304.14997]
+* **File & Function**: `src/blme/tasks/causality/circuit_quality.py` -> `CircuitQualityTask`
+* **Critical Info**: Computationally expensive — requires multiple forward passes per layer for importance ranking, plus additional passes for faithfulness evaluation.

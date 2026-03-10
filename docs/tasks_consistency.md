@@ -35,3 +35,19 @@ This module evaluates the mathematical reliability and internal logical coherenc
 * **Citation/Paper**: Canonical evaluation methodology.
 * **File & Function**: `src/blme/tasks/consistency/contrastive.py` -> `ContrastiveConsistencyTask`
 * **Critical Info**: Highly reliant on the quality of the negative sample. If the negative sample is too easy, the test trivially passes.
+
+## 5. Data Contamination Detection (Min-k% Probability)
+* **What are we measuring**: Whether the model has memorized specific text from its training data.
+* **How are we measuring**: Analyzing the distribution of per-token log probabilities using the Min-k% method. If the lowest-probability tokens in a passage are still unusually high, it is a signature of memorized (rather than generalized) text. The contamination score is the ratio of the mean bottom-k% log probability to the overall mean log probability.
+* **Hypothesis**: A model that has memorized text assigns uniformly high probabilities across all tokens, including those that would normally be surprising. Generalized knowledge shows more variance in per-token probabilities.
+* **Citation/Paper**: `Shi, W., et al. (2023). Detecting Pretraining Data from Large Language Models.` [ArXiv: 2310.16789]
+* **File & Function**: `src/blme/tasks/consistency/contamination.py` -> `ContaminationDetectionTask`
+* **Critical Info**: The k_pct parameter (default: 20%) controls how many of the lowest-probability tokens are examined. A contamination score closer to 1.0 indicates more uniform probabilities (higher memorization).
+
+## 6. Knowledge Capacity (Memorization vs Generalization)
+* **What are we measuring**: Whether the model has generalized factual knowledge or merely memorized specific surface forms.
+* **How are we measuring**: Comparing the token-level log probability of exact factual completions versus semantically equivalent rephrasings. A model that assigns similar probability to both has generalized; one that strongly prefers the exact form has memorized it.
+* **Hypothesis**: Generalized knowledge should be robust to surface-level rephrasing. A large gap between exact and rephrased probabilities indicates brittle memorization rather than deep understanding.
+* **Citation/Paper**: Related to `Tirumala, K., et al. (2022). Memorization Without Overfitting.` and `Carlini, N., et al. (2023). Quantifying Memorization Across Neural Language Models.`
+* **File & Function**: `src/blme/tasks/consistency/knowledge_capacity.py` -> `KnowledgeCapacityTask`
+* **Critical Info**: Requires paired datasets with "prompt", "exact", and "rephrased" keys. The generalization ratio (closer to 1.0 = better generalization) is the primary diagnostic metric.

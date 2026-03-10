@@ -102,6 +102,10 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `geometry_spectral` | `spectral_norm_*` | Weight matrix spectral norms. Very large norms can cause training instability. |
 | `geometry_mahalanobis` | `ood_separation_gap` | Mahalanobis distance gap between in-distribution and OOD data. Larger = better OOD detection. |
 | `geometry_information_fisher` | `empirical_fisher_trace` | Trace of empirical Fisher information. Higher = model is more sensitive to input perturbations. |
+| `geometry_correlation_dimension` | `correlation_dimension` | Fractal complexity of the representation manifold. Non-integer values indicate self-similar structure. |
+| `geometry_layer_change_ratio` | `lipschitz_mean` | Same as `geometry_lipschitz`. Mean relative change in representations between adjacent layers. |
+| `geometry_categories` | `mean_separation_ratio` | How well the model organically separates conceptual categories in representation space. |
+| `geometry_unembedding` | `mean_cosine_to_top_token` | Alignment between hidden states and the unembedding vectors of predicted tokens. |
 
 ---
 
@@ -117,6 +121,10 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `interpretability_probing` | `probe_accuracy` | 0–1 | Linear probing accuracy for syntactic features. Higher = more linearly decodable information. |
 | `interpretability_attribution` | `mean_attribution_entropy` | ≥0 | Entropy of component attribution scores. Higher = more distributed computation. |
 | `interpretability_attention_graph` | `graph_density` | 0–1 | Fraction of significant attention edges. Dense graphs = less structured attention patterns. |
+| `interpretability_superposition` | `mean_polysemanticity_index` | 0–1 | Bimodality coefficient of neuron activations. Higher = more superposition (neurons encode multiple features). |
+| `interpretability_waa` | `mean_waa_alignment` | 0–1 | Alignment between weight SVD vectors and activation PCA vectors. Higher = more efficient capacity utilization. |
+| `interpretability_attention_polysemanticity` | `mean_attention_svd_entropy` | ≥0 | SVD entropy of attention head outputs. Higher = more polysemantic (superposed) attention heads. |
+| `interpretability_sae_features` | `mean_active_features_l0` | ≥0 | Mean number of active SAE features per token. Lower = sparser, more disentangled representations. |
 
 ---
 
@@ -139,8 +147,9 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `causality_tracing` | `avg_indirect_effect` | any | Mean causal effect of hidden states on output. Larger magnitude = stronger causal role. |
 | `causality_ablation` | `area_under_degradation_curve` | 0–1 | How much performance degrades when ablating neurons. **Lower AUC = more robust** (less reliance on individual neurons). |
 | `causality_attention_knockout` | `mean_kl_divergence` | ≥0 | KL divergence after knocking out attention heads. Higher = that head matters more. |
+| `causality_circuit_quality` | `circuit_quality_score` | 0–1 | Harmonic mean of circuit faithfulness and minimality. Higher = model computation is concentrated in a compact, faithful circuit. |
 
-**Guidance**: Compare `causality_ablation` across models — more robust models degrade gracefully. High `mean_kl_divergence` on knockout identifies critical attention heads.
+**Guidance**: Compare `causality_ablation` across models — more robust models degrade gracefully. High `mean_kl_divergence` on knockout identifies critical attention heads. A high `circuit_quality_score` means the model's behavior can be reproduced by a small subset of its layers.
 
 ---
 
@@ -152,6 +161,8 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `consistency_paraphrase` | `invariance_score` | 0–1 | How stable representation are across paraphrases. Higher = more semantically consistent. |
 | `consistency_logical` | `logical_violation_rate` | 0–1 | Fraction of cases where P(conclusion) > P(premise). **Lower = more logically consistent.** |
 | `consistency_contrastive` | `mean_rejection_ratio` | ≥0 | Ratio of P(factual) to P(contradictory). **Higher = better discriminates facts from fiction.** |
+| `consistency_contamination` | `contamination_score` | 0–1 | Min-k% probability ratio. **Closer to 1.0 = more likely memorized** (uniform token probabilities). |
+| `consistency_knowledge_capacity` | `generalization_ratio` | 0–1+ | Ratio of rephrased to exact completion log probs. **Closer to 1.0 = better generalization** vs memorization. |
 
 ---
 
@@ -171,6 +182,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 |------|-----------|-------|-------------------|
 | `repe_task_vectors` | `mean_cosine_similarity` | −1 to 1 | Alignment of contrastive task vectors across layers. Higher = more consistent concept encoding. |
 | `repe_concept_separability` | `max_auc` | 0–1 | Peak linear separability of concept pairs across layers. Higher = more linearly decodable concepts. |
+| `repe_steering_effectiveness` | `steering_success_rate` | 0–1 | Fraction of layers where steering vectors produce a measurable output shift (KL > threshold). Higher = model is more steerable. |
 
 ---
 

@@ -91,3 +91,11 @@ This module contains metrics that directly probe the internal properties, specia
 * **Citation/Paper**: `Cunningham, H., et al. (2023). Sparse Autoencoders Find Highly Interpretable Features in Language Models.` [ArXiv: 2309.08600]
 * **File & Function**: `src/blme/tasks/interpretability/sae_features.py` -> `SAEFeatureDimensionalityTask`
 * **Critical Info**: Strictly requires the external `sae-lens` library to map to established SAE dictionaries for the specific tested model.
+
+## 12. Superposition Index (Neuron Polysemanticity)
+* **What are we measuring**: The degree of superposition (polysemanticity) in model neurons — whether individual neurons encode multiple unrelated features.
+* **How are we measuring**: Analyzing the bimodality coefficient of per-neuron activation distributions within MLP layers. A bimodal activation distribution suggests a neuron encodes multiple features (fires strongly for distinct, unrelated inputs). Also measures neuron utilization rate — the fraction of neurons with non-trivial activation variance.
+* **Hypothesis**: In superposition, individual neurons compress multiple unrelated features into their activation range. High polysemanticity (bimodality coefficient > 0.555) indicates severe superposition, while low values indicate cleaner, monosemantic neurons.
+* **Citation/Paper**: `Elhage, N., et al. (2022). Toy Models of Superposition.` [ArXiv: 2209.10652] and `Templeton, A., et al. (2024). Scaling Monosemanticity.`
+* **File & Function**: `src/blme/tasks/interpretability/superposition.py` -> `SuperpositionIndexTask`
+* **Critical Info**: The bimodality coefficient (BC) uses skewness and kurtosis: BC = (skewness^2 + 1) / kurtosis. Values > 0.555 suggest bimodality. Higher mean_polysemanticity_index indicates more severe superposition across the model.

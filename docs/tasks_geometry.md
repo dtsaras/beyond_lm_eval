@@ -8,7 +8,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local degrees of freedom of the representation manifold around a specific point.
 * **How are we measuring**: Using Maximum Likelihood Estimation (MLE) on the nearest neighbor distances (typically k=10 or k=20) to compute the local non-integer dimensionality.
 * **Hypothesis**: Models with excessively high LID might suffer from the curse of dimensionality and overfitting, while very low LID implies over-compression.
-* **Citation/Paper**: `Amsaleg, L., et al. (2015). Estimating local intrinsic dimensionality.` [ACM KDD 2015, DOI: 10.1145/2783258.2783405] (Extended version: ArXiv: 2006.12880)
+* **Citation/Paper**: `Amsaleg, L., et al. (2015). Estimating local intrinsic dimensionality.` [ACM KDD 2015, DOI: 10.1145/2783258.2783405]
 * **File & Function**: `src/blme/tasks/geometry/lid.py` -> `LocalIntrinsicDimensionalityTask`
 * **Critical Info**: LID changes drastically from shallow layers to deep layers, often forming an "intrinsic dimension bottleneck."
 
@@ -56,7 +56,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The underlying fractal complexity and self-similarity of the generated language manifold.
 * **How are we measuring**: Using the Grassberger-Procaccia algorithm. Measures the fraction of points within a radius $r$ and computes the log-log scaling coefficient.
 * **Hypothesis**: Standard intrinsic dimensions incorrectly assume the text space is locally flat (Euclidean). Correlation dimension proves language lies on a highly complex fractal attractor.
-* **Citation/Paper**: `Du, X., & Tanaka-Ishii, K. (2024/2025). Correlation Dimension of Autoregressive Large Language Models.` [NeurIPS 2025 / ArXiv]
+* **Citation/Paper**: `Du, X., & Tanaka-Ishii, K. (2025). Correlation Dimension of Autoregressive Large Language Models.` [NeurIPS 2025]
 * **File & Function**: `src/blme/tasks/geometry/correlation_dimension.py` -> `CorrelationDimensionTask`
 * **Critical Info**: Requires larger sample sizes to compute pairwise distances effectively. Normal text generally exhibits a non-integer structural dimension around ~6-7.
 
@@ -155,3 +155,11 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **Citation/Paper**: `Facco, E., d'Errico, M., Rodriguez, A., & Laio, A. (2017). Estimating the intrinsic dimension of datasets by a minimal neighborhood information.` [Scientific Reports]
 * **File & Function**: `src/blme/tasks/geometry/intrinsic_dim.py` -> `IntrinsicDimensionTask`
 * **Critical Info**: Returns a single global scalar, contrasting with Local Intrinsic Dimensionality (LID) which assesses local point neighborhoods.
+
+## 20. Layer Change Ratio (geometry_layer_change_ratio)
+* **What are we measuring**: The relative magnitude of representation change between consecutive transformer layers.
+* **How are we measuring**: Computing `||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||` — the relative change in hidden state norms for each pair of adjacent layers, averaged across tokens.
+* **Hypothesis**: Models with uniform, moderate ratios across layers have smoother, more stable transformations. Spike patterns indicate layers where representations undergo dramatic restructuring.
+* **Citation/Paper**: Related to `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` [ICLR 2018] and `Virmaux, A. & Scaman, K. (2018). Lipschitz Regularity of Deep Neural Networks.`
+* **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LayerChangeRatioTask` (alias of `LipschitzContinuityTask`)
+* **Critical Info**: This is a more accurately named alias of `geometry_lipschitz`. The metric measures relative layer-wise change, not the true operator Lipschitz constant (which would require supremum over all input pairs).

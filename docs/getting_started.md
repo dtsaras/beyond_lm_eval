@@ -73,15 +73,15 @@ print(results["results"]["geometry_svd"]["effective_rank"])
 
 ## Module Overview
 
-BLME organizes 45 diagnostic tasks across 7 categories:
+BLME organizes 51 diagnostic tasks across 7 categories:
 
-- **[Geometry](tasks_geometry.md)** (19 tasks): Manifold structure — isotropy, intrinsic dimension, CKA, collapse, Lipschitz constants
-- **[Interpretability](tasks_interpretability.md)** (11 tasks): Internal mechanisms — logit lens, attention entropy, probing, sparsity
+- **[Geometry](tasks_geometry.md)** (20 tasks): Manifold structure — isotropy, intrinsic dimension, CKA, collapse, Lipschitz constants, layer change ratio
+- **[Interpretability](tasks_interpretability.md)** (12 tasks): Internal mechanisms — logit lens, attention entropy, probing, sparsity, superposition index
 - **[Topology](tasks_topology.md)** (3 tasks): Manifold shape — persistent homology, Betti curves, persistence entropy
-- **[Causality](tasks_causality.md)** (3 tasks): Information flow — causal tracing, ablation robustness, attention knockout
-- **[Consistency](tasks_consistency.md)** (4 tasks): Output reliability — calibration, paraphrase invariance, logical consistency
+- **[Causality](tasks_causality.md)** (4 tasks): Information flow — causal tracing, ablation robustness, attention knockout, circuit quality
+- **[Consistency](tasks_consistency.md)** (6 tasks): Output reliability — calibration, paraphrase invariance, logical consistency, contamination detection, knowledge capacity
 - **[Dynamics](tasks_dynamics.md)** (3 tasks): Temporal behavior — stability, interpolation, chain-of-embedding drift
-- **[Representation Engineering](tasks_representation_engineering.md)** (2 tasks): Concept encoding — task vectors, concept separability
+- **[Representation Engineering](tasks_representation_engineering.md)** (3 tasks): Concept encoding — task vectors, concept separability, steering effectiveness
 
 ## Shared Cache
 

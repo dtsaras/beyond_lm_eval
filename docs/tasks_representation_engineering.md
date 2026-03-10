@@ -19,3 +19,11 @@ This module contains metrics that analyze and manipulate high-level concepts usi
 * **Citation/Paper**: `Zou, A., et al. (2023). Representation Engineering: A Top-Down Approach to AI Transparency.` [ArXiv: 2310.01405]
 * **File & Function**: `src/blme/tasks/representation_engineering.py` -> `ConceptSeparabilityTask`
 * **Critical Info**: Acts as the "Reading" phase of Representation Engineering, validating that the underlying structure supports Top-Down control interventions.
+
+## 3. Steering Effectiveness
+* **What are we measuring**: Whether representation steering (injecting task vectors into the residual stream) meaningfully alters the model's output distribution.
+* **How are we measuring**: Extracting task vectors from contrastive text pairs (text_pos/text_neg), then injecting them at each layer during forward passes on neutral prompts. The output distribution shift is measured via KL divergence between the steered and unsteered outputs.
+* **Hypothesis**: If representation engineering works, injecting a task vector at the right layer should cause a measurable shift in the output distribution. The steering success rate measures what fraction of layers produce a significant effect.
+* **Citation/Paper**: `Zou, A., et al. (2023). Representation Engineering: A Top-Down Approach to AI Transparency.` [ArXiv: 2310.01405]
+* **File & Function**: `src/blme/tasks/representation_engineering.py` -> `SteeringEffectivenessTask`
+* **Critical Info**: The `steering_alpha` parameter controls injection magnitude (default: 1.0). The `steering_threshold` parameter (default: 0.01 KL divergence) determines the minimum effect for a layer to count as "successful." Best steering layer identifies where intervention is most effective.
