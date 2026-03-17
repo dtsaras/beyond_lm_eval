@@ -12,7 +12,7 @@ _register_all_tasks()
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (20) ---
+    # --- Geometry (19) ---
     "geometry_svd",
     "geometry_categories",
     "geometry_cka",
@@ -22,7 +22,6 @@ EXPECTED_TASKS = [
     "geometry_hubness",
     "geometry_information_fisher",
     "geometry_intrinsic_dim",
-    "geometry_layer_change_ratio",
     "geometry_lid",
     "geometry_lipschitz",
     "geometry_mahalanobis",

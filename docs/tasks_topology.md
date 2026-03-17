@@ -24,6 +24,6 @@ This module contains metrics that utilize Computational Topological Data Analysi
 * **What are we measuring**: How the shape of language data transforms mathematically from syntax (shallow layers) to abstraction (deep layers).
 * **How are we measuring**: Tracking the evolution of the Betti-0 curve area across sequential transformer layers.
 * **Hypothesis**: Input layers contain highly disconnected, messy word tokens (high Betti curves). Deep conceptual layers merge these into unified structural representations, causing Betti curves to collapse and simplify.
-* **Citation/Paper**: Derived from general topological data analysis applied layer-wise. (No single conference paper; related to persistent homology layer analysis literature).
+* **Citation/Paper**: `Naitzat, G., Zhitnikov, A., & Lim, L. (2020). Topology of Deep Neural Networks.` [ICLR 2020]
 * **File & Function**: `src/blme/tasks/topology/betti_curve.py` -> `BettiCurveSimplificationTask`
 * **Critical Info**: The task compares the area-under-the-curve (AUC) of the Betti plot across layers. A negative delta indicates topological simplification as information flows through the network.

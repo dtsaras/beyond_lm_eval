@@ -6,6 +6,8 @@ isolation, and produces structured results with metadata.
 """
 
 import logging
+import signal
+import time
 from typing import List, Optional, Dict, Any, Union
 
 import torch
@@ -16,6 +18,11 @@ from .models.wrapper import load_model_and_tokenizer
 from .results import build_results_envelope, print_results_table, save_results
 
 logger = logging.getLogger("blme")
+
+
+def _timeout_handler(signum, frame):
+    raise TimeoutError("Task execution timed out")
+
 
 # ---------------------------------------------------------------------------
 # Task registration — import all task modules so @register_task fires
@@ -46,6 +53,9 @@ def evaluate(
     task_configs: Optional[Dict[str, dict]] = None,
     batch_size: Union[int, str, None] = None,
     device: Optional[str] = None,
+    cache_num_samples: Optional[int] = None,
+    seed: int = 42,
+    task_timeout: int = 600,
 ) -> dict:
     """
     Unified evaluation entry point.
@@ -59,10 +69,17 @@ def evaluate(
         task_configs: Per-task config dicts {task_name: {config_key: value}}.
         batch_size: Batch size (passed to lm_eval benchmark tasks).
         device: Target device (e.g., 'cuda', 'cpu').
+        cache_num_samples: Optional global sample count for shared cache.
+        seed: Random seed for reproducibility (default: 42).
+        task_timeout: Per-task timeout in seconds (default: 600). Unix only.
 
     Returns:
         Full results envelope dict.
     """
+    # Set global seed for reproducibility
+    from .utils import set_global_seed
+    set_global_seed(seed)
+
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -97,45 +114,99 @@ def evaluate(
     # 4. Run diagnostic tasks with error isolation + shared cache
     task_results: Dict[str, Any] = {}
     task_errors: Dict[str, str] = {}
+    task_timings: Dict[str, float] = {}
 
     if diagnostic_tasks:
-        # Determine what the tasks need so We can populate the cache once
-        _HIDDEN_TASK_PREFIXES = (
-            "geometry_", "topology_", "repe_",
-            "interpretability_probing", "interpretability_superposition",
-            "consistency_calibration", "consistency_paraphrase",
-            "consistency_contamination", "consistency_knowledge_capacity",
-            "causality_circuit_quality",
-        )
-        _ATTN_TASK_PREFIXES = (
-            "interpretability_attention", "interpretability_induction",
-            "geometry_positional_decay",
-        )
-        need_hidden = any(t.startswith(_HIDDEN_TASK_PREFIXES) for t in diagnostic_tasks)
-        need_attn = any(t.startswith(_ATTN_TASK_PREFIXES) for t in diagnostic_tasks)
+        # Resolve configs once (defaults + user overrides)
+        from .tasks.config_loader import resolve_task_config
+        resolved_task_configs: Dict[str, dict] = {}
+        for task_name in diagnostic_tasks:
+            user_override = task_configs.get(task_name, {}) if task_configs else {}
+            resolved_task_configs[task_name] = resolve_task_config(task_name, user_override)
 
-        # Create shared cache
-        from .cache import ModelOutputCache
-        cache = ModelOutputCache(model, tokenizer, dataset=None, num_samples=100)
-        if need_hidden or need_attn:
-            cache.populate(need_hidden=need_hidden, need_attentions=need_attn)
+        # Shared cache: only tasks known to consume cached hidden states or
+        # logits are listed here so we avoid the memory cost of caching when
+        # no requesting task is in the run.
+        cache = None
+        cache_hidden_tasks = {
+            "geometry_svd",
+            "geometry_lid",
+            "geometry_lipschitz",
+            "geometry_collapse",
+            "geometry_mutual_info",
+            "geometry_intrinsic_dim",
+            "geometry_consistency",
+            "geometry_rsa",
+            "geometry_matrix_entropy",
+            "geometry_cka",
+        }
+        cache_logits_tasks = {
+            "geometry_perplexity",
+            "consistency_calibration",
+        }
+        cache_candidates = set(cache_hidden_tasks) | set(cache_logits_tasks)
+
+        cache_tasks = []
+        for task_name, cfg in resolved_task_configs.items():
+            if not cfg.get("use_cache", True):
+                continue
+            if task_name not in cache_candidates:
+                continue
+            if task_name == "geometry_intrinsic_dim" and not cfg.get("layerwise", False):
+                continue
+            cache_tasks.append(task_name)
+
+        if cache_tasks:
+            if cache_num_samples is None:
+                sample_counts = [
+                    resolved_task_configs[t].get("num_samples")
+                    for t in cache_tasks
+                    if resolved_task_configs[t].get("num_samples") is not None
+                ]
+                cache_num_samples = max(sample_counts) if sample_counts else 100
+
+            if cache_num_samples and cache_num_samples > 0:
+                need_hidden = any(t in cache_hidden_tasks for t in cache_tasks)
+                need_attn = False
+
+                from .cache import ModelOutputCache
+                cache = ModelOutputCache(model, tokenizer, dataset=None, num_samples=cache_num_samples)
+                cache.populate(need_hidden=need_hidden, need_attentions=need_attn)
+
+        if not hasattr(signal, "SIGALRM"):
+            logger.warning("signal.SIGALRM not available (non-Unix). Per-task timeouts disabled.")
 
         logger.info(f"Running {len(diagnostic_tasks)} diagnostic tasks...")
         for task_name in tqdm(diagnostic_tasks, desc="BLME tasks", unit="task"):
             task_cls = get_task(task_name)
+            t_config = resolved_task_configs[task_name]
+            timeout_sec = t_config.get("timeout", task_timeout)
 
-            # Merge defaults.yaml + user overrides
-            from .tasks.config_loader import resolve_task_config
-            user_override = task_configs.get(task_name, {}) if task_configs else {}
-            t_config = resolve_task_config(task_name, user_override)
-
+            t_start = time.perf_counter()
             try:
+                if hasattr(signal, "SIGALRM"):
+                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(timeout_sec)
+
                 task = task_cls(config=t_config)
                 result = task.evaluate(model, tokenizer, dataset=None, cache=cache)
                 task_results[task_name] = result
+            except TimeoutError:
+                logger.error(f"Task '{task_name}' timed out after {timeout_sec}s")
+                task_errors[task_name] = f"Timeout after {timeout_sec}s"
+            except torch.cuda.OutOfMemoryError:
+                logger.error(f"Task '{task_name}' ran out of GPU memory")
+                torch.cuda.empty_cache()
+                task_errors[task_name] = "CUDA out of memory"
             except Exception as e:
                 logger.error(f"Task '{task_name}' failed: {e}")
                 task_errors[task_name] = str(e)
+            finally:
+                if hasattr(signal, "SIGALRM"):
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+                elapsed = time.perf_counter() - t_start
+                task_timings[task_name] = round(elapsed, 2)
 
     # 5. Run lm_eval benchmark tasks (optional)
     if lm_eval_tasks:
@@ -161,11 +232,13 @@ def evaluate(
         tasks_requested=tasks,
         task_results=task_results,
         task_errors=task_errors,
+        task_timings=task_timings,
         device=device,
+        seed=seed,
     )
 
     # 7. Print summary table
-    print_results_table(task_results, task_errors)
+    print_results_table(task_results, task_errors, task_timings=task_timings)
 
     # 8. Save to disk
     if output_dir:

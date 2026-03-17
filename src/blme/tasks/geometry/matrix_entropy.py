@@ -32,6 +32,7 @@ class MatrixEntropyTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Matrix Entropy (Information Bottleneck) Analysis...")
         num_samples = self.config.get("num_samples", 10)
+        use_cache = self.config.get("use_cache", True)
         
         if dataset is None:
              dataset = [{"text": "Deep neural networks enforce an information bottleneck over layers."}] * num_samples
@@ -41,8 +42,8 @@ class MatrixEntropyTask(DiagnosticTask):
              return {"error": "Need at least 1 sample."}
 
         # Cache-first path: use cached all-layer hidden states
-        if cache is not None and cache.is_populated:
-            all_layers = cache.get_hidden_states(layer_idx="all")
+        if cache is not None and cache.is_populated and use_cache:
+            all_layers = cache.get_hidden_states(layer_idx="all", num_samples=num_samples)
             if all_layers:
                 n_layers = len(all_layers)
                 # Reconstruct per-layer mean from cached flat tensors

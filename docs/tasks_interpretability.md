@@ -56,7 +56,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The model's confidence or uncertainty in its next-token prediction over the vocabulary distribution.
 * **How are we measuring**: The Shannon entropy of the Softmax output probabilities.
 * **Hypothesis**: High prediction entropy implies the model is genuinely guessing or hallucinating over flat distributions, whereas low prediction entropy indicates hard memorization or high structural constraint.
-* **Citation/Paper**: Typical uncertainty metric.
+* **Citation/Paper**: `Holtzman, A., et al. (2020). The Curious Case of Neural Text Degeneration.` [ICLR 2020, ArXiv: 1904.09751]
 * **File & Function**: `src/blme/tasks/interpretability/prediction_entropy.py` -> `PredictionEntropyTask`
 * **Critical Info**: Correlates heavily with `perplexity`, but normalizes out the specific text likelihood, giving a pure measure of constraint width.
 

@@ -35,6 +35,7 @@ pip install -e ".[all]"
 pip install -e ".[topology]"   # ripser for persistent homology
 pip install -e ".[benchmarks]" # lm-eval integration
 pip install -e ".[probing]"    # scikit-learn for probing tasks
+pip install -e ".[data]"       # datasets for HF-backed task data
 ```
 
 ## Quick Start

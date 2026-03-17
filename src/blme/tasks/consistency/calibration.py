@@ -17,6 +17,7 @@ class CalibrationTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Calibration Analysis (ECE)...")
         num_samples = self.config.get("num_samples", 100)
+        use_cache = self.config.get("use_cache", True)
         
         if dataset is None:
              try:
@@ -28,8 +29,8 @@ class CalibrationTask(DiagnosticTask):
              except ImportError:
                  logger.info("Warning: `datasets` library not found. Falling back to default examples.")
                  dataset = [{"text": "The quick brown fox jumps over the lazy dog."}]
-        if cache is not None and cache.is_populated:
-            stats, _ = cache.get_prediction_stats()
+        if cache is not None and cache.is_populated and use_cache:
+            stats, _ = cache.get_prediction_stats(num_samples=num_samples)
         else:
             stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
         

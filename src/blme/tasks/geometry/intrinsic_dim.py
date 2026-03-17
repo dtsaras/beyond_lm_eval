@@ -25,12 +25,16 @@ class IntrinsicDimensionTask(DiagnosticTask):
             if dataset is None:
                 # Mock dataset if missing
                 dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
+            use_cache = self.config.get("use_cache", True)
                 
             # Collect states from all layers
             logger.info("  Collecting hidden states...")
             # Use 'all' to get dict of {layer_idx: tensor}
-            if cache is not None and cache.is_populated:
-                layer_activations = cache.get_hidden_states(layer_idx="all")
+            if cache is not None and cache.is_populated and use_cache:
+                layer_activations = cache.get_hidden_states(
+                    layer_idx="all",
+                    num_samples=self.config.get("num_samples", 100),
+                )
             else:
                 layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100), layer_idx="all")
             
@@ -111,4 +115,3 @@ class IntrinsicDimensionTask(DiagnosticTask):
             "intrinsic_dimension": float(intrinsic_dim),
             "sample_size": N
         }
-

@@ -24,6 +24,7 @@ dependencies = [
     "tqdm",
     "scipy",
     "pyyaml",
+    "datasets",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,10 @@ topology = [
 sae = [
     "sae-lens",
 ]
+data = [
+    # datasets is now a core dependency; kept for backwards compatibility
+    "datasets",
+]
 logging = [
     "wandb",
 ]
@@ -53,10 +58,14 @@ all = [
     "ripser",
     "sae-lens",
     "wandb",
+    "datasets",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/dtsaras/beyond_lm_eval"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project.scripts]
 blme = "blme.cli:main"

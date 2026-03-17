@@ -189,7 +189,21 @@ class TestModelOutputCache:
         stats, _ = cache.get_prediction_stats()
         assert "logits" in stats
         assert "labels" in stats
+        assert "hidden" in stats
         assert "token_counts" in stats
+
+    def test_hidden_state_sample_slicing(self):
+        model = _make_mock_model(n_layers=2, hidden_dim=8)
+        tokenizer = _make_mock_tokenizer()
+        dataset = [{"text": "sample one"}, {"text": "sample two"}]
+
+        cache = ModelOutputCache(model, tokenizer, dataset, num_samples=2)
+        cache.populate(need_hidden=True)
+
+        all_hidden = cache.get_hidden_states(layer_idx=-1)
+        sliced_hidden = cache.get_hidden_states(layer_idx=-1, num_samples=1)
+
+        assert all_hidden.shape[0] > sliced_hidden.shape[0]
 
     def test_string_dataset(self):
         """Cache should handle plain string datasets."""

@@ -50,10 +50,15 @@ def build_results_envelope(
     task_results: Dict[str, Any],
     task_errors: Dict[str, str],
     device: str,
+    task_timings: Optional[Dict[str, float]] = None,
+    seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Wrap raw per-task results into a structured envelope with metadata.
     """
+    timings = task_timings or {}
+    total_elapsed = round(sum(timings.values()), 2) if timings else None
+
     return {
         "blme_version": _get_blme_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -62,14 +67,17 @@ def build_results_envelope(
             "model_args": model_args,
             "device": device,
             "tasks_requested": tasks_requested,
+            "seed": seed,
         },
         "summary": {
             "total_tasks": len(tasks_requested),
             "completed_tasks": len(task_results),
             "failed_tasks": len(task_errors),
+            "total_elapsed": total_elapsed,
         },
         "results": task_results,
         "errors": task_errors if task_errors else None,
+        "task_timings": timings if timings else None,
     }
 
 
@@ -80,12 +88,21 @@ def build_results_envelope(
 def print_results_table(
     task_results: Dict[str, Any],
     task_errors: Dict[str, str],
+    task_timings: Optional[Dict[str, float]] = None,
 ) -> None:
     """Print a compact summary table to stdout."""
+    timings = task_timings or {}
+    has_timings = bool(timings)
+
     print()
-    print("=" * 72)
-    print(f"{'Task':<42} {'Status':<10} {'Key Metric'}")
-    print("-" * 72)
+    if has_timings:
+        print("=" * 82)
+        print(f"{'Task':<42} {'Status':<10} {'Time':>7}  {'Key Metric'}")
+        print("-" * 82)
+    else:
+        print("=" * 72)
+        print(f"{'Task':<42} {'Status':<10} {'Key Metric'}")
+        print("-" * 72)
 
     for task_name, result in sorted(task_results.items()):
         if "error" in result:
@@ -93,20 +110,32 @@ def print_results_table(
             metric = result["error"][:30]
         else:
             status = "✓ OK"
-            # Pick the first numeric metric as the summary value
             metric = _pick_summary_metric(result)
-        print(f"  {task_name:<40} {status:<10} {metric}")
+        time_str = f"{timings[task_name]:>6.1f}s" if task_name in timings else ""
+        if has_timings:
+            print(f"  {task_name:<40} {status:<10} {time_str:>7}  {metric}")
+        else:
+            print(f"  {task_name:<40} {status:<10} {metric}")
 
     for task_name, err in sorted(task_errors.items()):
-        print(f"  {task_name:<40} {'✗ FAIL':<10} {err[:30]}")
+        time_str = f"{timings[task_name]:>6.1f}s" if task_name in timings else ""
+        if has_timings:
+            print(f"  {task_name:<40} {'✗ FAIL':<10} {time_str:>7}  {err[:30]}")
+        else:
+            print(f"  {task_name:<40} {'✗ FAIL':<10} {err[:30]}")
 
     total = len(task_results) + len(task_errors)
     passed = sum(1 for r in task_results.values() if "error" not in r)
     warned = sum(1 for r in task_results.values() if "error" in r)
     failed = len(task_errors)
-    print("-" * 72)
-    print(f"  Total: {total}  |  ✓ Passed: {passed}  |  ⚠ Warned: {warned}  |  ✗ Failed: {failed}")
-    print("=" * 72)
+    sep_width = 82 if has_timings else 72
+    print("-" * sep_width)
+    summary = f"  Total: {total}  |  ✓ Passed: {passed}  |  ⚠ Warned: {warned}  |  ✗ Failed: {failed}"
+    if has_timings:
+        total_elapsed = sum(timings.values())
+        summary += f"  |  Total time: {total_elapsed:.1f}s"
+    print(summary)
+    print("=" * sep_width)
     print()
 
 

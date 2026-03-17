@@ -27,10 +27,11 @@ class RepresentationCollapseTask(DiagnosticTask):
             ]
 
         num_samples = self.config.get("num_samples", 100)
+        use_cache = self.config.get("use_cache", True)
 
         # Collect hidden states from all layers
-        if cache is not None and cache.is_populated:
-            layer_activations = cache.get_hidden_states(layer_idx="all")
+        if cache is not None and cache.is_populated and use_cache:
+            layer_activations = cache.get_hidden_states(layer_idx="all", num_samples=num_samples)
         else:
             layer_activations = collect_hidden_states(
             model, tokenizer, dataset, num_samples=num_samples, layer_idx="all"

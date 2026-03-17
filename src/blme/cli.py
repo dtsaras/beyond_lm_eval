@@ -65,6 +65,10 @@ Examples:
         help="Batch size (passed to lm_eval benchmark tasks)",
     )
     eval_parser.add_argument(
+        "--cache-samples", type=int, default=None,
+        help="Global sample count for shared cache (overrides per-task num_samples)",
+    )
+    eval_parser.add_argument(
         "--limit", type=float, default=None,
         help="Limit number of samples for lm_eval benchmark tasks",
     )
@@ -75,6 +79,14 @@ Examples:
     eval_parser.add_argument(
         "--output-format", type=str, choices=["json", "csv"], default="json",
         help="Output format (default: json)",
+    )
+    eval_parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+    eval_parser.add_argument(
+        "--task-timeout", type=int, default=600,
+        help="Per-task timeout in seconds (default: 600). Unix only.",
     )
     eval_parser.add_argument(
         "--verbosity", type=str, choices=["DEBUG", "INFO", "WARNING"], default="INFO",
@@ -190,6 +202,9 @@ def _cmd_evaluate(args):
         limit=args.limit,
         output_dir=args.output_dir,
         output_format=args.output_format,
+        cache_num_samples=args.cache_samples,
+        seed=args.seed,
+        task_timeout=args.task_timeout,
     )
 
 

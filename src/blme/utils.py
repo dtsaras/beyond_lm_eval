@@ -1,5 +1,8 @@
+"""Shared utilities for BLME."""
+
 import logging
 import sys
+
 
 def setup_logging():
     logging.basicConfig(
@@ -9,3 +12,17 @@ def setup_logging():
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     return logging.getLogger("blme")
+
+
+def set_global_seed(seed: int) -> None:
+    """Set random seeds for reproducibility across random, numpy, and torch."""
+    import random
+
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)

@@ -24,7 +24,7 @@ This module contains metrics that utilize causal interventions (ablations, traci
 * **What are we measuring**: The reliance of the model on specific token-to-token attention edges.
 * **How are we measuring**: Forcing specific cells in the attention matrix to zero (often the diagonal, or edges leading back to the subject token) and measuring the impact on the final output distribution. 
 * **Hypothesis**: LLMs often route information via very sparse, specific attention bridges. Knocking out the structural attention edge prevents information routing entirely.
-* **Citation/Paper**: General methodology related to attention head pruning and causal abstractions.
+* **Citation/Paper**: Related to attention head pruning and analysis: `Michel, P., Levy, O., & Neubig, G. (2019). Are Sixteen Heads Really Better than One?` and `Voita, E., et al. (2019). Analyzing Multi-Head Self-Attention: Specialized Heads Do the Heavy Lifting, the Rest Can Be Pruned.`
 * **File & Function**: `src/blme/tasks/causality/attention_knockout.py` -> `AttentionKnockoutTask`
 * **Critical Info**: Works via sophisticated PyTorch forward hooks that directly intercept and clone-modify the `attn_weights` tensor before it multiplies the Value matrix.
 

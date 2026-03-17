@@ -11,6 +11,7 @@ blme evaluate \
     --output-dir results/ \
     --output-format json \
     --device cuda \
+    --cache-samples 200 \
     --verbosity INFO
 ```
 
@@ -25,6 +26,7 @@ global:
   device: "cuda"
   output_dir: "results/"
   batch_size: 1
+  cache_num_samples: 200
 
 model:
   path: "meta-llama/Llama-2-7b-hf"
@@ -34,6 +36,7 @@ tasks:
   # Geometry
   geometry_svd:
     num_samples: 200
+    use_cache: true
   geometry_lid:
     k: 30
     num_samples: 100
@@ -52,6 +55,9 @@ tasks:
   causality_tracing:
     num_samples: 10
     noise_std: 0.1
+  consistency_calibration:
+    num_samples: 200
+    use_cache: false
 ```
 
 Run with:
@@ -63,6 +69,14 @@ blme evaluate --recipe my_recipe.yaml
 ## Default Task Configs
 
 Every task has sensible defaults defined in [`src/blme/tasks/configs/defaults.yaml`](../src/blme/tasks/configs/defaults.yaml). When you run a task without specifying parameters, these defaults are used automatically.
+
+## Cache Settings
+
+BLME can precompute a shared cache of hidden states:
+
+- `global.cache_num_samples`: global sample count for the shared cache (overrides per-task `num_samples` for cached tasks).
+- If omitted, BLME uses the maximum `num_samples` among cacheable tasks.
+- `use_cache`: per-task flag to opt out when a task needs its own dataset or sampling.
 
 ### Config Resolution Priority
 
@@ -94,7 +108,7 @@ The `--model-args` flag (or `model.args` in YAML) uses comma-separated `key=valu
 | `revision` | `main` | Model revision/branch |
 | `load_in_8bit` | `true` | 8-bit quantization (requires bitsandbytes) |
 | `load_in_4bit` | `true` | 4-bit quantization (requires bitsandbytes) |
-| `max_memory` | `0:20GiB;cpu:40GiB` | Per-device memory limits |
+| `max_memory` | `0:20GiB,cpu:40GiB` | Per-device memory limits |
 
 ## Output Formats
 

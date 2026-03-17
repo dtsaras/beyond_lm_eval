@@ -14,11 +14,14 @@ class ConsistencyTask(DiagnosticTask):
         logger.info("Running Geometric Consistency Analysis...")
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
-            
-        if cache is not None and cache.is_populated:
-            stats, embeddings = cache.get_prediction_stats()
+
+        num_samples = self.config.get("num_samples", 100)
+        use_cache = self.config.get("use_cache", True)
+
+        if cache is not None and cache.is_populated and use_cache:
+            stats, embeddings = cache.get_prediction_stats(num_samples=num_samples)
         else:
-            stats, embeddings = collect_prediction_stats(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+            stats, embeddings = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
         
         if embeddings is None:
             # Fallback to shared utility

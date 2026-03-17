@@ -10,6 +10,9 @@ pip install -e .
 
 # With all optional dependencies (topology, probing, SAE, etc.)
 pip install -e ".[all]"
+
+# Dataset-backed tasks (HF datasets)
+pip install -e ".[data]"
 ```
 
 ## CLI Quickstart
@@ -45,6 +48,9 @@ The `--model-args` flag uses a comma-separated `key=value` format:
 # All supported keys
 --model-args pretrained=...,dtype=...,device_map=...,trust_remote_code=true,attn_implementation=flash_attention_2,revision=main,load_in_8bit=true
 ```
+
+> [!NOTE]
+> Attention-based tasks require attention weights. If your model uses SDPA/flash attention, set `attn_implementation=eager` to expose weights.
 
 ### Output
 
@@ -91,6 +97,23 @@ When running multiple tasks, BLME automatically creates a shared cache that runs
 # Without cache: 14 separate forward passes
 # With cache (automatic): 1 forward pass → shared across all 14 tasks
 blme evaluate --model-args pretrained=gpt2 --task-group geometry
+```
+
+### Cache Control
+
+- By default, the cache sample count is the **maximum** `num_samples` among cacheable tasks.
+- Override with `--cache-samples` (CLI) or `global.cache_num_samples` (YAML).
+- If a task must use its own dataset or sampling, set `use_cache: false` in that task config.
+
+Example:
+
+```yaml
+global:
+  cache_num_samples: 200
+
+tasks:
+  consistency_calibration:
+    use_cache: false
 ```
 
 ## Adding New Tasks

@@ -13,10 +13,13 @@ class SVDIsotropyTask(DiagnosticTask):
         if dataset is None:
             dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
 
-        if cache is not None and cache.is_populated:
-            X = cache.get_hidden_states(layer_idx=-1)
+        num_samples = self.config.get("num_samples", 100)
+        use_cache = self.config.get("use_cache", True)
+
+        if cache is not None and cache.is_populated and use_cache:
+            X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples)
         else:
-            X = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100))
+            X = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples)
         X = X.float().numpy()
         # Filter NaN/Inf rows (can happen with fp16 models)
         finite_mask = np.all(np.isfinite(X), axis=1)

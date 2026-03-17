@@ -53,6 +53,7 @@ class ModelOutputCache:
         self._attentions: Optional[Dict[int, List[torch.Tensor]]] = None
         self._logits: Optional[List[torch.Tensor]] = None
         self._labels: Optional[List[torch.Tensor]] = None
+        self._sample_lengths: List[int] = []
 
         # Feature flags — set by populate() or by first get_* call
         self._need_hidden: bool = False
@@ -84,6 +85,7 @@ class ModelOutputCache:
     def get_hidden_states(
         self,
         layer_idx: Union[int, str] = "all",
+        num_samples: Optional[int] = None,
     ) -> Union[torch.Tensor, Dict[int, torch.Tensor]]:
         """
         Return cached hidden states.
@@ -92,6 +94,8 @@ class ModelOutputCache:
             layer_idx: ``"all"`` returns ``{layer: Tensor}``.
                        An int returns a single ``Tensor (N, D)``.
                        Negative indexing is supported (``-1`` = last layer).
+            num_samples: Optional cap on the number of samples to include.
+                         Uses cached sample lengths to slice tokens.
 
         Returns:
             Hidden states tensor(s).
@@ -104,34 +108,43 @@ class ModelOutputCache:
             return None
 
         if layer_idx == "all":
-            return self._hidden_states
+            return self._slice_hidden_states(self._hidden_states, num_samples)
 
         n_layers = len(self._hidden_states)
         actual = layer_idx if layer_idx >= 0 else n_layers + layer_idx
         actual = max(0, min(actual, n_layers - 1))
 
-        return self._hidden_states.get(actual, None)
+        return self._slice_hidden_states({actual: self._hidden_states.get(actual)}, num_samples).get(actual, None)
 
-    def get_attentions(self) -> Optional[Dict[int, List[torch.Tensor]]]:
+    def get_attentions(self, num_samples: Optional[int] = None) -> Optional[Dict[int, List[torch.Tensor]]]:
         """Return cached attention weights ``{layer: [batch_attn, ...]}``."""
         if not self._populated:
             self._need_attentions = True
             self.populate(need_attentions=True)
-        return self._attentions
+        if self._attentions is None or num_samples is None:
+            return self._attentions
+        if not self._attentions:
+            return self._attentions
+        max_samples = min(num_samples, len(next(iter(self._attentions.values()))))
+        return {li: attn_list[:max_samples] for li, attn_list in self._attentions.items()}
 
-    def get_logits(self) -> Optional[List[torch.Tensor]]:
+    def get_logits(self, num_samples: Optional[int] = None) -> Optional[List[torch.Tensor]]:
         """Return cached logits (always collected)."""
         if not self._populated:
             self.populate()
-        return self._logits
+        if self._logits is None or num_samples is None:
+            return self._logits
+        return self._logits[: min(num_samples, len(self._logits))]
 
-    def get_labels(self) -> Optional[List[torch.Tensor]]:
+    def get_labels(self, num_samples: Optional[int] = None) -> Optional[List[torch.Tensor]]:
         """Return cached label token IDs."""
         if not self._populated:
             self.populate()
-        return self._labels
+        if self._labels is None or num_samples is None:
+            return self._labels
+        return self._labels[: min(num_samples, len(self._labels))]
 
-    def get_prediction_stats(self):
+    def get_prediction_stats(self, num_samples: Optional[int] = None):
         """
         Return (stats, embeddings) matching the signature of
         ``collect_prediction_stats`` for backward-compatible tasks.
@@ -141,8 +154,8 @@ class ModelOutputCache:
             self.populate(need_hidden=True)
 
         # Build stats dict
-        logits = self.get_logits() or []
-        labels = self.get_labels() or []
+        logits = self.get_logits(num_samples=num_samples) or []
+        labels = self.get_labels(num_samples=num_samples) or []
 
         # Compute token_counts from labels
         vocab_size = self.model.config.vocab_size if hasattr(self.model, "config") else 50257
@@ -157,6 +170,13 @@ class ModelOutputCache:
             "labels": labels,
             "token_counts": token_counts,
         }
+
+        # Add last-layer hidden states if available (per-sample list)
+        if self._hidden_states:
+            last_layer = max(self._hidden_states.keys())
+            last_hidden = self._hidden_states.get(last_layer)
+            if last_hidden is not None:
+                stats["hidden"] = self._split_by_samples(last_hidden, num_samples)
 
         # Embeddings = (V, D) from embedding layer
         embeddings = None
@@ -174,6 +194,7 @@ class ModelOutputCache:
         self._attentions = None
         self._logits = None
         self._labels = None
+        self._sample_lengths = []
         self._populated = False
 
     @property
@@ -188,12 +209,7 @@ class ModelOutputCache:
         """Get a list of text samples from the dataset."""
         dataset = self.dataset
         if dataset is None:
-            # Fall back to a simple default dataset
-            dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog."},
-                {"text": "In machine learning, a neural network is a computational model."},
-                {"text": "Large language models have transformed natural language processing."},
-            ] * max(1, self.num_samples // 3)
+            dataset = _load_default_corpus(self.num_samples)
 
         samples = []
         for i, sample in enumerate(dataset):
@@ -233,11 +249,15 @@ class ModelOutputCache:
             f"(hidden={self._need_hidden}, attn={self._need_attentions})"
         )
 
+        self._sample_lengths = []
         with torch.no_grad():
             for text in tqdm(samples, desc="Caching model outputs", unit="sample"):
                 inputs = self.tokenizer(
                     text, return_tensors="pt", truncation=True, max_length=512,
                 ).to(device)
+                if "input_ids" in inputs:
+                    seq_len = inputs["input_ids"].shape[1]
+                    self._sample_lengths.append(int(seq_len))
 
                 outputs = self.model(**inputs, **forward_kwargs)
 
@@ -285,3 +305,69 @@ class ModelOutputCache:
             n_layers = len(self._hidden_states)
             n_tokens = self._hidden_states[0].shape[0] if 0 in self._hidden_states else 0
             logger.info(f"Cache populated: {n_layers} layers, {n_tokens} tokens cached")
+
+    def _slice_hidden_states(
+        self,
+        hidden_states: Optional[Dict[int, torch.Tensor]],
+        num_samples: Optional[int],
+    ) -> Dict[int, torch.Tensor]:
+        """Slice cached hidden states to the first num_samples (by token count)."""
+        if hidden_states is None:
+            return {}
+        if num_samples is None or not self._sample_lengths:
+            return hidden_states
+        max_samples = min(num_samples, len(self._sample_lengths))
+        token_limit = int(sum(self._sample_lengths[:max_samples]))
+        return {
+            li: tensor[:token_limit] for li, tensor in hidden_states.items() if tensor is not None
+        }
+
+    def _split_by_samples(
+        self,
+        tensor: torch.Tensor,
+        num_samples: Optional[int],
+    ) -> List[torch.Tensor]:
+        """Split a flat (N, D) tensor into per-sample chunks."""
+        if tensor is None or not self._sample_lengths:
+            return []
+        max_samples = min(num_samples, len(self._sample_lengths)) if num_samples is not None else len(self._sample_lengths)
+        lengths = self._sample_lengths[:max_samples]
+        chunks = []
+        start = 0
+        for length in lengths:
+            end = start + int(length)
+            chunks.append(tensor[start:end])
+            start = end
+        return chunks
+
+
+def _load_default_corpus(num_samples: int) -> list:
+    """
+    Load diverse text passages from WikiText-103 validation split.
+
+    Falls back to hardcoded sentences if WikiText loading fails.
+    """
+    try:
+        from datasets import load_dataset
+
+        ds = load_dataset(
+            "wikitext", "wikitext-103-raw-v1", split="validation", trust_remote_code=False,
+        )
+        passages = [
+            {"text": row["text"]}
+            for row in ds
+            if isinstance(row.get("text"), str) and len(row["text"]) >= 50
+        ]
+        if passages:
+            result = passages[:num_samples]
+            logger.info(f"Loaded {len(result)} passages from WikiText-103 validation")
+            return result
+        logger.warning("WikiText-103 returned no usable passages; using fallback corpus")
+    except Exception as e:
+        logger.warning(f"Could not load WikiText-103 ({e}); using fallback corpus")
+
+    return [
+        {"text": "The quick brown fox jumps over the lazy dog."},
+        {"text": "In machine learning, a neural network is a computational model."},
+        {"text": "Large language models have transformed natural language processing."},
+    ] * max(1, num_samples // 3)

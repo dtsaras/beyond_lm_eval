@@ -73,9 +73,6 @@ geometry_mahalanobis:
   num_samples: 50
   ood_strategy: scramble  # "scramble" or "random"
 
-geometry_layer_change_ratio:
-  num_samples: 20
-
 # ---- Topology Tasks ----
 topology_homology:
   num_samples: 20
@@ -172,6 +169,7 @@ consistency_logical:
 consistency_calibration:
   num_samples: 100
   n_bins: 10
+  use_cache: false
 
 consistency_paraphrase:
   num_samples: 5

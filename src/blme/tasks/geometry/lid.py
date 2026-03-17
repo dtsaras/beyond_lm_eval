@@ -10,7 +10,7 @@ References:
 - "Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality"
   (Ma et al., ICLR 2018)
 - "Local Intrinsic Dimensionality Estimation via Maximum Likelihood"
-  (Levina & Bickel, NIPS 2005 — MLE-based LID)
+  (Levina & Bickel, NeurIPS 2004 — MLE-based LID)
 """
 
 from ...tasks.base import DiagnosticTask
@@ -26,7 +26,7 @@ def _lid_mle(distances, k):
     """Maximum Likelihood Estimator for Local Intrinsic Dimensionality.
     
     Given sorted distances from a query to its k nearest neighbors,
-    estimates the local dimensionality using the MLE formula from Levina & Bickel (2005):
+    estimates the local dimensionality using the MLE formula from Levina & Bickel (2004):
         LID = -k / sum_{i=1}^{k} log(d_i / d_k)
     
     Args:
@@ -57,7 +57,7 @@ def _lid_mle(distances, k):
 class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     """
     Computes per-sample Local Intrinsic Dimensionality (LID) using
-    the Maximum Likelihood Estimator (Levina & Bickel, 2005).
+    the Maximum Likelihood Estimator (Levina & Bickel, 2004).
     
     Outputs the mean, std, min, and max LID across all samples for
     the specified layer(s).
@@ -69,10 +69,11 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
             
         k = self.config.get("k", 20)
         num_samples = self.config.get("num_samples", 50)
+        use_cache = self.config.get("use_cache", True)
         
         # Collect hidden states from the last layer
-        if cache is not None and cache.is_populated:
-            X = cache.get_hidden_states(layer_idx=-1)
+        if cache is not None and cache.is_populated and use_cache:
+            X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples)
         else:
             X = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples)
         X = X.float().numpy()

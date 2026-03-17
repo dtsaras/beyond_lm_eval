@@ -33,7 +33,10 @@ def run_from_yaml(config_path: str):
     device = global_config.get("device", None)
     batch_size = global_config.get("batch_size", None)
     limit = global_config.get("limit", None)
-    
+    cache_num_samples = global_config.get("cache_num_samples", None)
+    seed = global_config.get("seed", 42)
+    task_timeout = global_config.get("task_timeout", 600)
+
     # Run
     return evaluate(
         model_args=model_args,
@@ -43,6 +46,9 @@ def run_from_yaml(config_path: str):
         device=device,
         limit=limit,
         output_dir=output_dir,
+        cache_num_samples=cache_num_samples,
+        seed=seed,
+        task_timeout=task_timeout,
     )
 
 def main():

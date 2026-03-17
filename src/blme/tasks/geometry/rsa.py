@@ -48,10 +48,11 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             
         num_samples = self.config.get("num_samples", 20)
         max_tokens_per_layer = self.config.get("max_tokens", 200)
+        use_cache = self.config.get("use_cache", True)
         
         # Collect hidden states from ALL layers
-        if cache is not None and cache.is_populated:
-            all_layers = cache.get_hidden_states(layer_idx="all")
+        if cache is not None and cache.is_populated and use_cache:
+            all_layers = cache.get_hidden_states(layer_idx="all", num_samples=num_samples)
         else:
             all_layers = collect_hidden_states(model, tokenizer, dataset,
                                            num_samples=num_samples,

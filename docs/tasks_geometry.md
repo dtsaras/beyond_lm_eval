@@ -8,7 +8,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local degrees of freedom of the representation manifold around a specific point.
 * **How are we measuring**: Using Maximum Likelihood Estimation (MLE) on the nearest neighbor distances (typically k=10 or k=20) to compute the local non-integer dimensionality.
 * **Hypothesis**: Models with excessively high LID might suffer from the curse of dimensionality and overfitting, while very low LID implies over-compression.
-* **Citation/Paper**: `Amsaleg, L., et al. (2015). Estimating local intrinsic dimensionality.` [ACM KDD 2015, DOI: 10.1145/2783258.2783405]
+* **Citation/Paper**: `Levina, E. & Bickel, P. J. (2004). Maximum Likelihood Estimation of Intrinsic Dimension.` [NeurIPS 2004]. Secondary: `Ma, X., et al. (2018). Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality.` [ICLR 2018]
 * **File & Function**: `src/blme/tasks/geometry/lid.py` -> `LocalIntrinsicDimensionalityTask`
 * **Critical Info**: LID changes drastically from shallow layers to deep layers, often forming an "intrinsic dimension bottleneck."
 
@@ -16,7 +16,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The local smoothness and sensitivity of the model to small perturbations in the input space.
 * **How are we measuring**: Practically estimated by computing the ratio of the distance between output representations to the distance between input representations for closely neighbored points.
 * **Hypothesis**: High Lipschitz constants indicate an unstable, highly chaotic representation space vulnerable to adversarial perturbations. Low constants indicate smooth, stable generalization.
-* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ICML 2019, ArXiv: 1811.05381]
+* **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ICML 2019, ArXiv: 1811.05381]. Related estimation work: `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` and `Scaman, K. & Virmaux, A. (2018). Lipschitz regularity of deep neural networks.` [NeurIPS 2018, ArXiv: 1805.10965]
 * **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LipschitzContinuityTask`
 * **Critical Info**: Extremely hard to measure analytically; this task uses an empirical local approximation based on sampled neighbors.
 
@@ -56,7 +56,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The underlying fractal complexity and self-similarity of the generated language manifold.
 * **How are we measuring**: Using the Grassberger-Procaccia algorithm. Measures the fraction of points within a radius $r$ and computes the log-log scaling coefficient.
 * **Hypothesis**: Standard intrinsic dimensions incorrectly assume the text space is locally flat (Euclidean). Correlation dimension proves language lies on a highly complex fractal attractor.
-* **Citation/Paper**: `Du, X., & Tanaka-Ishii, K. (2025). Correlation Dimension of Autoregressive Large Language Models.` [NeurIPS 2025]
+* **Citation/Paper**: `Du, X., & Tanaka-Ishii, K. (2025). Correlation Dimension of Autoregressive Large Language Models.` [NeurIPS 2025, ArXiv: 2510.21258]
 * **File & Function**: `src/blme/tasks/geometry/correlation_dimension.py` -> `CorrelationDimensionTask`
 * **Critical Info**: Requires larger sample sizes to compute pairwise distances effectively. Normal text generally exhibits a non-integer structural dimension around ~6-7.
 
@@ -64,7 +64,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The structural integrity and geometric degradation of context windows.
 * **How are we measuring**: Computing the Spearman rank correlation between absolute positional discrete token distance and the attention magnitude allocated to those past tokens.
 * **Hypothesis**: To extrapolate well to long sequences, the attention matrix should exhibit a structurally sound, smooth geometric decay relative to distance. Breakdown (random correlations) indicates failure of the positional embeddings (e.g., RoPE).
-* **Citation/Paper**: Derived from general 2024 Long-Context Extrapolation literature [No specific conference paper].
+* **Citation/Paper**: `Su, J., et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding.` and long-context extrapolation methods like `Chen, Q., et al. (2023). Extending Context Window of Large Language Models via Position Interpolation.`
 * **File & Function**: `src/blme/tasks/geometry/positional_decay.py` -> `PositionalAttentionDecayTask`
 * **Critical Info**: Requires sequences longer than a few tokens to establish a valid distance/attention correlation pattern.
 
@@ -72,7 +72,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The isotropy (roundness) of the representation space.
 * **How are we measuring**: Decomposing the hidden state matrix with SVD and calculating the ratio of the top singular value to the sum of all singular values, or looking at the variance drop-off.
 * **Hypothesis**: Highly anisotropic spaces (e.g., dominating outlier dimensions) collapse semantics into a narrow cone, degrading similarity metrics. Isotropic spaces utilize capacity more uniformly.
-* **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [ArXiv: 1909.00512]
+* **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [EMNLP 2019, ArXiv: 1909.00512]
 * **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `SVDIsotropyTask`
 * **Critical Info**: Language models almost always suffer from an "anisotropy cone" unless explicitly regularized or normalized.
 
@@ -156,10 +156,3 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **File & Function**: `src/blme/tasks/geometry/intrinsic_dim.py` -> `IntrinsicDimensionTask`
 * **Critical Info**: Returns a single global scalar, contrasting with Local Intrinsic Dimensionality (LID) which assesses local point neighborhoods.
 
-## 20. Layer Change Ratio (geometry_layer_change_ratio)
-* **What are we measuring**: The relative magnitude of representation change between consecutive transformer layers.
-* **How are we measuring**: Computing `||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||` — the relative change in hidden state norms for each pair of adjacent layers, averaged across tokens.
-* **Hypothesis**: Models with uniform, moderate ratios across layers have smoother, more stable transformations. Spike patterns indicate layers where representations undergo dramatic restructuring.
-* **Citation/Paper**: Related to `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` [ICLR 2018] and `Scaman, K. & Virmaux, A. (2018). Lipschitz regularity of deep neural networks: analysis and efficient estimation.` [NeurIPS 2018, ArXiv: 1805.10965]
-* **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LayerChangeRatioTask` (alias of `LipschitzContinuityTask`)
-* **Critical Info**: This is a more accurately named alias of `geometry_lipschitz`. The metric measures relative layer-wise change, not the true operator Lipschitz constant (which would require supremum over all input pairs).
