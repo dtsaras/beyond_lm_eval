@@ -28,14 +28,14 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
 
 
 def test_consistency(mock_model, mock_tokenizer):
-    from blme.tasks.geometry.consistency import ConsistencyTask
+    from blme.tasks.geometry.consistency import PredictionAlignmentTask
 
-    task = ConsistencyTask(config={"num_samples": 5})
+    task = PredictionAlignmentTask(config={"num_samples": 5})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
-    assert "cosine_consistency_mean" in results
-    assert "cosine_consistency_std" in results
-    mean = results["cosine_consistency_mean"]
+    assert "prediction_alignment_mean" in results
+    assert "prediction_alignment_std" in results
+    mean = results["prediction_alignment_mean"]
     assert -1.0 <= mean <= 1.0
 
 
@@ -169,16 +169,16 @@ def test_correlation_dimension(mock_model, mock_tokenizer):
 
 
 def test_information_geometry(mock_model, mock_tokenizer):
-    """Fisher Information Matrix trace estimation."""
-    from blme.tasks.geometry.information_geometry import FisherInformationTraceTask
+    """Representation sensitivity (gradient norm w.r.t. hidden states)."""
+    from blme.tasks.geometry.information_geometry import RepresentationSensitivityTask
 
-    task = FisherInformationTraceTask(config={"num_samples": 3})
+    task = RepresentationSensitivityTask(config={"num_samples": 3})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "empirical_fisher_trace" in results
-        assert results["empirical_fisher_trace"] >= 0
+        assert "representation_sensitivity" in results
+        assert results["representation_sensitivity"] >= 0
 
 
 def test_lid(mock_model, mock_tokenizer):
@@ -209,15 +209,15 @@ def test_mahalanobis(mock_model, mock_tokenizer):
 
 
 def test_mutual_info(mock_model, mock_tokenizer):
-    """Mutual information estimation between layers via HSIC."""
-    from blme.tasks.geometry.mutual_info import MutualInformationTask
+    """HSIC dependence estimation between layers."""
+    from blme.tasks.geometry.mutual_info import HSICDependenceTask
 
-    task = MutualInformationTask(config={"num_samples": 3})
+    task = HSICDependenceTask(config={"num_samples": 3})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "avg_adjacent_mi" in results
+        assert "avg_adjacent_hsic" in results
 
 
 def test_perplexity_rare_freq(mock_model, mock_tokenizer):

@@ -69,19 +69,19 @@ def test_attention_graph(mock_model, mock_tokenizer):
 
 
 def test_attention_polysemanticity(mock_model, mock_tokenizer):
-    """SVD entropy of attention head outputs (superposition measure)."""
+    """SVD entropy (effective rank) of attention outputs."""
     from blme.tasks.interpretability.attention_polysemanticity import (
-        AttentionHeadPolysemanticityTask,
+        AttentionEffectiveRankTask,
     )
 
-    task = AttentionHeadPolysemanticityTask(config={"num_samples": 2})
+    task = AttentionEffectiveRankTask(config={"num_samples": 2})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
     # Architecture-specific module name matching — may return error
     if "error" not in results:
-        assert "mean_attention_svd_entropy" in results
-        assert results["mean_attention_svd_entropy"] >= 0
+        assert "mean_attention_effective_rank_entropy" in results
+        assert results["mean_attention_effective_rank_entropy"] >= 0
 
 
 def test_induction_heads(mock_model, mock_tokenizer):

@@ -1,22 +1,22 @@
 """
-Information Geometry (Empirical Fisher Trace) Task
+Representation Sensitivity Task
 ──────────────────────────────────────────────────────────────────────
-Evaluates the local curvature and sharpness of the learned representation space
-by computing the Trace of the Empirical Fisher Information Matrix (FIM).
+Evaluates how sensitive the model's output distribution is to perturbations
+in the final-layer hidden states, by computing ||grad_h log P(y|h)||^2
+averaged over tokens.
 
-In information geometry, the FIM acts as a Riemannian metric tensor on the
-statistical manifold of probability distributions. A high trace indicates 
-sharpness (high sensitivity to parameter/representation changes), while a low
-trace indicates a flatter, robust, and often better-generalizing manifold. 
+This measures the squared norm of the gradient of the log-likelihood with
+respect to the representation — a form of local sensitivity or Jacobian
+norm.  Higher values indicate the representation space is "sharp" (small
+changes in h cause large changes in the prediction), while lower values
+indicate a flatter, more robust manifold.
 
-Since computing the full FIM across all parameters is intractable, we compute
-the empirical Fisher trace with respect to the continuous hidden states at the
-final layer, before the unembedding projection.
+Since the LM head is linear (logits = W h + b), the gradient has a
+closed-form:  grad_h log P(y|h) = W_y - sum_k p(k) W_k,  which avoids
+per-token backward passes entirely.
 
 References:
 - "Information Geometry of Neural Networks" (Amari, 1998)
-- "Understanding Deep Learning Requires Rethinking Generalization" (Zhang et al., 2017)
-- 2024-2025 LLM Information Geometry literature.
 """
 
 import torch
@@ -24,147 +24,90 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import apply_lm_head
+from ..common import apply_lm_head, get_lm_head, get_embeddings
 import logging
 logger = logging.getLogger("blme")
 
 
-@register_task("geometry_information_fisher")
-class FisherInformationTraceTask(DiagnosticTask):
+@register_task("geometry_representation_sensitivity")
+class RepresentationSensitivityTask(DiagnosticTask):
     """
-    Computes the Trace of the Empirical Fisher Information Matrix (FIM)
-    with respect to the final layer representations.
-    
-    A lower trace generally correlates with flatter minima, better generalization,
-    and a robust topological manifold.
+    Computes ||grad_h log P(y|h)||^2 with respect to final-layer hidden
+    states using a closed-form derivation for the linear LM head.
+    Uses the true next token as the target rather than argmax.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Information Geometry (Fisher Trace) Analysis...")
+        logger.info("Running Representation Sensitivity Analysis...")
         num_samples = self.config.get("num_samples", 20)
-        
+
         if dataset is None:
              dataset = [
                  {"text": "Information geometry studies probability distributions as a Riemannian manifold."}
              ] * num_samples
-             
+
         samples = list(dataset)[:num_samples]
         if not samples:
              return {"error": "Need at least 1 sample."}
-             
+
         device = next(model.parameters()).device
-        
-        fisher_traces = []
-        
-        # We need gradients with respect to the hidden states
-        # so we cannot use torch.no_grad()
+
+        # Get the unembedding matrix W (vocab_size, hidden_dim)
+        head = get_lm_head(model)
+        if head is not None:
+            W = head.weight.detach().float()  # (V, D)
+        else:
+            W = get_embeddings(model)
+            if W is None:
+                return {"error": "Cannot access unembedding matrix."}
+            W = W.detach().float()
+
+        W = W.to(device)
+
+        sensitivity_values = []
+
         model.eval()
-        
-        for s in samples:
-            text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-            
-            # Forward pass to get hidden states
-            # We want to intercept the final hidden state before the LM head
-            out = model(**inputs, output_hidden_states=True)
-            
-            # The last hidden state
-            final_hidden = out.hidden_states[-1] # shape: (1, seq_len, hidden_dim)
-            
-            # We must detach, require grad, and pass through the LM head manually
-            # to compute gradients of the log probabilities w.r.t the hidden state.
-            h = final_hidden.detach().requires_grad_(True)
-            
-            # Project hidden states to logits using universal LM head access
-            try:
-                logits = apply_lm_head(model, h)
-            except RuntimeError:
-                # Architecture not supported by apply_lm_head; fall through to backward hook path
-                break
-                
-            # Efficient Empirical Fisher Trace computation:
-            # Empirical Fisher Matrix F = (1/N) * sum_i (\nabla log P_i)(\nabla log P_i)^T
-            # Trace(F) = (1/N) * sum_i ||\nabla log P_i||_2^2
-            
-            # We compute gradients w.r.t the representation `h`
-            # For each token t, P is the predicted probability of the *true* or *argmax* token
-            probs = torch.softmax(logits, dim=-1) # (1, seq_len, vocab_size)
-            log_probs = torch.log_softmax(logits, dim=-1)
-            
-            # Expected Fisher (sampling from model's own distribution) or Empirical Fisher (using argmax)
-            # Typically, Empirical Fisher Trace uses the argmax token to avoid sampling variance
-            preds = torch.argmax(logits, dim=-1) # (1, seq_len)
-            
-            trace_sum = 0.0
-            seq_len = preds.shape[1]
-            valid_tokens = 0
-            
-            for t in range(seq_len):
-                if h.grad is not None:
-                    h.grad.zero_()
-                    
-                target_log_prob = log_probs[0, t, preds[0, t]]
-                
-                # Backpropagate this single token's log probability
-                # retain_graph=True because we iterate over sequence
-                target_log_prob.backward(retain_graph=True)
-                
-                # The gradient w.r.t the specific token's hidden state
-                grad_h = h.grad[0, t, :] # (hidden_dim,)
-                
-                # Add squared L2 norm of the gradient
-                trace_sum += torch.sum(grad_h ** 2).item()
-                valid_tokens += 1
-                
-            if valid_tokens > 0:
-                fisher_traces.append(trace_sum / valid_tokens)
-                
-        # If the direct lm_head access failed (e.g. custom architecture), use a slower backward hook
-        if not fisher_traces:
+        with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-                
-                # Keep track of gradients of the last hidden layer
-                h_grad = []
-                def hook(module, grad_input, grad_output):
-                    h_grad.append(grad_output[0].detach())
-                    
-                # Register hook to the actual backbone's last layer
-                # (Highly architecture dependent, using a generic heuristic)
-                if hasattr(model.base_model, "hidden_dropout_prob"): # BERT/RoBERTa
-                    handle = getattr(model.base_model, 'encoder').layer[-1].register_backward_hook(hook)
-                else: 
-                     handle = model.base_model.register_backward_hook(hook) # Fallback, might not be exact last layer
-                     
-                out = model(**inputs)
-                logits = out.logits
-                log_probs = torch.log_softmax(logits, dim=-1)
-                preds = torch.argmax(logits, dim=-1)
-                
-                trace_sum = 0.0
-                seq_len = preds.shape[1]
-                
-                for t in range(seq_len):
-                     model.zero_grad()
-                     h_grad.clear()
-                     target_log_prob = log_probs[0, t, preds[0, t]]
-                     target_log_prob.backward(retain_graph=True)
-                     
-                     if h_grad:
-                          grad = h_grad[0][0, t, :]
-                          trace_sum += torch.sum(grad ** 2).item()
-                          
-                if seq_len > 0:
-                     fisher_traces.append(trace_sum / seq_len)
-                handle.remove()
-                
-        if not fisher_traces:
-             return {"error": "Could not compute Fisher Trace (architecture incompatibility)."}
-             
-        mean_trace = float(np.mean(fisher_traces))
-        
+                input_ids = inputs["input_ids"]
+
+                if input_ids.shape[1] < 2:
+                    continue
+
+                out = model(**inputs, output_hidden_states=True)
+
+                # Last hidden state: (1, seq_len, D)
+                final_hidden = out.hidden_states[-1][0].float()  # (T, D)
+
+                # True next tokens (shifted input_ids)
+                targets = input_ids[0, 1:]  # (T-1,)
+                h = final_hidden[:-1]       # (T-1, D) — hidden states predicting next token
+
+                # Compute logits and probabilities
+                logits = h @ W.T  # (T-1, V)
+                # Add bias if present
+                if head is not None and head.bias is not None:
+                    logits = logits + head.bias.detach().float()
+                probs = torch.softmax(logits, dim=-1)  # (T-1, V)
+
+                # Closed-form gradient: grad_h log P(y|h) = W_y - sum_k p(k) W_k
+                # W_y for each token: (T-1, D)
+                W_target = W[targets]  # (T-1, D)
+                # Expected W under model distribution: (T-1, D)
+                W_expected = probs @ W  # (T-1, V) @ (V, D) -> (T-1, D)
+
+                grad = W_target - W_expected  # (T-1, D)
+
+                # Squared L2 norm per token
+                grad_sq_norms = (grad ** 2).sum(dim=-1)  # (T-1,)
+                sensitivity_values.append(grad_sq_norms.mean().item())
+
+        if not sensitivity_values:
+             return {"error": "Could not compute representation sensitivity."}
+
         return {
-            "empirical_fisher_trace": mean_trace,
-            "fisher_trace_std": float(np.std(fisher_traces)),
-            "num_samples_analyzed": len(fisher_traces)
+            "representation_sensitivity": float(np.mean(sensitivity_values)),
+            "sensitivity_std": float(np.std(sensitivity_values)),
+            "num_samples_analyzed": len(sensitivity_values)
         }

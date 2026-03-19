@@ -16,7 +16,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Unembedding Diagnostics...")
-        n_sample = self.config.get("n_sample", 2000)
+        n_sample = self.config.get("num_samples", 2000)
         k = self.config.get("k", 20)
         categories_path = self.config.get("categories_path", None)
         

@@ -21,7 +21,7 @@ geometry_lid:
   k: 20
   num_samples: 50
 
-geometry_information_fisher:
+geometry_representation_sensitivity:
   num_samples: 20
 
 geometry_correlation_dimension:
@@ -49,7 +49,7 @@ geometry_cka:
   num_samples: 100
 
 geometry_unembedding:
-  n_sample: 2000
+  num_samples: 2000
   k: 20
   categories_path: null
 
@@ -57,11 +57,11 @@ geometry_intrinsic_dim:
   layerwise: false
   num_samples: 100
 
-geometry_mutual_info:
+geometry_hsic:
   num_samples: 100
-  max_mi_tokens: 2000
+  max_hsic_tokens: 2000
 
-geometry_consistency:
+geometry_prediction_alignment:
   num_samples: 100
 
 geometry_categories:
@@ -71,7 +71,7 @@ geometry_categories:
 
 geometry_mahalanobis:
   num_samples: 50
-  ood_strategy: scramble  # "scramble" or "random"
+  ood_strategy: shuffle  # "shuffle" or "random"
 
 # ---- Topology Tasks ----
 topology_homology:
@@ -125,7 +125,7 @@ interpretability_sparsity:
 interpretability_waa:
   num_samples: 5
 
-interpretability_attention_polysemanticity:
+interpretability_attention_effective_rank:
   num_samples: 3
 
 interpretability_probing:
@@ -146,7 +146,7 @@ interpretability_superposition:
 # ---- Dynamics Tasks ----
 dynamics_stability:
   k: 50
-  n_sample: 5000
+  num_samples: 5000
   reference_model_path: null
 
 dynamics_interpolation:
@@ -163,8 +163,7 @@ consistency_contrastive:
   num_samples: 3
 
 consistency_logical:
-  num_samples: 3
-  margin: 0.1
+  num_samples: 5
 
 consistency_calibration:
   num_samples: 100

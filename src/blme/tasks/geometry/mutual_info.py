@@ -8,17 +8,20 @@ import logging
 logger = logging.getLogger("blme")
 
 
-@register_task("geometry_mutual_info")
-class MutualInformationTask(DiagnosticTask):
+@register_task("geometry_hsic")
+class HSICDependenceTask(DiagnosticTask):
     """
-    Estimates Mutual Information between layer representations using
-    a kernel-based estimator (HSIC as a proxy for MI).
-    Ref: Shwartz-Ziv & Tishby, "Opening the Black Box of Deep Neural
-         Networks via Information", 2017. arXiv:1703.00810
+    Measures statistical dependence between layer representations using
+    normalized HSIC (Hilbert-Schmidt Independence Criterion) with a linear
+    kernel.  This is mathematically equivalent to Linear CKA (Centered
+    Kernel Alignment) from Kornblith et al., 2019.
+
+    Ref: Kornblith et al., "Similarity of Neural Network Representations
+         Revisited", ICML 2019. arXiv:1905.00414
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Mutual Information Analysis (HSIC proxy)...")
+        logger.info("Running HSIC Dependence Analysis...")
 
         if dataset is None:
             dataset = [
@@ -44,7 +47,7 @@ class MutualInformationTask(DiagnosticTask):
             return {"error": "Need at least 2 layers"}
 
         # Subsample tokens for speed — use SAME indices across all layers
-        max_tokens = self.config.get("max_mi_tokens", 2000)
+        max_tokens = self.config.get("max_hsic_tokens", 2000)
         n_tokens = layer_activations[layers[0]].shape[0]
         if n_tokens > max_tokens:
             shared_perm = torch.randperm(n_tokens)[:max_tokens]
@@ -79,33 +82,33 @@ class MutualInformationTask(DiagnosticTask):
             K = gram_matrices[idx]
             self_hsic[idx] = float(torch.sum(K * K))
 
-        # Adjacent layer MI proxy
-        adjacent_mi = []
+        # Adjacent layer HSIC
+        adjacent_hsic = []
         for i in range(n_layers - 1):
             K_i = gram_matrices[layers[i]]
             K_j = gram_matrices[layers[i + 1]]
 
             hsic_ij = float(torch.sum(K_i * K_j))
             norm = np.sqrt(self_hsic[layers[i]] * self_hsic[layers[i + 1]])
-            nmi = hsic_ij / (norm + 1e-12)
-            adjacent_mi.append(nmi)
+            nhsic = hsic_ij / (norm + 1e-12)
+            adjacent_hsic.append(nhsic)
 
-        # Input-to-layer MI (first layer vs all others)
-        input_mi = []
+        # Input-to-layer HSIC (first layer vs all others)
+        input_hsic = []
         K_input = gram_matrices[layers[0]]
         for i in range(n_layers):
             K_i = gram_matrices[layers[i]]
             hsic_val = float(torch.sum(K_input * K_i))
             norm = np.sqrt(self_hsic[layers[0]] * self_hsic[layers[i]])
-            nmi = hsic_val / (norm + 1e-12)
-            input_mi.append(nmi)
+            nhsic = hsic_val / (norm + 1e-12)
+            input_hsic.append(nhsic)
 
         return {
-            "adjacent_mi": adjacent_mi,
-            "avg_adjacent_mi": float(np.mean(adjacent_mi)),
-            "min_adjacent_mi": float(np.min(adjacent_mi)),
-            "input_to_layer_mi": input_mi,
-            "information_compression_ratio": float(input_mi[-1] / (input_mi[0] + 1e-12))
-            if input_mi
+            "adjacent_hsic": adjacent_hsic,
+            "avg_adjacent_hsic": float(np.mean(adjacent_hsic)),
+            "min_adjacent_hsic": float(np.min(adjacent_hsic)),
+            "input_to_layer_hsic": input_hsic,
+            "hsic_compression_ratio": float(input_hsic[-1] / (input_hsic[0] + 1e-12))
+            if input_hsic
             else 0.0,
         }

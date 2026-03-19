@@ -30,7 +30,8 @@ class ContaminationDetectionTask(DiagnosticTask):
 
     Computes per-token log probabilities and checks whether the bottom-k%
     tokens have unusually high probabilities, indicating memorized text.
-    Returns contamination_score, min_k_pct_prob, and mean_token_logprob.
+    Primary score is the raw min-k% mean log probability (higher = more
+    likely memorized).  Also reports a per-passage z-score.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Data Contamination Detection (Min-k%%)...")
@@ -53,6 +54,7 @@ class ContaminationDetectionTask(DiagnosticTask):
 
         all_min_k_probs = []
         all_mean_logprobs = []
+        all_std_logprobs = []
 
         with torch.no_grad():
             for s in samples:
@@ -82,9 +84,11 @@ class ContaminationDetectionTask(DiagnosticTask):
                 if len(token_lps) < 2:
                     continue
 
-                # Mean log prob
+                # Mean and std of all log probs for this passage
                 mean_lp = float(np.mean(token_lps))
+                std_lp = float(np.std(token_lps))
                 all_mean_logprobs.append(mean_lp)
+                all_std_logprobs.append(std_lp)
 
                 # Min-k%: take the bottom k% of token log probs
                 k_count = max(1, int(len(token_lps) * k_pct / 100))
@@ -96,21 +100,30 @@ class ContaminationDetectionTask(DiagnosticTask):
         if not all_min_k_probs:
             return {"error": "No valid samples processed."}
 
-        # Contamination score: higher min-k% prob = more likely memorized
-        # We negate and normalize so higher = more contamination
-        mean_min_k = float(np.mean(all_min_k_probs))
+        # Primary contamination score: raw min-k% mean log prob (Shi et al.)
+        # Higher (less negative) = more likely memorized
+        min_k_score = float(np.mean(all_min_k_probs))
         mean_logprob = float(np.mean(all_mean_logprobs))
 
-        # Contamination score: ratio of min-k mean to overall mean
-        # Closer to 1.0 = more uniform probs = more likely memorized
+        # Per-passage z-score: how unusual is the min-k% average relative to
+        # the full passage distribution
+        z_scores = []
+        for mk, mu, sd in zip(all_min_k_probs, all_mean_logprobs, all_std_logprobs):
+            if sd > 1e-8:
+                z_scores.append((mk - mu) / sd)
+            else:
+                z_scores.append(0.0)
+
+        # Legacy ratio metric (secondary)
         if mean_logprob != 0:
-            contamination_score = float(mean_min_k / mean_logprob)
+            contamination_ratio = float(min_k_score / mean_logprob)
         else:
-            contamination_score = 0.0
+            contamination_ratio = 0.0
 
         return {
-            "contamination_score": contamination_score,
-            "min_k_pct_prob": mean_min_k,
+            "min_k_score": min_k_score,
+            "contamination_z_score": float(np.mean(z_scores)),
+            "contamination_ratio": contamination_ratio,
             "mean_token_logprob": mean_logprob,
             "k_pct": k_pct,
             "num_samples_analyzed": len(all_min_k_probs),

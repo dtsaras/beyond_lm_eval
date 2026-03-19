@@ -35,7 +35,17 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
             return {"error": msg}
             
         device = next(model.parameters()).device
-        
+
+        # Check model compatibility — default SAE config is GPT2-specific
+        model_name = getattr(getattr(model, "config", None), "_name_or_path", "")
+        if model_name and "gpt2" not in model_name.lower():
+            if sae_release == "gpt2-small-res-jb":
+                return {
+                    "error": f"Default SAE config (release={sae_release}, id={sae_id}) "
+                             f"is specific to GPT2. Current model: {model_name}. "
+                             f"Provide model-appropriate sae_release and sae_id in task config."
+                }
+
         try:
             logger.info(f"  Attempting to load SAE: release={sae_release}, id={sae_id}")
             # Loading the SAE requires an internet connection on first run to download from HF

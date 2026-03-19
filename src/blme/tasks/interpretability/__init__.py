@@ -8,5 +8,5 @@ from .sparsity import ActivationSparsityTask
 from .sae_features import SAEFeatureDimensionalityTask
 from .attention_graph import AttentionGraphTopologyTask
 from .weight_activation_alignment import WeightActivationAlignmentTask
-from .attention_polysemanticity import AttentionHeadPolysemanticityTask
+from .attention_polysemanticity import AttentionEffectiveRankTask
 from .superposition import SuperpositionIndexTask

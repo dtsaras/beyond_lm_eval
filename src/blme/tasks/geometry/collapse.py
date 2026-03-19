@@ -34,8 +34,8 @@ class RepresentationCollapseTask(DiagnosticTask):
             layer_activations = cache.get_hidden_states(layer_idx="all", num_samples=num_samples)
         else:
             layer_activations = collect_hidden_states(
-            model, tokenizer, dataset, num_samples=num_samples, layer_idx="all"
-        )
+                model, tokenizer, dataset, num_samples=num_samples, layer_idx="all"
+            )
 
         layers = sorted(layer_activations.keys())
         erank_per_layer = []

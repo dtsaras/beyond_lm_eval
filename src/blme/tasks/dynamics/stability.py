@@ -20,7 +20,7 @@ class NeighborhoodStabilityTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neighborhood Stability Analysis...")
         k = self.config.get("k", 50)
-        n_sample = self.config.get("n_sample", 5000)
+        n_sample = self.config.get("num_samples", 5000)
         ref_path = self.config.get("reference_model_path", None)
         
         device = next(model.parameters()).device
