@@ -1,0 +1,1243 @@
+% !TEX program = pdflatex
+\documentclass[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+\usepackage{nicefrac}
+\usepackage{microtype}
+
+% Compact lists
+\setlist{nosep,leftmargin=*}
+
+\title{Beyond Benchmarks: Correlating Intrinsic Model Properties\\with Downstream Language Model Performance}
+
+\author{
+  % Authors omitted for preprint
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Benchmark leaderboards rank language models by \emph{what} they can do, yet reveal little about \emph{why} one model outperforms another.
+We present a systematic study that measures over 30 intrinsic geometric, topological, and mechanistic properties of 30+ language model checkpoints spanning five model families and correlates these with downstream benchmark performance.
+Our contributions are threefold.
+First, we introduce a taxonomy of intrinsic diagnostic metrics organized by data dependency and a normalization framework that enables fair comparison across models with different hidden dimensions, layer counts, and tokenizers.
+Second, we identify which intrinsic properties predict benchmark performance after controlling for parameter count, and characterize how instruction tuning alters representational geometry.
+Third, we propose the \emph{Effective Dimensionality Gradient} (EDG), a threshold-free, scale-independent scalar grounded in information bottleneck theory that captures the compression structure of a model's representations across layers.
+All metrics are implemented in BLME, an open-source diagnostic library with a shared forward-pass cache for computational efficiency.
+\end{abstract}
+
+% ============================================================
+\section{Introduction}
+\label{sec:introduction}
+% ============================================================
+
+Standard evaluation of large language models (LLMs) relies on benchmark suites such as MMLU~\citep{hendrycks2021measuring}, HellaSwag~\citep{zellers2019hellaswag}, and ARC~\citep{clark2018arc}.
+These benchmarks are invaluable for ranking models, but they treat the model as a black box: a score of 78\% on MMLU tells us nothing about the internal representational structure that produces that score.
+Two models with identical benchmark performance may have fundamentally different representational geometries, attention patterns, and compression profiles.
+
+A growing body of work has studied individual intrinsic properties of neural language models---anisotropy of contextual embeddings~\citep{ethayarajh2019contextual}, spectral exponents of weight matrices~\citep{martin2021implicit}, effective rank and representation collapse~\citep{jing2021understanding}, local intrinsic dimensionality~\citep{ma2018characterizing}---but these investigations have largely proceeded in isolation.
+No prior study has systematically measured a comprehensive suite of geometric, topological, and mechanistic properties across a controlled model zoo and correlated the resulting measurements with downstream performance.
+
+This paper bridges that gap. We make the following contributions:
+
+\begin{enumerate}
+  \item \textbf{Metric taxonomy and normalization framework.} We classify 30 intrinsic diagnostic metrics into three tiers based on data dependency (weight-only, data-dependent but stable, and data-dependent requiring controlled design) and six categories (geometry, topology, interpretability, causality, dynamics, and representation engineering). We develop a normalization framework that accounts for differences in model width, depth, and tokenization, enabling principled cross-model comparison.
+
+  \item \textbf{Systematic correlation study.} We evaluate all metrics across 30+ checkpoints spanning five model families (GPT-2, Pythia, Llama~3, Qwen~2.5, and others), performing univariate and partial correlations, multivariate feature selection, within-family scaling analysis, and base-versus-instruction-tuned comparisons.
+
+  \item \textbf{Effective Dimensionality Gradient (EDG).} We propose a novel metric that captures the information bottleneck compression structure of a model by measuring the monotonicity of effective rank reduction across layers. EDG is threshold-free, scale-independent, and computed from existing measurements with zero additional cost.
+
+  \item \textbf{Open-source toolkit.} All metrics are implemented in BLME (Beyond LM Eval), a diagnostic library with a shared forward-pass cache that amortizes the cost of hidden-state extraction across tasks.
+\end{enumerate}
+
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+% ============================================================
+
+\paragraph{Representation geometry.}
+\citet{ethayarajh2019contextual} showed that contextual word representations in BERT, ELMo, and GPT-2 become increasingly anisotropic in later layers, occupying a narrow cone in embedding space.
+\citet{cai2021isotropy} extended this analysis, demonstrating that isotropy---uniform utilization of the embedding space---correlates with downstream task performance.
+\citet{godey2024anisotropy} further investigated how anisotropy interacts with fine-tuning.
+These studies examine one or two geometric properties; we unify and extend them into a comprehensive suite spanning effective rank~\citep{roy2007effective}, local intrinsic dimensionality~\citep{levina2004maximum}, CKA~\citep{kornblith2019similarity}, RSA~\citep{kriegeskorte2008representational}, and others.
+
+\paragraph{Spectral properties and generalization.}
+\citet{martin2021implicit} introduced the theory of Heavy-Tailed Self-Regularization (HT-SR), showing that the power-law exponent $\alpha$ of weight matrix singular value distributions predicts generalization without requiring test data.
+\citet{bartlett2017spectrally} provided generalization bounds based on spectral norms and stable rank.
+Our study includes these spectral metrics as Tier~1 (weight-only) predictors and tests whether they retain predictive power after controlling for model size.
+
+\paragraph{Mechanistic interpretability.}
+The logit lens~\citep{nostalgebraist2020logitlens} decodes intermediate hidden states through the final language model head to trace how predictions form across layers.
+\citet{olsson2022context} identified induction heads as a key mechanistic component for in-context learning.
+\citet{meng2022locating} developed causal tracing via activation patching to localize factual knowledge.
+\citet{clark2019what} analyzed attention entropy and head specialization.
+We include these mechanistic metrics alongside geometric ones, enabling direct comparison of their predictive value.
+
+\paragraph{Information bottleneck.}
+\citet{tishby2015deep} proposed that deep networks optimize an information bottleneck, compressing input information while preserving task-relevant features.
+\citet{shwartz2017opening} provided empirical evidence for compression phases during training.
+Our EDG metric operationalizes this principle for pretrained transformers by measuring whether effective rank decreases monotonically with depth.
+
+\paragraph{Scaling laws.}
+\citet{kaplan2020scaling} established power-law relationships between model size, data, and compute with loss.
+\citet{wei2022emergent} documented emergent abilities that appear at scale.
+Our within-family scaling series (Pythia with 8 sizes, GPT-2 with 4) allow us to disentangle size effects from architectural and representational ones.
+
+% ============================================================
+\section{Methodology}
+\label{sec:methodology}
+% ============================================================
+
+Our methodology addresses three questions: \emph{what} do we measure, \emph{what} do we measure it on, and \emph{how} do we make measurements comparable across models of different sizes and architectures.
+
+% ------------------------------------------------------------
+\subsection{Metric Taxonomy}
+\label{sec:taxonomy}
+% ------------------------------------------------------------
+
+We organize 30 diagnostic metrics along two axes: \emph{category} (the aspect of the model being probed) and \emph{tier} (the degree of data dependency). \Cref{tab:taxonomy} presents the full classification.
+
+\begin{table}[t]
+\centering
+\caption{Taxonomy of intrinsic diagnostic metrics. Tier~1 metrics require only model weights. Tier~2 metrics require a forward pass on a standard corpus but measure stable model tendencies independent of specific input content. All metrics in this table serve as independent variables (predictors). See \Cref{app:metrics} for full definitions.}
+\label{tab:taxonomy}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Category} & \textbf{Tier} & \textbf{Metric} & \textbf{Key Quantities} \\
+\midrule
+\multirow{14}{*}{Geometry}
+  & 1 & Weight Spectral & $\bar\alpha$, stable rank \\
+  & 1 & Embedding Hubness & skewness, Gini \\
+  & 1 & Unembedding Structure & effective rank, tied \\
+  \cmidrule(l){2-4}
+  & 2 & SVD Isotropy & effective rank, participation ratio \\
+  & 2 & Local Intrinsic Dim.\ (LID) & $\overline{\text{LID}}$, $\sigma_{\text{LID}}$ \\
+  & 2 & Representation Collapse & collapse ratio, max drop \\
+  & 2 & Lipschitz Continuity & $\bar{L}$, $L_{\max}$ \\
+  & 2 & Matrix Entropy & $\bar{H}_{\text{vN}}$ \\
+  & 2 & Intrinsic Dimension & Two-NN estimate \\
+  & 2 & Correlation Dimension & $D_2$ (Grassberger--Procaccia) \\
+  & 2 & RSA & $\bar\rho_{\text{adj}}$, $\rho_{\text{early-late}}$ \\
+  & 2 & CKA & $\overline{\text{CKA}}_{\text{adj}}$ \\
+  & 2 & HSIC & compression ratio \\
+  & 2 & Positional Decay & $\bar\rho_{\text{pos}}$ \\
+\midrule
+\multirow{3}{*}{Topology}
+  & 2 & Persistent Homology & $\bar{p}_{H_0}$, $\bar{p}_{H_1}$, loops \\
+  & 2 & Betti Curves & simplification ratio \\
+  & 2 & Persistence Entropy & PE$_{H_0}$, PE$_{H_1}$ \\
+\midrule
+\multirow{7}{*}{Interpretability}
+  & 2 & Logit Lens & per-layer accuracy, entropy \\
+  & 2 & Attention Entropy & $\bar{H}_{\text{attn}}$ \\
+  & 2 & Induction Heads & max/mean induction score \\
+  & 2 & Activation Sparsity & $\bar{L}_0$, kurtosis \\
+  & 2 & Superposition Index & polysemanticity, utilization \\
+  & 2 & Weight--Activation Alignment & $\overline{\text{WAA}}$ \\
+  & 2 & Attention Graph & sink PageRank, edge Gini \\
+\midrule
+\multirow{2}{*}{Causality}
+  & 2 & Causal Tracing & max AIE, causal entropy \\
+  & 2 & Attention Knockout & impact Gini \\
+\midrule
+\multirow{2}{*}{Rep.\ Eng.}
+  & 2 & Task Vectors & layer norms, cosine sim \\
+  & 2 & Concept Separability & layer AUC, max AUC \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Tier~1 (weight-only)} metrics require no input data. They analyze the spectral properties of weight matrices, the hub structure of the embedding matrix, and the effective rank of the unembedding (language model head) matrix. These serve as a natural baseline: if weight-only metrics already predict performance, hidden-state analysis may be unnecessary for some applications.
+
+\textbf{Tier~2 (data-dependent, stable)} metrics require a forward pass through a fixed evaluation corpus (\Cref{sec:corpus}). They measure properties of hidden-state geometry, attention patterns, and mechanistic structure. While computed on specific inputs, they capture stable model tendencies rather than input-specific phenomena---analogous to measuring a building's resonant frequency by striking it with a standard hammer.
+
+We further classify metrics by the \emph{aspect} of the model they probe:
+
+\begin{itemize}
+  \item \textbf{Geometry} (14 metrics): Spectral decompositions of weight matrices (Tier~1) and hidden-state covariance matrices (Tier~2), measuring capacity utilization, isotropy, intrinsic dimensionality, and inter-layer similarity.
+  \item \textbf{Topology} (3 metrics): Persistent homology of hidden-state point clouds via Vietoris--Rips complexes, capturing the topological complexity of representation manifolds.
+  \item \textbf{Interpretability} (7 metrics): Functional organization of the model including prediction convergence (logit lens), attention structure, activation sparsity, and mechanistic circuit detection.
+  \item \textbf{Causality} (2 metrics): Interventional measurements via activation patching (causal tracing) and head ablation, quantifying the localization and distribution of causal effects.
+  \item \textbf{Representation Engineering} (2 metrics): Task vector geometry and linear concept separability across layers, measuring how cleanly the model encodes high-level concepts.
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{Model Zoo}
+\label{sec:models}
+% ------------------------------------------------------------
+
+We select approximately 30 checkpoints organized to support three types of analysis (\Cref{tab:models}).
+
+\begin{table}[t]
+\centering
+\caption{Model zoo organized by experimental purpose. All models use publicly available weights.}
+\label{tab:models}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Purpose} & \textbf{Models} & \textbf{Count} \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Within-family\\scaling}} & GPT-2: 124M, 355M, 774M, 1.5B & 4 \\
+  & Pythia (deduped): 70M, 160M, 410M, 1B, 1.4B, 2.8B, 6.9B, 12B & 8 \\
+  & Llama~3.x: 1B, 3B, 8B & 3 \\
+  & Qwen~2.5: 0.5B, 1.5B, 3B, 7B & 4 \\
+\midrule
+\shortstack[l]{Cross-family\\(1--3B)} & GPT-2~XL, Pythia-1.4B, OLMo-1B, Llama-3.2-1B, & \multirow{2}{*}{8} \\
+  & Qwen-2.5-1.5B, Gemma-2B, TinyLlama-1.1B, Phi-2 & \\
+\midrule
+\shortstack[l]{Base vs.\\instruct} & Llama-3.2-1B, Qwen-2.5-1.5B, Qwen-2.5-7B & 3 pairs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Within-family scaling series} hold architecture and training data constant while varying model size, allowing us to isolate the effect of scale on intrinsic properties.
+The Pythia suite~\citep{biderman2023pythia} is particularly valuable: eight sizes trained on identical data with identical hyperparameters (modulo those that scale with size).
+
+\textbf{Cross-family comparison} at approximately matched parameter count (1--3B) holds size roughly constant while varying architecture, training data, and training recipe.
+This reveals which intrinsic properties differ across model families independently of scale.
+
+\textbf{Base versus instruction-tuned pairs} isolate the effect of alignment training on representational structure.
+
+% ------------------------------------------------------------
+\subsection{Evaluation Corpus}
+\label{sec:corpus}
+% ------------------------------------------------------------
+
+All Tier~2 metrics are computed on a standardized evaluation corpus derived from the WikiText-103 validation set~\citep{merity2017pointer}.
+
+\textbf{Construction.}
+We select the first 500 passages containing at least 64 tokens, truncate each to 128 tokens using each model's own tokenizer, and discard passages that fall below 32 tokens after tokenization.
+This yields approximately 400--500 passages and 50K--60K tokens per model.
+WikiText-103 is deterministic, publicly available, and absent from standard benchmark contamination lists.
+
+\textbf{Sample counts} vary by computational cost: weight-only metrics require no corpus; hidden-state metrics use 200 samples; topology metrics (with $O(n^3)$ persistent homology) use 50 samples; causal tracing uses 10--50 samples.
+
+% ------------------------------------------------------------
+\subsection{Normalization for Cross-Model Comparability}
+\label{sec:normalization}
+% ------------------------------------------------------------
+
+Comparing intrinsic metrics across models with different hidden dimensions ($d_{\text{model}} \in [512, 4096]$), layer counts ($L \in [6, 32]$), and tokenizers requires systematic normalization. We address three challenges.
+
+\subsubsection{Dimension-Dependent Metrics}
+\label{sec:norm-dim}
+
+Raw values of dimension-sensitive metrics are not comparable across models. An effective rank of 200 indicates high utilization in a 768-dimensional model ($26\%$) but low utilization in a 4096-dimensional model ($5\%$).
+We normalize each such metric by the model's hidden dimension:
+\begin{equation}
+  \hat{m} = \frac{m}{d_{\text{model}}}
+  \label{eq:dim-norm}
+\end{equation}
+yielding a utilization ratio in $[0, 1]$.
+\Cref{tab:normalization} in the appendix lists the normalization applied to each metric.
+Metrics that are already ratios or dimensionless (e.g., collapse ratio, Lipschitz constant, CKA) require no dimension normalization.
+
+\subsubsection{Layer-Dependent Metrics}
+\label{sec:norm-layer}
+
+Many metrics produce a per-layer profile $\{v_0, v_1, \ldots, v_{L-1}\}$ whose length varies with the model.
+Directly comparing a 12-element profile (GPT-2 small) with a 32-element profile (Llama-3-8B) is ill-defined.
+We apply a two-step procedure:
+
+\begin{enumerate}
+  \item \textbf{Depth normalization.} Assign each layer a normalized depth $z_l = l / (L-1) \in [0, 1]$ and linearly interpolate the profile to 20 evenly spaced depths $z^* \in \{0.0, 0.05, \ldots, 1.0\}$.
+  \item \textbf{Summary statistics.} Extract a fixed-length feature vector from the interpolated profile:
+\end{enumerate}
+
+\begin{equation}
+  \mathbf{f} = \bigl[\, v(0.25),\; v(0.5),\; v(0.75),\; \beta_1,\; \beta_2,\; z_{\min},\; z_{\max} \,\bigr]
+  \label{eq:layer-features}
+\end{equation}
+
+\noindent where $v(z)$ denotes the interpolated value at normalized depth $z$; $\beta_1$ and $\beta_2$ are the slope and curvature (linear and quadratic coefficients) of a least-squares fit to the profile; and $z_{\min}$, $z_{\max}$ are the normalized depths of the minimum and maximum values.
+This converts any variable-length layer profile into a 7-dimensional feature vector.
+
+\subsubsection{Tokenizer Differences}
+\label{sec:norm-tok}
+
+The same text produces different token counts across tokenizers.
+Per-token statistics (e.g., mean attention entropy per token) are normalized by each model's own token count for the evaluation corpus.
+Cross-layer metrics---such as CKA between layers or the Lipschitz ratio---are internally consistent within a model and require no tokenizer correction.
+
+% ============================================================
+\section{The Effective Dimensionality Gradient}
+\label{sec:edg}
+% ============================================================
+
+% ------------------------------------------------------------
+\subsection{Motivation}
+\label{sec:edg-motivation}
+% ------------------------------------------------------------
+
+The information bottleneck principle~\citep{tishby2015deep,shwartz2017opening} posits that effective representations compress input entropy while preserving task-relevant information.
+In a transformer language model, this suggests that the effective dimensionality of hidden representations should decrease with depth: early layers encode rich, high-dimensional input features, while later layers compress these into the lower-dimensional subspace relevant for next-token prediction.
+We hypothesize that models exhibiting smooth, monotonic compression generalize better than those with erratic or non-monotonic dimensionality profiles.
+
+% ------------------------------------------------------------
+\subsection{Definition}
+\label{sec:edg-definition}
+% ------------------------------------------------------------
+
+Let a model have $L$ transformer layers. At layer $l$, we compute the effective rank of the hidden-state covariance matrix via the exponential of the Shannon entropy of the normalized singular values~\citep{roy2007effective}:
+\begin{equation}
+  \text{erank}(l) = \exp\!\Bigl(-\sum_{i} \hat\sigma_i^{(l)} \log \hat\sigma_i^{(l)}\Bigr), \qquad \hat\sigma_i^{(l)} = \frac{\sigma_i^{(l)}}{\sum_j \sigma_j^{(l)}}
+  \label{eq:erank}
+\end{equation}
+where $\sigma_i^{(l)}$ are the singular values of the mean-centered hidden-state matrix $X^{(l)} \in \mathbb{R}^{n \times d_{\text{model}}}$ at layer $l$.
+We normalize by the model width to obtain a dimensionless utilization ratio:
+\begin{equation}
+  r(l) = \frac{\text{erank}(l)}{d_{\text{model}}}
+  \label{eq:erank-ratio}
+\end{equation}
+The Effective Dimensionality Gradient is the Spearman rank correlation between layer index and effective rank ratio:
+\begin{equation}
+  \text{EDG} = \rho_S\!\bigl(\{1, 2, \ldots, L\},\; \{r(1), r(2), \ldots, r(L)\}\bigr) \in [-1, 1]
+  \label{eq:edg}
+\end{equation}
+
+% ------------------------------------------------------------
+\subsection{Interpretation and Properties}
+\label{sec:edg-properties}
+% ------------------------------------------------------------
+
+\begin{itemize}
+  \item $\text{EDG} \approx -1$: smooth monotonic compression across layers, consistent with a strong information bottleneck.
+  \item $\text{EDG} \approx 0$: no systematic trend in dimensionality, suggesting an absence of progressive compression.
+  \item $\text{EDG} > 0$: dimensionality expansion with depth, which would be unexpected under standard information bottleneck theory.
+\end{itemize}
+
+\noindent EDG has several desirable properties:
+
+\begin{enumerate}
+  \item \textbf{Threshold-free.} Unlike composite metrics that require choosing cutoffs for ``significant'' rank changes, EDG uses Spearman rank correlation with no arbitrary thresholds.
+  \item \textbf{Scale-independent.} The rank-based formulation makes EDG naturally comparable across models with different $d_{\text{model}}$, since the normalization in \Cref{eq:erank-ratio} converts effective rank to a utilization ratio.
+  \item \textbf{Zero marginal cost.} EDG is computed from the effective rank profile already produced by the representation collapse metric (\texttt{geometry\_collapse}). No additional forward passes are required.
+  \item \textbf{Theoretically grounded.} The metric directly operationalizes the information bottleneck prediction for pretrained transformers.
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{Extended Compression Profile}
+\label{sec:edg-extended}
+% ------------------------------------------------------------
+
+Beyond the global EDG, we extract phase-specific features that capture where compression occurs within the network:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Feature} & \textbf{Definition} & \textbf{Captures} \\
+\midrule
+$\text{EDG}_{\text{early}}$ & Spearman over layers $1$ to $\lfloor L/3 \rfloor$ & Early compression phase \\
+$\text{EDG}_{\text{late}}$ & Spearman over layers $\lfloor 2L/3 \rfloor$ to $L$ & Late compression phase \\
+$r_{\text{first}}$ & $r(1)$ & Initial capacity utilization \\
+$r_{\text{last}}$ & $r(L)$ & Surviving capacity at output \\
+Smoothness & $1 - \text{std}(\Delta r) / \text{mean}(|\Delta r|)$ & Regularity of compression \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent These features allow us to test whether compression timing (early vs.\ late) or smoothness matters beyond the overall trend.
+
+% ============================================================
+\section{Experimental Design}
+\label{sec:experiments}
+% ============================================================
+
+We describe the planned statistical analyses. Results will be reported in a subsequent version.
+
+% ------------------------------------------------------------
+\subsection{Benchmark Performance (Dependent Variables)}
+\label{sec:benchmarks}
+% ------------------------------------------------------------
+
+We evaluate each model on six standard benchmarks via the Language Model Evaluation Harness~\citep{eval-harness}: HellaSwag~\citep{zellers2019hellaswag}, PIQA~\citep{bisk2020piqa}, ARC-Easy and ARC-Challenge~\citep{clark2018arc}, WinoGrande~\citep{sakaguchi2021winogrande}, and MMLU (5-shot)~\citep{hendrycks2021measuring}.
+
+Our primary dependent variable is a \textbf{composite benchmark score}: the mean of min-max normalized accuracies across all six benchmarks.
+Secondary dependent variables include individual benchmark scores, perplexity on the evaluation corpus, and Expected Calibration Error (ECE).
+
+% ------------------------------------------------------------
+\subsection{Univariate Correlations}
+\label{sec:univariate}
+% ------------------------------------------------------------
+
+We compute Spearman rank correlations between each intrinsic metric and each benchmark score across all models.
+With approximately 30 metrics and 7 dependent variables, this yields $\sim\!200$ tests.
+We apply Benjamini--Hochberg false discovery rate (FDR) correction at $q = 0.05$.
+Results will be presented as a heatmap with significant correlations marked.
+
+% ------------------------------------------------------------
+\subsection{Partial Correlations Controlling for Model Size}
+\label{sec:partial}
+% ------------------------------------------------------------
+
+Many intrinsic metrics correlate with model size, which itself strongly predicts benchmark performance.
+To identify metrics with predictive value \emph{beyond} scale, we compute partial Spearman correlations:
+\begin{equation}
+  \rho_S(\text{metric}, \text{benchmark} \mid \log N_{\text{params}})
+\end{equation}
+where we partial out the log of total parameter count.
+Metrics that retain significant partial correlations are candidates for capturing qualitative aspects of model quality independent of quantity.
+
+% ------------------------------------------------------------
+\subsection{Multivariate Prediction}
+\label{sec:multivariate}
+% ------------------------------------------------------------
+
+We train Ridge regression models (with cross-validated regularization) to predict the composite benchmark score from all intrinsic features.
+LASSO regression is used for feature selection, identifying the minimal subset of metrics that best predicts performance.
+We report $R^2$ and compare against a naive baseline using $\log N_{\text{params}}$ as the sole predictor.
+The key question is: how much variance in benchmark performance can intrinsic metrics explain beyond what model size alone accounts for?
+
+% ------------------------------------------------------------
+\subsection{Within-Family Analysis}
+\label{sec:within-family}
+% ------------------------------------------------------------
+
+We repeat the univariate and multivariate analyses within the Pythia family ($n=8$) and GPT-2 family ($n=4$) separately.
+Within-family analysis controls for architecture and training data, revealing whether the same metrics that predict across families also predict within a family.
+With small sample sizes, these results are exploratory: the minimum detectable Spearman correlation at $\alpha = 0.05$ with power $0.8$ is $r \approx 0.71$ for $n = 8$.
+
+% ------------------------------------------------------------
+\subsection{Base vs.\ Instruction-Tuned}
+\label{sec:instruct}
+% ------------------------------------------------------------
+
+For each base--instruct pair (3--5 pairs), we compute the signed difference in each intrinsic metric.
+We apply paired Wilcoxon signed-rank tests to identify metrics that systematically shift with instruction tuning.
+This addresses: which representational properties are altered by alignment training, and which are invariant to it?
+
+% ------------------------------------------------------------
+\subsection{Unsupervised Clustering}
+\label{sec:clustering}
+% ------------------------------------------------------------
+
+We perform PCA on the (models $\times$ features) matrix to visualize the intrinsic property landscape.
+Hierarchical clustering (Ward linkage) on the standardized feature matrix tests whether models cluster by family, size tier, or training paradigm when grouped solely by their intrinsic properties.
+
+% ------------------------------------------------------------
+\subsection{EDG Evaluation}
+\label{sec:edg-eval}
+% ------------------------------------------------------------
+
+We evaluate EDG's predictive power through:
+(1) Spearman correlation with the composite score;
+(2) partial correlation controlling for $\log N_{\text{params}}$;
+(3) comparison of $R^2$ against every other individual metric;
+(4) within-family analysis in the Pythia series;
+(5) paired comparison in base--instruct pairs.
+
+% ------------------------------------------------------------
+\subsection{Statistical Power}
+\label{sec:power}
+% ------------------------------------------------------------
+
+With $n \approx 30$ models, the minimum detectable Spearman correlation at $\alpha = 0.05$ with power $0.8$ is $r \approx 0.45$, corresponding to medium-to-large effects.
+We can reliably detect metrics that explain $\gtrsim\!20\%$ of variance.
+Within-family results (Pythia $n=8$, GPT-2 $n=4$) have limited power and are reported as exploratory.
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+% ============================================================
+
+% ------------------------------------------------------------
+\subsection{Expected Findings}
+% ------------------------------------------------------------
+
+Based on prior work, we anticipate several patterns.
+The spectral exponent $\alpha$ should correlate with benchmark performance, consistent with the Heavy-Tailed Self-Regularization theory~\citep{martin2021implicit}.
+Instruction tuning is expected to increase attention entropy (broader, less specialized attention patterns) and decrease activation sparsity.
+EDG should be negative for well-performing models, with magnitude increasing with scale, reflecting deeper compression in larger models.
+
+Partial correlations will reveal which of these effects survive after controlling for model size.
+We expect that some geometric metrics (effective rank utilization, LID) capture aspects of representation quality that size alone does not predict---for instance, two models of similar size but different training recipes may differ substantially in their compression profiles.
+
+% ------------------------------------------------------------
+\subsection{Limitations}
+% ------------------------------------------------------------
+
+Several limitations deserve emphasis.
+First, \textbf{correlation does not imply causation}: observing that a metric correlates with performance does not establish that the measured property causes better performance.
+Experimental interventions during training would be needed to establish causal claims.
+Second, our sample size ($n \approx 30$) limits statistical power, particularly for within-family analyses.
+Third, all evaluations use English text from WikiText-103; intrinsic properties may behave differently for multilingual models evaluated on non-English benchmarks.
+Fourth, forward-pass metrics capture a snapshot of trained model behavior and do not reflect training dynamics.
+
+% ------------------------------------------------------------
+\subsection{Implications}
+% ------------------------------------------------------------
+
+If intrinsic metrics predict benchmark performance beyond model size, this has implications for multiple audiences.
+\textbf{Model developers} could monitor intrinsic properties during training as early indicators of model quality, potentially reducing reliance on expensive benchmark evaluations.
+\textbf{Benchmark designers} could complement behavioral evaluations with diagnostic metrics that reveal \emph{why} performance varies.
+\textbf{Theorists} would gain empirical grounding for connecting representation geometry to generalization.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have presented a systematic framework for correlating intrinsic model properties with downstream language model performance.
+Our metric taxonomy classifies 30 diagnostic measurements by data dependency and model aspect, while our normalization framework enables fair comparison across models with different architectures.
+The Effective Dimensionality Gradient provides a principled, threshold-free measure of information compression that operationalizes bottleneck theory for pretrained transformers.
+Together with the open-source BLME toolkit, this work provides the infrastructure for moving beyond benchmark scores toward understanding the representational foundations of language model capability.
+
+% ============================================================
+% Bibliography
+% ============================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% ============================================================
+\newpage
+\appendix
+
+% ============================================================
+\section{Complete Metric Definitions}
+\label{app:metrics}
+% ============================================================
+
+This appendix provides the full mathematical definition, hypothesis, and intuition for each of the 28 diagnostic metrics used as independent variables in our study. Metrics are organized by category. For each metric we state:
+\begin{itemize}
+  \item \textbf{Tier}: 1 (weight-only) or 2 (data-dependent, stable).
+  \item \textbf{Data requirement}: None, hidden states, attention maps, or interventional (activation patching).
+  \item \textbf{Definition}: Full mathematical specification matching our implementation.
+  \item \textbf{Hypothesis}: The expected relationship with downstream performance and why.
+  \item \textbf{Intuition}: A plain-language explanation of what the metric captures.
+  \item \textbf{Normalization}: How the metric is normalized for cross-model comparison.
+\end{itemize}
+
+% ============================================================
+\subsection{Geometry Metrics}
+\label{app:geometry}
+% ============================================================
+
+% --------------------------------------------------------
+\subsubsection{Weight Spectral Properties (\texttt{geometry\_spectral})}
+\label{app:spectral}
+
+\textbf{Tier:} 1 \quad \textbf{Data requirement:} None (weight matrices only)
+
+\textbf{Definition.}
+For each linear weight matrix $W \in \mathbb{R}^{m \times n}$ in the model, we compute the singular values $\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_{\min(m,n)}$ and derive two quantities:
+
+\emph{Stable rank} measures how spread out the spectrum is relative to the leading singular value:
+\begin{equation}
+  \text{srank}(W) = \frac{\|W\|_F^2}{\|W\|_2^2} = \frac{\sum_i \sigma_i^2}{\sigma_1^2}
+\end{equation}
+A stable rank of 1 indicates a rank-1 matrix; a stable rank equal to $\min(m,n)$ indicates a uniform spectrum.
+
+\emph{Power-law exponent} $\alpha$ characterizes the tail behavior of the empirical spectral distribution (ESD). We use the Hill estimator on the top 20\% of singular values:
+\begin{equation}
+  \hat\alpha = 1 + \frac{k}{\sum_{i=1}^{k} \ln(\sigma_i / \sigma_k)}
+\end{equation}
+where $k = \lfloor 0.2 \cdot \min(m,n) \rfloor$ and $\sigma_k$ is the $k$-th largest singular value.
+
+We report the mean $\bar\alpha$ and mean stable rank $\overline{\text{srank}}$ across all linear modules.
+
+\textbf{Hypothesis.}
+Lower $\alpha$ values (heavier tails) indicate stronger implicit self-regularization and should correlate with better generalization~\citep{martin2021implicit}. Higher stable rank indicates more distributed representations and may also correlate with performance.
+
+\textbf{Intuition.}
+The singular value spectrum of weight matrices reflects how the model distributes learned information across its representational capacity. A heavy-tailed spectrum (low $\alpha$) suggests that the model has developed a few very strong features alongside many weaker ones---a hallmark of well-regularized learning. Stable rank measures whether the matrix ``uses'' all its dimensions or concentrates information in a few.
+
+\textbf{Normalization.} Stable rank is already in $[1, \min(m,n)]$ and is comparable across models. $\alpha$ is dimensionless.
+
+% --------------------------------------------------------
+\subsubsection{Embedding Hubness (\texttt{geometry\_hubness})}
+\label{app:hubness}
+
+\textbf{Tier:} 1 \quad \textbf{Data requirement:} None (embedding matrix only)
+
+\textbf{Definition.}
+Given the input embedding matrix $E \in \mathbb{R}^{V \times d}$ where $V$ is vocabulary size, we compute the $k$-nearest-neighbor graph and count how many times each token appears as a neighbor of other tokens. Let $N_k(i)$ denote the number of times token $i$ appears in other tokens' $k$-NN lists. We compute:
+
+\emph{Hubness skewness}: the skewness of the distribution $\{N_k(i)\}_{i=1}^{V}$.
+
+\emph{Hubness Gini coefficient}: the Gini index of the same distribution, measuring inequality.
+
+\emph{Top-1\% mass}: the fraction of all neighbor slots occupied by the top 1\% most frequent hubs.
+
+\textbf{Hypothesis.}
+High hubness (positive skewness, high Gini) indicates that a few ``hub'' tokens dominate the nearest-neighbor structure, reflecting anisotropy in the embedding space. Models with lower hubness may have more uniform, isotropic embeddings, which prior work~\citep{cai2021isotropy} associates with better downstream performance.
+
+\textbf{Intuition.}
+In high-dimensional spaces, some points become ``universal neighbors''---hubs that are close to almost everything. This curse of dimensionality effect distorts nearest-neighbor structure and can impair the model's ability to discriminate between semantically distinct tokens.
+
+\textbf{Normalization.} Skewness and Gini are dimensionless. No normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{Unembedding Structure (\texttt{geometry\_unembedding})}
+\label{app:unembedding}
+
+\textbf{Tier:} 1 \quad \textbf{Data requirement:} None (LM head matrix only)
+
+\textbf{Definition.}
+We extract the language model head matrix $W_{\text{lm}} \in \mathbb{R}^{V \times d}$ (or its transpose, depending on architecture) and compute:
+
+\emph{Effective rank}: $\text{erank}(W_{\text{lm}}) = \exp\!\bigl(-\sum_i \hat\sigma_i \log \hat\sigma_i\bigr)$ where $\hat\sigma_i = \sigma_i / \sum_j \sigma_j$.
+
+\emph{Weight tying indicator}: whether the model ties input embeddings and output projections ($W_{\text{lm}} = E^T$).
+
+\textbf{Hypothesis.}
+The effective rank of the LM head constrains how many ``directions'' the model can use to distinguish tokens in its predictions. Higher effective rank indicates a richer prediction geometry. Weight tying constrains this rank to match the input embedding structure.
+
+\textbf{Intuition.}
+The LM head is the final linear map from hidden states to vocabulary logits. If its effective rank is low, the model is effectively making predictions in a low-dimensional subspace regardless of how rich its hidden representations are---a potential bottleneck.
+
+\textbf{Normalization.} Effective rank is divided by $d_{\text{model}}$ for cross-model comparison.
+
+% --------------------------------------------------------
+\subsubsection{SVD Isotropy (\texttt{geometry\_svd})}
+\label{app:svd}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (last layer)
+
+\textbf{Definition.}
+Given the mean-centered hidden-state matrix $X \in \mathbb{R}^{n \times d}$ at the final layer, we compute:
+
+\emph{Effective rank}: $\text{erank}(X) = \exp(H(\hat\sigma))$ as in \Cref{eq:erank}.
+
+\emph{Participation ratio}: $\text{PR}(X) = (\sum_i \sigma_i^2)^2 / \sum_i \sigma_i^4$, which counts the number of ``significantly contributing'' singular values.
+
+\emph{Average cosine similarity}: $\overline{\cos} = \frac{2}{n(n-1)} \sum_{i<j} \cos(x_i, x_j)$, measuring global anisotropy.
+
+\textbf{Hypothesis.}
+Higher effective rank and participation ratio indicate more isotropic representations that utilize more of the available dimensions. Lower average cosine similarity indicates less anisotropy. All three should correlate positively with performance~\citep{ethayarajh2019contextual,cai2021isotropy}.
+
+\textbf{Intuition.}
+If all hidden states point in roughly the same direction (high cosine similarity, low effective rank), the model wastes most of its representational capacity. Isotropic representations spread information across dimensions, enabling finer-grained discrimination.
+
+\textbf{Normalization.} Effective rank and participation ratio are divided by $d_{\text{model}}$. Cosine similarity is in $[-1, 1]$.
+
+% --------------------------------------------------------
+\subsubsection{Local Intrinsic Dimensionality (\texttt{geometry\_lid})}
+\label{app:lid}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (last layer)
+
+\textbf{Definition.}
+For each query point $x_q$ in the hidden-state matrix, we compute the distances to its $k$ nearest neighbors $d_1 \leq d_2 \leq \cdots \leq d_k$ and estimate the local intrinsic dimensionality using the maximum likelihood estimator~\citep{levina2004maximum}:
+\begin{equation}
+  \widehat{\text{LID}}(x_q) = -\frac{k}{\sum_{i=1}^{k} \ln(d_i / d_k)}
+\end{equation}
+We report the mean ($\overline{\text{LID}}$), standard deviation ($\sigma_{\text{LID}}$), median, minimum, and maximum across query points, with $k=20$ by default.
+
+\textbf{Hypothesis.}
+LID captures the local dimensionality of the representation manifold around each point. Lower LID relative to $d_{\text{model}}$ indicates that representations lie on a lower-dimensional manifold, suggesting efficient compression. Models that achieve lower LID while maintaining high performance have learned more compact representations.
+
+\textbf{Intuition.}
+While effective rank measures global dimensionality, LID measures dimensionality locally---how many directions you can move in from a given point before leaving the data manifold. High variance in LID suggests that different inputs are encoded with different levels of complexity.
+
+\textbf{Normalization.} Divided by $d_{\text{model}}$ to obtain a dimensionality utilization ratio.
+
+% --------------------------------------------------------
+\subsubsection{Representation Collapse (\texttt{geometry\_collapse})}
+\label{app:collapse}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+We compute the effective rank at every layer $l \in \{0, 1, \ldots, L-1\}$ using \Cref{eq:erank}, producing a profile $\{\text{erank}(l)\}_{l=0}^{L-1}$.
+
+\emph{Collapse ratio}: $\text{CR} = \text{erank}_{\min} / \text{erank}_{\max}$.
+
+\emph{Maximum drop}: $\Delta_{\max} = \min_l (\text{erank}(l+1) - \text{erank}(l))$, the largest single-layer decrease.
+
+\textbf{Hypothesis.}
+A low collapse ratio indicates severe dimensional collapse---the model compresses representations to a small fraction of the available dimensions at some layer. Moderate, smooth collapse (quantified by EDG, \Cref{sec:edg}) should correlate with performance, while extreme or abrupt collapse should not~\citep{jing2021understanding}.
+
+\textbf{Intuition.}
+As information flows through layers, some dimensions become inactive. Tracking effective rank across layers reveals whether this compression is gradual (healthy bottleneck) or sudden (potential information loss). The erank profile is also the foundation for our EDG metric.
+
+\textbf{Normalization.} Collapse ratio is in $[0, 1]$. Individual erank values are divided by $d_{\text{model}}$.
+
+% --------------------------------------------------------
+\subsubsection{Lipschitz Continuity (\texttt{geometry\_lipschitz})}
+\label{app:lipschitz}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+For each consecutive pair of layers, we compute the relative change in hidden states averaged over all tokens:
+\begin{equation}
+  L_l = \frac{1}{n}\sum_{i=1}^{n} \frac{\|h_i^{(l+1)} - h_i^{(l)}\|}{\|h_i^{(l)}\| + \epsilon}
+\end{equation}
+We report the mean ($\bar{L}$) and maximum ($L_{\max}$) across all layer transitions, and the contraction rate (fraction of transitions where $L_l < 1$).
+
+\textbf{Hypothesis.}
+The Lipschitz constant controls how much small perturbations in one layer are amplified in the next. Moderate, uniform Lipschitz constants suggest stable information flow. Very high values indicate potential instability; very low values suggest redundant layers.
+
+\textbf{Intuition.}
+Each transformer layer applies a residual update $h^{(l+1)} = h^{(l)} + f_l(h^{(l)})$. The Lipschitz ratio measures the magnitude of $f_l$ relative to $h^{(l)}$---whether each layer is making large or small modifications to the representation.
+
+\textbf{Normalization.} Already a ratio; no normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{Matrix Entropy (\texttt{geometry\_matrix\_entropy})}
+\label{app:matrix-entropy}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+At each layer $l$, we compute the covariance matrix $\Sigma^{(l)} = \frac{1}{n-1}(X^{(l)})^T X^{(l)}$ of the mean-centered hidden states, obtain its eigenvalues $\lambda_1 \geq \cdots \geq \lambda_d$, normalize them to form a probability distribution $p_i = \lambda_i / \sum_j \lambda_j$, and compute the Von Neumann entropy:
+\begin{equation}
+  H_{\text{vN}}^{(l)} = -\sum_{i=1}^{d} p_i \log p_i
+\end{equation}
+We report the mean entropy across layers $\bar{H}_{\text{vN}}$ and the per-layer profile.
+
+\textbf{Hypothesis.}
+Higher matrix entropy indicates more uniform eigenvalue distributions---more isotropic covariance structure. Models that maintain high entropy across layers use their representational capacity more efficiently.
+
+\textbf{Intuition.}
+Matrix entropy generalizes the notion of effective rank by using the full eigenvalue distribution of the covariance. If a few eigenvalues dominate (low entropy), most variance is captured in a few directions; if eigenvalues are uniform (high entropy), information is spread evenly.
+
+\textbf{Normalization.} Divided by $\log(d_{\text{model}})$ to obtain a fraction of maximum possible entropy.
+
+% --------------------------------------------------------
+\subsubsection{Intrinsic Dimension (\texttt{geometry\_intrinsic\_dim})}
+\label{app:intrinsic-dim}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (last layer)
+
+\textbf{Definition.}
+We use the Two-NN estimator~\citep{facco2017estimating}, which estimates the intrinsic dimension from the ratio of distances to the first and second nearest neighbors. For each point $x_i$, let $r_1(i)$ and $r_2(i)$ be the distances to its nearest and second-nearest neighbor. The intrinsic dimension is:
+\begin{equation}
+  \hat{d} = \left(\frac{1}{n} \sum_{i=1}^{n} \ln \frac{r_2(i)}{r_1(i)}\right)^{-1}
+\end{equation}
+
+\textbf{Hypothesis.}
+The Two-NN intrinsic dimension provides a global estimate of the manifold dimension, complementing the local LID estimates. Lower intrinsic dimension relative to $d_{\text{model}}$ indicates more efficient compression.
+
+\textbf{Intuition.}
+While LID estimates dimensionality point-by-point, Two-NN gives a single global number answering: ``how many dimensions does the representation manifold actually occupy?'' This is a cruder but more stable measurement.
+
+\textbf{Normalization.} Divided by $d_{\text{model}}$.
+
+% --------------------------------------------------------
+\subsubsection{Correlation Dimension (\texttt{geometry\_correlation\_dimension})}
+\label{app:corr-dim}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (last layer)
+
+\textbf{Definition.}
+The Grassberger--Procaccia estimator~\citep{grassberger1983measuring} computes the correlation integral $C(\epsilon) = \frac{2}{n(n-1)} \sum_{i<j} \mathds{1}[\|x_i - x_j\| < \epsilon]$ and estimates the correlation dimension as the slope of $\log C(\epsilon)$ vs.\ $\log \epsilon$ in the scaling region:
+\begin{equation}
+  D_2 = \lim_{\epsilon \to 0} \frac{\log C(\epsilon)}{\log \epsilon}
+\end{equation}
+
+\textbf{Hypothesis.}
+The correlation dimension captures the fractal dimensionality of the representation manifold, which may reveal multi-scale structure not captured by linear methods like effective rank.
+
+\textbf{Intuition.}
+Correlation dimension asks: ``if I double the radius of a ball around a point, how does the number of nearby points scale?'' In $d$ dimensions, the count scales as $\epsilon^d$. Fractal (non-integer) dimensions indicate that the data has complex, multi-scale geometric structure.
+
+\textbf{Normalization.} Divided by $d_{\text{model}}$.
+
+% --------------------------------------------------------
+\subsubsection{Representational Similarity Analysis (\texttt{geometry\_rsa})}
+\label{app:rsa}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+At each layer $l$, we compute the pairwise distance matrix (representational dissimilarity matrix, RDM) $D^{(l)}_{ij} = \|h_i^{(l)} - h_j^{(l)}\|$ over all pairs of input samples. We then compute the Spearman rank correlation between adjacent layers' RDMs~\citep{kriegeskorte2008representational}:
+\begin{equation}
+  \text{RSA}(l, l+1) = \rho_S\!\bigl(\text{vec}(D^{(l)}),\; \text{vec}(D^{(l+1)})\bigr)
+\end{equation}
+We report the mean adjacent RSA ($\bar\rho_{\text{adj}}$) and the early-to-late RSA ($\rho_{\text{early-late}}$).
+
+\textbf{Hypothesis.}
+High adjacent RSA indicates that consecutive layers preserve the relative geometry of representations---smooth, gradual transformations. High early-to-late RSA suggests that the model's representational structure remains consistent across depth. Lower early-to-late RSA indicates more transformative processing.
+
+\textbf{Intuition.}
+RSA answers: ``do layers agree on which inputs are similar and which are different?'' If adjacent layers have RSA $\approx 1$, the geometry is barely changing; if $\approx 0$, each layer radically reorganizes the representation.
+
+\textbf{Normalization.} Spearman correlation is in $[-1, 1]$; no normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{Centered Kernel Alignment (\texttt{geometry\_cka})}
+\label{app:cka}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+CKA~\citep{kornblith2019similarity} measures the similarity between layer representations using kernel alignment. For representations $X \in \mathbb{R}^{n \times p}$ and $Y \in \mathbb{R}^{n \times q}$ (from two layers), linear CKA is:
+\begin{equation}
+  \text{CKA}(X, Y) = \frac{\|Y^T X\|_F^2}{\|X^T X\|_F \cdot \|Y^T Y\|_F}
+\end{equation}
+We compute the full $L \times L$ CKA matrix and report the mean adjacent CKA ($\overline{\text{CKA}}_{\text{adj}}$).
+
+\textbf{Hypothesis.}
+CKA provides a more principled similarity measure than RSA, being invariant to orthogonal transformations and isotropic scaling. High adjacent CKA throughout the network suggests gradual processing; a block-diagonal CKA matrix reveals phase transitions in representation.
+
+\textbf{Intuition.}
+While RSA compares distance patterns, CKA compares the actual linear subspaces used by different layers. Two layers have high CKA if they encode similar information even if individual neuron activations differ.
+
+\textbf{Normalization.} CKA is in $[0, 1]$; no normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{HSIC (\texttt{geometry\_hsic})}
+\label{app:hsic}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+The Hilbert--Schmidt Independence Criterion~\citep{gretton2005measuring} measures statistical dependence between layers using kernel methods. For centered kernel matrices $\tilde{K}^{(l)}$ and $\tilde{K}^{(l+1)}$:
+\begin{equation}
+  \text{HSIC}(l, l+1) = \frac{1}{(n-1)^2} \text{tr}(\tilde{K}^{(l)} \tilde{K}^{(l+1)})
+\end{equation}
+The compression ratio $\text{HSIC}(0, L-1) / \text{HSIC}(0, 0)$ measures how much of the input information survives to the output.
+
+\textbf{Hypothesis.}
+Decreasing HSIC with depth indicates information compression. The compression ratio directly quantifies the information bottleneck.
+
+\textbf{Intuition.}
+HSIC measures how much knowing one layer's representations tells you about another's. It is the kernel analogue of mutual information and is equivalent to linear CKA when using linear kernels.
+
+\textbf{Normalization.} Compression ratio is already a ratio in $[0, 1]$.
+
+% --------------------------------------------------------
+\subsubsection{Positional Decay (\texttt{geometry\_positional\_decay})}
+\label{app:positional-decay}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Attention maps
+
+\textbf{Definition.}
+For each attention head, we compute the Spearman rank correlation between token pair distance $|i - j|$ and the corresponding attention weight $a_{ij}$:
+\begin{equation}
+  \rho_{\text{pos}} = \rho_S\!\bigl(\{|i-j|\}_{i,j},\; \{a_{ij}\}_{i,j}\bigr)
+\end{equation}
+We report the mean across all heads $\bar\rho_{\text{pos}}$.
+
+\textbf{Hypothesis.}
+A negative correlation indicates that attention decays with distance---the model attends preferentially to nearby tokens. This decay pattern reflects the integrity of positional encoding (especially RoPE). Stronger decay may indicate better local context integration.
+
+\textbf{Intuition.}
+Does the model pay more attention to nearby tokens? In models with rotary position embeddings, attention should naturally decay with distance. Deviations from this pattern may indicate that the model has learned to override positional biases for long-range dependencies.
+
+\textbf{Normalization.} Spearman correlation is in $[-1, 1]$; no normalization needed.
+
+% ============================================================
+\subsection{Topology Metrics}
+\label{app:topology}
+% ============================================================
+
+% --------------------------------------------------------
+\subsubsection{Persistent Homology (\texttt{topology\_homology})}
+\label{app:homology}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (selected layers)
+
+\textbf{Definition.}
+We compute the Vietoris--Rips persistent homology~\citep{naitzat2020topology} of mean-pooled sentence representations at early, middle, and late layers. This produces persistence diagrams $\text{Dgm}_{H_k}$ for homological dimensions $k \in \{0, 1\}$:
+\begin{itemize}
+  \item $H_0$ features: connected components. Each feature has a birth time $b$ and death time $d$; the lifespan $d - b$ indicates how persistent the cluster structure is.
+  \item $H_1$ features: loops (1-dimensional holes). Their persistence indicates topological complexity.
+\end{itemize}
+We report the mean persistence $\bar{p}_{H_0}$, $\bar{p}_{H_1}$, and the number of $H_1$ loops at each layer.
+
+\textbf{Hypothesis.}
+As representations are processed through layers, topological complexity should simplify: clusters become more separated ($H_0$ persistence increases or stabilizes) and spurious loops disappear ($H_1$ count decreases). Models that achieve cleaner topological simplification may generalize better.
+
+\textbf{Intuition.}
+Persistent homology asks: ``what is the shape of the data?'' At a coarse scale, do representations form clusters? Do they have holes or loops? Tracking these topological features across layers reveals how the model progressively simplifies the geometric structure of its representations.
+
+\textbf{Normalization.} Persistence values depend on the scale of hidden states; we normalize by the mean pairwise distance at each layer.
+
+% --------------------------------------------------------
+\subsubsection{Betti Curves (\texttt{topology\_betti\_curve})}
+\label{app:betti}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+The Betti number $\beta_k(\epsilon)$ counts the number of $k$-dimensional topological features alive at filtration scale $\epsilon$. We track $\beta_0$ (connected components) and $\beta_1$ (loops) across layers.
+
+The \emph{simplification ratio} measures how much topological complexity is reduced from early to late layers:
+\begin{equation}
+  \text{SR} = 1 - \frac{\beta_0^{\text{late}}}{\beta_0^{\text{early}}}
+\end{equation}
+
+\textbf{Hypothesis.}
+Higher simplification ratio indicates that the network successfully merges initially separate clusters into more coherent structures---a sign of effective representation learning.
+
+\textbf{Intuition.}
+Tracking Betti numbers across layers is like watching a sculptor at work: the raw marble (early layers) has complex topology, and the finished sculpture (late layers) has simpler, more structured topology.
+
+\textbf{Normalization.} Simplification ratio is in $[0, 1]$. Raw Betti numbers are compared within-model across layers.
+
+% --------------------------------------------------------
+\subsubsection{Persistence Entropy (\texttt{topology\_persistence\_entropy})}
+\label{app:persistence-entropy}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+Given a persistence diagram with lifespans $l_1, l_2, \ldots, l_m$, persistence entropy~\citep{rucco2016characterisation} treats the normalized lifespans as a probability distribution:
+\begin{equation}
+  \text{PE}_{H_k} = -\sum_{i=1}^{m} \frac{l_i}{\sum_j l_j} \log \frac{l_i}{\sum_j l_j}
+\end{equation}
+We compute PE for $H_0$ and $H_1$ at each layer and report the simplification ratio of persistence entropy from early to late layers.
+
+\textbf{Hypothesis.}
+Decreasing persistence entropy across layers indicates that topological features become more heterogeneous (dominated by a few persistent features) rather than uniformly distributed. This simplification reflects progressive abstraction.
+
+\textbf{Intuition.}
+If all topological features have similar lifespans (high entropy), the topology is ``noisy'' with no dominant structure. If a few features have long lifespans and many have short ones (low entropy), the topology is dominated by robust, meaningful structures.
+
+\textbf{Normalization.} PE is in $[0, \log m]$; we normalize by $\log m$ when comparing across layers.
+
+% ============================================================
+\subsection{Interpretability Metrics}
+\label{app:interpretability}
+% ============================================================
+
+% --------------------------------------------------------
+\subsubsection{Logit Lens (\texttt{interpretability\_logit\_lens})}
+\label{app:logit-lens}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+At each layer $l$, we project hidden states through the final layer normalization and language model head to obtain intermediate logits, then compute:
+
+\emph{Layer accuracy}: the fraction of tokens for which the argmax of the intermediate logits matches the argmax of the final logits.
+
+\emph{Layer entropy}: the Shannon entropy of the intermediate softmax distribution $H^{(l)} = -\sum_v p_v^{(l)} \log p_v^{(l)}$.
+
+These form a convergence profile showing how predictions crystallize across layers~\citep{nostalgebraist2020logitlens}.
+
+\textbf{Hypothesis.}
+Models that converge to their final predictions earlier (high accuracy at earlier layers) have developed a stronger hierarchical prediction pipeline. The slope and onset of the accuracy curve may predict benchmark performance.
+
+\textbf{Intuition.}
+The logit lens lets us ``read the model's mind'' at each layer. In well-organized models, a rough prediction emerges early and is progressively refined. In poorly organized ones, the prediction may not stabilize until the very last layers.
+
+\textbf{Normalization.} Layer indices are normalized to depth $[0, 1]$; accuracy is in $[0, 1]$.
+
+% --------------------------------------------------------
+\subsubsection{Attention Entropy (\texttt{interpretability\_attention\_entropy})}
+\label{app:attn-entropy}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Attention maps
+
+\textbf{Definition.}
+For each attention head $h$ at layer $l$, we compute the Shannon entropy of the attention distribution over the sequence~\citep{clark2019what}:
+\begin{equation}
+  H_{l,h} = -\sum_{j=1}^{T} a_{ij} \log a_{ij}
+\end{equation}
+averaged over all query positions $i$ and input samples. We report the mean entropy per layer and the global mean $\bar{H}_{\text{attn}}$.
+
+\textbf{Hypothesis.}
+Higher attention entropy indicates broader, less specialized attention patterns. Instruction-tuned models may exhibit higher entropy (attending more broadly) than base models. The relationship with performance is likely non-monotonic: both extremely focused and extremely diffuse attention may be suboptimal.
+
+\textbf{Intuition.}
+Entropy measures how ``spread out'' the attention is. An entropy of $\log T$ means uniform attention (the head looks at everything equally); an entropy near 0 means the head focuses on a single token. The distribution of entropies across heads reveals specialization.
+
+\textbf{Normalization.} Entropy is divided by $\log T$ (where $T$ is sequence length) to normalize for different sequence lengths.
+
+% --------------------------------------------------------
+\subsubsection{Induction Heads (\texttt{interpretability\_induction\_heads})}
+\label{app:induction}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Attention maps (synthetic repeated tokens)
+
+\textbf{Definition.}
+Following \citet{olsson2022context}, we feed the model a sequence with a repeated token pattern $[A] [B] \cdots [A]$ and check whether any attention head at position $[A]_2$ attends strongly to the token following $[A]_1$ (i.e., $[B]$). The induction score for head $(l, h)$ is the attention weight at the correct position.
+
+We report the maximum induction score across all heads ($\max_{\text{ind}}$) and the mean score of the top-$k$ heads ($\bar{s}_{\text{ind}}$).
+
+\textbf{Hypothesis.}
+Models with stronger induction heads should exhibit better in-context learning, which may correlate with benchmark performance on tasks requiring pattern matching and few-shot reasoning.
+
+\textbf{Intuition.}
+Induction heads implement a simple but powerful algorithm: ``if I've seen token $A$ before, attend to whatever followed $A$ last time.'' This is a building block for in-context learning. Detecting induction heads mechanistically reveals whether the model has learned this fundamental circuit.
+
+\textbf{Normalization.} Induction scores are in $[0, 1]$; no normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{Activation Sparsity (\texttt{interpretability\_sparsity})}
+\label{app:sparsity}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (MLP activations)
+
+\textbf{Definition.}
+After the MLP activation function at each layer, we compute:
+
+\emph{$L_0$ rate}: the fraction of activations above a threshold ($10^{-5}$), measuring the density of the activation pattern.
+
+\emph{Kurtosis}: the fourth standardized moment of activations, measuring heavy-tailedness. High kurtosis indicates that a few neurons fire very strongly while most are near zero.
+
+We report the global mean $L_0$ and kurtosis across all layers.
+
+\textbf{Hypothesis.}
+Higher sparsity (lower $L_0$, higher kurtosis) may indicate more efficient feature encoding, where each input activates only a small, specialized subset of neurons. This relates to the superposition hypothesis: sparse activations suggest less superposition.
+
+\textbf{Intuition.}
+A sparse MLP activates only a few ``expert'' neurons for each input, while a dense MLP spreads activation broadly. Sparsity reflects whether the model has developed specialized feature detectors or relies on distributed codes.
+
+\textbf{Normalization.} $L_0$ rate is in $[0, 1]$; kurtosis is dimensionless.
+
+% --------------------------------------------------------
+\subsubsection{Superposition Index (\texttt{interpretability\_superposition})}
+\label{app:superposition}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (MLP activations)
+
+\textbf{Definition.}
+For each neuron, we compute the bimodality coefficient of its activation distribution across inputs~\citep{templeton2024scaling}:
+\begin{equation}
+  \text{BC} = \frac{\gamma^2 + 1}{\kappa}
+\end{equation}
+where $\gamma$ is skewness and $\kappa$ is kurtosis. A bimodality coefficient $> 5/9$ suggests a bimodal distribution.
+
+\emph{Polysemanticity index}: the mean BC across neurons. Higher values indicate more neurons respond to multiple, distinct input types.
+
+\emph{Neuron utilization rate}: the fraction of neurons with mean activation above a threshold, measuring what fraction of the network is ``active.''
+
+\textbf{Hypothesis.}
+Lower polysemanticity (more monosemantic neurons) may indicate cleaner feature representations and better performance. Higher utilization rate suggests more efficient use of model capacity.
+
+\textbf{Intuition.}
+In a perfectly monosemantic model, each neuron responds to one concept. In reality, neurons are often polysemantic---responding to multiple unrelated inputs. The superposition index quantifies this: models in ``deep superposition'' pack more features than they have neurons, at the cost of interference.
+
+\textbf{Normalization.} BC and utilization rate are dimensionless.
+
+% --------------------------------------------------------
+\subsubsection{Weight--Activation Alignment (\texttt{interpretability\_waa})}
+\label{app:waa}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (all layers)
+
+\textbf{Definition.}
+At each layer, we compute the top singular vector of the weight matrix ($u_W$, from SVD of the layer's linear projection) and the top principal component of the activation matrix ($u_A$, from PCA of the hidden states). WAA is their absolute cosine similarity:
+\begin{equation}
+  \text{WAA}^{(l)} = |\cos(u_W^{(l)}, u_A^{(l)})|
+\end{equation}
+We report the mean $\overline{\text{WAA}}$ across layers.
+
+\textbf{Hypothesis.}
+High WAA indicates that the directions most emphasized by the weights align with the directions most used by the activations---the model's capacity matches its usage. Misalignment may indicate wasted capacity or training instability.
+
+\textbf{Intuition.}
+If the weight matrix ``wants'' to amplify direction $u_W$ but the actual data primarily varies along a different direction $u_A$, the model is poorly adapted to its inputs. WAA measures this alignment.
+
+\textbf{Normalization.} WAA is in $[0, 1]$; no normalization needed.
+
+% --------------------------------------------------------
+\subsubsection{Attention Graph (\texttt{interpretability\_attention\_graph})}
+\label{app:attn-graph}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Attention maps
+
+\textbf{Definition.}
+We interpret each attention head's attention matrix as a directed graph (tokens as nodes, attention weights as edges) and compute:
+
+\emph{Sink PageRank}~\citep{xiao2023efficient}: the PageRank centrality of the first token (BOS/CLS), which often acts as an ``attention sink.''
+
+\emph{BOS sink ratio}: the fraction of total attention mass directed to the first token.
+
+\emph{Edge Gini}: the Gini coefficient of attention edge weights, measuring how concentrated attention is among a few token pairs.
+
+\textbf{Hypothesis.}
+Strong attention sinks (high BOS PageRank) reflect the model's strategy for handling uninformative attention slots. Edge Gini captures attention sparsity from a graph-theoretic perspective. These structural properties may differ between base and instruction-tuned models.
+
+\textbf{Intuition.}
+Viewing attention as a graph reveals global information flow patterns. A model with strong attention sinks ``parks'' attention on a default token when no specific token is relevant---a known phenomenon in efficient inference. The edge Gini reveals whether attention is sparse (a few strong connections) or dense (many weak connections).
+
+\textbf{Normalization.} PageRank is in $[0, 1]$; Gini is in $[0, 1]$.
+
+% ============================================================
+\subsection{Causality Metrics}
+\label{app:causality}
+% ============================================================
+
+% --------------------------------------------------------
+\subsubsection{Causal Tracing (\texttt{causality\_tracing})}
+\label{app:tracing}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Interventional (activation patching)
+
+\textbf{Definition.}
+Following \citet{meng2022locating}, we perform a three-step procedure:
+\begin{enumerate}
+  \item \textbf{Clean run}: Record all hidden states and the probability of the target token $p_{\text{clean}}$.
+  \item \textbf{Corrupted run}: Add Gaussian noise ($\sigma = 0.1$) to the embedding of subject tokens and record $p_{\text{corrupt}}$.
+  \item \textbf{Restored run}: For each layer $l$, patch the clean hidden state back into the corrupted run and record $p_{\text{restore}}^{(l)}$.
+\end{enumerate}
+The Average Indirect Effect (AIE) at layer $l$ is:
+\begin{equation}
+  \text{AIE}(l) = \frac{p_{\text{restore}}^{(l)} - p_{\text{corrupt}}}{p_{\text{clean}} - p_{\text{corrupt}}}
+\end{equation}
+Causal entropy normalizes the AIE distribution across layers into a probability distribution and computes its Shannon entropy, measuring how localized vs.\ distributed the causal effect is.
+
+\textbf{Hypothesis.}
+Models with more localized causal effects (low causal entropy, one or few layers with high AIE) have more modular knowledge storage. The location of the maximum AIE (early, middle, or late) may distinguish architectures.
+
+\textbf{Intuition.}
+Causal tracing asks: ``if I damage the input and then surgically repair one layer, which repair is most effective?'' This reveals where factual knowledge is stored. A model that stores knowledge in a single layer is more modular than one where knowledge is distributed.
+
+\textbf{Normalization.} AIE is in $[0, 1]$. Layer index is normalized to depth $[0, 1]$.
+
+% --------------------------------------------------------
+\subsubsection{Attention Knockout (\texttt{causality\_attention\_knockout})}
+\label{app:knockout}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Interventional (head ablation)
+
+\textbf{Definition.}
+For each attention head, we zero out its output and measure the increase in cross-entropy loss relative to the baseline:
+\begin{equation}
+  \Delta\mathcal{L}_{l,h} = \mathcal{L}_{\text{knockout}(l,h)} - \mathcal{L}_{\text{baseline}}
+\end{equation}
+We report the maximum knockout impact ($\max \Delta\mathcal{L}$) and the Gini coefficient of the impact distribution.
+
+\textbf{Hypothesis.}
+High Gini indicates that a few critical heads dominate model behavior (fragile, specialized architecture). Low Gini suggests a more distributed, redundant architecture. Distributed architectures may be more robust.
+
+\textbf{Intuition.}
+By disabling one head at a time and measuring damage, we map the importance landscape. A model where removing any single head barely matters has distributed processing; one where removing a specific head is catastrophic has concentrated, fragile circuits.
+
+\textbf{Normalization.} Gini is in $[0, 1]$; $\Delta\mathcal{L}$ is in loss units (nats or bits).
+
+% ============================================================
+\subsection{Representation Engineering Metrics}
+\label{app:repe}
+% ============================================================
+
+% --------------------------------------------------------
+\subsubsection{Task Vectors (\texttt{repe\_task\_vectors})}
+\label{app:task-vectors}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (contrastive prompts)
+
+\textbf{Definition.}
+Given pairs of prompts with contrasting properties (e.g., positive vs.\ negative sentiment), the task vector at layer $l$ is~\citep{zou2023representation}:
+\begin{equation}
+  \mathbf{v}^{(l)} = \frac{1}{|\mathcal{P}|}\sum_{(p^+, p^-) \in \mathcal{P}} \bigl(h^{(l)}(p^+) - h^{(l)}(p^-)\bigr)
+\end{equation}
+We report per-layer norms $\|\mathbf{v}^{(l)}\|$ and cosine similarities between adjacent layers' task vectors.
+
+\textbf{Hypothesis.}
+Stronger task vectors (higher norms) indicate cleaner encoding of the target concept. The depth at which task vectors peak may correlate with the model's capability for that task.
+
+\textbf{Intuition.}
+A task vector is the ``direction of a concept'' in representation space. If the model cleanly separates positive from negative sentiment, the task vector will be large and consistent. Weak or noisy task vectors suggest the concept is not linearly encoded.
+
+\textbf{Normalization.} Norms are divided by $\sqrt{d_{\text{model}}}$.
+
+% --------------------------------------------------------
+\subsubsection{Concept Separability (\texttt{repe\_concept\_separability})}
+\label{app:separability}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states (contrastive prompts)
+
+\textbf{Definition.}
+At each layer, we train a logistic regression classifier (with cross-validation) to distinguish positive from negative examples and report the area under the ROC curve (AUC)~\citep{zou2023representation}:
+\begin{equation}
+  \text{AUC}^{(l)} = \text{ROC-AUC}\!\bigl(\text{LogReg}(h^{(l)}, y)\bigr)
+\end{equation}
+We report the per-layer AUC, the maximum AUC across layers ($\max_l \text{AUC}^{(l)}$), and the mean AUC.
+
+\textbf{Hypothesis.}
+Higher maximum AUC indicates that the model develops linearly separable concept representations somewhere in its depth. The layer at which separability peaks may relate to the model's processing depth.
+
+\textbf{Intuition.}
+If you can train a simple linear classifier to distinguish concepts from hidden states, those concepts are ``linearly readable''---the model has organized its representations so that concept boundaries are flat hyperplanes. This is a stronger claim than having a nonzero task vector.
+
+\textbf{Normalization.} AUC is in $[0.5, 1]$; no normalization needed.
+
+% ============================================================
+\section{Model Zoo Details}
+\label{app:models}
+% ============================================================
+
+\begin{table}[h]
+\centering
+\caption{Complete model specifications. All models are decoder-only autoregressive transformers with publicly available weights.}
+\label{tab:model-details}
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\textbf{Model} & \textbf{Family} & $N_{\text{params}}$ & $d_{\text{model}}$ & $L$ & $N_{\text{heads}}$ \\
+\midrule
+GPT-2 Small & GPT-2 & 124M & 768 & 12 & 12 \\
+GPT-2 Medium & GPT-2 & 355M & 1024 & 24 & 16 \\
+GPT-2 Large & GPT-2 & 774M & 1280 & 36 & 20 \\
+GPT-2 XL & GPT-2 & 1.5B & 1600 & 48 & 25 \\
+\midrule
+Pythia-70M & Pythia & 70M & 512 & 6 & 8 \\
+Pythia-160M & Pythia & 160M & 768 & 12 & 12 \\
+Pythia-410M & Pythia & 410M & 1024 & 24 & 16 \\
+Pythia-1B & Pythia & 1B & 2048 & 16 & 8 \\
+Pythia-1.4B & Pythia & 1.4B & 2048 & 24 & 16 \\
+Pythia-2.8B & Pythia & 2.8B & 2560 & 32 & 32 \\
+Pythia-6.9B & Pythia & 6.9B & 4096 & 32 & 32 \\
+Pythia-12B & Pythia & 12B & 5120 & 36 & 40 \\
+\midrule
+Llama-3.2-1B & Llama~3 & 1.2B & 2048 & 16 & 32 \\
+Llama-3.2-3B & Llama~3 & 3.2B & 3072 & 28 & 24 \\
+Llama-3.1-8B & Llama~3 & 8B & 4096 & 32 & 32 \\
+\midrule
+Qwen-2.5-0.5B & Qwen~2.5 & 0.5B & 896 & 24 & 14 \\
+Qwen-2.5-1.5B & Qwen~2.5 & 1.5B & 1536 & 28 & 12 \\
+Qwen-2.5-3B & Qwen~2.5 & 3B & 2048 & 36 & 16 \\
+Qwen-2.5-7B & Qwen~2.5 & 7B & 3584 & 28 & 28 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Normalization Details}
+\label{app:normalization}
+% ============================================================
+
+\begin{table}[h]
+\centering
+\caption{Normalization applied to each metric for cross-model comparability.}
+\label{tab:normalization}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Metric} & \textbf{Normalization} & \textbf{Range} \\
+\midrule
+Effective rank (SVD, collapse, unemb.) & $\div\; d_{\text{model}}$ & $[0, 1]$ \\
+Participation ratio & $\div\; d_{\text{model}}$ & $[0, 1]$ \\
+LID (mean, median) & $\div\; d_{\text{model}}$ & $[0, 1]$ \\
+Intrinsic dimension (Two-NN) & $\div\; d_{\text{model}}$ & $[0, 1]$ \\
+Correlation dimension & $\div\; d_{\text{model}}$ & $[0, 1]$ \\
+Matrix entropy & $\div\; \log(d_{\text{model}})$ & $[0, 1]$ \\
+Task vector norms & $\div\; \sqrt{d_{\text{model}}}$ & $[0, \infty)$ \\
+\midrule
+Stable rank & None (already $[1, \min(m,n)]$) & $[1, \infty)$ \\
+Power-law $\alpha$ & None (dimensionless) & $(1, \infty)$ \\
+Collapse ratio & None (already a ratio) & $[0, 1]$ \\
+Lipschitz constant & None (already a ratio) & $[0, \infty)$ \\
+CKA, RSA, WAA & None (correlations) & $[0, 1]$ \\
+Attention entropy & $\div\; \log T$ & $[0, 1]$ \\
+Sparsity ($L_0$) & None (already a fraction) & $[0, 1]$ \\
+Gini coefficients & None (dimensionless) & $[0, 1]$ \\
+AUC (separability) & None & $[0.5, 1]$ \\
+EDG & None (Spearman $\rho$) & $[-1, 1]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
