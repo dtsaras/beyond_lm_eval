@@ -69,11 +69,8 @@ class SuperpositionIndexTask(DiagnosticTask):
         device = next(model.parameters()).device
 
         if dataset is None:
-            dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog."},
-                {"text": "Machine learning models learn representations of data."},
-                {"text": "Quantum computing leverages superposition of states."},
-            ] * max(1, num_samples // 3 + 1)
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
         samples = list(dataset)[:num_samples]
         if not samples:

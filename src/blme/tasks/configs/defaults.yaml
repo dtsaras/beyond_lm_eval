@@ -9,6 +9,7 @@
 # ---- Geometry Tasks ----
 geometry_svd:
   num_samples: 100
+  layerwise: false
 
 geometry_hubness:
   k_values: [10, 50, 100]
@@ -20,12 +21,17 @@ geometry_collapse:
 geometry_lid:
   k: 20
   num_samples: 50
+  layerwise: false
 
 geometry_representation_sensitivity:
   num_samples: 20
 
 geometry_correlation_dimension:
-  num_samples: 50
+  num_samples: 100
+  max_length: 128
+  num_radii: 30
+  pooling: mean  # "mean", "all_tokens", or "last"
+  max_points: 2000
 
 geometry_matrix_entropy:
   num_samples: 10
@@ -40,7 +46,8 @@ geometry_lipschitz:
 geometry_perplexity:
   num_samples: 100
 
-geometry_spectral: {}
+geometry_spectral:
+  tail_fraction: 0.2  # Fraction of top singular values for Hill estimator
 
 geometry_positional_decay:
   num_samples: 5

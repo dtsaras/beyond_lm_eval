@@ -25,7 +25,8 @@ class LogitLensTask(DiagnosticTask):
         device = next(model.parameters()).device
         
         if dataset is None:
-             dataset = [{"text": "Sample text for logit lens."} for _ in range(5)]
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
              
         # Detect layers (universal)
         layers = get_layers(model)

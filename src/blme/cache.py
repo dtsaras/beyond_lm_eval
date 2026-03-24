@@ -341,11 +341,14 @@ class ModelOutputCache:
         return chunks
 
 
-def _load_default_corpus(num_samples: int) -> list:
+def load_default_corpus(num_samples: int) -> list:
     """
     Load diverse text passages from WikiText-103 validation split.
 
-    Falls back to hardcoded sentences if WikiText loading fails.
+    Falls back to a small hardcoded corpus **with an explicit warning** if
+    WikiText loading fails (e.g. ``datasets`` not installed or no network).
+    The hardcoded fallback is unsuitable for publishable research — install
+    ``datasets`` and ensure network access to get the real corpus.
     """
     try:
         from datasets import load_dataset
@@ -366,8 +369,17 @@ def _load_default_corpus(num_samples: int) -> list:
     except Exception as e:
         logger.warning(f"Could not load WikiText-103 ({e}); using fallback corpus")
 
+    logger.warning(
+        "USING HARDCODED FALLBACK CORPUS (3 sentences). "
+        "Results are NOT suitable for research. Install the `datasets` "
+        "package and ensure network access to load WikiText-103."
+    )
     return [
         {"text": "The quick brown fox jumps over the lazy dog."},
         {"text": "In machine learning, a neural network is a computational model."},
         {"text": "Large language models have transformed natural language processing."},
     ] * max(1, num_samples // 3)
+
+
+# Keep backward-compatible private alias
+_load_default_corpus = load_default_corpus

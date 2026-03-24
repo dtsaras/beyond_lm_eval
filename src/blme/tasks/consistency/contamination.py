@@ -41,12 +41,8 @@ class ContaminationDetectionTask(DiagnosticTask):
         device = next(model.parameters()).device
 
         if dataset is None:
-            dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog. "
-                         "This sentence is commonly used in typing tests."},
-                {"text": "In machine learning, overfitting occurs when a model "
-                         "learns the training data too well."},
-            ] * max(1, num_samples // 2)
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
         samples = list(dataset)[:num_samples]
         if not samples:

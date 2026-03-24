@@ -39,15 +39,8 @@ class LatentInterpolationTask(DiagnosticTask):
         device = next(model.parameters()).device
 
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    dataset.append({"text": dset[i]["text"]})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [{"text": f"Sample {i}"} for i in range(num_samples)]
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
         samples = list(dataset)
         if len(samples) < 2: return {"error": "Need at least 2 samples"}

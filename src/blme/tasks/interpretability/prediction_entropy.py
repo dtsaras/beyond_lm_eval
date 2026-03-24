@@ -20,10 +20,8 @@ class PredictionEntropyTask(DiagnosticTask):
         logger.info("Running Prediction Entropy Analysis...")
 
         if dataset is None:
-            dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog."}
-                for _ in range(50)
-            ]
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(self.config.get("num_samples", 100))
 
         num_samples = self.config.get("num_samples", 100)
         all_entropies = []

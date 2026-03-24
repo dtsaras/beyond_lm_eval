@@ -34,15 +34,8 @@ class AttentionEffectiveRankTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 3)
 
         if dataset is None:
-             try:
-                 from datasets import load_dataset
-                 dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                 dataset = []
-                 for i in range(min(num_samples, len(dset))):
-                     dataset.append({"text": dset[i]["text"]})
-             except ImportError:
-                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                 dataset = [{"text": "Attention effective rank measures the diversity of combined attention outputs."}] * num_samples
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
         samples = list(dataset)[:num_samples]
         if not samples:
              return {"error": "Need at least 1 sample."}

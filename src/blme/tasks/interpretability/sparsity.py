@@ -24,7 +24,8 @@ class ActivationSparsityTask(DiagnosticTask):
         device = next(model.parameters()).device
         
         if dataset is None:
-            dataset = [{"text": "Sample text for activation sparsity."}] * num_samples
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
         
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:
@@ -100,12 +101,15 @@ class ActivationSparsityTask(DiagnosticTask):
                 mean_l0_rates.append(float(layer_l0))
                 mean_kurtosis.append(float(layer_kurt))
             else:
-                mean_l0_rates.append(0.0)
-                mean_kurtosis.append(0.0)
-                
+                mean_l0_rates.append(float("nan"))
+                mean_kurtosis.append(float("nan"))
+
         results["layer_l0_rates"] = mean_l0_rates
         results["layer_kurtosis"] = mean_kurtosis
-        results["global_mean_l0"] = float(np.mean(mean_l0_rates))
-        results["global_mean_kurtosis"] = float(np.mean(mean_kurtosis))
+        # Filter NaN values for global means
+        valid_l0 = [v for v in mean_l0_rates if not np.isnan(v)]
+        valid_kurt = [v for v in mean_kurtosis if not np.isnan(v)]
+        results["global_mean_l0"] = float(np.mean(valid_l0)) if valid_l0 else 0.0
+        results["global_mean_kurtosis"] = float(np.mean(valid_kurt)) if valid_kurt else 0.0
         
         return results

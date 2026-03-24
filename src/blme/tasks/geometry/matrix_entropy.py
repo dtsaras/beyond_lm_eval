@@ -35,7 +35,8 @@ class MatrixEntropyTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         
         if dataset is None:
-             dataset = [{"text": "Deep neural networks enforce an information bottleneck over layers."}] * num_samples
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
              
         samples = list(dataset)[:num_samples]
         if not samples:
@@ -91,8 +92,9 @@ class MatrixEntropyTask(DiagnosticTask):
             
             # Normalize to form a valid probability distribution (Trace(rho) = 1)
             rho = eigenvalues / torch.sum(eigenvalues)
-            rho = rho[rho > 0] # Filter exactly 0
-            
+            # Clamp for numerical stability before log (avoids log(0))
+            rho = torch.clamp(rho, min=1e-30)
+
             # Compute von Neumann Entropy (Information Bottleneck capacity)
             entropy = -torch.sum(rho * torch.log(rho)).item()
             

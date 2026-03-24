@@ -57,9 +57,8 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
             return {"error": msg}
 
         if dataset is None:
-            dataset = [
-                {"text": "Sparse autoencoders help us understand true feature dimensions."}
-            ] * num_samples
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
             
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:

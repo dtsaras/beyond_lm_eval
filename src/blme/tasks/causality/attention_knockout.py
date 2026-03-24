@@ -31,18 +31,8 @@ class AttentionKnockoutTask(DiagnosticTask):
         num_layers = len(layers)
         
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("fahamu/ioi", split="train")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    item = dset[i]
-                    dataset.append({"text": item["text"]})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [
-                    {"text": "John gave a book to Mary. Mary gave a pencil to"}
-                ] * num_samples
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
             
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:

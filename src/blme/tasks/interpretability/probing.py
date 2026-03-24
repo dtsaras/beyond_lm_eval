@@ -27,10 +27,8 @@ class LinearProbingTask(DiagnosticTask):
         logger.info("Running Linear Probing Analysis...")
 
         if dataset is None:
-            dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog."}
-                for _ in range(50)
-            ]
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(50)
 
         num_samples = self.config.get("num_samples", 50)
         max_tokens = self.config.get("max_tokens", 128)

@@ -8,7 +8,7 @@ isolation, and produces structured results with metadata.
 import logging
 import signal
 import time
-from typing import List, Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from tqdm import tqdm
@@ -56,6 +56,7 @@ def evaluate(
     cache_num_samples: Optional[int] = None,
     seed: int = 42,
     task_timeout: int = 600,
+    dataset: Optional[Any] = None,
 ) -> dict:
     """
     Unified evaluation entry point.
@@ -72,6 +73,10 @@ def evaluate(
         cache_num_samples: Optional global sample count for shared cache.
         seed: Random seed for reproducibility (default: 42).
         task_timeout: Per-task timeout in seconds (default: 600). Unix only.
+        dataset: Optional list of ``{"text": ...}`` dicts to use as
+            the evaluation corpus.  Passed to both the shared cache and
+            individual tasks.  When *None*, WikiText-103 validation is
+            loaded automatically (see :func:`cache.load_default_corpus`).
 
     Returns:
         Full results envelope dict.
@@ -117,6 +122,11 @@ def evaluate(
     task_timings: Dict[str, float] = {}
 
     if diagnostic_tasks:
+        # Load a shared evaluation corpus if none was provided
+        if dataset is None:
+            from .cache import load_default_corpus
+            dataset = load_default_corpus(cache_num_samples or 200)
+
         # Resolve configs once (defaults + user overrides)
         from .tasks.config_loader import resolve_task_config
         resolved_task_configs: Dict[str, dict] = {}
@@ -170,7 +180,7 @@ def evaluate(
                 need_attn = False
 
                 from .cache import ModelOutputCache
-                cache = ModelOutputCache(model, tokenizer, dataset=None, num_samples=cache_num_samples)
+                cache = ModelOutputCache(model, tokenizer, dataset=dataset, num_samples=cache_num_samples)
                 cache.populate(need_hidden=need_hidden, need_attentions=need_attn)
 
         if not hasattr(signal, "SIGALRM"):
@@ -189,7 +199,7 @@ def evaluate(
                     signal.alarm(timeout_sec)
 
                 task = task_cls(config=t_config)
-                result = task.evaluate(model, tokenizer, dataset=None, cache=cache)
+                result = task.evaluate(model, tokenizer, dataset=dataset, cache=cache)
                 task_results[task_name] = result
             except TimeoutError:
                 logger.error(f"Task '{task_name}' timed out after {timeout_sec}s")

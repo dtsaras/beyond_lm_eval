@@ -19,8 +19,8 @@ class CKATask(DiagnosticTask):
         logger.info("Running CKA Layer Similarity Analysis...")
         
         if dataset is None:
-            # Mock dataset if missing
-            dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(50)
             
         # 1. Collect Activations
         # We need synchronization: same tokens for all layers.

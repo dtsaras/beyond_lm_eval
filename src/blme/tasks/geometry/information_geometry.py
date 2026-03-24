@@ -41,9 +41,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 20)
 
         if dataset is None:
-             dataset = [
-                 {"text": "Information geometry studies probability distributions as a Riemannian manifold."}
-             ] * num_samples
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
 
         samples = list(dataset)[:num_samples]
         if not samples:

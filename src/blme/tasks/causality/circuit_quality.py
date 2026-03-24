@@ -43,11 +43,8 @@ class CircuitQualityTask(DiagnosticTask):
         num_layers = len(layers)
 
         if dataset is None:
-            dataset = [
-                {"text": "The capital of France is Paris"},
-                {"text": "Water boils at 100 degrees Celsius"},
-                {"text": "The quick brown fox jumps over the lazy dog"},
-            ] * max(1, num_samples // 3 + 1)
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
         samples = list(dataset)[:num_samples]
         if not samples:

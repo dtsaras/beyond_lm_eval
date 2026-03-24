@@ -21,7 +21,8 @@ class AttentionEntropyTask(DiagnosticTask):
         logger.info("Running Attention Entropy Analysis...")
         
         if dataset is None:
-             dataset = [{"text": "The quick brown fox jumps over the lazy dog."}]
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(self.config.get("num_samples", 100))
              
         # We need attention weights: (B, H, T, T)
         # Ensure model outputs attentions

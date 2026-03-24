@@ -74,10 +74,8 @@ class AttentionGraphTopologyTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Attention Graph Topology Analysis...")
         if dataset is None:
-            dataset = [
-                {"text": "Attention is a graph. In this graph, some tokens acts as sinks. This is a robust mechanism."}
-                for _ in range(10)
-            ]
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(self.config.get("num_samples", 10))
         num_samples = self.config.get("num_samples", 10)
         samples = list(dataset)[:num_samples]
         

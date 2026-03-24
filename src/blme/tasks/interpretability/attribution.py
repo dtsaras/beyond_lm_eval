@@ -21,7 +21,9 @@ class ComponentAttributionTask(DiagnosticTask):
         if E is None: return {"error": "Embeddings not found"}
         E = E.to(device)
         
-        if dataset is None: dataset = [{"text": "Sample"}]
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
         
         coherence_scores = []
         

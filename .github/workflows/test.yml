@@ -30,7 +30,7 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short -x
+          python -m pytest tests/ -v --tb=short
 
       - name: Check imports
         run: |

@@ -30,20 +30,8 @@ class AblationRobustnessTask(DiagnosticTask):
         num_layers = len(layers)
         
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("NeelNanda/counterfact-tracing", split="train")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    item = dset[i]
-                    # We just need text that the model can process and predict on.
-                    # The prompt + target_true provides a factual statement.
-                    dataset.append({"text": item["prompt"] + item["target_true"]})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [
-                    {"text": "A quick brown fox jumps over the lazy dog."}
-                ] * num_samples
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
         
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:

@@ -34,15 +34,8 @@ class WeightActivationAlignmentTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 5)
         
         if dataset is None:
-             try:
-                 from datasets import load_dataset
-                 dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                 dataset = []
-                 for i in range(min(num_samples, len(dset))):
-                     dataset.append({"text": dset[i]["text"]})
-             except ImportError:
-                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                 dataset = [{"text": "The geometry of activations defines the expressivity of the model."}] * num_samples
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
         samples = list(dataset)[:num_samples]
         if not samples:
              return {"error": "Need at least 1 sample."}
@@ -78,11 +71,17 @@ class WeightActivationAlignmentTask(DiagnosticTask):
         
         for l_idx, proj in target_modules:
             W = proj.weight.detach().float()
-            # If Conv1D (like GPT2), weights are transposed
-            if len(W.shape) == 2 and W.shape[0] < W.shape[1] and hasattr(proj, "nf"): 
-                pass # Already right shape for out = in @ W
+            # Detect Conv1D (GPT-2 style): check for the class or the `nf` attr
+            _is_conv1d = False
+            try:
+                from transformers.pytorch_utils import Conv1D
+                _is_conv1d = isinstance(proj, Conv1D)
+            except ImportError:
+                _is_conv1d = hasattr(proj, "nf")
+            if _is_conv1d:
+                pass  # Conv1D: shape is (in, out), already correct for out = in @ W
             else:
-                W = W.T # Standard linear out = in @ W^T, so we transpose
+                W = W.T  # Standard Linear: shape is (out, in), transpose to (in, out)
                 
             # Get the top singular vector of the weight matrix
             # W has shape (in_features, out_features)

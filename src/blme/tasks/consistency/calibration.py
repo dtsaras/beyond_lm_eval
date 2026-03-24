@@ -20,15 +20,8 @@ class CalibrationTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         
         if dataset is None:
-             try:
-                 from datasets import load_dataset
-                 dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                 dataset = []
-                 for i in range(min(num_samples, len(dset))):
-                     dataset.append({"text": dset[i]["text"]})
-             except ImportError:
-                 logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                 dataset = [{"text": "The quick brown fox jumps over the lazy dog."}]
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
         if cache is not None and cache.is_populated and use_cache:
             stats, _ = cache.get_prediction_stats(num_samples=num_samples)
         else:

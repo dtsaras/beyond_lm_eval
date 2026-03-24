@@ -24,15 +24,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
         device = next(model.parameters()).device
         
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    dataset.append({"text": dset[i]["text"]})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [{"text": "The capital of France is Paris."}] * num_samples        
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:
             return {"error": "Need at least 1 sample"}

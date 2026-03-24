@@ -37,8 +37,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         
         # We need reasonably long sequences to measure positional decay gracefully
         if dataset is None:
-             text = "The quick brown fox jumps over the lazy dog. " * 10
-             dataset = [{"text": text}] * num_samples
+             from ...cache import load_default_corpus
+             dataset = load_default_corpus(num_samples)
              
         samples = list(dataset)[:num_samples]
         if not samples:
@@ -46,57 +46,52 @@ class PositionalAttentionDecayTask(DiagnosticTask):
              
         device = next(model.parameters()).device
         
-        correlations = []
-        
-        # Run forward passes, requesting output_attentions so we don't have to hook
+        # Per-layer correlations: {layer_idx: [corr_sample1, corr_sample2, ...]}
+        from collections import defaultdict
+        layer_correlations = defaultdict(list)
+
         with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                # Need sequence length > 4 to measure correlation properly
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=256).to(device)
-                
+
                 seq_len = inputs.input_ids.shape[1]
                 if seq_len < 4:
                    continue
-                   
+
                 out = model(**inputs, output_attentions=True)
                 if out.attentions is None or len(out.attentions) == 0:
                     return {"error": "Model did not return attentions. Cannot compute Positional Decay."}
-                    
-                # attentions shape: (num_layers, batch, num_heads, seq_len, seq_len)
-                # We analyze the middle layer as a representative heuristic for structure
-                mid_layer = len(out.attentions) // 2
-                attn_entry = out.attentions[mid_layer]
-                if attn_entry is None:
-                    return {"error": "Attention weights at selected layer are None. Model may use SDPA."}
-                attn_matrix = attn_entry[0] # (num_heads, seq_len, seq_len)
-                
-                # Average attention across heads to get the macro positional structure
-                mean_attn = attn_matrix.mean(dim=0).cpu().numpy() # (seq_len, seq_len)
-                
-                # We want to correlate (i - j) distance with mean_attn[i, j] for all valid j < i
-                distances = []
-                attentions = []
-                
-                for i in range(1, seq_len):
-                    for j in range(i):
-                        distances.append(i - j)
-                        attentions.append(mean_attn[i, j])
-                        
-                # Compute Spearman correlation
-                # We expect a negative correlation (higher distance = lower attention)
-                # so a perfectly structured local window is -1.0. 
-                if len(distances) > 5:
-                    corr, _ = spearmanr(distances, attentions)
-                    if not np.isnan(corr):
-                         correlations.append(corr)
-                         
-        if not correlations:
+
+                for li, attn_entry in enumerate(out.attentions):
+                    if attn_entry is None:
+                        continue
+                    attn_matrix = attn_entry[0]  # (num_heads, seq_len, seq_len)
+                    mean_attn = attn_matrix.mean(dim=0).cpu().numpy()  # (seq_len, seq_len)
+
+                    distances = []
+                    attentions = []
+                    for i in range(1, seq_len):
+                        for j in range(i):
+                            distances.append(i - j)
+                            attentions.append(mean_attn[i, j])
+
+                    if len(distances) > 5:
+                        corr, _ = spearmanr(distances, attentions)
+                        if not np.isnan(corr):
+                             layer_correlations[li].append(corr)
+
+        if not layer_correlations:
              return {"error": "Could not compute positional correlations (sequences too short or nan)."}
-             
-        mean_corr = float(np.mean(correlations))
-        
+
+        # Compute per-layer means
+        layer_means = {}
+        for li in sorted(layer_correlations.keys()):
+            layer_means[f"layer_{li}"] = float(np.mean(layer_correlations[li]))
+
+        all_corrs = [c for corrs in layer_correlations.values() for c in corrs]
+
         return {
-            "mean_positional_decay_correlation": mean_corr,
-            "interpretation": "Strong negative values (e.g. -0.5 to -1.0) indicate structurally sound local positional geometry."
+            "mean_positional_decay_correlation": float(np.mean(all_corrs)),
+            "layer_positional_decay": layer_means,
         }
