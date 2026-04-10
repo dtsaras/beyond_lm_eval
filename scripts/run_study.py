@@ -86,13 +86,14 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
     """Run all BLME tasks for a single model."""
     name = model_entry["name"]
     model_args = build_model_args(model_entry)
-    out_path = os.path.join(output_dir, "blme", f"{name}.json")
+    model_out_dir = os.path.join(output_dir, "blme", name)
 
-    if os.path.exists(out_path):
+    # Check if results already exist (the CLI writes results.json in the output dir)
+    if os.path.exists(os.path.join(model_out_dir, "results.json")):
         logger.info(f"[SKIP] {name} — BLME results already exist")
         return name, "skipped"
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    os.makedirs(model_out_dir, exist_ok=True)
 
     all_tasks = BLME_RESEARCH_TASKS + BLME_Y_TASKS
     task_str = " ".join(all_tasks)
@@ -101,12 +102,13 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
     if gpu_ids is not None:
         env["CUDA_VISIBLE_DEVICES"] = gpu_ids
 
+    # Each model gets its own output subdirectory
+    model_out_dir = os.path.join(output_dir, "blme", name)
     cmd = [
         sys.executable, "-m", "blme.cli", "evaluate",
         "--model-args", model_args,
         "--tasks", *all_tasks,
-        "--output-dir", os.path.join(output_dir, "blme"),
-        "--output-name", name,
+        "--output-dir", model_out_dir,
     ]
 
     logger.info(f"[START] BLME {name} (GPUs: {gpu_ids or 'all'})")
@@ -123,7 +125,7 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
         else:
             logger.error(f"[FAIL]  BLME {name}: {result.stderr[-500:]}")
             # Save error log
-            err_path = os.path.join(output_dir, "blme", f"{name}.error.log")
+            err_path = os.path.join(model_out_dir, "error.log")
             with open(err_path, "w") as f:
                 f.write(result.stderr)
             return name, "failed"
