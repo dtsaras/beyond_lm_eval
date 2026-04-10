@@ -36,15 +36,21 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
             
         device = next(model.parameters()).device
 
-        # Check model compatibility — default SAE config is GPT2-specific
+        # Check model compatibility — default SAE config is GPT2-specific.
+        # This task is opt-in: it should be silently skipped (with a clear
+        # warning) on any model the configured SAE wasn't trained for, so
+        # that batch runs on heterogeneous model zoos don't get error noise.
         model_name = getattr(getattr(model, "config", None), "_name_or_path", "")
         if model_name and "gpt2" not in model_name.lower():
             if sae_release == "gpt2-small-res-jb":
-                return {
-                    "error": f"Default SAE config (release={sae_release}, id={sae_id}) "
-                             f"is specific to GPT2. Current model: {model_name}. "
-                             f"Provide model-appropriate sae_release and sae_id in task config."
-                }
+                msg = (
+                    f"Default SAE config (release={sae_release}, id={sae_id}) "
+                    f"is specific to GPT2. Current model: {model_name}. "
+                    f"Skipping. Provide a model-appropriate sae_release and sae_id "
+                    f"in the task config to enable this task on other architectures."
+                )
+                logger.warning("  " + msg)
+                return {"skipped": True, "reason": msg}
 
         try:
             logger.info(f"  Attempting to load SAE: release={sae_release}, id={sae_id}")

@@ -29,7 +29,8 @@ def get_embeddings(model):
 
 _LAYER_ATTRS = [
     # (parent_chain, layer_list_attr)
-    ("model", "layers"),          # LLaMA, Mistral, Qwen2, Gemma, Phi-3
+    ("model", "layers"),          # LLaMA, Mistral, Qwen2, Gemma 2/3, Phi-3
+    ("model.language_model", "layers"),  # Gemma 4 multimodal (ForConditionalGeneration)
     ("transformer", "h"),         # GPT2, GPT-Neo, BLOOM, CodeGen
     ("gpt_neox", "layers"),       # Pythia, GPT-NeoX
     ("model.decoder", "layers"),  # OPT
@@ -134,7 +135,8 @@ def apply_lm_head(model, hidden_states):
 # ── Final Layer Norm ──────────────────────────────────────────────────
 
 _NORM_ATTRS = [
-    ("model", "norm"),            # LLaMA, Mistral, Qwen2, Gemma
+    ("model", "norm"),            # LLaMA, Mistral, Qwen2, Gemma 2/3
+    ("model.language_model", "norm"),  # Gemma 4 multimodal (ForConditionalGeneration)
     ("transformer", "ln_f"),      # GPT2, GPT-Neo, CodeGen
     ("gpt_neox", "final_layer_norm"),  # Pythia, GPT-NeoX
     ("model.decoder", "final_layer_norm"),  # OPT

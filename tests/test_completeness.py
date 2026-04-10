@@ -12,11 +12,13 @@ _register_all_tasks()
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (19) ---
+    # --- Geometry (22) ---
     "geometry_svd",
+    "geometry_isoscore",
     "geometry_categories",
     "geometry_cka",
     "geometry_collapse",
+    "geometry_contextualization",
     "geometry_correlation_dimension",
     "geometry_hsic",
     "geometry_hubness",
@@ -25,6 +27,7 @@ EXPECTED_TASKS = [
     "geometry_lipschitz",
     "geometry_mahalanobis",
     "geometry_matrix_entropy",
+    "geometry_neural_collapse",
     "geometry_prediction_alignment",
     "geometry_perplexity",
     "geometry_positional_decay",
@@ -32,11 +35,15 @@ EXPECTED_TASKS = [
     "geometry_spectral",
     "geometry_representation_sensitivity",
     "geometry_unembedding",
-    # --- Interpretability (12) ---
+    "geometry_weight_norms",
+    "geometry_tokenizer_efficiency",
+    # --- Interpretability (14) ---
     "interpretability_attention_effective_rank",
     "interpretability_attention_entropy",
     "interpretability_attention_graph",
+    "interpretability_attention_rank",
     "interpretability_attribution",
+    "interpretability_head_roles",
     "interpretability_induction_heads",
     "interpretability_logit_lens",
     "interpretability_prediction_entropy",
@@ -45,28 +52,41 @@ EXPECTED_TASKS = [
     "interpretability_sparsity",
     "interpretability_superposition",
     "interpretability_waa",
-    # --- Consistency (6) ---
+    # --- Consistency (11) ---
+    "consistency_bias_weat",
     "consistency_calibration",
     "consistency_contamination",
     "consistency_contrastive",
+    "consistency_format_robustness",
     "consistency_knowledge_capacity",
     "consistency_logical",
+    "consistency_membership_inference",
     "consistency_paraphrase",
-    # --- Dynamics (3) ---
+    "consistency_position_sensitivity",
+    "consistency_self_consistency",
+    "consistency_icl_slope",
+    # --- Dynamics (7) ---
     "dynamics_coe",
+    "dynamics_generation_diversity",
     "dynamics_interpolation",
+    "dynamics_gradient_flow",
+    "dynamics_sharpness",
     "dynamics_stability",
-    # --- Causality (4) ---
+    # --- Causality (6) ---
     "causality_ablation",
     "causality_attention_knockout",
     "causality_circuit_quality",
+    "causality_edge_attribution",
+    "causality_knowledge_neurons",
     "causality_tracing",
-    # --- Topology (3) ---
+    # --- Topology (4) ---
     "topology_betti_curve",
     "topology_homology",
     "topology_persistence_entropy",
-    # --- Representation Engineering (3) ---
+    "topology_persistence_landscape",
+    # --- Representation Engineering (4) ---
     "repe_concept_separability",
+    "repe_refusal_direction",
     "repe_steering_effectiveness",
     "repe_task_vectors",
 ]

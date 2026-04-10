@@ -1,4 +1,4 @@
-from .isotropy import SVDIsotropyTask
+from .isotropy import SVDIsotropyTask, IsoScoreTask
 from .consistency import PredictionAlignmentTask
 from .perplexity import RarePPLTask
 from .categories import CategoryGeometryTask
@@ -17,3 +17,7 @@ from .information_geometry import RepresentationSensitivityTask
 from .positional_decay import PositionalAttentionDecayTask
 from .matrix_entropy import MatrixEntropyTask
 from .correlation_dimension import CorrelationDimensionTask
+from .contextualization import ContextualizationTask
+from .neural_collapse import NeuralCollapseTask
+from .weight_norms import WeightNormProfileTask
+from .tokenizer_efficiency import TokenizerEfficiencyTask

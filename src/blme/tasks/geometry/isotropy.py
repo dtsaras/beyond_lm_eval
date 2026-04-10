@@ -56,6 +56,96 @@ def _svd_metrics_for_layer(X):
     }
 
 
+def _isoscore(X: np.ndarray) -> float:
+    """IsoScore (Rudman et al. 2022, arXiv:2207.10341).
+
+    Measures how close the empirical covariance of a point cloud is to a
+    scaled identity — a more discriminative notion of isotropy than the
+    Ethayarajh anisotropy baseline (which only looks at average cosine
+    similarity of random pairs).
+
+    Algorithm (sum-normalisation form):
+      1. Center X and compute the eigenvalue spectrum lambda_i of cov(X)
+         via SVD on centered data.
+      2. Scale lambda so sum(lambda_i) = d, so the isotropic case gives
+         the all-ones vector.
+      3. delta^2 = ||lambda - 1||^2.
+      4. delta_iso^2 = d*(d-1) — the maximum delta achieved when all the
+         variance lives in a single PC (lambda = (d, 0, ..., 0)).
+      5. psi = (delta_iso^2 - delta^2) / delta_iso^2  (in [0, 1]).
+      6. IsoScore = ((d - 1) * psi + 1) / d  (in [1/d, 1]).
+
+    Verified empirically: 1.00 for an isotropic Gaussian, ~0.03 when
+    99.99% of the variance lives in a single dimension, ~0.64 for a
+    1.5^-i power-law decay spectrum.
+
+    Returns a scalar in [1/d, 1] where 1 = perfectly isotropic.
+    """
+    n, d = X.shape
+    if n < 2 or d < 2:
+        return float("nan")
+
+    Xc = X - X.mean(axis=0, keepdims=True)
+    try:
+        _, S, _ = np.linalg.svd(Xc, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return float("nan")
+    eigvals = (S ** 2) / max(1, n - 1)
+
+    full = np.zeros(d, dtype=np.float64)
+    full[: len(eigvals)] = eigvals
+    s = full.sum()
+    if s <= 0:
+        return float("nan")
+    full = full * (d / s)
+
+    delta_sq = float(np.sum((full - 1.0) ** 2))
+    delta_iso_sq = float(d * (d - 1))
+    if delta_iso_sq == 0:
+        return float("nan")
+
+    psi = max(0.0, (delta_iso_sq - delta_sq) / delta_iso_sq)
+    xi = ((d - 1) * psi + 1.0) / d
+    return float(max(0.0, min(1.0, xi)))
+
+
+@register_task("geometry_isoscore")
+class IsoScoreTask(DiagnosticTask):
+    """
+    IsoScore (Rudman et al. 2022, arXiv:2207.10341).
+
+    A scalar in [0, 1] measuring how close the empirical covariance of the
+    final-layer hidden states is to a scaled identity matrix. Higher = more
+    isotropic. This is a strictly more discriminative isotropy measure than
+    Ethayarajh's average-cosine-similarity baseline (which only looks at
+    pairwise directions, not the magnitude spectrum).
+
+    Returns:
+        isoscore: float in [0, 1]
+    """
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running IsoScore Analysis...")
+        if dataset is None:
+            dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
+
+        num_samples = self.config.get("num_samples", 100)
+        use_cache = self.config.get("use_cache", True)
+
+        if cache is not None and cache.is_populated and use_cache:
+            X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples)
+        else:
+            X = collect_hidden_states(model, tokenizer, dataset, num_samples=num_samples)
+        X = X.float().numpy()
+        finite_mask = np.all(np.isfinite(X), axis=1)
+        if not np.all(finite_mask):
+            logger.info(f"  Filtered {(~finite_mask).sum()} non-finite rows out of {len(X)}")
+            X = X[finite_mask]
+        if len(X) < 10:
+            return {"error": "Too few finite hidden states for IsoScore"}
+
+        return {"isoscore": _isoscore(X)}
+
+
 @register_task("geometry_svd")
 class SVDIsotropyTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):

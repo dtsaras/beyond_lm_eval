@@ -30,8 +30,9 @@ class AttentionEntropyTask(DiagnosticTask):
         batch_size = self.config.get("batch_size", 1)
         num_samples = self.config.get("num_samples", 100)
         
-        entropies = [] # List of (num_layers, num_heads) arrays
-        
+        entropies = []  # List of (num_layers, num_heads) arrays
+        seq_lengths = []  # Per-sample sequence length for normalization
+
         with torch.no_grad():
             for i, sample in enumerate(tqdm(dataset, desc="Analyzing Attention")):
                 if i >= num_samples: break
@@ -54,37 +55,48 @@ class AttentionEntropyTask(DiagnosticTask):
                 # H(p) = - sum p log p
                 
                 layer_entropies = []
+                # T is the same for all layers in a single forward pass
+                T = attentions[0].shape[-1] if attentions[0] is not None else 1
                 for layer_att in attentions:
                     if layer_att is None:
                         # SDPA/Flash attention doesn't return weights
                         return {"error": "Model does not return attention weights. Reload with attn_implementation='eager'."}
                     # Layer shape: (B, H, T, T)
-                    # We compute entropy over the last dim (attention to other tokens)
-                    # Avg over B and T (query tokens)
-                    
-                    # Epsilon inside log to avoid log(0) without biasing the sum
-                    entropy = -torch.sum(layer_att * torch.log(layer_att + 1e-9), dim=-1) # (B, H, T)
-                    
+                    # Compute entropy over the last dim (attention to other tokens)
+                    # using clamp inside log instead of additive epsilon — avoids
+                    # biasing the entropy sum upward on sparse attention.
+                    p = layer_att.clamp(min=1e-12)
+                    entropy = -(layer_att * p.log()).sum(dim=-1)  # (B, H, T) — 0*log(0) = 0
+
                     # Avg over Batch and Query Tokens
-                    avg_head_entropy = entropy.mean(dim=[0, 2]).cpu().numpy() # (H,)
+                    avg_head_entropy = entropy.mean(dim=[0, 2]).cpu().numpy()  # (H,)
                     layer_entropies.append(avg_head_entropy)
-                    
-                entropies.append(np.array(layer_entropies)) # (L, H)
-        
+
+                entropies.append(np.array(layer_entropies))  # (L, H)
+                seq_lengths.append(T)
+
         # Average over all samples
         if not entropies:
             return {"error": "No attentions computed"}
-            
-        avg_entropies = np.mean(np.stack(entropies), axis=0) # (L, H)
-        
+
+        avg_entropies = np.mean(np.stack(entropies), axis=0)  # (L, H)
+        # Use the median sequence length for normalization. log(T) is the
+        # entropy of a uniform distribution over T positions, so dividing
+        # by it gives a value in roughly [0, 1] — comparable across models
+        # with different context lengths.
+        median_T = float(np.median(seq_lengths)) if seq_lengths else 1.0
+        norm_factor = float(np.log(max(2.0, median_T)))
+
         # Aggregate results
         results = {
             "avg_entropy_per_layer": np.mean(avg_entropies, axis=1).tolist(),
             "avg_entropy_total": float(np.mean(avg_entropies)),
             "min_entropy_head": float(np.min(avg_entropies)),
             "max_entropy_head": float(np.max(avg_entropies)),
-            # Return detailed map? Maybe too large.
-            # "head_entropies": avg_entropies.tolist() 
+            "avg_normalized_entropy_total": float(np.mean(avg_entropies) / norm_factor),
+            "min_normalized_entropy_head": float(np.min(avg_entropies) / norm_factor),
+            "max_normalized_entropy_head": float(np.max(avg_entropies) / norm_factor),
+            "median_seq_len": median_T,
         }
-        
+
         return results

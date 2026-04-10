@@ -64,8 +64,33 @@ class CalibrationTask(DiagnosticTask):
                     "count": mask.sum().item()
                 })
                 
+        # Brier score: mean squared error between confidence and correctness
+        # Brier = E[(confidence - correct)^2]. Lower = better calibrated.
+        conf_np = confidences.float().cpu().numpy()
+        acc_np = accuracies.float().cpu().numpy()
+        brier_score = float(np.mean((conf_np - acc_np) ** 2))
+
+        # Calibration slope: linear fit of bin_acc vs bin_conf.
+        # A perfectly calibrated model has slope = 1.0. Slope < 1 means
+        # overconfident; slope > 1 means underconfident.
+        if len(bin_stats) >= 3:
+            bin_confs = np.array([b["confidence"] for b in bin_stats])
+            bin_accs = np.array([b["accuracy"] for b in bin_stats])
+            try:
+                slope, intercept = np.polyfit(bin_confs, bin_accs, 1)
+                calibration_slope = float(slope)
+                calibration_intercept = float(intercept)
+            except Exception:
+                calibration_slope = float("nan")
+                calibration_intercept = float("nan")
+        else:
+            calibration_slope = float("nan")
+            calibration_intercept = float("nan")
+
         return {
             "ece": float(ece),
+            "brier_score": brier_score,
+            "calibration_slope": calibration_slope,
+            "calibration_intercept": calibration_intercept,
             "num_predictions": total_samples,
-            # "bin_detailed": bin_stats
         }

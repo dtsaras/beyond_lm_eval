@@ -1,3 +1,4 @@
 from .homology import PersistentHomologyTask
 from .persistence_entropy import PersistenceEntropyTask
 from .betti_curve import BettiCurveTask
+from .persistence_landscape import PersistenceLandscapeTask

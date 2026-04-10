@@ -96,8 +96,30 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             except Exception as e:
                 logger.info(f"Error computing purity: {e}")
 
+        # Embedding alignment: per-token cosine similarity between the
+        # input embedding row and the output (unembedding) row for the
+        # same token. High alignment means the model's input and output
+        # spaces are well-aligned (even when weights are not literally tied).
+        emb_alignment_mean = float("nan")
+        emb_alignment_std = float("nan")
+        emb_high_alignment_frac = float("nan")
+        if E_in is not None and E_in_np.shape == W_out_np.shape:
+            # Per-row cosine similarity
+            e_norms = np.linalg.norm(E_in_np, axis=1, keepdims=True)
+            w_norms = np.linalg.norm(W_out_np, axis=1, keepdims=True)
+            safe_e = np.where(e_norms > 0, e_norms, 1.0)
+            safe_w = np.where(w_norms > 0, w_norms, 1.0)
+            cos_sims = np.sum((E_in_np / safe_e) * (W_out_np / safe_w), axis=1)
+            emb_alignment_mean = float(np.mean(cos_sims))
+            emb_alignment_std = float(np.std(cos_sims))
+            # Fraction of tokens with cos > 0.9 (highly aligned)
+            emb_high_alignment_frac = float(np.mean(cos_sims > 0.9))
+
         return {
             "unembedding_is_tied": is_tied,
             "unembedding_eff_rank": float(eff_rank),
-            "unembedding_purity_mean": float(purity_mean)
+            "unembedding_purity_mean": float(purity_mean),
+            "embedding_alignment_mean": emb_alignment_mean,
+            "embedding_alignment_std": emb_alignment_std,
+            "embedding_high_alignment_frac": emb_high_alignment_frac,
         }

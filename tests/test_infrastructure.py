@@ -284,15 +284,43 @@ class TestRegistry:
 
         _register_all_tasks()
         tasks = list_tasks()
-        assert len(tasks) == 50
+        # Original library: 50 tasks.
+        # Phase B added: IsoScore, Contextualization, AttentionRankCollapse (+3)
+        # Phase C1-C5 added: PositionSensitivity, FormatRobustness,
+        #   NeuralCollapse, SelfConsistency, RefusalDirection (+5)
+        # Future additions should bump this number.
+        # 50 original + 3 Phase B + 5 Phase C1-5 + 4 Phase C6-9 + 4 Phase D + 4 Phase E = 70
+        assert len(tasks) == 70
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
+        assert "geometry_isoscore" in tasks
+        assert "geometry_contextualization" in tasks
+        assert "geometry_neural_collapse" in tasks
         assert "interpretability_attention_entropy" in tasks
+        assert "interpretability_attention_rank" in tasks
         assert "causality_tracing" in tasks
         assert "topology_homology" in tasks
         assert "consistency_calibration" in tasks
+        assert "consistency_position_sensitivity" in tasks
+        assert "consistency_format_robustness" in tasks
+        assert "consistency_self_consistency" in tasks
         assert "dynamics_stability" in tasks
         assert "repe_task_vectors" in tasks
+        assert "repe_refusal_direction" in tasks
+        assert "causality_knowledge_neurons" in tasks
+        assert "causality_edge_attribution" in tasks
+        assert "dynamics_sharpness" in tasks
+        assert "interpretability_head_roles" in tasks
+        # Phase D
+        assert "topology_persistence_landscape" in tasks
+        assert "consistency_bias_weat" in tasks
+        assert "dynamics_generation_diversity" in tasks
+        assert "consistency_membership_inference" in tasks
+        # Phase E
+        assert "dynamics_gradient_flow" in tasks
+        assert "geometry_weight_norms" in tasks
+        assert "geometry_tokenizer_efficiency" in tasks
+        assert "consistency_icl_slope" in tasks
 
 
 # ---------------------------------------------------------------------------

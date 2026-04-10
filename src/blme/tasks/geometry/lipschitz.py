@@ -1,6 +1,6 @@
 """
-Lipschitz Continuity Analysis — measures how smoothly representations
-change between adjacent layers.
+Relative-change ratio (sometimes called empirical Lipschitz) — measures
+how smoothly representations change between adjacent layers.
 
 The Lipschitz constant of a layer transformation f: R^d -> R^d bounds
 how much the output can change relative to the input:
@@ -108,12 +108,25 @@ class LipschitzContinuityTask(DiagnosticTask):
             contraction_rates.append(float(np.mean(cr)))
         
         lip_arr = np.array(lipschitz_means)
-        
+
+        # The keys named `lipschitz_*` are kept for backward compatibility,
+        # but this metric is the *relative-change ratio* ||Δh||/||h||, not
+        # the operator Lipschitz constant. The `relative_change_*` keys are
+        # the preferred names going forward.
+        mean_v = float(np.mean(lip_arr))
+        max_v = float(np.max(lip_arr))
+        std_v = float(np.std(lip_arr))
+        max_layer = int(np.argmax(lip_arr))
+
         return {
-            "lipschitz_mean": float(np.mean(lip_arr)),
-            "lipschitz_max": float(np.max(lip_arr)),
-            "lipschitz_std": float(np.std(lip_arr)),
-            "lipschitz_max_layer": int(np.argmax(lip_arr)),
+            "lipschitz_mean": mean_v,
+            "lipschitz_max": max_v,
+            "lipschitz_std": std_v,
+            "lipschitz_max_layer": max_layer,
+            "relative_change_mean": mean_v,
+            "relative_change_max": max_v,
+            "relative_change_std": std_v,
+            "relative_change_max_layer": max_layer,
             "mean_contraction_rate": float(np.mean(contraction_rates)),
             "contraction_std": float(np.std(contraction_rates)),
         }

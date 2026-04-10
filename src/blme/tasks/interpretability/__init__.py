@@ -10,3 +10,5 @@ from .attention_graph import AttentionGraphTopologyTask
 from .weight_activation_alignment import WeightActivationAlignmentTask
 from .attention_polysemanticity import AttentionEffectiveRankTask
 from .superposition import SuperpositionIndexTask
+from .attention_rank import AttentionRankCollapseTask
+from .head_roles import HeadRolesTask

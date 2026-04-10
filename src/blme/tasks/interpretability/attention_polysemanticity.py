@@ -49,7 +49,11 @@ class AttentionEffectiveRankTask(DiagnosticTask):
         target_modules = []
         for name, module in model.named_modules():
             # Standard HF naming for the attention output projection
-            if "attn.c_proj" in name or "attn.out_proj" in name or "attention.output.dense" in name:
+            # GPT-2: attn.c_proj; Llama/Gemma/Mistral/Qwen: self_attn.o_proj;
+            # BERT: attention.output.dense; GPT-NeoX: attention.dense
+            if ("attn.c_proj" in name or "attn.out_proj" in name
+                    or "self_attn.o_proj" in name or "self_attn.out_proj" in name
+                    or "attention.output.dense" in name or "attention.dense" in name):
                 target_modules.append(module)
 
         if not target_modules:

@@ -1,6 +1,7 @@
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from ..common import get_layers
 import torch
 import numpy as np
 import random
@@ -8,12 +9,68 @@ from tqdm import tqdm
 import logging
 logger = logging.getLogger("blme")
 
+
+def _find_attn_out_proj(layer):
+    """Locate the attention output projection for a transformer block.
+
+    Returns the nn.Module (Linear or Conv1D) that maps the concatenated
+    per-head attention outputs back to the residual stream, or None if
+    not found.
+    """
+    # Llama / Mistral / Qwen / Gemma
+    sa = getattr(layer, "self_attn", None)
+    if sa is not None:
+        for name in ("o_proj", "out_proj"):
+            if hasattr(sa, name):
+                return getattr(sa, name)
+    # GPT-2 / GPT-Neo / CodeGen
+    attn = getattr(layer, "attn", None)
+    if attn is not None:
+        for name in ("c_proj", "out_proj"):
+            if hasattr(attn, name):
+                return getattr(attn, name)
+    # Pythia / GPT-NeoX
+    attention = getattr(layer, "attention", None)
+    if attention is not None:
+        for name in ("dense", "out_proj"):
+            if hasattr(attention, name):
+                return getattr(attention, name)
+    return None
+
+
+def _make_head_ablation_pre_hook(head_indices, head_dim):
+    """Forward pre-hook that zeroes out the slice(s) of the o_proj input
+    corresponding to the given head indices."""
+    def pre_hook(module, args):
+        if not args:
+            return args
+        x = args[0]
+        x = x.clone()
+        for h in head_indices:
+            x[..., h * head_dim : (h + 1) * head_dim] = 0.0
+        return (x,) + tuple(args[1:])
+    return pre_hook
+
+
 @register_task("interpretability_induction_heads")
 class InductionHeadTask(DiagnosticTask):
     """
-    Identifies induction heads by measuring their ability to copy the token 
+    Identifies induction heads by measuring their ability to copy the token
     that followed a previous occurrence of the current token.
     Ref: Olsson et al., "In-context Learning and Induction Heads" (2022)
+
+    Two complementary signals are reported:
+      1. **Prefix-matching score** (attention-based): for the repeated
+         sequence "A B C ... A B C ...", we check whether each head at
+         position k attends to position (k - N) + 1 — the token after the
+         previous occurrence of the current token.
+      2. **Causal validation score** (OV-side): we ablate the top-k heads
+         identified by the prefix-matching score and measure how much the
+         model's next-token accuracy on the second half of the repeated
+         sequence drops, relative to ablating an equal number of random
+         heads. Heads that pass both checks are genuine induction heads —
+         this addresses the Jain & Wallace 2019 critique that attention
+         weights alone don't establish causal use.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Induction Head Analysis...")
@@ -108,19 +165,141 @@ class InductionHeadTask(DiagnosticTask):
         # Average over samples
         if not scores:
             return {"error": "No scores computed"}
-            
-        avg_scores = np.mean(np.stack(scores), axis=0) # (L, H)
-        
+
+        avg_scores = np.mean(np.stack(scores), axis=0)  # (L, H)
+        num_layers, num_heads_per_layer = avg_scores.shape
+
         num_top = min(5, avg_scores.size)
-        top_heads_indices = np.unravel_index(np.argsort(avg_scores, axis=None)[::-1][:num_top], avg_scores.shape)
+        top_flat_idx = np.argsort(avg_scores, axis=None)[::-1][:num_top]
+        top_heads_indices = np.unravel_index(top_flat_idx, avg_scores.shape)
         top_heads = []
+        top_head_pairs = []  # list of (layer_idx, head_idx)
         for i in range(num_top):
-            l = top_heads_indices[0][i]
-            h = top_heads_indices[1][i]
+            l = int(top_heads_indices[0][i])
+            h = int(top_heads_indices[1][i])
             top_heads.append(f"L{l}H{h}: {avg_scores[l, h]:.4f}")
-            
-        return {
+            top_head_pairs.append((l, h))
+
+        result = {
             "max_induction_score": float(np.max(avg_scores)),
             "avg_induction_score": float(np.mean(avg_scores)),
-            "top_induction_heads": top_heads
+            "prefix_match_score_max": float(np.max(avg_scores)),
+            "prefix_match_score_mean": float(np.mean(avg_scores)),
+            "top_induction_heads": top_heads,
         }
+
+        # ── Causal validation (OV-side check) ─────────────────────────────
+        # Ablate the top-k prefix-matching heads and measure how much the
+        # next-token accuracy drops on the second half of the repeated
+        # sequences. Compare to the drop from ablating an equal number of
+        # random heads. Heads that pass both checks are validated.
+        try:
+            layers = get_layers(model)
+            if layers is None:
+                logger.info("  Skipping causal validation: could not detect layers")
+                result["causal_validation_score"] = None
+                return result
+
+            # Resolve head dimension. Most architectures expose
+            # num_attention_heads + hidden_size on the config.
+            cfg = getattr(model, "config", None)
+            n_heads_cfg = getattr(cfg, "num_attention_heads", None) if cfg else None
+            hidden_size = getattr(cfg, "hidden_size", None) if cfg else None
+            if n_heads_cfg is None or hidden_size is None or n_heads_cfg == 0:
+                logger.info("  Skipping causal validation: missing num_attention_heads/hidden_size")
+                result["causal_validation_score"] = None
+                return result
+            # Gemma 3+ and some other models set head_dim explicitly
+            # (it may differ from hidden_size // num_heads).
+            head_dim = getattr(cfg, "head_dim", None) or (hidden_size // n_heads_cfg)
+
+            # Group head pairs by layer for hook bookkeeping. Note that the
+            # number of heads in `avg_scores` may exceed cfg num_heads on
+            # GQA models — clip to be safe.
+            def group_by_layer(pairs):
+                grouped = {}
+                for (l, h) in pairs:
+                    if h >= n_heads_cfg:
+                        continue
+                    grouped.setdefault(l, []).append(h)
+                return grouped
+
+            top_grouped = group_by_layer(top_head_pairs)
+
+            # Pick K random heads as a control baseline (excluding the top-k).
+            top_set = set(top_head_pairs)
+            all_heads = [(l, h) for l in range(num_layers) for h in range(n_heads_cfg)]
+            available = [p for p in all_heads if p not in top_set]
+            rng = random.Random(0)
+            rand_pairs = rng.sample(available, k=min(len(top_head_pairs), len(available)))
+            rand_grouped = group_by_layer(rand_pairs)
+
+            def measure_induction_accuracy(grouped_ablation):
+                """Run the same synthetic repeated sequences with the
+                specified set of heads ablated and return mean next-token
+                accuracy on the second half."""
+                handles = []
+                try:
+                    for l_idx, head_list in grouped_ablation.items():
+                        if l_idx >= len(layers):
+                            continue
+                        proj = _find_attn_out_proj(layers[l_idx])
+                        if proj is None:
+                            continue
+                        handles.append(
+                            proj.register_forward_pre_hook(
+                                _make_head_ablation_pre_hook(head_list, head_dim)
+                            )
+                        )
+
+                    correct, total = 0, 0
+                    rng_local = random.Random(123)
+                    with torch.no_grad():
+                        for _ in range(num_samples):
+                            rand_tokens = torch.randint(
+                                0, vocab_size, (1, seq_len),
+                                generator=torch.Generator().manual_seed(rng_local.randint(0, 2**31)),
+                            )
+                            input_ids_local = torch.cat([rand_tokens, rand_tokens], dim=1).to(model.device)
+                            out = model(input_ids_local)
+                            preds = out.logits[0, :-1].argmax(dim=-1)
+                            targets = input_ids_local[0, 1:]
+                            # Score only the second half (positions where
+                            # induction would help — i.e., k in [N-1, 2N-2]
+                            # predicts token at k+1 in [N, 2N-1])
+                            mask_start = seq_len - 1
+                            correct += (preds[mask_start:] == targets[mask_start:]).sum().item()
+                            total += (len(preds) - mask_start)
+                    return correct / max(1, total)
+                finally:
+                    for h in handles:
+                        h.remove()
+
+            baseline_acc = measure_induction_accuracy({})  # no ablation
+            top_ablated_acc = measure_induction_accuracy(top_grouped)
+            rand_ablated_acc = measure_induction_accuracy(rand_grouped)
+
+            # Causal validation: how much more does ablating top-k heads
+            # hurt induction accuracy compared to ablating random heads?
+            # Positive = top-k matters more than random. Normalised by
+            # baseline so it lives in roughly [-1, 1].
+            top_drop = baseline_acc - top_ablated_acc
+            rand_drop = baseline_acc - rand_ablated_acc
+            denom = max(baseline_acc, 1e-6)
+            causal_validation = (top_drop - rand_drop) / denom
+
+            result.update({
+                "induction_baseline_acc": float(baseline_acc),
+                "induction_acc_after_top_ablation": float(top_ablated_acc),
+                "induction_acc_after_random_ablation": float(rand_ablated_acc),
+                "causal_validation_score": float(causal_validation),
+                "validated_top_heads": [
+                    s for s, (l, h) in zip(top_heads, top_head_pairs)
+                    if causal_validation > 0  # if globally validated
+                ] if causal_validation > 0 else [],
+            })
+        except Exception as e:
+            logger.info(f"  Causal validation failed: {type(e).__name__}: {e}")
+            result["causal_validation_score"] = None
+
+        return result

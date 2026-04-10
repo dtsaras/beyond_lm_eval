@@ -69,73 +69,80 @@ class WeightActivationAlignmentTask(DiagnosticTask):
         # Dictionary to store mean alignment per layer
         alignments = {}
         
+        # Detect Conv1D class once. GPT-2 uses transformers.pytorch_utils.Conv1D,
+        # whose `weight` is shape (in, out) and the forward op is `x @ W`.
+        # nn.Linear's `weight` is shape (out, in) and the forward op is `x @ W^T`.
+        try:
+            from transformers.pytorch_utils import Conv1D as _HFConv1D
+        except Exception:
+            _HFConv1D = None
+
         for l_idx, proj in target_modules:
             W = proj.weight.detach().float()
-            # Detect Conv1D (GPT-2 style): check for the class or the `nf` attr
-            _is_conv1d = False
-            try:
-                from transformers.pytorch_utils import Conv1D
-                _is_conv1d = isinstance(proj, Conv1D)
-            except ImportError:
-                _is_conv1d = hasattr(proj, "nf")
-            if _is_conv1d:
-                pass  # Conv1D: shape is (in, out), already correct for out = in @ W
+            # Normalize to (in, out) so U[:, 0] lives in the *input* feature
+            # space and matches the activation principal component below.
+            if _HFConv1D is not None and isinstance(proj, _HFConv1D):
+                pass  # Already (in, out)
             else:
-                W = W.T  # Standard Linear: shape is (out, in), transpose to (in, out)
-                
-            # Get the top singular vector of the weight matrix
-            # W has shape (in_features, out_features)
-            U, S, V = torch.svd(W, compute_uv=True)
-            top_weight_vector = U[:, 0].unsqueeze(0) # (1, in_features)
-            
-            # Hook to collect activations entering this projection
+                # nn.Linear
+                W = W.T  # (out, in) -> (in, out)
+
+            # SVD: W = U @ diag(S) @ V^T, with U in input space.
+            try:
+                U, S, V = torch.svd(W, compute_uv=True)
+            except Exception as e:
+                logger.info(f"  SVD failed on layer {l_idx}: {e}")
+                continue
+            top_weight_vector = U[:, 0].unsqueeze(0)  # (1, in_features)
+
+            # Hook to collect activations entering this projection.
             activations = []
             def hook_fn(module, input_args, output):
-                # input_args[0] is typically the activation entering the layer
                 act = input_args[0].detach().cpu().float()
-                activations.append(act.view(-1, act.shape[-1])) # Flatten batch and seq
-                
+                activations.append(act.reshape(-1, act.shape[-1]))
+
             handle = proj.register_forward_hook(hook_fn)
-            
-            # Run forward pass
-            with torch.no_grad():
-                for s in samples:
-                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-                    model(**inputs)
-                    
-            handle.remove()
-            
+            try:
+                with torch.no_grad():
+                    for s in samples:
+                        text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
+                        inputs = tokenizer(text, return_tensors="pt",
+                                           truncation=True, max_length=128).to(device)
+                        model(**inputs)
+            finally:
+                handle.remove()
+
             if not activations:
                 continue
-                
-            # Compute principal component of activations
-            all_acts = torch.cat(activations, dim=0) # (N, in_features)
-            
-            # Center activations
+
+            all_acts = torch.cat(activations, dim=0)  # (N, in_features)
             all_acts = all_acts - all_acts.mean(dim=0, keepdim=True)
-            
-            # Since N can be large, we can compute PCA via SVD or Covariance
-            # If N > 10000, covariance is better
+
+            # Top principal component of activations (in input space)
             if all_acts.shape[0] > 5000:
                 cov = (all_acts.T @ all_acts) / (all_acts.shape[0] - 1)
-                L, Q = torch.linalg.eigh(cov)
-                top_act_vector = Q[:, -1].unsqueeze(0) # eigh sorts ascending
+                L_eig, Q = torch.linalg.eigh(cov)
+                top_act_vector = Q[:, -1].unsqueeze(0)  # eigh sorts ascending
             else:
                 U_a, S_a, V_a = torch.svd(all_acts, compute_uv=True)
                 top_act_vector = V_a[:, 0].unsqueeze(0)
-                
-            # Align shapes
+
             top_weight_vector = top_weight_vector.to(top_act_vector.device)
-            
+
+            # Both vectors should now be in the same (input feature) space.
+            # If they aren't, there's a real bug — fail loudly instead of
+            # silently falling back to a different vector.
             if top_weight_vector.shape[-1] != top_act_vector.shape[-1]:
-                # Transpose Mismatch fallback
-                top_weight_vector = V[:, 0].unsqueeze(0).to(top_act_vector.device)
-                
-            # Compute absolute cosine similarity (we only care about axis alignment, not sign)
+                logger.info(
+                    f"  WAA layer {l_idx}: dimension mismatch "
+                    f"(weight={top_weight_vector.shape[-1]}, act={top_act_vector.shape[-1]}) — skipping"
+                )
+                continue
+
+            # Absolute cosine similarity (sign doesn't matter for axis alignment).
             cos_sim = torch.nn.functional.cosine_similarity(top_weight_vector, top_act_vector)
             alignment = float(torch.abs(cos_sim).mean().item())
-            
+
             alignments[str(l_idx)] = alignment
             
         if not alignments:

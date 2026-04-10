@@ -88,7 +88,8 @@ class AttentionKnockoutTask(DiagnosticTask):
                         break
                         
                 hidden_size = model.config.hidden_size
-                head_size = hidden_size // num_heads
+                # Gemma 3+ sets head_dim explicitly (may differ from hidden_size // num_heads)
+                head_size = getattr(model.config, "head_dim", None) or (hidden_size // num_heads)
                 
                 for h_idx in range(num_heads):
                     start_dim = h_idx * head_size
