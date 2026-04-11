@@ -207,3 +207,15 @@ marimo/_lsp/
 __marimo__/
 CLAUDE.md
 AGENTS.md
+
+# LaTeX build artifacts (paper/main.tex compiles via Overleaf or local pdflatex)
+paper/main.aux
+paper/main.log
+paper/main.bbl
+paper/main.blg
+paper/main.out
+paper/main.toc
+paper/main.pdf
+paper/*.synctex.gz
+# Local-only shim used to syntax-check main.tex without the real NeurIPS .cls
+paper/neurips_2025.cls

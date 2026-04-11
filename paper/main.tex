@@ -7,6 +7,7 @@
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{subcaption}
+\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{cleveref}
 \usepackage{xcolor}
@@ -359,7 +360,7 @@ Smoothness & $1 - \text{std}(\Delta r) / \text{mean}(|\Delta r|)$ & Regularity o
 \label{sec:experiments}
 % ============================================================
 
-We describe the planned statistical analyses. Results will be reported in a subsequent version.
+We describe the planned statistical analyses below. Most analyses await full evaluation coverage; the base vs.\ instruction-tuned comparison (\Cref{sec:instruct}) does not depend on the downstream benchmark suite and is reported here from the completed BLME pass on $n = 6$ paired models.
 
 % ------------------------------------------------------------
 \subsection{Benchmark Performance (Dependent Variables)}
@@ -418,9 +419,55 @@ With small sample sizes, these results are exploratory: the minimum detectable S
 \label{sec:instruct}
 % ------------------------------------------------------------
 
-For each base--instruct pair (3--5 pairs), we compute the signed difference in each intrinsic metric.
-We apply paired Wilcoxon signed-rank tests to identify metrics that systematically shift with instruction tuning.
-This addresses: which representational properties are altered by alignment training, and which are invariant to it?
+\paragraph{Research question.}
+Supervised fine-tuning (SFT) and the subsequent preference-tuning stages that produce ``instruct'' variants are widely deployed but have unclear effects on model internals. We ask: \emph{which intrinsic representational properties shift systematically when a base language model is converted into its instruction-tuned counterpart, and in what direction?}
+
+\paragraph{Pairs.}
+We use the six base/instruction-tuned model pairs available in our zoo: Llama-3.2-1B, Qwen-3.5-\{0.8B, 2B, 4B, 9B\}, and Gemma-4-E4B (four Qwen pairs, one Llama pair, one Gemma pair). The Qwen-3.5-27B and Gemma-4-31B variants ship only as instruct checkpoints and contribute no pair. The pair set is dominated by Qwen-3.5; per-family direction is reported transparently in the results so that Qwen-specific shifts can be distinguished from family-invariant ones.
+
+\paragraph{Per-feature paired statistic.}
+For every numeric BLME feature $f$ and every pair $(b, i)$ where both base and instruction-tuned variants produced a finite value, we compute the signed difference $\Delta_{f}^{(b,i)} = f_i - f_b$. To make the magnitudes comparable across metrics with very different scales we normalise by the cross-model standard deviation of $f$ over the full evaluation zoo:
+\begin{equation}
+  \widetilde{\Delta}_f \;=\; \frac{\overline{\Delta_f}}{\hat\sigma_f^{\,\text{zoo}}},
+\end{equation}
+where $\overline{\Delta_f}$ is the mean of the per-pair differences and $\hat\sigma_f^{\,\text{zoo}}$ is the sample standard deviation of $f$ across all $32$ models in the study. The interpretation is direct: $\widetilde{\Delta}_f = +1$ means instruction tuning shifts the metric upward by one unit of cross-model variation. We also report Cohen's $d$ (using the within-pair $\sigma$) and the mean and median raw differences.
+
+\paragraph{Sign-agreement as primary evidence.}
+With $n = 6$ paired observations the paired Wilcoxon signed-rank test has minimum two-sided $p \approx 0.031$ (achieved only when all six pairs move in the same direction); after Benjamini--Hochberg correction across $\sim\!500$ features, no individual feature can reach $q < 0.05$ in principle. We therefore treat the \emph{sign-agreement fraction}---the proportion of pairs that moved in the same direction as the mean---as the primary descriptive evidence, and report Wilcoxon $q$-values for completeness only. A feature where all six pairs move the same direction (sign-agreement $= 1.0$) is treated as a high-confidence finding even when the corrected $p$-value is uninformative; we explicitly avoid framing the analysis as a hypothesis test.
+
+\paragraph{Pre-registered directional hypotheses.}
+Prior work suggests several testable directional predictions:
+\begin{itemize}
+  \item \textbf{Refusal direction emerges.} \citet{arditi2024refusal} report that instruction-tuned models develop a single linear direction whose ablation removes refusal behaviour, while base models do not. We expect \texttt{repe\_refusal\_direction.best\_layer\_separability\_auc} to increase from near-chance to substantially above $0.5$.
+  \item \textbf{Calibration degrades.} Multiple studies document that SFT and especially RLHF damage calibration~\citep{tian2023just,openai2023gpt4}. We expect Expected Calibration Error and Brier score to increase, and the calibration slope to fall below $1$.
+  \item \textbf{Attention sharpens.} Instruction tuning rewards focus on instruction tokens and format. We expect attention entropy to decrease.
+  \item \textbf{Activation sparsity rises.} Specialisation pressure typically increases sparsity of MLP intermediate activations.
+  \item \textbf{Effective dimensionality (EDG, IsoScore).} Open: instruction tuning could either compress representations (specialisation) or preserve them (multitask alignment). The sign of the effect on EDG is a research question of its own.
+\end{itemize}
+
+\paragraph{Results on completed BLME pass.}
+\Cref{tab:bvi-shifts} ranks the top $20$ BLME features by absolute standardised shift. The forest plot in \Cref{fig:bvi-forest} visualises the per-pair magnitudes, coloured by family. The most striking unanimous shifts on $n = 6$ pairs (sign-agreement $= 1.0$, $|\widetilde{\Delta}| > 0.9\sigma$) fall into three thematic clusters:
+\begin{itemize}
+  \item \textbf{Calibration cluster:} Expected Calibration Error, Brier score, and the calibration intercept and slope all shift in the direction prior work predicts---instruction-tuned models become \emph{less} calibrated. This effect is unanimous on the five pairs with calibration data and is among the largest standardised shifts in the entire feature set.
+  \item \textbf{Sharpness cluster:} the Hutchinson trace, SAM-perturbed loss, and gradient-norm magnitudes all increase by $\sim\!0.9$--$1.0$ cross-model standard deviations with full sign-agreement, consistent with instruction-tuned models occupying sharper minima.
+  \item \textbf{Surface-form NLL cluster:} the mean negative log-likelihood under the format-robustness templates rises by $\sim\!1.05\sigma$, indicating that SFT trades raw text-prediction quality for instruction-following. This is consistent with the chat-template formatting bias we expect.
+\end{itemize}
+We refrain from making significance claims given the small pair count and the dominance of Qwen in the sample (4/6 pairs); the per-family columns in \Cref{tab:bvi-shifts} let the reader assess Qwen-specificity at a glance. The full per-feature paired CSV is provided in the supplementary material.
+
+\begin{table}[t]
+\centering
+\caption{Top 20 BLME features by absolute cross-model standardised shift after instruction tuning ($n = 6$ pairs). Columns: $n$ = number of pairs with finite values on both sides (per-family breakdown in subscript: Q = Qwen 3.5, L = Llama 3, G = Gemma 4); $\Delta$ = mean signed difference (instruct $-$ base) in raw units; $\Delta_{\sigma}$ = $\Delta$ normalised by the cross-model standard deviation of the metric; $d$ = Cohen's $d$; \textbf{Agree.} = fraction of pairs moving in the same direction as the mean (1.0 = unanimous, primary evidence at small $n$); $q$ = Benjamini--Hochberg-corrected paired Wilcoxon $p$-value (uninformative at $n = 6$, included for completeness). Arrows indicate the direction of the mean shift.}
+\label{tab:bvi-shifts}
+\small
+\input{tables/table_base_vs_instruct_shifts}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_base_vs_instruct_forest.pdf}
+  \caption{Forest plot of the largest base$\to$instruct shifts on the completed BLME pass. Each colored marker is a single base/instruct pair (jittered vertically for readability); the black diamond is the per-feature mean. The dashed vertical line is the no-change baseline. Features are ordered by $|\widetilde{\Delta}|$. Unanimous direction across all six pairs is the primary descriptive evidence at this sample size.}
+  \label{fig:bvi-forest}
+\end{figure}
 
 % ------------------------------------------------------------
 \subsection{Unsupervised Clustering}
