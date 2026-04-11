@@ -30,8 +30,9 @@ logger = logging.getLogger("patch")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_zoo import MODELS, build_model_args
 
-# Tasks to re-run (the 4 that were failing due to the fixed bugs)
-TASKS_TO_PATCH = [
+# Default tasks to re-run (the 4 that were failing due to the fixed bugs).
+# Override with --tasks on the command line.
+DEFAULT_TASKS_TO_PATCH = [
     "geometry_svd",
     "geometry_prediction_alignment",
     "causality_tracing",
@@ -39,8 +40,8 @@ TASKS_TO_PATCH = [
 ]
 
 
-def _patch_model(entry, input_dir: Path, gpu_id: str):
-    """Run TASKS_TO_PATCH on `model` and merge into existing results.json."""
+def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
+    """Run ``tasks_to_patch`` on `model` and merge into existing results.json."""
     name = entry["name"]
     model_dir = input_dir / "blme" / name
     results_path = model_dir / "results.json"
@@ -48,7 +49,7 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
         logger.info(f"[SKIP] {name} — no existing results.json")
         return name, "skipped"
 
-    # Check if patching is needed (any of the 4 tasks missing/errored)
+    # Check if patching is needed (any task missing/errored in the existing envelope)
     with open(results_path) as f:
         envelope = json.load(f)
     existing_results = envelope.get("results", {})
@@ -56,13 +57,13 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
         t not in existing_results
         or (isinstance(existing_results[t], dict) and
             (len(existing_results[t]) == 0 or "error" in existing_results[t]))
-        for t in TASKS_TO_PATCH
+        for t in tasks_to_patch
     )
     if not needs_patch:
-        logger.info(f"[SKIP] {name} — all 4 tasks already successful")
+        logger.info(f"[SKIP] {name} — all {len(tasks_to_patch)} tasks already successful")
         return name, "already_done"
 
-    # Run just the 4 tasks into a temp output dir
+    # Run just the patched tasks into a temp output dir
     tmp_dir = model_dir / "_patch_tmp"
     tmp_dir.mkdir(exist_ok=True)
 
@@ -72,7 +73,7 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
     cmd = [
         sys.executable, "-m", "blme.cli", "evaluate",
         "--model-args", build_model_args(entry),
-        "--tasks", *TASKS_TO_PATCH,
+        "--tasks", *tasks_to_patch,
         "--output-dir", str(tmp_dir),
     ]
 
@@ -103,7 +104,7 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
     envelope["results"].update(patched_results)
     # Remove from errors any task that now succeeded
     envelope_errors = envelope.get("errors", {})
-    for t in TASKS_TO_PATCH:
+    for t in tasks_to_patch:
         if t in patched_results and isinstance(patched_results[t], dict) and "error" not in patched_results[t]:
             envelope_errors.pop(t, None)
         elif t in patched_errors:
@@ -119,7 +120,7 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
     envelope["summary"]["completed_tasks"] = completed
     envelope["summary"]["failed_tasks"] = total - completed
     envelope["patched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-    envelope["patched_tasks"] = TASKS_TO_PATCH
+    envelope["patched_tasks"] = tasks_to_patch
 
     # Write back
     with open(results_path, "w") as f:
@@ -129,11 +130,11 @@ def _patch_model(entry, input_dir: Path, gpu_id: str):
     import shutil
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    newly_ok = sum(1 for t in TASKS_TO_PATCH
+    newly_ok = sum(1 for t in tasks_to_patch
                     if t in patched_results and isinstance(patched_results[t], dict)
                     and "error" not in patched_results[t] and len(patched_results[t]) > 0)
-    logger.info(f"[DONE] {name} ({elapsed:.0f}s, {newly_ok}/{len(TASKS_TO_PATCH)} tasks patched OK)")
-    return name, f"patched {newly_ok}/{len(TASKS_TO_PATCH)}"
+    logger.info(f"[DONE] {name} ({elapsed:.0f}s, {newly_ok}/{len(tasks_to_patch)} tasks patched OK)")
+    return name, f"patched {newly_ok}/{len(tasks_to_patch)}"
 
 
 def main():
@@ -141,11 +142,19 @@ def main():
     ap.add_argument("--input-dir", default="results/study_v1")
     ap.add_argument("--models", default=None, help="Comma-separated model names")
     ap.add_argument("--all", action="store_true", help="Run on all completed models")
+    ap.add_argument("--tasks", default=None,
+                    help="Comma-separated task names to patch. "
+                         f"Defaults to: {','.join(DEFAULT_TASKS_TO_PATCH)}")
     ap.add_argument("--gpus", type=str, default=None,
                     help="Comma-separated physical GPU IDs to use (e.g. '3,4,5,6,7'). "
                          "Defaults to 0..n-gpus-1.")
     ap.add_argument("--n-gpus", type=int, default=4, help="Parallel GPUs (if --gpus not set)")
     args = ap.parse_args()
+
+    tasks_to_patch = (
+        [t.strip() for t in args.tasks.split(",") if t.strip()]
+        if args.tasks else list(DEFAULT_TASKS_TO_PATCH)
+    )
 
     input_dir = Path(args.input_dir)
     if args.all:
@@ -166,6 +175,7 @@ def main():
     else:
         gpu_ids = [str(i) for i in range(args.n_gpus)]
     logger.info(f"Patching {len(candidates)} models across GPUs {gpu_ids}")
+    logger.info(f"  tasks: {tasks_to_patch}")
 
     # Important: do NOT inherit CUDA_VISIBLE_DEVICES from parent so that
     # child processes see the physical GPU numbering and set_device works.
@@ -182,7 +192,7 @@ def main():
         while idx < len(candidates) or futures:
             while gpu_queue and idx < len(candidates):
                 gpu_id = gpu_queue.pop(0)
-                fut = executor.submit(_patch_model, candidates[idx], input_dir, str(gpu_id))
+                fut = executor.submit(_patch_model, candidates[idx], input_dir, str(gpu_id), tasks_to_patch)
                 futures[fut] = (candidates[idx]["name"], gpu_id)
                 idx += 1
             if futures:

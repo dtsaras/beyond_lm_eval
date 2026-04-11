@@ -142,105 +142,153 @@ class CausalTracingTask(DiagnosticTask):
         triples = triples[:num_samples]
         if not triples:
             return {"error": "No (prompt, subject, target) triples to trace"}
-        embeddings = model.get_input_embeddings()
+
+        # Noise injection is performed via a forward hook on the input
+        # embedding module rather than by passing ``inputs_embeds=`` to the
+        # model. This is portable across architectures: multimodal wrappers
+        # like Gemma 4 reject ``model(inputs_embeds=...)`` without
+        # ``input_ids`` because they need the token ids for placeholder
+        # routing, but they happily call the text embedding module whose
+        # output we can mutate from a hook.
+        embed_module = model.get_input_embeddings()
+        noise_state = {"enabled": False, "start": 0, "end": 0, "noise": None}
+
+        def embed_noise_hook(module, inputs, output):
+            if not noise_state["enabled"]:
+                return output
+            s = noise_state["start"]
+            e = noise_state["end"]
+            noise = noise_state["noise"]
+            # Cast noise to the embedding output dtype (e.g. bfloat16) to
+            # avoid dtype mismatches on models that store embeddings in
+            # reduced precision.
+            corrupted = output.clone()
+            corrupted[:, s:e, :] = corrupted[:, s:e, :] + noise.to(corrupted.dtype)
+            return corrupted
+
+        embed_hook_handle = embed_module.register_forward_hook(embed_noise_hook)
 
         results_by_layer = {layer_idx: [] for layer_idx in trace_layers}
 
-        with torch.no_grad():
-            for prompt, subject, target in triples:
-                input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
-                seq_len = input_ids.shape[1]
-                if seq_len < 2:
-                    continue
+        try:
+            with torch.no_grad():
+                for prompt, subject, target in triples:
+                    input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+                    seq_len = input_ids.shape[1]
+                    if seq_len < 2:
+                        continue
 
-                # Locate subject tokens in the prompt.
-                rng = _find_subject_token_range(tokenizer, prompt, subject)
-                if rng is None:
-                    logger.info(f"Skipping — could not locate subject '{subject}' in '{prompt}'")
-                    continue
-                corrupt_idx_start, corrupt_idx_end = rng
+                    # Locate subject tokens in the prompt.
+                    rng = _find_subject_token_range(tokenizer, prompt, subject)
+                    if rng is None:
+                        logger.info(f"Skipping — could not locate subject '{subject}' in '{prompt}'")
+                        continue
+                    corrupt_idx_start, corrupt_idx_end = rng
 
-                # Account for any special token at position 0 added by encode().
-                # tokenizer(prompt, add_special_tokens=False) was used in
-                # _find_subject_token_range, but tokenizer.encode adds bos for
-                # some models. Detect by length difference.
-                base_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-                offset = seq_len - len(base_ids)
-                if offset > 0:
-                    corrupt_idx_start += offset
-                    corrupt_idx_end += offset
-                corrupt_idx_end = min(corrupt_idx_end, seq_len)
-                if corrupt_idx_end <= corrupt_idx_start:
-                    continue
+                    # Account for any special token at position 0 added by encode().
+                    # tokenizer(prompt, add_special_tokens=False) was used in
+                    # _find_subject_token_range, but tokenizer.encode adds bos for
+                    # some models. Detect by length difference.
+                    base_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+                    offset = seq_len - len(base_ids)
+                    if offset > 0:
+                        corrupt_idx_start += offset
+                        corrupt_idx_end += offset
+                    corrupt_idx_end = min(corrupt_idx_end, seq_len)
+                    if corrupt_idx_end <= corrupt_idx_start:
+                        continue
 
-                # The "predict at" position is the last token of the prompt
-                # (next-token prediction).
-                target_idx = seq_len - 1
+                    # The "predict at" position is the last token of the prompt
+                    # (next-token prediction).
+                    target_idx = seq_len - 1
 
-                # Resolve the target token id (first token of `target`).
-                target_token_ids = tokenizer.encode(target, add_special_tokens=False)
-                if not target_token_ids:
-                    continue
-                target_token_id = target_token_ids[0]
+                    # Resolve the target token id (first token of `target`).
+                    target_token_ids = tokenizer.encode(target, add_special_tokens=False)
+                    if not target_token_ids:
+                        continue
+                    target_token_id = target_token_ids[0]
 
-                # 1. Clean Run
-                clean_out = model(input_ids, output_hidden_states=True)
-                clean_logits = clean_out.logits[0, target_idx]
-                clean_probs = F.softmax(clean_logits, dim=-1)
-                clean_prob_target = clean_probs[target_token_id].item()
+                    # 1. Clean Run — noise hook disabled.
+                    noise_state["enabled"] = False
+                    clean_out = model(input_ids, output_hidden_states=True)
+                    clean_logits = clean_out.logits[0, target_idx]
+                    clean_probs = F.softmax(clean_logits, dim=-1)
+                    clean_prob_target = clean_probs[target_token_id].item()
 
-                # Cache the clean hidden states
-                clean_states = [h.detach() for h in clean_out.hidden_states]
+                    # Cache the clean hidden states
+                    clean_states = [h.detach() for h in clean_out.hidden_states]
 
-                # 2. Corrupted Run — noise only on the subject tokens
-                inputs_embeds = embeddings(input_ids).clone()
-                noise = torch.randn_like(inputs_embeds[:, corrupt_idx_start:corrupt_idx_end, :]) * noise_std
-                inputs_embeds[:, corrupt_idx_start:corrupt_idx_end, :] += noise
+                    # Generate per-sample noise once — subsequent restoration
+                    # runs must reuse the same noise so corrupted baselines
+                    # are consistent. Shape matches the subject slice of
+                    # the embedding output (clean_states[0] is the embedding
+                    # output before any transformer block).
+                    clean_embed_out = clean_states[0]
+                    noise = torch.randn_like(
+                        clean_embed_out[:, corrupt_idx_start:corrupt_idx_end, :],
+                        dtype=torch.float32,
+                    ) * noise_std
+                    noise_state["start"] = corrupt_idx_start
+                    noise_state["end"] = corrupt_idx_end
+                    noise_state["noise"] = noise
 
-                corrupted_out = model(inputs_embeds=inputs_embeds)
-                corrupted_logits = corrupted_out.logits[0, target_idx]
-                corrupted_probs = F.softmax(corrupted_logits, dim=-1)
-                corrupted_prob_target = corrupted_probs[target_token_id].item()
-                
-                # Calculate the maximum possible restoration
-                max_restoration = clean_prob_target - corrupted_prob_target
-                if max_restoration <= 0:
-                    continue # Skip if noise didn't hurt the prediction
-                    
-                # 3. Restored Runs (Layer by Layer Patching)
-                for layer_idx in trace_layers:
-                    
-                    # We create a forward hook to patch the clean state back in
-                    def get_patch_hook(clean_state_to_patch):
-                        def patch_hook(module, input, output):
-                            # Patch the hidden states at the corrupt indices
-                            if isinstance(output, tuple):
-                                out_tensor = output[0].clone()
-                                out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
-                                return (out_tensor,) + output[1:]
-                            else:
-                                out_tensor = output.clone()
-                                out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
-                                return out_tensor
-                        return patch_hook
-                        
-                    # hidden_states stores [embedding_out, layer_0_out, ...]
-                    # So clean_states[layer_idx + 1] corresponds to the output of layers[layer_idx]
-                    hook = layers[layer_idx].register_forward_hook(get_patch_hook(clean_states[layer_idx + 1]))
-                    
-                    try:
-                        restored_out = model(inputs_embeds=inputs_embeds)
-                        restored_logits = restored_out.logits[0, target_idx]
-                        restored_probs = F.softmax(restored_logits, dim=-1)
-                        restored_prob_target = restored_probs[target_token_id].item()
-                        
-                        # Calculate Average Indirect Effect (AIE)
-                        # How much of the lost probability did we get back?
-                        aie = (restored_prob_target - corrupted_prob_target) / max_restoration
-                        results_by_layer[layer_idx].append(aie)
-                        
-                    finally:
-                        hook.remove()
+                    # 2. Corrupted Run — activate noise hook; forward with
+                    # input_ids so multimodal wrappers route correctly.
+                    noise_state["enabled"] = True
+                    corrupted_out = model(input_ids)
+                    corrupted_logits = corrupted_out.logits[0, target_idx]
+                    corrupted_probs = F.softmax(corrupted_logits, dim=-1)
+                    corrupted_prob_target = corrupted_probs[target_token_id].item()
+
+                    # Calculate the maximum possible restoration
+                    max_restoration = clean_prob_target - corrupted_prob_target
+                    if max_restoration <= 0:
+                        noise_state["enabled"] = False
+                        continue  # Skip if noise didn't hurt the prediction
+
+                    # 3. Restored Runs (Layer by Layer Patching).
+                    # The embedding noise hook stays active so every
+                    # restoration run sees the same corrupted embeddings;
+                    # the layer patch hook restores the clean hidden state
+                    # at the subject slice for one specific layer.
+                    for layer_idx in trace_layers:
+
+                        def get_patch_hook(clean_state_to_patch):
+                            def patch_hook(module, input, output):
+                                if isinstance(output, tuple):
+                                    out_tensor = output[0].clone()
+                                    out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
+                                    return (out_tensor,) + output[1:]
+                                else:
+                                    out_tensor = output.clone()
+                                    out_tensor[:, corrupt_idx_start:corrupt_idx_end, :] = clean_state_to_patch[:, corrupt_idx_start:corrupt_idx_end, :]
+                                    return out_tensor
+                            return patch_hook
+
+                        # hidden_states stores [embedding_out, layer_0_out, ...]
+                        # So clean_states[layer_idx + 1] corresponds to the output of layers[layer_idx]
+                        hook = layers[layer_idx].register_forward_hook(get_patch_hook(clean_states[layer_idx + 1]))
+
+                        try:
+                            restored_out = model(input_ids)
+                            restored_logits = restored_out.logits[0, target_idx]
+                            restored_probs = F.softmax(restored_logits, dim=-1)
+                            restored_prob_target = restored_probs[target_token_id].item()
+
+                            # Calculate Average Indirect Effect (AIE)
+                            # How much of the lost probability did we get back?
+                            aie = (restored_prob_target - corrupted_prob_target) / max_restoration
+                            results_by_layer[layer_idx].append(aie)
+
+                        finally:
+                            hook.remove()
+
+                    # Disable the noise hook until the next sample installs
+                    # fresh noise — prevents accidental corruption leaking
+                    # between samples.
+                    noise_state["enabled"] = False
+        finally:
+            embed_hook_handle.remove()
                         
         results = {}
         aie_list = []

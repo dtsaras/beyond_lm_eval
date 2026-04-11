@@ -25,6 +25,43 @@ def get_embeddings(model):
     return None
 
 
+def get_vocab_size(model):
+    """Get the text vocabulary size from any HF model config.
+
+    Handles multimodal "composed config" models (Gemma 4, Llava, Idefics,
+    Pixtral, etc.) where ``vocab_size`` lives under ``config.text_config``
+    rather than at the top level.
+
+    Resolution order:
+      1. ``model.config.vocab_size`` (plain causal LMs)
+      2. ``model.config.text_config.vocab_size`` (multimodal wrappers)
+      3. ``model.get_input_embeddings().num_embeddings`` (last resort)
+
+    Returns:
+        int vocab size, or None if nothing works.
+    """
+    cfg = getattr(model, "config", None)
+    if cfg is not None:
+        v = getattr(cfg, "vocab_size", None)
+        if v is not None:
+            return int(v)
+        # Multimodal: look inside nested sub-configs.
+        for sub_attr in ("text_config", "language_config", "llm_config"):
+            sub = getattr(cfg, sub_attr, None)
+            if sub is not None:
+                v = getattr(sub, "vocab_size", None)
+                if v is not None:
+                    return int(v)
+    # Last resort: ask the embedding module directly.
+    try:
+        emb = model.get_input_embeddings()
+        if emb is not None and hasattr(emb, "num_embeddings"):
+            return int(emb.num_embeddings)
+    except Exception:
+        pass
+    return None
+
+
 # ── Layer Access ───────────────────────────────────────────────────────
 
 _LAYER_ATTRS = [

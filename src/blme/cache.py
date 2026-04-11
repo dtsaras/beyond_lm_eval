@@ -157,8 +157,11 @@ class ModelOutputCache:
         logits = self.get_logits(num_samples=num_samples) or []
         labels = self.get_labels(num_samples=num_samples) or []
 
-        # Compute token_counts from labels
-        vocab_size = self.model.config.vocab_size if hasattr(self.model, "config") else 50257
+        # Compute token_counts from labels. Use the shared helper so
+        # multimodal models (Gemma 4, Llava, etc.) that nest vocab_size
+        # under config.text_config still work.
+        from .tasks.common import get_vocab_size
+        vocab_size = get_vocab_size(self.model) or 50257
         token_counts = np.zeros(vocab_size, dtype=np.float64)
         for lbl in labels:
             for t in lbl.view(-1).tolist():
