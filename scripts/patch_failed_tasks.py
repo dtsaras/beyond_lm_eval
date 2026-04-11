@@ -166,14 +166,17 @@ def main():
         print("Specify --all or --models <list>")
         return
 
-    # Skip models that need >1 GPU for this simple patcher
-    candidates = [m for m in candidates if m["n_gpus"] == 1]
-
-    # Resolve physical GPU ids
+    # Resolve physical GPU ids first so we can decide how to dispatch each
+    # model: small (n_gpus=1) models run as parallel workers across the
+    # gpu_ids list; multi-GPU models reserve the entire gpu_ids list
+    # sequentially via CUDA_VISIBLE_DEVICES="<list>".
     if args.gpus:
         gpu_ids = [g.strip() for g in args.gpus.split(",") if g.strip()]
     else:
         gpu_ids = [str(i) for i in range(args.n_gpus)]
+
+    multi_gpu_candidates = [m for m in candidates if m["n_gpus"] > 1]
+    candidates = [m for m in candidates if m["n_gpus"] == 1]
     logger.info(f"Patching {len(candidates)} models across GPUs {gpu_ids}")
     logger.info(f"  tasks: {tasks_to_patch}")
 
@@ -204,6 +207,19 @@ def main():
                     results[name] = status
                 except Exception as e:
                     results[name] = f"error: {e}"
+
+    # Multi-GPU models: each one gets the entire gpu_ids list passed as a
+    # comma-joined CUDA_VISIBLE_DEVICES string, run sequentially. The model's
+    # device_map=auto in build_model_args spreads the weights across them.
+    if multi_gpu_candidates:
+        joined = ",".join(gpu_ids)
+        logger.info(f"Patching {len(multi_gpu_candidates)} multi-GPU models on GPUs {joined}")
+        for m in multi_gpu_candidates:
+            try:
+                _, status = _patch_model(m, input_dir, joined, tasks_to_patch)
+                results[m["name"]] = status
+            except Exception as e:
+                results[m["name"]] = f"error: {e}"
 
     n_ok = sum(1 for v in results.values() if "patched" in str(v))
     n_skip = sum(1 for v in results.values() if v == "already_done")
