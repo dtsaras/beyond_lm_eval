@@ -67,7 +67,8 @@ def _load(input_dir: Path):
     partial = pd.read_csv(analysis_dir / "partial.csv") if (analysis_dir / "partial.csv").exists() else pd.DataFrame()
     lasso = pd.read_csv(analysis_dir / "lasso_features.csv") if (analysis_dir / "lasso_features.csv").exists() else pd.DataFrame()
     pca_coords = pd.read_csv(analysis_dir / "pca_coords.csv") if (analysis_dir / "pca_coords.csv").exists() else pd.DataFrame()
-    return agg, feat_meta, univariate, partial, lasso, pca_coords
+    bvi = pd.read_csv(analysis_dir / "base_vs_instruct.csv") if (analysis_dir / "base_vs_instruct.csv").exists() else pd.DataFrame()
+    return agg, feat_meta, univariate, partial, lasso, pca_coords, bvi
 
 
 def _sig_matrix(df: pd.DataFrame, value_col: str, top_features: list, benchmarks: list):
@@ -327,6 +328,100 @@ def fig_compression_profile(input_dir: Path, agg: pd.DataFrame, out_path: Path):
     print(f"  wrote {out_path}")
 
 
+def fig_base_vs_instruct_forest(input_dir: Path, bvi: pd.DataFrame,
+                                  agg: pd.DataFrame, out_path: Path,
+                                  top_n: int = 20):
+    """Forest plot of the largest standardised base→instruct shifts.
+
+    Y-axis: top-N features ordered by |std_delta_xmodel|.
+    X-axis: per-pair standardised delta = (it - base) / cross_model_std.
+    Each pair is plotted as a colored marker (one color per family). The
+    feature-level mean is shown as a black diamond. A vertical zero line
+    separates direction.
+    """
+    if bvi is None or bvi.empty:
+        print("  skipping base-vs-instruct forest (no analysis CSV)")
+        return
+
+    # We need the per-pair raw deltas, not just the per-feature summary.
+    # Reconstruct from agg + the same pair-finding rule used in
+    # analyze_correlations.run_base_vs_instruct.
+    pairs = []
+    name_to_row = {row["model"]: row for _, row in agg.iterrows()}
+    for name, it_row in name_to_row.items():
+        if not isinstance(name, str) or not name.endswith("-it"):
+            continue
+        base_row = name_to_row.get(name[:-3])
+        if base_row is None:
+            continue
+        family = it_row.get("family", "unknown")
+        if pd.isna(family):
+            family = "unknown"
+        pairs.append((base_row, it_row, str(family)))
+    if not pairs:
+        print("  skipping base-vs-instruct forest (no pairs in agg)")
+        return
+
+    cross_model_std = agg.std(numeric_only=True, ddof=1)
+    top = bvi.head(top_n).reset_index(drop=True)
+    # Order so the biggest absolute effect is at the *top* of the plot
+    top = top.iloc[::-1].reset_index(drop=True)
+
+    height = max(3.5, 0.35 * len(top) + 1)
+    fig, ax = plt.subplots(figsize=(6.5, height))
+
+    # Per-pair scatter, jittered slightly within each row to avoid overlap
+    rng = np.random.default_rng(0)
+    for y, (_, row) in enumerate(top.iterrows()):
+        feat = row["feature"]
+        denom = cross_model_std.get(feat, np.nan)
+        if pd.isna(denom) or denom <= 0:
+            continue
+        for base_row, it_row, family in pairs:
+            b = base_row.get(feat)
+            i = it_row.get(feat)
+            if pd.isna(b) or pd.isna(i):
+                continue
+            std_delta = (float(i) - float(b)) / float(denom)
+            jitter = rng.uniform(-0.12, 0.12)
+            ax.scatter(std_delta, y + jitter,
+                       s=42,
+                       c=FAMILY_COLORS.get(family, "#999"),
+                       edgecolors="black", linewidths=0.5,
+                       alpha=0.9, zorder=3)
+        # Mean diamond
+        ax.scatter(row["std_delta_xmodel"], y,
+                   s=100, marker="D",
+                   c="black", edgecolors="white", linewidths=0.7,
+                   zorder=4)
+
+    ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+    ax.set_yticks(range(len(top)))
+    ax.set_yticklabels([f.replace("_", r"\_") if False else f
+                         for f in top["feature"]], fontsize=7)
+    ax.set_xlabel(r"Standardised shift (instruct $-$ base) / cross-model $\sigma$")
+    ax.set_title(
+        f"Largest {len(top)} intrinsic-property shifts after instruction tuning"
+        f"\n(per-pair markers; black $\\diamond$ = mean over $n={int(top['n_pairs'].max())}$ pairs)"
+    )
+
+    # Family legend (only the families actually present)
+    families_present = sorted({f for _, _, f in pairs})
+    handles = [plt.Line2D([0], [0], marker="o", color="w",
+                          markerfacecolor=FAMILY_COLORS.get(f, "#999"),
+                          markeredgecolor="black", markersize=7, label=f)
+               for f in families_present]
+    handles.append(plt.Line2D([0], [0], marker="D", color="w",
+                              markerfacecolor="black", markeredgecolor="white",
+                              markersize=8, label="Mean"))
+    ax.legend(handles=handles, fontsize=7, loc="best", framealpha=0.9)
+
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    print(f"  wrote {out_path}")
+
+
 def fig_within_family_scaling(input_dir: Path, agg: pd.DataFrame, out_path: Path):
     """Key metric trajectories across the Pythia scaling series."""
     if "log_n_params" not in agg.columns or "family" not in agg.columns:
@@ -378,7 +473,7 @@ def main():
     output_dir = Path(args.output_dir) if args.output_dir else input_dir / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    agg, feat_meta, univariate, partial, lasso, pca_coords = _load(input_dir)
+    agg, feat_meta, univariate, partial, lasso, pca_coords, bvi = _load(input_dir)
 
     print(f"Generating figures to {output_dir}/")
     fig_correlation_heatmap(input_dir, univariate, partial, output_dir / "fig_correlation_heatmap.pdf")
@@ -386,6 +481,7 @@ def main():
     fig_feature_importance(input_dir, lasso, output_dir / "fig_feature_importance.pdf")
     fig_pca_clustering(input_dir, pca_coords, output_dir / "fig_pca_clustering.pdf")
     fig_base_vs_instruct(input_dir, agg, output_dir / "fig_base_vs_instruct.pdf")
+    fig_base_vs_instruct_forest(input_dir, bvi, agg, output_dir / "fig_base_vs_instruct_forest.pdf")
     fig_compression_profile(input_dir, agg, output_dir / "fig_compression_profile.pdf")
     fig_within_family_scaling(input_dir, agg, output_dir / "fig_within_family_scaling.pdf")
 

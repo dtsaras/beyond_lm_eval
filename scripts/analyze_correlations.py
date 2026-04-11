@@ -252,6 +252,138 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
     return df
 
 
+def _find_base_instruct_pairs(agg: pd.DataFrame) -> List[Tuple[pd.Series, pd.Series, str]]:
+    """Locate (base_row, instruct_row, family) tuples by the ``-it`` suffix.
+
+    A model named ``foo-it`` is the instruction-tuned counterpart of ``foo``
+    (the base) when both rows exist in the aggregated table. Models with no
+    matching base (e.g. ``qwen3.5-27b-it`` for which there is no public
+    Qwen3.5-27B base) are silently skipped.
+    """
+    pairs = []
+    name_to_row = {row["model"]: row for _, row in agg.iterrows()}
+    for name, it_row in name_to_row.items():
+        if not isinstance(name, str) or not name.endswith("-it"):
+            continue
+        base_name = name[:-3]
+        base_row = name_to_row.get(base_name)
+        if base_row is None:
+            continue
+        family = it_row.get("family", "unknown")
+        if pd.isna(family):
+            family = "unknown"
+        pairs.append((base_row, it_row, str(family)))
+    return pairs
+
+
+def run_base_vs_instruct(agg: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
+    """Compute paired base-vs-instruct statistics for every feature column.
+
+    For each metric we report:
+      * ``n_pairs``                       — pairs with finite values on both sides
+      * ``mean_delta`` / ``median_delta`` — instruct − base in raw units
+      * ``cohens_d``                      — mean_delta / std_delta (paired effect size)
+      * ``std_delta_xmodel``              — mean_delta / (cross-model std of the metric);
+                                            this normalises across metrics with very
+                                            different scales so a forest plot is meaningful
+      * ``sign_agreement``                — fraction of pairs that moved in the same
+                                            direction as the mean (1.0 = unanimous);
+                                            primary evidence at small n
+      * ``wilcoxon_p`` / ``wilcoxon_q``   — paired Wilcoxon signed-rank test +
+                                            Benjamini–Hochberg FDR. With n≈6 the test is
+                                            low-power; treat sign_agreement as primary.
+      * ``n_qwen``/``n_llama``/``n_gemma``— per-family pair counts (transparency for the
+                                            n=6 sample dominated by Qwen)
+
+    Output is sorted by |std_delta_xmodel| descending so the largest effects are
+    on top.
+    """
+    pairs = _find_base_instruct_pairs(agg)
+    if not pairs:
+        return pd.DataFrame()
+
+    # Cross-model std (over the full set of evaluated models) is the natural
+    # unit for cross-metric comparison: a delta of "0.5 cross-model stds"
+    # means the instruction-tuned model has shifted by half the variation
+    # we see across the entire zoo on that metric.
+    cross_model_std = agg[feature_cols].std(ddof=1)
+
+    try:
+        from scipy.stats import wilcoxon
+    except ImportError:
+        wilcoxon = None  # type: ignore
+
+    rows = []
+    for feat in feature_cols:
+        deltas = []
+        per_family: Dict[str, List[float]] = {}
+        for base_row, it_row, family in pairs:
+            b = base_row.get(feat)
+            i = it_row.get(feat)
+            if pd.isna(b) or pd.isna(i):
+                continue
+            d = float(i) - float(b)
+            deltas.append(d)
+            per_family.setdefault(family, []).append(d)
+
+        n = len(deltas)
+        if n < 2:
+            continue
+
+        deltas_arr = np.asarray(deltas, dtype=np.float64)
+        mean_delta = float(deltas_arr.mean())
+        median_delta = float(np.median(deltas_arr))
+        std_delta = float(deltas_arr.std(ddof=1)) if n >= 2 else np.nan
+        cohens_d = float(mean_delta / std_delta) if std_delta and std_delta > 0 else np.nan
+
+        denom = cross_model_std.get(feat, np.nan)
+        if pd.notna(denom) and denom > 0:
+            std_delta_xmodel = float(mean_delta / float(denom))
+        else:
+            std_delta_xmodel = np.nan
+
+        # Sign-agreement: fraction of pairs that moved in the dominant
+        # direction. Primary evidence at small n, where Wilcoxon has no power.
+        if mean_delta > 0:
+            sign_agreement = float((deltas_arr > 0).sum()) / n
+        elif mean_delta < 0:
+            sign_agreement = float((deltas_arr < 0).sum()) / n
+        else:
+            sign_agreement = 0.5
+
+        # Wilcoxon signed-rank (small n caveat)
+        wilcox_p: float = np.nan
+        if wilcoxon is not None and n >= 3 and np.any(deltas_arr != 0):
+            try:
+                _, wp = wilcoxon(deltas_arr, zero_method="wilcox", alternative="two-sided")
+                wilcox_p = float(wp)
+            except Exception:
+                wilcox_p = np.nan
+
+        rows.append({
+            "feature": feat,
+            "n_pairs": n,
+            "mean_delta": mean_delta,
+            "median_delta": median_delta,
+            "std_delta": std_delta if not np.isnan(std_delta) else np.nan,
+            "std_delta_xmodel": std_delta_xmodel,
+            "cohens_d": cohens_d if not np.isnan(cohens_d) else np.nan,
+            "sign_agreement": sign_agreement,
+            "wilcoxon_p": wilcox_p,
+            "n_qwen": len(per_family.get("qwen3.5", [])),
+            "n_llama": len(per_family.get("llama3", [])),
+            "n_gemma": len(per_family.get("gemma4", [])),
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["abs_std_delta_xmodel"] = df["std_delta_xmodel"].abs()
+    df = df.sort_values("abs_std_delta_xmodel", ascending=False).reset_index(drop=True)
+    df["wilcoxon_q"] = _bh_correction(df["wilcoxon_p"].values)
+    return df
+
+
 def run_pca(agg: pd.DataFrame, feature_cols: List[str], n_components: int = 3) -> pd.DataFrame:
     """PCA on the feature matrix, standardized."""
     try:
@@ -325,7 +457,27 @@ def main():
         for _, row in lasso.head(10).iterrows():
             print(f"    {row['feature']:<50s} {row['coefficient']:+.4f}")
 
-    # 4. PCA
+    # 4. Base vs. Instruct paired analysis
+    print("\n=== Base vs. Instruct paired analysis ===")
+    bvi = run_base_vs_instruct(agg, feature_cols)
+    if not bvi.empty:
+        bvi.to_csv(output_dir / "base_vs_instruct.csv", index=False)
+        n_pairs_max = int(bvi["n_pairs"].max())
+        n_features_evaluated = len(bvi)
+        unanimous = bvi[bvi["sign_agreement"] >= 0.999]
+        print(f"  {n_features_evaluated} features evaluated across up to {n_pairs_max} pairs")
+        print(f"  {len(unanimous)} features moved unanimously across all pairs")
+        print(f"  Top 10 by |std_delta_xmodel|:")
+        for _, r in bvi.head(10).iterrows():
+            arrow = "↑" if r["mean_delta"] > 0 else "↓"
+            print(f"    {arrow} {r['feature']:<60s} "
+                  f"n={int(r['n_pairs'])} "
+                  f"std_Δ={r['std_delta_xmodel']:+.2f} "
+                  f"agree={r['sign_agreement']:.2f}")
+    else:
+        print("  No base/instruct pairs found in aggregated.csv")
+
+    # 5. PCA
     print("\n=== PCA ===")
     pca_result = run_pca(agg, feature_cols)
     if isinstance(pca_result, tuple) and not pca_result[0].empty:
