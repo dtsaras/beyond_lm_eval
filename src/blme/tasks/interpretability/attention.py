@@ -69,7 +69,8 @@ class AttentionEntropyTask(DiagnosticTask):
                     entropy = -(layer_att * p.log()).sum(dim=-1)  # (B, H, T) — 0*log(0) = 0
 
                     # Avg over Batch and Query Tokens
-                    avg_head_entropy = entropy.mean(dim=[0, 2]).cpu().numpy()  # (H,)
+                    # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+                    avg_head_entropy = entropy.mean(dim=[0, 2]).float().cpu().numpy()  # (H,)
                     layer_entropies.append(avg_head_entropy)
 
                 entropies.append(np.array(layer_entropies))  # (L, H)

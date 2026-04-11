@@ -51,7 +51,8 @@ class ActivationSparsityTask(DiagnosticTask):
                 
                 # Calculate Kurtosis to measure the 'tailedness' of the activation distribution
                 # Flatten the tensor to compute kurtosis across all tokens and batch
-                flat_tensor = tensor.detach().cpu().numpy().flatten()
+                # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+                flat_tensor = tensor.detach().float().cpu().numpy().flatten()
                 
                 # We use Fisher's definition (normal ==> 0.0) by default in scipy
                 k = float(kurtosis(flat_tensor, fisher=True))

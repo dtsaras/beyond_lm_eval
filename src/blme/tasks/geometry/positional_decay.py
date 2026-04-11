@@ -67,7 +67,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                     if attn_entry is None:
                         continue
                     attn_matrix = attn_entry[0]  # (num_heads, seq_len, seq_len)
-                    mean_attn = attn_matrix.mean(dim=0).cpu().numpy()  # (seq_len, seq_len)
+                    # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+                    mean_attn = attn_matrix.mean(dim=0).float().cpu().numpy()  # (seq_len, seq_len)
 
                     distances = []
                     attentions = []

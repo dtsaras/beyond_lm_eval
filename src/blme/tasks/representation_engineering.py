@@ -172,7 +172,8 @@ class ConceptSeparabilityTask(DiagnosticTask):
                 out = model(**inputs, output_hidden_states=True)
                 for l_idx in range(num_layers):
                     hidden = out.hidden_states[l_idx + 1][0]
-                    rep = hidden.mean(dim=0).cpu().numpy()
+                    # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+                    rep = hidden.mean(dim=0).float().cpu().numpy()
                     layer_reps[l_idx].append(rep)
         
         y = np.array(labels)

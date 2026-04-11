@@ -40,8 +40,15 @@ DEFAULT_TASKS_TO_PATCH = [
 ]
 
 
-def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
-    """Run ``tasks_to_patch`` on `model` and merge into existing results.json."""
+def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch,
+                  task_timeout: int = 600, subprocess_timeout: int = 7200):
+    """Run the subset of ``tasks_to_patch`` that this model actually needs.
+
+    For each model we look at its existing results.json and select only the
+    tasks that are missing or recorded as errored — this avoids re-running
+    tasks that already succeeded for a particular model when the same
+    ``tasks_to_patch`` list is shared across heterogeneous failures.
+    """
     name = entry["name"]
     model_dir = input_dir / "blme" / name
     results_path = model_dir / "results.json"
@@ -49,21 +56,29 @@ def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
         logger.info(f"[SKIP] {name} — no existing results.json")
         return name, "skipped"
 
-    # Check if patching is needed (any task missing/errored in the existing envelope)
+    # Compute the per-model patch list: tasks in the requested list that
+    # this model is actually missing or that errored last time.
     with open(results_path) as f:
         envelope = json.load(f)
     existing_results = envelope.get("results", {})
-    needs_patch = any(
-        t not in existing_results
-        or (isinstance(existing_results[t], dict) and
-            (len(existing_results[t]) == 0 or "error" in existing_results[t]))
-        for t in tasks_to_patch
-    )
-    if not needs_patch:
-        logger.info(f"[SKIP] {name} — all {len(tasks_to_patch)} tasks already successful")
+    existing_errors = envelope.get("errors", {})
+
+    def _needs(t: str) -> bool:
+        if t in existing_errors:
+            return True
+        if t not in existing_results:
+            return True
+        v = existing_results[t]
+        if isinstance(v, dict) and (len(v) == 0 or "error" in v):
+            return True
+        return False
+
+    per_model_tasks = [t for t in tasks_to_patch if _needs(t)]
+    if not per_model_tasks:
+        logger.info(f"[SKIP] {name} — none of the requested tasks need patching")
         return name, "already_done"
 
-    # Run just the patched tasks into a temp output dir
+    # Run just the per-model patch list into a temp output dir
     tmp_dir = model_dir / "_patch_tmp"
     tmp_dir.mkdir(exist_ok=True)
 
@@ -73,16 +88,18 @@ def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
     cmd = [
         sys.executable, "-m", "blme.cli", "evaluate",
         "--model-args", build_model_args(entry),
-        "--tasks", *tasks_to_patch,
+        "--tasks", *per_model_tasks,
         "--output-dir", str(tmp_dir),
+        "--task-timeout", str(task_timeout),
     ]
 
-    logger.info(f"[PATCH] {name} (GPU {gpu_id})")
+    logger.info(f"[PATCH] {name} (GPU {gpu_id}, {len(per_model_tasks)} tasks, "
+                f"task_timeout={task_timeout}s): {per_model_tasks}")
     t0 = time.time()
     try:
-        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=3600)
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=subprocess_timeout)
     except subprocess.TimeoutExpired:
-        logger.error(f"[TIMEOUT] {name}")
+        logger.error(f"[TIMEOUT] {name} (subprocess > {subprocess_timeout}s)")
         return name, "timeout"
 
     elapsed = time.time() - t0
@@ -102,10 +119,11 @@ def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
 
     # Merge into the original envelope
     envelope["results"].update(patched_results)
-    # Remove from errors any task that now succeeded
+    # Remove from errors any task that now succeeded; record any new errors
+    # for tasks that still failed.
     envelope_errors = envelope.get("errors", {})
-    for t in tasks_to_patch:
-        if t in patched_results and isinstance(patched_results[t], dict) and "error" not in patched_results[t]:
+    for t in per_model_tasks:
+        if t in patched_results and isinstance(patched_results[t], dict) and "error" not in patched_results[t] and len(patched_results[t]) > 0:
             envelope_errors.pop(t, None)
         elif t in patched_errors:
             envelope_errors[t] = patched_errors[t]
@@ -120,7 +138,11 @@ def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
     envelope["summary"]["completed_tasks"] = completed
     envelope["summary"]["failed_tasks"] = total - completed
     envelope["patched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-    envelope["patched_tasks"] = tasks_to_patch
+    # Append, not overwrite — multiple patch passes accumulate.
+    prior_patched = envelope.get("patched_tasks", [])
+    if not isinstance(prior_patched, list):
+        prior_patched = []
+    envelope["patched_tasks"] = sorted(set(prior_patched) | set(per_model_tasks))
 
     # Write back
     with open(results_path, "w") as f:
@@ -130,11 +152,11 @@ def _patch_model(entry, input_dir: Path, gpu_id: str, tasks_to_patch):
     import shutil
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    newly_ok = sum(1 for t in tasks_to_patch
+    newly_ok = sum(1 for t in per_model_tasks
                     if t in patched_results and isinstance(patched_results[t], dict)
                     and "error" not in patched_results[t] and len(patched_results[t]) > 0)
-    logger.info(f"[DONE] {name} ({elapsed:.0f}s, {newly_ok}/{len(tasks_to_patch)} tasks patched OK)")
-    return name, f"patched {newly_ok}/{len(tasks_to_patch)}"
+    logger.info(f"[DONE] {name} ({elapsed:.0f}s, {newly_ok}/{len(per_model_tasks)} tasks patched OK)")
+    return name, f"patched {newly_ok}/{len(per_model_tasks)}"
 
 
 def main():
@@ -149,6 +171,13 @@ def main():
                     help="Comma-separated physical GPU IDs to use (e.g. '3,4,5,6,7'). "
                          "Defaults to 0..n-gpus-1.")
     ap.add_argument("--n-gpus", type=int, default=4, help="Parallel GPUs (if --gpus not set)")
+    ap.add_argument("--task-timeout", type=int, default=600,
+                    help="Per-task timeout in seconds passed through to blme.cli "
+                         "(default: 600). Bump for slow tasks on large/wide models.")
+    ap.add_argument("--subprocess-timeout", type=int, default=7200,
+                    help="Hard wall-clock cap on each model's whole patch run "
+                         "(default: 7200s = 2h). Should comfortably exceed "
+                         "task-timeout × number of patched tasks.")
     args = ap.parse_args()
 
     tasks_to_patch = (
@@ -195,7 +224,9 @@ def main():
         while idx < len(candidates) or futures:
             while gpu_queue and idx < len(candidates):
                 gpu_id = gpu_queue.pop(0)
-                fut = executor.submit(_patch_model, candidates[idx], input_dir, str(gpu_id), tasks_to_patch)
+                fut = executor.submit(_patch_model, candidates[idx], input_dir,
+                                      str(gpu_id), tasks_to_patch,
+                                      args.task_timeout, args.subprocess_timeout)
                 futures[fut] = (candidates[idx]["name"], gpu_id)
                 idx += 1
             if futures:
@@ -216,7 +247,8 @@ def main():
         logger.info(f"Patching {len(multi_gpu_candidates)} multi-GPU models on GPUs {joined}")
         for m in multi_gpu_candidates:
             try:
-                _, status = _patch_model(m, input_dir, joined, tasks_to_patch)
+                _, status = _patch_model(m, input_dir, joined, tasks_to_patch,
+                                          args.task_timeout, args.subprocess_timeout)
                 results[m["name"]] = status
             except Exception as e:
                 results[m["name"]] = f"error: {e}"

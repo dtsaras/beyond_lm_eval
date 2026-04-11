@@ -112,7 +112,8 @@ class AttentionGraphTopologyTask(DiagnosticTask):
                     if layer_attn is None:
                         continue
                     # layer_attn shape: (1, num_heads, seq_len, seq_len)
-                    layer_attn = layer_attn[0].cpu().numpy() # (num_heads, seq_len, seq_len)
+                    # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+                    layer_attn = layer_attn[0].float().cpu().numpy() # (num_heads, seq_len, seq_len)
                     num_heads = layer_attn.shape[0]
                     
                     for h_idx in range(num_heads):

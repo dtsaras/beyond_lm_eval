@@ -85,7 +85,8 @@ class CorrelationDimensionTask(DiagnosticTask):
 
         # Extract upper triangle distances (i < j)
         tri_indices = torch.triu_indices(N, N, offset=1)
-        distances = dist_matrix[tri_indices[0], tri_indices[1]].numpy()
+        # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+        distances = dist_matrix[tri_indices[0], tri_indices[1]].float().cpu().numpy()
 
         # 2. Grassberger-Procaccia Algorithm
         r_min = np.percentile(distances, 5)

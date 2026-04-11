@@ -123,7 +123,8 @@ class SuperpositionIndexTask(DiagnosticTask):
                 utilization_rates.append(0.0)
                 continue
 
-            all_acts = torch.cat(activation_data[l_idx], dim=0).numpy()
+            # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
+            all_acts = torch.cat(activation_data[l_idx], dim=0).float().cpu().numpy()
             n_tokens, dim = all_acts.shape
 
             # Subsample neurons if dim is large
