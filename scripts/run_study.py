@@ -206,13 +206,31 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
 
 
 def run_single_gpu_batch(models, output_dir, n_gpus=8, run_type="blme"):
-    """Run multiple 1-GPU models in parallel across available GPUs."""
+    """Run multiple 1-GPU models in parallel across available GPUs.
+
+    Respects the parent's CUDA_VISIBLE_DEVICES: if the parent restricted
+    the visible GPUs (e.g. CUDA_VISIBLE_DEVICES=3,4,5,6), child workers
+    are assigned the PHYSICAL GPU ids from that list, not 0..n-1.
+    Otherwise, when the child sets CUDA_VISIBLE_DEVICES="0" it would be
+    interpreted as physical GPU 0, colliding with other phases.
+    """
     runner = run_blme_model if run_type == "blme" else run_lmeval_model
     results = {}
 
-    # Queue models across GPUs
-    gpu_queue = list(range(n_gpus))
-    with ProcessPoolExecutor(max_workers=n_gpus) as executor:
+    # Resolve physical GPU IDs from parent's CUDA_VISIBLE_DEVICES
+    parent_cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if parent_cvd:
+        physical_gpus = [g.strip() for g in parent_cvd.split(",") if g.strip()]
+        # Unset parent's CUDA_VISIBLE_DEVICES so child sees all physical
+        # GPUs and can pick the one we assign by physical id.
+        del os.environ["CUDA_VISIBLE_DEVICES"]
+    else:
+        physical_gpus = [str(i) for i in range(n_gpus)]
+    physical_gpus = physical_gpus[:n_gpus]
+
+    # Queue physical GPU ids
+    gpu_queue = list(physical_gpus)
+    with ProcessPoolExecutor(max_workers=len(physical_gpus)) as executor:
         futures = {}
         model_idx = 0
 
