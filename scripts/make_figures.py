@@ -274,13 +274,13 @@ def fig_base_vs_instruct(input_dir: Path, agg: pd.DataFrame, out_path: Path):
 
 def fig_compression_profile(input_dir: Path, agg: pd.DataFrame, out_path: Path):
     """Per-layer effective rank profile for selected representative models."""
-    # We need the raw erank_per_layer, which lives in individual results.json files
     import json
     blme_dir = input_dir / "blme"
 
-    # Select representative models (one per family at similar sizes)
     picks = ["gpt2-small", "pythia-1.4b", "llama3-1b", "qwen3.5-2b", "gemma4-e2b", "olmo-1b"]
+    has_d_model = "d_model" in agg.columns
 
+    plotted = 0
     fig, ax = plt.subplots(figsize=(5.5, 3.5))
     for model in picks:
         path = blme_dir / model / "results.json"
@@ -299,15 +299,26 @@ def fig_compression_profile(input_dir: Path, agg: pd.DataFrame, out_path: Path):
         if family == "qwen3":
             family = "qwen3.5"
         xs = np.linspace(0, 1, len(erank))
-        # Normalise by model width (approximate — use d_model from metadata)
-        d_model = agg.loc[agg["model"] == model, "d_model"].values
-        d = d_model[0] if len(d_model) > 0 and d_model[0] > 0 else 1
+        # Normalise by model width if available, else by max rank (per-model)
+        d = 1.0
+        if has_d_model:
+            vals = agg.loc[agg["model"] == model, "d_model"].values
+            if len(vals) > 0 and pd.notna(vals[0]) and vals[0] > 0:
+                d = float(vals[0])
+        if d <= 1.0:
+            d = max(erank) if max(erank) > 0 else 1.0
         ys = np.asarray(erank) / d
         ax.plot(xs, ys, "-o", markersize=4,
                 label=model, color=FAMILY_COLORS.get(family, "#555"),
                 linewidth=1.5, alpha=0.85)
+        plotted += 1
+
+    if plotted == 0:
+        print("  skipping compression profile (no models)")
+        plt.close()
+        return
     ax.set_xlabel("Normalised depth")
-    ax.set_ylabel("Effective rank / $d_{\\mathrm{model}}$")
+    ax.set_ylabel("Effective rank (normalised)")
     ax.set_title("Compression profile across layers")
     ax.legend(fontsize=7, loc="best", framealpha=0.85)
     plt.tight_layout()
@@ -318,7 +329,10 @@ def fig_compression_profile(input_dir: Path, agg: pd.DataFrame, out_path: Path):
 
 def fig_within_family_scaling(input_dir: Path, agg: pd.DataFrame, out_path: Path):
     """Key metric trajectories across the Pythia scaling series."""
-    pythia = agg[agg["family"] == "pythia"].sort_values("log_n_params")
+    if "log_n_params" not in agg.columns or "family" not in agg.columns:
+        print("  skipping scaling plot (no log_n_params/family)")
+        return
+    pythia = agg[agg["family"] == "pythia"].dropna(subset=["log_n_params"]).sort_values("log_n_params")
     if len(pythia) < 4:
         print("  skipping scaling plot (need ≥4 Pythia models)")
         return
@@ -326,10 +340,15 @@ def fig_within_family_scaling(input_dir: Path, agg: pd.DataFrame, out_path: Path
     metrics = [
         ("edg", "EDG", False),
         ("geometry_spectral.avg_alpha", "Power-law $\\alpha$", False),
-        ("dynamics_sharpness.hutchinson_trace_per_param", "Hessian trace / param", True),  # log y
+        ("dynamics_sharpness.hutchinson_trace_per_param", "Hessian trace / param", True),
         ("composite_benchmark", "Composite benchmark", False),
     ]
-    metrics = [(k, lbl, lg) for k, lbl, lg in metrics if k in pythia.columns]
+    # Keep only metrics where the column exists AND Pythia has ≥3 non-NaN values
+    metrics = [(k, lbl, lg) for k, lbl, lg in metrics
+               if k in pythia.columns and pythia[k].notna().sum() >= 3]
+    if not metrics:
+        print("  skipping scaling plot (no metrics with enough data)")
+        return
 
     n = len(metrics)
     fig, axes = plt.subplots(1, n, figsize=(2.3 * n, 3.0))
