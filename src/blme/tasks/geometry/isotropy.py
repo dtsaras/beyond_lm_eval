@@ -25,7 +25,9 @@ def _svd_metrics_for_layer(X):
             return None
 
     explained_variance = np.cumsum(S ** 2) / np.sum(S ** 2)
-    auc = np.trapezoid(explained_variance) / max(1, len(explained_variance))
+    # np.trapezoid was introduced in NumPy 2.0; fall back to np.trapz for compatibility
+    _trapz = getattr(np, "trapezoid", np.trapz)
+    auc = _trapz(explained_variance) / max(1, len(explained_variance))
 
     p = S / (np.sum(S) + 1e-12)
     p = p[p > 1e-12]

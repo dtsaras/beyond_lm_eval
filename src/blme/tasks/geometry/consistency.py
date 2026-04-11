@@ -39,18 +39,25 @@ class PredictionAlignmentTask(DiagnosticTask):
         cosine_sims = []
 
         for h, labels in zip(stats["hidden"], stats["labels"]):
-            # With flattened stats: h is (N, D), labels is (N,)
-            if h.dim() == 3:
+            # Normalize shapes: h → (N, D), labels → (N,). The cache
+            # historically stores hidden flattened but labels with a batch
+            # dim, so we need to reconcile them before F.embedding.
+            if hasattr(h, "dim") and h.dim() == 3:
                 B, T, D = h.shape
                 h = h.reshape(-1, D)
+            if hasattr(labels, "dim") and labels.dim() >= 2:
                 labels = labels.reshape(-1)
 
             target_embs = F.embedding(labels, embeddings)
+            # At this point both should be 2D of shape (N, D).
 
             h_norm = F.normalize(h.float(), p=2, dim=-1)
             e_norm = F.normalize(target_embs.float(), p=2, dim=-1)
 
             cos = (h_norm * e_norm).sum(dim=-1)
+            # Ensure 1D before extending to avoid nested lists.
+            if cos.dim() > 1:
+                cos = cos.reshape(-1)
             cosine_sims.extend(cos.tolist())
 
         return {

@@ -129,6 +129,8 @@ class AblationRobustnessTask(DiagnosticTask):
         # Summary metrics
         # If the curve grows very fast, the model is brittle.
         # If the curve grows slowly, the model is redundant.
-        results["area_under_degradation_curve"] = float(np.trapezoid(degradation_curve, ablation_percentages))
+        # np.trapezoid was introduced in NumPy 2.0; fall back to np.trapz for compatibility
+        _trapz = getattr(np, "trapezoid", np.trapz)
+        results["area_under_degradation_curve"] = float(_trapz(degradation_curve, ablation_percentages))
         
         return results

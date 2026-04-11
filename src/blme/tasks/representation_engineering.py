@@ -33,21 +33,41 @@ class TaskVectorGeometryTask(DiagnosticTask):
         layers = get_layers(model)
         num_layers = len(layers)
         
-        # We need paired contrasting positive/negative examples
+        # Bundled true/false contrastive pairs used as a fallback when the
+        # caller passes a dataset without {text_pos, text_neg} keys.
+        _FALLBACK_PAIRS = [
+            {"text_pos": "The earth revolves around the sun.",
+             "text_neg": "The sun revolves around the earth."},
+            {"text_pos": "Water boils at 100 degrees Celsius.",
+             "text_neg": "Water boils at 0 degrees Celsius."},
+            {"text_pos": "A triangle has three sides.",
+             "text_neg": "A triangle has four sides."},
+            {"text_pos": "Humans typically have two arms.",
+             "text_neg": "Humans typically have three arms."},
+            {"text_pos": "The Pacific is the largest ocean.",
+             "text_neg": "The Atlantic is the largest ocean."},
+        ]
+
+        # Fall back to bundled pairs when dataset is None OR when it
+        # contains items without the required contrastive keys (e.g. the
+        # default BLME corpus with only {text: ...}).
+        need_fallback = False
         if dataset is None:
-            dataset = [
-                {"text_pos": "The earth revolves around the sun.", "text_neg": "The sun revolves around the earth."},
-                {"text_pos": "Water boils at 100 degrees Celsius.", "text_neg": "Water boils at 0 degrees Celsius."},
-                {"text_pos": "A triangle has three sides.", "text_neg": "A triangle has four sides."},
-            ] * num_samples
-        
+            need_fallback = True
+        else:
+            samples_preview = list(dataset)[:num_samples]
+            if not samples_preview or not all(
+                isinstance(s, dict) and "text_pos" in s and "text_neg" in s
+                for s in samples_preview
+            ):
+                need_fallback = True
+
+        if need_fallback:
+            dataset = (_FALLBACK_PAIRS * ((num_samples // len(_FALLBACK_PAIRS)) + 1))[:num_samples]
+
         samples = list(dataset)[:num_samples]
         if len(samples) < 1:
              return {"error": "Need at least 1 sample with 'text_pos' and 'text_neg' keys"}
-             
-        if not all("text_pos" in s and "text_neg" in s for s in samples):
-             # If dataset doesn't have pairs, we can't do contrastive task vectors
-             return {"error": "Dataset must contain 'text_pos' and 'text_neg' paired keys for contrastive Task Vector extraction"}
 
         
         # Dictionaries to hold the activations for each sample pair across layers

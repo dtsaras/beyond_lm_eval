@@ -124,8 +124,20 @@ class CausalTracingTask(DiagnosticTask):
                         target = " " + target
                     triples.append((s["prompt"], s["subject"], target))
                 elif isinstance(s, dict) and "text" in s:
-                    logger.info(f"Skipping sample without 'subject' field: {s.get('text', '')[:60]}")
+                    # Dataset provided but lacks subject annotation — the
+                    # default BLME cache corpus hits this branch. Fall back
+                    # to the bundled facts so the task still produces output.
                     continue
+
+            # If nothing survived (e.g. default corpus with only 'text'),
+            # fall back to the bundled facts.
+            if not triples:
+                logger.info("  dataset lacks (prompt, subject) triples — using bundled fallback facts")
+                while len(triples) < num_samples:
+                    for t in _FALLBACK_FACTS:
+                        triples.append(t)
+                        if len(triples) >= num_samples:
+                            break
 
         triples = triples[:num_samples]
         if not triples:
