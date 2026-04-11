@@ -141,7 +141,10 @@ def main():
     ap.add_argument("--input-dir", default="results/study_v1")
     ap.add_argument("--models", default=None, help="Comma-separated model names")
     ap.add_argument("--all", action="store_true", help="Run on all completed models")
-    ap.add_argument("--n-gpus", type=int, default=4, help="Parallel GPUs")
+    ap.add_argument("--gpus", type=str, default=None,
+                    help="Comma-separated physical GPU IDs to use (e.g. '3,4,5,6,7'). "
+                         "Defaults to 0..n-gpus-1.")
+    ap.add_argument("--n-gpus", type=int, default=4, help="Parallel GPUs (if --gpus not set)")
     args = ap.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -156,11 +159,24 @@ def main():
 
     # Skip models that need >1 GPU for this simple patcher
     candidates = [m for m in candidates if m["n_gpus"] == 1]
-    logger.info(f"Patching {len(candidates)} models across {args.n_gpus} GPUs")
+
+    # Resolve physical GPU ids
+    if args.gpus:
+        gpu_ids = [g.strip() for g in args.gpus.split(",") if g.strip()]
+    else:
+        gpu_ids = [str(i) for i in range(args.n_gpus)]
+    logger.info(f"Patching {len(candidates)} models across GPUs {gpu_ids}")
+
+    # Important: do NOT inherit CUDA_VISIBLE_DEVICES from parent so that
+    # child processes see the physical GPU numbering and set_device works.
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        logger.info(f"  (unsetting parent CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']})")
+        del os.environ["CUDA_VISIBLE_DEVICES"]
 
     results = {}
-    gpu_queue = list(range(args.n_gpus))
-    with ProcessPoolExecutor(max_workers=args.n_gpus) as executor:
+    gpu_queue = list(gpu_ids)
+    max_workers = len(gpu_ids)
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         idx = 0
         while idx < len(candidates) or futures:
