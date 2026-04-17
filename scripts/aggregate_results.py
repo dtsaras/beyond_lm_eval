@@ -218,14 +218,28 @@ def _extract_blme_features(blme_dir: Path, model_name: str, d_model: int) -> Opt
     return features
 
 
-def _extract_lm_eval_scores(lm_eval_dir: Path, model_name: str) -> Dict[str, float]:
-    """Extract benchmark accuracies from lm_eval output JSONs."""
+def _extract_lm_eval_scores(lm_eval_dir: Path, model_name: str,
+                             extended_dir: Optional[Path] = None) -> Dict[str, float]:
+    """Extract benchmark accuracies from lm_eval output JSONs.
+
+    Scans both the original lm_eval/ subdirs (with _mmlu suffix for 5-shot
+    MMLU) and the extended comprehensive-benchmark suite at lm_eval_extended/
+    (with _<benchname> suffix per benchmark group).
+    """
     out: Dict[str, float] = {}
-    for suffix in ["", "_mmlu"]:
-        model_subdir = lm_eval_dir / f"{model_name}{suffix}"
+
+    # Primary lm_eval dir: {model_name}/ (main 0-shot) + {model_name}_mmlu/
+    dirs_to_scan = [lm_eval_dir / f"{model_name}",
+                    lm_eval_dir / f"{model_name}_mmlu"]
+    # Extended benchmarks: {model_name}_{benchmark_tag}/ under lm_eval_extended/
+    if extended_dir is not None and extended_dir.exists():
+        for sub in extended_dir.iterdir():
+            if sub.is_dir() and sub.name.startswith(f"{model_name}_"):
+                dirs_to_scan.append(sub)
+
+    for model_subdir in dirs_to_scan:
         if not model_subdir.exists():
             continue
-        # lm_eval writes a timestamped json inside a subfolder named after the model ID
         json_files = list(model_subdir.rglob("results*.json"))
         for jf in json_files:
             try:
@@ -236,9 +250,19 @@ def _extract_lm_eval_scores(lm_eval_dir: Path, model_name: str) -> Dict[str, flo
                     if not isinstance(task_metrics, dict):
                         continue
                     # Find the main accuracy / acc_norm metric
-                    for metric_key in ["acc,none", "acc_norm,none", "acc", "acc_norm"]:
+                    # Also handle perplexity-style and exact-match metrics for
+                    # benchmarks like lambada_openai (acc), drop (em,f1),
+                    # triviaqa (exact_match), nq_open (exact_match).
+                    for metric_key in ["acc,none", "acc_norm,none",
+                                       "em,none", "exact_match,flexible-extract",
+                                       "exact_match,strict-match",
+                                       "exact_match,get-answer",
+                                       "exact_match,remove_whitespace",
+                                       "perplexity,none",
+                                       "acc", "acc_norm"]:
                         if metric_key in task_metrics:
-                            col = f"benchmark_{task_name}_{metric_key.split(',')[0]}"
+                            metric_name = metric_key.split(',')[0]
+                            col = f"benchmark_{task_name}_{metric_name}"
                             out[col] = float(task_metrics[metric_key])
                             break
             except Exception as e:
@@ -328,6 +352,8 @@ def main():
 
     blme_dir = input_dir / "blme"
     lm_eval_dir = input_dir / "lm_eval"
+    # Extended comprehensive benchmark suite (gsm8k, bbh, drop, triviaqa, ...)
+    lm_eval_extended_dir = input_dir / "lm_eval_extended"
 
     # Build model metadata
     print("Loading model metadata...")
@@ -353,17 +379,102 @@ def main():
 
     features_df = pd.DataFrame(feature_rows)
 
-    # Extract benchmark scores (Y-variables)
+    # Extract benchmark scores (Y-variables) — scans both lm_eval/ and
+    # the extended comprehensive suite in lm_eval_extended/
     print("Extracting lm_eval benchmark scores...")
     benchmark_rows: List[Dict[str, float]] = []
     for _, row in meta.iterrows():
-        scores = _extract_lm_eval_scores(lm_eval_dir, row["model"])
+        scores = _extract_lm_eval_scores(lm_eval_dir, row["model"],
+                                          extended_dir=lm_eval_extended_dir)
         scores["model"] = row["model"]
         benchmark_rows.append(scores)
     benchmarks_df = pd.DataFrame(benchmark_rows)
 
     # Merge everything
     aggregated = meta.merge(features_df, on="model", how="left").merge(benchmarks_df, on="model", how="left")
+
+    # ── Post-merge cleaning (from the BLME audit findings) ─────────────
+    # These fixes address issues discovered during the 2026-04-13 audit:
+    #   (a) ~35 hyperparameter constants leaked into the feature matrix
+    #   (b) dynamics_sharpness.n_params IS the parameter count (ρ=0.97 with log N)
+    #   (c) gemma4-e4b-it ECE=0.568 is a 20× outlier from a tokenizer/template bug
+    #   (d) geometry_perplexity metrics are inverted with model size (cache's
+    #       128-token evaluation breaks cross-model PPL comparisons)
+
+    # (a) Drop features with zero variance across all models (these are
+    # hyperparameter constants: n_samples, num_points, sam_rho, n_facts, ...).
+    feature_cols = [c for c in aggregated.columns
+                    if c not in {"model", "family", "hf_id", "dtype", "n_gpus",
+                                 "purpose", "d_model", "n_layers", "n_heads",
+                                 "vocab_size", "n_params_est", "n_params_M",
+                                 "log_n_params", "composite_benchmark"}
+                    and not c.startswith("benchmark_")]
+    dropped_constants: List[str] = []
+    for col in feature_cols:
+        if not pd.api.types.is_numeric_dtype(aggregated[col]):
+            continue
+        vals = aggregated[col].dropna()
+        if len(vals) < 3:
+            continue
+        # Zero or near-zero coefficient of variation → a constant
+        mean = vals.mean()
+        std = vals.std(ddof=0)
+        cv = std / (abs(mean) + 1e-12)
+        if cv < 1e-4 and mean != 0:
+            dropped_constants.append(col)
+        elif std == 0:
+            dropped_constants.append(col)
+    if dropped_constants:
+        print(f"  Dropping {len(dropped_constants)} constant/hyperparameter features "
+              f"(zero variance — these are config values not features)")
+        aggregated = aggregated.drop(columns=dropped_constants)
+
+    # (b) Drop dynamics_sharpness.n_params — it leaks model size into the
+    # feature matrix (ρ=0.97 with log N_params per audit).
+    if "dynamics_sharpness.n_params" in aggregated.columns:
+        aggregated = aggregated.drop(columns=["dynamics_sharpness.n_params"])
+        print("  Dropped dynamics_sharpness.n_params (confounded with model size)")
+
+    # (c) Null out gemma4-e4b-it's calibration values (the 20× ECE outlier
+    # appears to be a chat-template/tokenization bug in the calibration task).
+    cal_cols = [c for c in aggregated.columns
+                if c.startswith("consistency_calibration.")]
+    if cal_cols:
+        bad_idx = aggregated["model"] == "gemma4-e4b-it"
+        if bad_idx.any():
+            n_nulled = 0
+            for c in cal_cols:
+                before = aggregated.loc[bad_idx, c].notna().sum()
+                aggregated.loc[bad_idx, c] = np.nan
+                n_nulled += int(before)
+            if n_nulled > 0:
+                print(f"  Nulled {n_nulled} calibration entries for gemma4-e4b-it "
+                      f"(ECE=0.568 is a 20× outlier — likely bug)")
+
+    # (d) Add effective_rank_ratio = geometry_svd.effective_rank / d_model.
+    # This is a more discriminative isotropy proxy than IsoScore (which
+    # saturates near 1.0 for most models — see audit findings).
+    if ("geometry_svd.effective_rank" in aggregated.columns
+            and "d_model" in aggregated.columns):
+        aggregated["geometry_svd.effective_rank_ratio"] = (
+            aggregated["geometry_svd.effective_rank"]
+            / aggregated["d_model"].replace(0, np.nan)
+        )
+        print("  Added geometry_svd.effective_rank_ratio (= effective_rank / d_model)")
+
+    # (e) Flag the BLME geometry_perplexity columns as deprecated — they are
+    # inverted with model size (ρ=+0.65 with log N instead of negative) due to
+    # the cache's 128-token per-passage protocol. We keep them in the output
+    # for transparency but rename so any downstream analysis has to
+    # explicitly opt in to using a metric we know is broken.
+    ppl_cols = [c for c in aggregated.columns
+                if c.startswith("geometry_perplexity.")
+                and any(k in c for k in ["ppl", "mean_nll", "bits_per_char"])]
+    if ppl_cols:
+        rename = {c: f"{c}__deprecated_inverted" for c in ppl_cols}
+        aggregated = aggregated.rename(columns=rename)
+        print(f"  Renamed {len(ppl_cols)} geometry_perplexity columns with "
+              f"__deprecated_inverted suffix (metric inverted with model size)")
 
     # Compute composite benchmark score
     bench_cols = [c for c in aggregated.columns if c.startswith("benchmark_")]

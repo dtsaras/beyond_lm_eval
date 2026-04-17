@@ -198,7 +198,14 @@ def analyze_benchmark_y(agg: pd.DataFrame) -> str:
 # ── Q2/Q3. Size baseline + top predictors beyond scale ──────────────────
 
 def analyze_predictors(agg: pd.DataFrame, uni: pd.DataFrame, par: pd.DataFrame,
-                       lasso: pd.DataFrame) -> str:
+                       lasso: pd.DataFrame, min_n: int = 20) -> str:
+    """min_n filters out low-power correlations (default 20).
+
+    At n<20, Spearman ρ approaches ±1.0 with meaningful probability under
+    the null, so "top correlates" tables get contaminated by spurious
+    perfect correlations from per-layer features that only exist for a
+    handful of models. min_n=20 retains ~62% of our 32 models per feature
+    as a reasonable power threshold."""
     out = []
 
     # Size baseline R² on composite (simple linear)
@@ -210,7 +217,6 @@ def analyze_predictors(agg: pd.DataFrame, uni: pd.DataFrame, par: pd.DataFrame,
         if len(df) >= 5:
             lr = LinearRegression().fit(df[["log_n"]], df[target])
             r2_size = lr.score(df[["log_n"]], df[target])
-            # Spearman is scale-invariant, report that too
             rho_size, p_size = spearmanr(df["log_n"], df[target])
             out.append(f"### Size-only baseline on composite (n={len(df)})")
             out.append(f"- Linear R² = **{r2_size:.3f}**")
@@ -219,30 +225,41 @@ def analyze_predictors(agg: pd.DataFrame, uni: pd.DataFrame, par: pd.DataFrame,
     # Univariate top correlates with composite
     uni_comp = uni[uni["benchmark"] == "composite_benchmark"].copy()
     uni_comp["abs_rho"] = uni_comp["rho"].abs()
-    uni_comp = uni_comp.sort_values("abs_rho", ascending=False)
-    n_sig = int((uni_comp["q"] < 0.05).sum())
-    out.append(f"\n### Univariate Spearman with composite (n={int(uni_comp['n'].max())})")
-    out.append(f"- {n_sig} / {len(uni_comp)} features FDR-significant at q<0.05.")
-    out.append("\n**Top 20 by |ρ| (univariate, naturally dominated by scale):**")
-    for _, r in uni_comp.head(20).iterrows():
+    uni_filt = uni_comp[uni_comp["n"] >= min_n].sort_values("abs_rho", ascending=False)
+    n_sig = int((uni_filt["q"] < 0.05).sum())
+    out.append(f"\n### Univariate Spearman with composite (n≥{min_n})")
+    out.append(f"- {len(uni_filt)} features survive the n≥{min_n} power filter "
+               f"(out of {len(uni_comp)} tested).")
+    out.append(f"- {n_sig} / {len(uni_filt)} of those are FDR-significant at q<0.05.")
+    out.append("\n**Top 20 by |ρ| (univariate, n≥{}):**".format(min_n))
+    for _, r in uni_filt.head(20).iterrows():
         out.append(f"- `{r['feature']:<55s}` {_fmt_rho(r['rho'], r.get('q'))} (n={int(r['n'])})")
 
-    # Partial correlates with composite (this is what paper cares about)
+    # Partial correlates with composite — the paper's main result
     par_comp = par[par["benchmark"] == "composite_benchmark"].copy()
     par_comp["abs_rho"] = par_comp["partial_rho"].abs()
-    par_comp = par_comp.sort_values("abs_rho", ascending=False)
-    n_sig_par = int((par_comp["q"] < 0.05).sum())
-    out.append(f"\n### Partial correlates with composite, controlling for log(N_params) (n={int(par_comp['n'].max())})")
-    out.append(f"- **{n_sig_par} / {len(par_comp)}** features remain FDR-significant at q<0.05 after "
-               f"partialling out log N_params — i.e., they carry predictive signal **beyond model scale**.")
-    out.append("\n**Top 25 features ranked by |partial ρ|:**")
-    for _, r in par_comp.head(25).iterrows():
+    par_filt = par_comp[par_comp["n"] >= min_n].sort_values("abs_rho", ascending=False)
+    n_sig_par = int((par_filt["q"] < 0.05).sum())
+    out.append(f"\n### Partial correlates with composite, controlling for log(N_params) (n≥{min_n})")
+    out.append(f"- {len(par_filt)} features survive the n≥{min_n} power filter.")
+    out.append(f"- **{n_sig_par} / {len(par_filt)}** remain FDR-significant at q<0.05 after "
+               f"partialling out log N_params — features carrying signal BEYOND model scale.")
+    out.append("\n**Top 25 features ranked by |partial ρ| (n≥{}):**".format(min_n))
+    for _, r in par_filt.head(25).iterrows():
         cat = _category(r["feature"])
-        out.append(f"- `{r['feature']:<55s}` partial ρ={_fmt_rho(r['partial_rho'], r.get('q'))}  [{cat}]")
+        out.append(f"- `{r['feature']:<55s}` partial ρ={_fmt_rho(r['partial_rho'], r.get('q'))} "
+                   f"(n={int(r['n'])}) [{cat}]")
+
+    # Also report what got filtered out — for transparency
+    par_lowpower = par_comp[par_comp["n"] < min_n].sort_values("abs_rho", ascending=False)
+    n_inflated = int((par_lowpower["abs_rho"].fillna(0) > 0.9).sum())
+    out.append(f"\n**Low-power filter removed** {len(par_lowpower)} features at n<{min_n}, "
+               f"of which {n_inflated} had spurious |ρ|>0.9 (likely chance inflation).")
 
     # LASSO selected features
-    out.append("\n### LASSO multivariate selection (LassoCV on standardized features → composite)")
+    out.append("\n### LASSO multivariate selection")
     out.append(f"- Selected **{len(lasso)}** features out of ~920 candidates.")
+    out.append("- Training R² is overfit (n=32 × p≈900); see console output for held-out LOO/LOFO R².")
     out.append("\n**Top 20 LASSO coefficients (signed):**")
     for _, r in lasso.head(20).iterrows():
         cat = _category(r["feature"])
@@ -254,10 +271,16 @@ def analyze_predictors(agg: pd.DataFrame, uni: pd.DataFrame, par: pd.DataFrame,
 
 # ── Q4. Which categories carry the signal? ──────────────────────────────
 
-def analyze_category_signal(par: pd.DataFrame) -> str:
+def analyze_category_signal(par: pd.DataFrame, min_n: int = 20) -> str:
+    """Category-level signal table, filtered to features with n>=min_n to
+    avoid reporting inflated spurious partial ρ from low-n features."""
     par_comp = par[par["benchmark"] == "composite_benchmark"].copy()
+    par_comp = par_comp[par_comp["n"] >= min_n].copy()
     par_comp["major_cat"] = par_comp["feature"].apply(_major_category)
     par_comp["abs_partial"] = par_comp["partial_rho"].abs()
+
+    if par_comp.empty:
+        return "*(no features survive the power filter)*"
 
     agg = par_comp.groupby("major_cat").agg(
         n_features=("feature", "count"),
@@ -268,11 +291,11 @@ def analyze_category_signal(par: pd.DataFrame) -> str:
             par_comp.loc[x.index, "abs_partial"].idxmax(), "feature"
         ]),
     ).reset_index()
-    agg["sig_rate"] = agg["n_fdr_sig"] / agg["n_features"]
+    agg["sig_rate"] = agg["n_fdr_sig"] / agg["n_features"].clip(lower=1)
     agg = agg.sort_values("sig_rate", ascending=False)
 
     out = ["### FDR-significant features per BLME major category"]
-    out.append("(partial Spearman with composite benchmark, controlling for log N_params)\n")
+    out.append(f"(partial Spearman with composite, controlling for log N_params, n≥{min_n})\n")
     out.append("| Category | n features | FDR-sig | sig rate | max \\|partial ρ\\| | best feature |")
     out.append("|---|---:|---:|---:|---:|---|")
     for _, r in agg.iterrows():
@@ -482,6 +505,10 @@ def main():
     ap.add_argument("--input-dir", default="results/study_v1")
     ap.add_argument("--output", default=None,
                     help="Output markdown file (default: <input>/analysis/findings_report.md)")
+    ap.add_argument("--min-n", type=int, default=20,
+                    help="Minimum sample size for a feature to appear in top-correlate "
+                         "tables (default 20). Filters out low-power correlations that "
+                         "spuriously hit ±1.0 at small n.")
     args = ap.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -491,11 +518,14 @@ def main():
 
     parts = ["# BLME Study — Findings Report",
              f"\n*Generated from {input_dir}/aggregated.csv ({len(agg)} models, "
-             f"{len(agg.columns)} columns) and analysis/*.csv outputs.*"]
+             f"{len(agg.columns)} columns) and analysis/*.csv outputs.*",
+             f"\n*Low-power filter: features with n < {args.min_n} excluded from top "
+             f"correlates to prevent spurious ±1.0 ρ values.*"]
     parts.append(_section("Q1. Benchmark Y distribution", analyze_benchmark_y(agg)))
     parts.append(_section("Q2/Q3. Size baseline & top predictors beyond scale",
-                          analyze_predictors(agg, uni, par, lasso)))
-    parts.append(_section("Q4. Category-level signal", analyze_category_signal(par)))
+                          analyze_predictors(agg, uni, par, lasso, min_n=args.min_n)))
+    parts.append(_section("Q4. Category-level signal",
+                          analyze_category_signal(par, min_n=args.min_n)))
     parts.append(_section("Q5. EDG validation", analyze_edg(agg, par)))
     parts.append(_section("Q6. Within-family analysis", analyze_within_family(agg)))
     parts.append(_section("Q7. Base vs Instruct paired shifts", analyze_base_vs_instruct(bvi, agg)))

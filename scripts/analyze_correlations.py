@@ -181,10 +181,24 @@ def run_partial(agg: pd.DataFrame, feature_cols: List[str],
 
 def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
               target: str = "composite_benchmark") -> pd.DataFrame:
-    """LASSO regression with cross-validation to find predictive features."""
+    """LASSO regression with proper held-out cross-validation.
+
+    Returns a DataFrame of selected features with their coefficients AND
+    prints both training R² and held-out LOO/LOFO R². The held-out CV R² is
+    the honest number for paper claims — training R² with 32 samples × ~900
+    features is meaningless (always ~1.0 due to overfitting).
+
+    Cross-validation schemes:
+      - LOO   (leave-one-out): each model held out once; predictions from a
+        LassoCV refit on the remaining 31. Fair but optimistic since
+        same-family relatives remain in the training set.
+      - LOFO  (leave-one-family-out): holds out an entire family (e.g. all 8
+        Pythias at once), tests cross-family generalization. Stricter.
+    """
     try:
-        from sklearn.linear_model import LassoCV, RidgeCV
+        from sklearn.linear_model import LassoCV, LinearRegression
         from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import LeaveOneOut, LeaveOneGroupOut
     except ImportError:
         print("sklearn not installed; skipping LASSO")
         return pd.DataFrame()
@@ -192,63 +206,110 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
     if target not in agg.columns:
         return pd.DataFrame()
 
-    # Prep data
+    # Prep data — keep family alongside for LOFO
     y = agg[target].values.astype(np.float64)
+    families = agg.get("family", pd.Series([""] * len(agg))).fillna("").values
     mask_y = np.isfinite(y)
     if mask_y.sum() < 10:
         print(f"Too few models with {target}; skipping LASSO")
         return pd.DataFrame()
 
     X = agg[feature_cols].copy()
-    # Fill NaN with median per column
     X = X.fillna(X.median(numeric_only=True))
-    # Drop columns that are still NaN or constant
     X = X.loc[:, X.nunique() > 1]
     X = X.loc[:, X.notna().all()]
-
     if X.shape[1] == 0:
         return pd.DataFrame()
 
-    X_arr = X.values.astype(np.float64)
+    feat_names = list(X.columns)
+    X_arr = X.values.astype(np.float64)[mask_y]
     y_arr = y[mask_y]
-    X_arr = X_arr[mask_y]
+    families_valid = families[mask_y]
 
-    # Standardize
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_arr)
 
-    # LASSO with CV
     n = X_scaled.shape[0]
     cv_folds = min(5, max(2, n // 4))
     lasso = LassoCV(cv=cv_folds, max_iter=10000, random_state=42)
     lasso.fit(X_scaled, y_arr)
 
-    # Build result
     coefs = lasso.coef_
     nonzero_mask = np.abs(coefs) > 1e-8
-    rows = []
-    for col, coef, nz in zip(X.columns, coefs, nonzero_mask):
-        if nz:
-            rows.append({
-                "feature": col,
-                "coefficient": float(coef),
-                "abs_coefficient": float(abs(coef)),
-            })
-    df = pd.DataFrame(rows).sort_values("abs_coefficient", ascending=False)
+    rows = [
+        {"feature": col, "coefficient": float(c), "abs_coefficient": float(abs(c))}
+        for col, c, nz in zip(feat_names, coefs, nonzero_mask) if nz
+    ]
+    df = pd.DataFrame(rows).sort_values("abs_coefficient", ascending=False) if rows else pd.DataFrame()
 
-    # Also compute R² against baseline (log_n_params alone)
-    from sklearn.linear_model import LinearRegression
-    baseline_r2 = np.nan
+    # ── R² reports ──
+    # Training R² (what the old code reported — overfits trivially)
+    train_r2 = lasso.score(X_scaled, y_arr)
+
+    # Baseline: log_n_params only, simple linear regression — held-out LOO
+    baseline_r2_train = np.nan
+    baseline_r2_loo = np.nan
     if "log_n_params" in agg.columns:
-        z = agg["log_n_params"].values[mask_y].reshape(-1, 1)
-        mask_baseline = np.isfinite(z).ravel()
-        if mask_baseline.sum() >= 5:
-            baseline = LinearRegression().fit(z[mask_baseline], y_arr[mask_baseline])
-            baseline_r2 = baseline.score(z[mask_baseline], y_arr[mask_baseline])
+        z_full = agg["log_n_params"].values
+        mask_b = mask_y & np.isfinite(z_full)
+        if mask_b.sum() >= 5:
+            z = z_full[mask_b].reshape(-1, 1)
+            y_b = y[mask_b]
+            baseline = LinearRegression().fit(z, y_b)
+            baseline_r2_train = baseline.score(z, y_b)
+            # LOO R² for baseline
+            loo = LeaveOneOut()
+            preds_b = np.zeros(len(y_b))
+            for tr, te in loo.split(z):
+                m = LinearRegression().fit(z[tr], y_b[tr])
+                preds_b[te] = m.predict(z[te])
+            ss_res = float(np.sum((y_b - preds_b) ** 2))
+            ss_tot = float(np.sum((y_b - y_b.mean()) ** 2))
+            baseline_r2_loo = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
-    full_r2 = lasso.score(X_scaled, y_arr)
-    print(f"LASSO on {target}: R² = {full_r2:.3f} (baseline log_n_params R² = {baseline_r2:.3f})")
-    print(f"  Selected {nonzero_mask.sum()} features out of {X.shape[1]}")
+    # LASSO LOO: for each held-out model, refit LassoCV on the remaining 31
+    # and use its prediction as the held-out estimate. With 32 samples this
+    # runs ~32 LassoCV fits — a few minutes at most.
+    preds_loo = np.zeros(n)
+    loo = LeaveOneOut()
+    for fold_i, (tr_idx, te_idx) in enumerate(loo.split(X_scaled)):
+        m = LassoCV(cv=min(5, max(2, len(tr_idx) // 4)),
+                    max_iter=10000, random_state=42)
+        m.fit(X_scaled[tr_idx], y_arr[tr_idx])
+        preds_loo[te_idx] = m.predict(X_scaled[te_idx])
+    ss_res = float(np.sum((y_arr - preds_loo) ** 2))
+    ss_tot = float(np.sum((y_arr - y_arr.mean()) ** 2))
+    loo_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    # LASSO LOFO: leave-one-family-out, strictest generalization test.
+    lofo_r2 = np.nan
+    unique_fams = set(families_valid)
+    if len(unique_fams) >= 3:
+        logo = LeaveOneGroupOut()
+        preds_lofo = np.zeros(n)
+        mask_predicted = np.zeros(n, dtype=bool)
+        for tr_idx, te_idx in logo.split(X_scaled, y_arr, groups=families_valid):
+            if len(tr_idx) < 5:
+                continue
+            m = LassoCV(cv=min(5, max(2, len(tr_idx) // 4)),
+                        max_iter=10000, random_state=42)
+            m.fit(X_scaled[tr_idx], y_arr[tr_idx])
+            preds_lofo[te_idx] = m.predict(X_scaled[te_idx])
+            mask_predicted[te_idx] = True
+        if mask_predicted.sum() >= 5:
+            y_eval = y_arr[mask_predicted]
+            p_eval = preds_lofo[mask_predicted]
+            ss_res = float(np.sum((y_eval - p_eval) ** 2))
+            ss_tot = float(np.sum((y_eval - y_eval.mean()) ** 2))
+            lofo_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    print(f"LASSO on {target}:")
+    print(f"  Training R² = {train_r2:.3f}  (not meaningful: n<<p)")
+    print(f"  Held-out LOO R² = {loo_r2:.3f}  ← honest within-family generalization")
+    print(f"  Held-out LOFO R² = {lofo_r2:.3f}  ← cross-family generalization (strict)")
+    print(f"  Baseline log_n_params: train R² = {baseline_r2_train:.3f}, "
+          f"LOO R² = {baseline_r2_loo:.3f}")
+    print(f"  Selected {int(nonzero_mask.sum())} features out of {X.shape[1]}")
     return df
 
 
