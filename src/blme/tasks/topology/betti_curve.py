@@ -146,9 +146,15 @@ class BettiCurveTask(DiagnosticTask):
         else:
             results["simplification_ratio"] = 1.0
         
-        # Rate of decay: linear regression slope of β0 vs layer index
-        x = np.arange(num_layers)
+        # Rate of decay: linear regression slope of β0 vs **normalised
+        # depth** (x in [0, 1]) so the slope is comparable across
+        # models with different layer counts. Using raw layer index
+        # instead makes a 12-layer and 80-layer model's slopes scale
+        # differently — same issue as the fix applied to
+        # dynamics/gradient_flow.
         if len(betti_0_curve) > 1:
+            denom = max(1, num_layers - 1)
+            x = np.arange(num_layers, dtype=np.float64) / float(denom)
             slope = np.polyfit(x, betti_0_curve, 1)[0]
             results["betti_0_decay_rate"] = float(slope)
         else:

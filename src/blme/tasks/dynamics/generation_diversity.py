@@ -184,11 +184,15 @@ class GenerationDiversityTask(DiagnosticTask):
                         if total_4g > 0:
                             all_phrase_rep_rate.append(rep_4g / total_4g)
 
-                # Entropy collapse from the per-step scores
+                # Entropy collapse from the per-step scores. Compute
+                # via ``log_softmax`` directly on fp32 logits so the
+                # log-sum-exp trick keeps full floating-point precision
+                # on the low-probability tail (``torch.log(clamp)`` can
+                # wash out small probs and bias the entropy sum).
                 if hasattr(outputs, "scores") and outputs.scores:
-                    scores_stack = torch.stack(outputs.scores, dim=1)  # (N, L, V)
-                    probs = F.softmax(scores_stack.float(), dim=-1)
-                    log_probs = torch.log(probs.clamp(min=1e-12))
+                    scores_stack = torch.stack(outputs.scores, dim=1).float()  # (N, L, V)
+                    log_probs = F.log_softmax(scores_stack, dim=-1)
+                    probs = log_probs.exp()
                     per_token_H = -(probs * log_probs).sum(dim=-1)  # (N, L)
                     mean_H = per_token_H.mean(dim=0).cpu().numpy()  # (L,)
                     L = len(mean_H)

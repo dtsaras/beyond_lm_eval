@@ -198,12 +198,11 @@ class NeuralCollapseTask(DiagnosticTask):
             samples = list(_TOPIC_BUNDLE)
 
         device = next(model.parameters()).device
-        final_norm = get_final_norm(model)
 
-        # Mean-pool the final-layer hidden states for each sample. We
-        # apply final_norm if present so the features live in the same
-        # space as the LM-head input — this is the natural "last-layer
-        # representation" for Neural Collapse.
+        # Mean-pool the final-layer hidden states for each sample.
+        # ``hidden_states[-1]`` is already post-final_norm in
+        # transformers 5.x, so it already lives in the LM-head input
+        # space — no need to apply ``final_norm`` again.
         feats = []
         labs = []
         with torch.no_grad():
@@ -213,13 +212,13 @@ class NeuralCollapseTask(DiagnosticTask):
                 if inputs["input_ids"].shape[1] < 1:
                     continue
                 out = model(**inputs, output_hidden_states=True)
-                h = out.hidden_states[-1][0]  # (T, D)
-                if final_norm is not None:
-                    try:
-                        norm_dtype = next(final_norm.parameters()).dtype
-                    except StopIteration:
-                        norm_dtype = h.dtype
-                    h = final_norm(h.to(norm_dtype))
+                # transformers 5.x: ``hidden_states[-1]`` is already
+                # post-final_norm (verified in logit_lens where
+                # ``lm_head(hidden_states[-1]) == outputs.logits``). The
+                # previous code re-applied ``final_norm`` here which
+                # double-normalised the features and gave spuriously
+                # small NC1 for RMSNorm architectures.
+                h = out.hidden_states[-1][0]  # (T, D) — already normed
                 # Mean-pool, ignoring padding (causal LMs typically don't
                 # have padding here since we tokenize one text at a time).
                 pooled = h.float().mean(dim=0).cpu().numpy()

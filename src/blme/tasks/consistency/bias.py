@@ -110,13 +110,15 @@ def _embed_word(model, tokenizer, word: str, device, final_norm=None,
 
     with torch.no_grad():
         out = model(**enc, output_hidden_states=True)
-    h = out.hidden_states[-1][0, pos]  # (D,)
-    if final_norm is not None:
-        try:
-            norm_dtype = next(final_norm.parameters()).dtype
-        except StopIteration:
-            norm_dtype = h.dtype
-        h = final_norm(h.unsqueeze(0).to(norm_dtype))[0]
+    # transformers 5.x: ``outputs.hidden_states[-1]`` is *already*
+    # post-final_norm (verified empirically in
+    # ``interpretability/logit_lens.py`` where
+    # ``lm_head(hidden_states[-1])`` exactly reproduces
+    # ``outputs.logits``). Applying ``final_norm`` again
+    # double-normalises the embedding and corrupts every WEAT d-value.
+    # Keep the helper signature for API compatibility but do not
+    # re-apply the norm.
+    h = out.hidden_states[-1][0, pos]  # (D,) — already post-norm
     return h.float().detach().cpu().numpy()
 
 

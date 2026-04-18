@@ -79,39 +79,41 @@ class AttentionEffectiveRankTask(DiagnosticTask):
 
         handles = [m.register_forward_hook(hook_fn) for m in target_modules]
 
-        with torch.no_grad():
-            for s in samples:
-                text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
+        # Guard hook removal with try/finally so a tokenizer / forward
+        # failure in the sample loop below doesn't leak hooks into any
+        # subsequent task that reuses the same model instance.
+        try:
+            with torch.no_grad():
+                for s in samples:
+                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
+                    inputs = tokenizer(text, return_tensors="pt",
+                                       truncation=True, max_length=128).to(device)
 
-                # Clear hook cache
-                outputs_collected.clear()
+                    # Clear hook cache
+                    outputs_collected.clear()
 
-                model(**inputs)
+                    model(**inputs)
 
-                for out_proj in outputs_collected:
-                    # out_proj shape: (batch_size, seq_len, hidden_size)
-                    # We compute the SVD entropy along the sequence dimension
-                    for b in range(out_proj.shape[0]):
-                        mat = out_proj[b] # (seq_len, hidden_size)
-
-                        # Singular Value Decomposition
-                        # If seq_len is 1, SVD entropy is 0
-                        if mat.shape[0] < 2:
-                            continue
-
-                        U, S, V = torch.svd(mat, compute_uv=False)
-
-                        # Normalize singular values to form a probability distribution
-                        S_norm = S / torch.sum(S)
-                        S_norm = S_norm[S_norm > 0] # Avoid log(0)
-
-                        # Shannon Entropy of the singular values
-                        entropy = -torch.sum(S_norm * torch.log(S_norm)).item()
-                        entropies.append(entropy)
-
-        for h in handles:
-            h.remove()
+                    for out_proj in outputs_collected:
+                        # out_proj shape: (batch_size, seq_len, hidden_size)
+                        # SVD entropy along the sequence dimension.
+                        for b in range(out_proj.shape[0]):
+                            mat = out_proj[b]  # (seq_len, hidden_size)
+                            if mat.shape[0] < 2:
+                                continue
+                            # torch.svd is deprecated; linalg is the
+                            # recommended replacement.
+                            S = torch.linalg.svdvals(mat)
+                            total = torch.sum(S)
+                            if total <= 0:
+                                continue
+                            S_norm = S / total
+                            S_norm = S_norm[S_norm > 0]
+                            entropy = -torch.sum(S_norm * torch.log(S_norm)).item()
+                            entropies.append(entropy)
+        finally:
+            for h in handles:
+                h.remove()
 
         if not entropies:
             return {"error": "Failed to compute effective rank entropies."}
