@@ -144,16 +144,34 @@ class ConceptSeparabilityTask(DiagnosticTask):
 
         num_samples = self.config.get("num_samples", 20)
 
-        if dataset is None:
-            dataset = [{"text": f"This is clearly a wonderful and true statement number {i}.", "label": 1} for i in range(num_samples)] + \
-                      [{"text": f"This is an absolutely terrible and false lie number {i}.", "label": 0} for i in range(num_samples)]
-        else:
-            if len(dataset) > 0 and "label" not in dataset[0]:
-                for i, d in enumerate(dataset):
-                    if isinstance(d, str): dataset[i] = {"text": d, "label": i % 2}
-                    else: d["label"] = i % 2
-        
-        samples = list(dataset)[:num_samples*2]
+        # Only accept the caller's dataset if it already carries a real
+        # concept label. Historic bug: when the shared BLME corpus
+        # (unlabelled WikiText) was passed in, the task mutated it
+        # in-place by writing ``d["label"] = i % 2`` — silently
+        # corrupting every downstream task's copy of the corpus and
+        # giving *this* task meaningless parity labels to probe.
+        # Both were CRITICAL: concept_separability AUCs became
+        # sub-chance noise (0.26–0.40), and ``repe_refusal_direction``
+        # saw every WikiText line as "labelled" so it ignored the
+        # hard-coded harmful/harmless prompts and scored parity
+        # instead.
+        def _is_labelled(items):
+            if not items:
+                return False
+            first = items[0]
+            return isinstance(first, dict) and "label" in first and "text" in first
+
+        if dataset is None or not _is_labelled(list(dataset)[:1]):
+            # Build a self-contained concept dataset and *never* mutate
+            # the caller's reference.
+            dataset = (
+                [{"text": f"This is clearly a wonderful and true statement number {i}.",
+                  "label": 1} for i in range(num_samples)]
+                + [{"text": f"This is an absolutely terrible and false lie number {i}.",
+                    "label": 0} for i in range(num_samples)]
+            )
+
+        samples = list(dataset)[:num_samples * 2]
         texts = [s["text"] for s in samples]
         labels = [s["label"] for s in samples]
         
@@ -185,24 +203,35 @@ class ConceptSeparabilityTask(DiagnosticTask):
         
         for l_idx in range(num_layers):
             X = np.array(layer_reps[l_idx])
+            # Some bf16/fp16 models can produce NaN/Inf in deep layers
+            # (e.g. pythia-12b under fp16). sklearn's LogisticRegression
+            # rejects inputs with NaN; filter invalid rows so the task
+            # degrades gracefully instead of crashing the whole run.
+            mask = np.isfinite(X).all(axis=1)
+            if mask.sum() < n_splits * 2:
+                layer_aucs.append(float("nan"))
+                layer_accs.append(float("nan"))
+                continue
+            X = X[mask]
+            y_l = y[mask]
             fold_aucs, fold_accs = [], []
-            
-            for train_idx, test_idx in cv.split(X, y):
+
+            for train_idx, test_idx in cv.split(X, y_l):
                 X_train, X_test = X[train_idx], X[test_idx]
-                y_train, y_test = y[train_idx], y[test_idx]
-                
+                y_train, y_test = y_l[train_idx], y_l[test_idx]
+
                 clf = LogisticRegression(solver='liblinear', class_weight='balanced', max_iter=1000)
                 clf.fit(X_train, y_train)
                 
                 preds = clf.predict(X_test)
                 probas = clf.predict_proba(X_test)[:, 1] if len(set(y_train)) > 1 else preds
-                
+
                 fold_accs.append(accuracy_score(y_test, preds))
                 try: fold_aucs.append(roc_auc_score(y_test, probas))
                 except ValueError: fold_aucs.append(accuracy_score(y_test, preds))
-                    
-            layer_aucs.append(float(np.mean(fold_aucs)))
-            layer_accs.append(float(np.mean(fold_accs)))
+
+            layer_aucs.append(float(np.mean(fold_aucs)) if fold_aucs else float("nan"))
+            layer_accs.append(float(np.mean(fold_accs)) if fold_accs else float("nan"))
             
         return {
             "layer_separability_auc": layer_aucs,
@@ -306,11 +335,19 @@ class SteeringEffectivenessTask(DiagnosticTask):
                         def hook(module, input, output):
                             if isinstance(output, tuple):
                                 out_t = output[0].clone()
-                                out_t[:, -1, :] += alpha * vec
+                                # Match steering vector to the hidden
+                                # state dtype to avoid silently upcasting
+                                # the residual on bf16/fp16 models —
+                                # torch's ``out_t += alpha * vec`` with
+                                # vec in float32 promotes out_t to fp32,
+                                # so downstream layers see a wider dtype
+                                # than the unablated forward did and the
+                                # KL becomes apples-to-oranges.
+                                out_t[:, -1, :] += (alpha * vec).to(out_t.dtype)
                                 return (out_t,) + output[1:]
                             else:
                                 out_t = output.clone()
-                                out_t[:, -1, :] += alpha * vec
+                                out_t[:, -1, :] += (alpha * vec).to(out_t.dtype)
                                 return out_t
                         return hook
 
@@ -423,11 +460,28 @@ class RefusalDirectionTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Refusal Direction Analysis (Arditi 2024)...")
 
-        if dataset is not None and isinstance(dataset, list) and dataset and (
-            isinstance(dataset[0], dict) and {"text", "label"} <= set(dataset[0])
-        ):
-            harmful = [d["text"] for d in dataset if d["label"] in ("harmful", 1, "1", True)]
-            harmless = [d["text"] for d in dataset if d["label"] in ("harmless", 0, "0", False)]
+        # Only accept the caller's dataset if it carries an explicit
+        # "harmful"/"harmless" label — not any {0,1,True,False} label.
+        # Historic bug: ConceptSeparabilityTask silently mutated the
+        # shared corpus with ``label = i % 2``, so this task saw
+        # every WikiText line as labelled and measured parity
+        # separability instead of refusal.
+        def _looks_like_refusal_dataset(items):
+            if not isinstance(items, list) or not items:
+                return False
+            first = items[0]
+            if not isinstance(first, dict) or "label" not in first:
+                return False
+            # Require the canonical string labels, not integer parity.
+            lab_set = {str(d.get("label", "")).lower()
+                       for d in items if isinstance(d, dict)}
+            return bool(lab_set & {"harmful", "harmless"})
+
+        if _looks_like_refusal_dataset(dataset):
+            harmful = [d["text"] for d in dataset
+                       if str(d.get("label", "")).lower() == "harmful"]
+            harmless = [d["text"] for d in dataset
+                        if str(d.get("label", "")).lower() == "harmless"]
         else:
             harmful = list(_HARMFUL_PROMPTS)
             harmless = list(_HARMLESS_PROMPTS)
@@ -501,13 +555,52 @@ class RefusalDirectionTask(DiagnosticTask):
         last_key = f"layer{n_layers - 1}"
         final = per_layer.get(last_key, list(per_layer.values())[-1])
 
-        return {
+        # Architecture-agnostic depth quantiles. Per-layer dicts keyed by
+        # absolute layer index make the feature set model-size dependent;
+        # only the shallowest common depth survives the downstream CSV
+        # aggregation, so 99 % of refusal columns were always-NaN in the
+        # study (1/32 all_filled). Emitting AUC at normalised depths
+        # 0/25/50/75/100 % gives the same five columns for every model.
+        ordered = sorted(
+            (int(k.replace("layer", "")), v["separability_auc"])
+            for k, v in per_layer.items()
+            if not np.isnan(v["separability_auc"])
+        )
+        depth_auc: dict[str, float] = {}
+        if ordered:
+            # Normalise against the *model*'s actual layer count, not
+            # the max of the surviving AUCs — otherwise the depth axis
+            # silently rescales when shallow layers are filtered out.
+            layer_idxs = np.array([x[0] for x in ordered], dtype=np.float64)
+            aucs = np.array([x[1] for x in ordered], dtype=np.float64)
+            depths = layer_idxs / max(1.0, float(n_layers - 1))
+            for q in (0.0, 0.25, 0.5, 0.75, 1.0):
+                # If the requested depth lies outside the surviving
+                # range (e.g. layer 0 was filtered out and we're asked
+                # for depth 0), emit NaN rather than silently clamp to
+                # the shallowest surviving layer — otherwise
+                # ``auc_at_depth_0`` would mis-report.
+                if q < depths.min() - 1e-9 or q > depths.max() + 1e-9:
+                    depth_auc[f"auc_at_depth_{int(q * 100)}"] = float("nan")
+                else:
+                    depth_auc[f"auc_at_depth_{int(q * 100)}"] = float(
+                        np.interp(q, depths, aucs)
+                    )
+
+        best_layer_fraction = (
+            float(best_layer) / max(1.0, float(n_layers - 1))
+            if best_layer >= 0 else float("nan")
+        )
+
+        result = {
             "direction_norm": final["direction_norm"],
             "separability_auc": final["separability_auc"],
             "mean_projection_gap": final["mean_projection_gap"],
             "best_layer_separability_auc": float(best_auc),
             "best_layer": int(best_layer),
+            "best_layer_fraction": best_layer_fraction,
             "n_harmful": len(harmful),
             "n_harmless": len(harmless),
-            "per_layer": per_layer,
+            **depth_auc,
         }
+        return result

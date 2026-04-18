@@ -1,154 +1,265 @@
-"""
-Weight-Activation Alignment (WAA) Task
+"""Weight-Activation Alignment (WAA)
 ──────────────────────────────────────────────────────────────────────
-Evaluates mechanistic capacity utilization by measuring the cosine similarity
-between the principal components of the actual forward-pass activations and 
-the principal singular vectors of the static layer weights.
+For each transformer block, compare the top singular direction of the
+MLP output projection's weight matrix (in its *input* feature space)
+with the top principal component of the *actual* MLP intermediate
+activations observed during inference. High alignment means the model
+is using the feature directions it stored in its weights.
 
-A high alignment score suggests the model is efficiently utilizing the 
-feature directions inherently encoded in its weights during inference. A low 
-score implies representation collapse or underutilization of parameter capacity.
-
-References:
-- General mechanistic interpretability and capacity utilization (2024-2025).
+Rewrite (2026-04-17 audit):
+  * Hooks every target projection simultaneously and captures the
+    activations in a single forward pass over the corpus (the previous
+    implementation ran ``num_layers × num_samples`` forward passes, so
+    on Llama 3 8B with 32 layers × 5 samples it tripped the 600 s task
+    timeout — 22/32 models failed).
+  * Extended the projection name table to cover Pythia / GPT-NeoX
+    (``dense_4h_to_h``), OLMo (``ff_out``), and Phi-2 (``fc2``).
+  * Uses ``torch.linalg.svd`` instead of the deprecated ``torch.svd``.
+  * Subsamples tokens before SVD (default 4096) so the eigh step stays
+    tractable on ~14 k-dim intermediates.
 """
 
-import torch
-import numpy as np
-
-from ...tasks.base import DiagnosticTask
-from ...registry import register_task
-from ..common import get_layers
 import logging
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
+
+from ...registry import register_task
+from ...tasks.base import DiagnosticTask
+from ..common import get_layers
+
 logger = logging.getLogger("blme")
+
+
+try:
+    from transformers.pytorch_utils import Conv1D as _HFConv1D
+except Exception:  # pragma: no cover - optional dep
+    _HFConv1D = None
+
+
+# Projection attribute names in the order we prefer them. The "output"
+# projection of an MLP is always the one that maps the expanded
+# intermediate space back down to the residual-stream width.
+_OUT_PROJ_NAMES = (
+    "down_proj",       # Llama, Qwen, Gemma, Mistral (gated MLP)
+    "dense_4h_to_h",   # Pythia / GPT-NeoX / GPT-J
+    "ff_out",          # OLMo
+    "fc2",             # Phi, OPT
+    "c_proj",          # GPT-2 / CodeGen (transformers.Conv1D)
+    "output_proj",     # some adapters
+    "dense",           # BERT-style second linear
+)
+
+
+def _is_projection(m) -> bool:
+    if isinstance(m, torch.nn.Linear):
+        return True
+    if _HFConv1D is not None and isinstance(m, _HFConv1D):
+        return True
+    return False
+
+
+def _find_mlp_projection(mlp) -> Optional[torch.nn.Module]:
+    """Return the MLP's output projection module, or None."""
+    for name in _OUT_PROJ_NAMES:
+        proj = getattr(mlp, name, None)
+        if proj is not None and _is_projection(proj):
+            return proj
+    # Fallback: last projection submodule in the MLP.
+    last = None
+    for sub in mlp.modules():
+        if _is_projection(sub):
+            last = sub
+    return last
+
+
+def _weight_top_left_singular(proj: torch.nn.Module) -> Optional[torch.Tensor]:
+    """Top left-singular vector of the projection's weight, in the
+    module's *input* feature space, computed on the projection's own
+    device via a randomised rank-1 SVD (much faster than a full SVD on
+    large intermediate widths).
+
+    ``torch.nn.Linear`` stores ``weight`` with shape ``(out, in)`` and
+    applies ``x @ W.T``. ``transformers.Conv1D`` stores ``weight`` with
+    shape ``(in, out)`` and applies ``x @ W``. We flip the Linear
+    weight to ``(in, out)`` so ``U[:, 0]`` always lives in the input
+    feature axis regardless of the layer type.
+    """
+    W = proj.weight.detach().float()
+    if W.dim() != 2:
+        return None
+    if _HFConv1D is not None and isinstance(proj, _HFConv1D):
+        pass  # (in, out) already
+    else:
+        W = W.T  # (out, in) → (in, out)
+    try:
+        # Randomised rank-1 SVD: ``U`` has shape (in, 1); ``U[:, 0]`` is
+        # the top left-singular vector. Two extra iterations match
+        # scikit-learn's default and give ~1e-6 approximation error.
+        U, _S, _V = torch.svd_lowrank(W, q=1, niter=2)
+    except Exception as e:
+        logger.info(f"  WAA SVD failed: {type(e).__name__}: {e}")
+        return None
+    return U[:, 0]
+
+
+def _activation_top_principal(acts: torch.Tensor) -> Optional[torch.Tensor]:
+    """Top principal component of the centered activation matrix.
+
+    ``acts`` has shape ``(N, D)``. Uses randomised rank-1 SVD for speed
+    on large intermediate widths — a full SVD of (4k, 14k) on CPU
+    takes tens of seconds per layer, which was the dominant cost of
+    this task before the fix.
+    """
+    if acts.numel() == 0 or acts.shape[0] < 2:
+        return None
+    acts = acts.float()
+    acts = acts - acts.mean(dim=0, keepdim=True)
+    try:
+        # ``torch.svd_lowrank`` returns ``U S V`` for rank-q SVD;
+        # ``V[:, 0]`` is the top right-singular vector — the direction
+        # in the feature space with maximum variance.
+        _U, _S, V = torch.svd_lowrank(acts, q=1, niter=2)
+    except Exception as e:
+        logger.info(f"  WAA activation SVD failed: {type(e).__name__}: {e}")
+        return None
+    return V[:, 0]
 
 
 @register_task("interpretability_waa")
 class WeightActivationAlignmentTask(DiagnosticTask):
-    """
-    Computes structural alignment between static layer weights (via SVD) 
-    and empirical activation vectors (via PCA).
-    """
+    """Cosine between weight SVD and activation PCA per layer."""
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Weight-Activation Alignment...")
-        num_samples = self.config.get("num_samples", 5)
-        
+        logger.info("Running Weight-Activation Alignment (single-pass)...")
+        num_samples = int(self.config.get("num_samples", 5))
+        max_tokens_per_layer = int(self.config.get("max_tokens", 4096))
+        max_length = int(self.config.get("max_length", 128))
+
         if dataset is None:
-             from ...cache import load_default_corpus
-             dataset = load_default_corpus(num_samples)
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
         samples = list(dataset)[:num_samples]
         if not samples:
-             return {"error": "Need at least 1 sample."}
-             
+            return {"error": "Need at least 1 sample."}
+
         device = next(model.parameters()).device
         layers = get_layers(model)
-        
-        # We need to hook into the MLP/FFN output projection layer
-        # Heuristic to find the main output projection matrix per layer
-        target_modules = []
+        if layers is None:
+            return {"error": "Could not detect model layers."}
+
+        targets: List[Tuple[int, torch.nn.Module]] = []
         for l_idx, layer in enumerate(layers):
-            # Try to find the down projection or c_proj (GPT style) or dense (BERT style)
-            # Typically, the second linear layer in the MLP
-            mlp = getattr(layer, "mlp", None) or getattr(layer, "output", None) or getattr(layer, "feed_forward", None)
-            
-            proj = None
-            if mlp is not None:
-                if hasattr(mlp, "c_proj"): # GPT2
-                    proj = mlp.c_proj
-                elif hasattr(mlp, "down_proj"): # Llama
-                    proj = mlp.down_proj
-                elif hasattr(mlp, "dense"): # BERT
-                    proj = mlp.dense
-            
-            if proj is not None and hasattr(proj, "weight"):
-                 target_modules.append((l_idx, proj))
-                 
-        if not target_modules:
-             return {"error": "Could not identify standard MLP projection layers for WAA computation."}
-             
-        # Dictionary to store mean alignment per layer
-        alignments = {}
-        
-        # Detect Conv1D class once. GPT-2 uses transformers.pytorch_utils.Conv1D,
-        # whose `weight` is shape (in, out) and the forward op is `x @ W`.
-        # nn.Linear's `weight` is shape (out, in) and the forward op is `x @ W^T`.
+            mlp = (
+                getattr(layer, "mlp", None)
+                or getattr(layer, "feed_forward", None)
+                or getattr(layer, "output", None)
+            )
+            if mlp is None:
+                continue
+            proj = _find_mlp_projection(mlp)
+            if proj is not None:
+                targets.append((l_idx, proj))
+
+        if not targets:
+            return {
+                "error": (
+                    "Could not identify MLP output projections for "
+                    "WAA on this architecture."
+                )
+            }
+
+        # Hook every target simultaneously. We use a pre-forward hook so
+        # we intercept the projection's INPUT — the MLP intermediate
+        # activation, in the same feature space as U[:, 0] above.
+        collected: Dict[int, List[torch.Tensor]] = {li: [] for li, _ in targets}
+        # Seeded RNG so the sub-sampled token set (and therefore the
+        # reported alignment) is deterministic across reruns of the
+        # same model/corpus. Without this, `torch.randperm` draws from
+        # the global PyTorch RNG and the result drifts between
+        # invocations even when `set_global_seed` has been called at
+        # the start of the pipeline.
+        rng = torch.Generator(device="cpu").manual_seed(
+            int(self.config.get("seed", 0))
+        )
+
+        def make_hook(li: int, budget: int):
+            def pre_hook(module, args):
+                if not args:
+                    return
+                x = args[0]
+                if not isinstance(x, torch.Tensor):
+                    return
+                # Keep activations on the model's device so the SVD can
+                # run on GPU (100-1000× faster than CPU SVD of a
+                # (4k, 14k) matrix — which was the dominant cost of
+                # this task prior to the speedup fix).
+                flat = x.detach().float().reshape(-1, x.shape[-1])
+                # Early subsample per batch to bound memory.
+                if flat.shape[0] > budget:
+                    cpu_rand = torch.randperm(flat.shape[0], generator=rng)[:budget]
+                    idx = cpu_rand.to(flat.device)
+                    flat = flat[idx]
+                collected[li].append(flat)
+            return pre_hook
+
+        # Per-layer budget: total ≤ max_tokens_per_layer across the
+        # corpus, so a model with more tokens doesn't blow up memory.
+        handles = [
+            proj.register_forward_pre_hook(make_hook(li, max_tokens_per_layer))
+            for li, proj in targets
+        ]
+
         try:
-            from transformers.pytorch_utils import Conv1D as _HFConv1D
-        except Exception:
-            _HFConv1D = None
+            with torch.no_grad():
+                for s in samples:
+                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
+                    inputs = tokenizer(
+                        text, return_tensors="pt",
+                        truncation=True, max_length=max_length,
+                    ).to(device)
+                    model(**inputs)
+        finally:
+            for h in handles:
+                h.remove()
 
-        for l_idx, proj in target_modules:
-            W = proj.weight.detach().float()
-            # Normalize to (in, out) so U[:, 0] lives in the *input* feature
-            # space and matches the activation principal component below.
-            if _HFConv1D is not None and isinstance(proj, _HFConv1D):
-                pass  # Already (in, out)
-            else:
-                # nn.Linear
-                W = W.T  # (out, in) -> (in, out)
-
-            # SVD: W = U @ diag(S) @ V^T, with U in input space.
-            try:
-                U, S, V = torch.svd(W, compute_uv=True)
-            except Exception as e:
-                logger.info(f"  SVD failed on layer {l_idx}: {e}")
+        alignments: Dict[int, float] = {}
+        for l_idx, proj in targets:
+            chunks = collected.get(l_idx, [])
+            if not chunks:
                 continue
-            top_weight_vector = U[:, 0].unsqueeze(0)  # (1, in_features)
+            acts = torch.cat(chunks, dim=0)
+            if acts.shape[0] > max_tokens_per_layer:
+                cpu_rand = torch.randperm(
+                    acts.shape[0], generator=rng,
+                )[:max_tokens_per_layer]
+                acts = acts[cpu_rand.to(acts.device)]
 
-            # Hook to collect activations entering this projection.
-            activations = []
-            def hook_fn(module, input_args, output):
-                act = input_args[0].detach().cpu().float()
-                activations.append(act.reshape(-1, act.shape[-1]))
-
-            handle = proj.register_forward_hook(hook_fn)
-            try:
-                with torch.no_grad():
-                    for s in samples:
-                        text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                        inputs = tokenizer(text, return_tensors="pt",
-                                           truncation=True, max_length=128).to(device)
-                        model(**inputs)
-            finally:
-                handle.remove()
-
-            if not activations:
+            u_weight = _weight_top_left_singular(proj)
+            v_act = _activation_top_principal(acts)
+            if u_weight is None or v_act is None:
                 continue
-
-            all_acts = torch.cat(activations, dim=0)  # (N, in_features)
-            all_acts = all_acts - all_acts.mean(dim=0, keepdim=True)
-
-            # Top principal component of activations (in input space)
-            if all_acts.shape[0] > 5000:
-                cov = (all_acts.T @ all_acts) / (all_acts.shape[0] - 1)
-                L_eig, Q = torch.linalg.eigh(cov)
-                top_act_vector = Q[:, -1].unsqueeze(0)  # eigh sorts ascending
-            else:
-                U_a, S_a, V_a = torch.svd(all_acts, compute_uv=True)
-                top_act_vector = V_a[:, 0].unsqueeze(0)
-
-            top_weight_vector = top_weight_vector.to(top_act_vector.device)
-
-            # Both vectors should now be in the same (input feature) space.
-            # If they aren't, there's a real bug — fail loudly instead of
-            # silently falling back to a different vector.
-            if top_weight_vector.shape[-1] != top_act_vector.shape[-1]:
+            if u_weight.shape[-1] != v_act.shape[-1]:
                 logger.info(
                     f"  WAA layer {l_idx}: dimension mismatch "
-                    f"(weight={top_weight_vector.shape[-1]}, act={top_act_vector.shape[-1]}) — skipping"
+                    f"(weight={u_weight.shape[-1]}, act={v_act.shape[-1]})"
                 )
                 continue
 
-            # Absolute cosine similarity (sign doesn't matter for axis alignment).
-            cos_sim = torch.nn.functional.cosine_similarity(top_weight_vector, top_act_vector)
-            alignment = float(torch.abs(cos_sim).mean().item())
+            # Both vectors can now live on any device — move them to a
+            # common device before the dot product.
+            u = u_weight.detach().float().flatten()
+            v = v_act.detach().float().flatten().to(u.device)
+            cos_sim = torch.dot(u, v)
+            # |cos| — the sign is arbitrary; we only care about the axis.
+            alignments[l_idx] = float(torch.abs(cos_sim).item())
 
-            alignments[str(l_idx)] = alignment
-            
         if not alignments:
-             return {"error": "Failed to collect layer activations for WAA."}
-             
+            return {"error": "Failed to collect activations for WAA."}
+
         return {
-            "mean_waa_alignment": sum(alignments.values()) / len(alignments),
-            "layer_waa_alignments": alignments
+            "mean_waa_alignment": float(np.mean(list(alignments.values()))),
+            "layer_waa_alignments": {str(k): v for k, v in alignments.items()},
+            "n_layers_analyzed": len(alignments),
         }

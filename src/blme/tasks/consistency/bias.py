@@ -58,23 +58,55 @@ _WEAT_TESTS: Dict[str, Dict[str, List[str]]] = {
 }
 
 
+def _find_word_token_position(tokenizer, text: str, word: str):
+    """Locate the first token whose character span overlaps the first
+    occurrence of ``word`` in ``text`` via ``return_offsets_mapping``.
+
+    Returns the token index, or ``None`` if the word is not in the text
+    or the tokenizer doesn't expose offsets (slow tokenisers).
+
+    Using offset mapping avoids the BPE pitfall of tokenising ``word``
+    standalone and then searching the templated sentence's ids for it —
+    standalone ``"John"`` and in-context ``" John"`` usually produce
+    different token ids, so that approach silently hits the fallback
+    and every word ends up attributed to the same end-of-sentence
+    position.
+    """
+    try:
+        enc = tokenizer(text, return_offsets_mapping=True,
+                        add_special_tokens=True)
+    except (TypeError, NotImplementedError):
+        return None
+    offsets = enc.get("offset_mapping")
+    if offsets is None:
+        return None
+    char_start = text.find(word)
+    if char_start < 0:
+        return None
+    char_end = char_start + len(word)
+    for i, (s, e) in enumerate(offsets):
+        # First token whose span overlaps [char_start, char_end).
+        if s == 0 and e == 0:
+            continue  # special token
+        if s < char_end and e > char_start:
+            return i
+    return None
+
+
 def _embed_word(model, tokenizer, word: str, device, final_norm=None,
                 template: str = "This is {}.") -> np.ndarray:
     """Get the contextualized hidden state at the target word position."""
     text = template.format(word)
     enc = tokenizer(text, return_tensors="pt").to(device)
-    # Find the token position of the target word.
-    word_enc = tokenizer(word, add_special_tokens=False)["input_ids"]
-    if not word_enc:
-        return np.zeros(0)
-    first_word_tok = word_enc[0]
     input_ids = enc["input_ids"][0].tolist()
-    # Find the first occurrence of first_word_tok.
-    try:
-        pos = input_ids.index(first_word_tok)
-    except ValueError:
-        # Fallback: use the last non-special position
-        pos = len(input_ids) - 2 if len(input_ids) > 1 else 0
+
+    pos = _find_word_token_position(tokenizer, text, word)
+    if pos is None or pos >= len(input_ids):
+        # Prefix-length fallback: tokenise the *prefix* up to the word
+        # and take the position right after it.
+        prefix = text[: text.find(word)] if word in text else text
+        prefix_len = len(tokenizer(prefix, add_special_tokens=True)["input_ids"])
+        pos = max(0, min(prefix_len, len(input_ids) - 1))
 
     with torch.no_grad():
         out = model(**enc, output_hidden_states=True)

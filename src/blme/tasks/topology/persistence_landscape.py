@@ -89,15 +89,18 @@ def _compute_landscape(dgm: np.ndarray, n_landscapes: int = 5,
 def _landscape_stats(landscapes: np.ndarray, dt: float
                      ) -> Dict[str, float]:
     """Summary statistics from a (K, n_points) landscape array."""
+    # np.trapezoid (NumPy 2.0) replaces the deprecated np.trapz; fall
+    # back on older NumPy.
+    _trapz = getattr(np, "trapezoid", np.trapz)
     K = landscapes.shape[0]
     integrals = []
     maxes = []
     norms = []
     for k in range(K):
         Lk = landscapes[k]
-        integrals.append(float(np.trapz(Lk, dx=dt)))
+        integrals.append(float(_trapz(Lk, dx=dt)))
         maxes.append(float(Lk.max()))
-        norms.append(float(np.sqrt(np.trapz(Lk ** 2, dx=dt))))
+        norms.append(float(np.sqrt(_trapz(Lk ** 2, dx=dt))))
     return {
         "landscape_integrals": integrals,
         "landscape_maxes": maxes,

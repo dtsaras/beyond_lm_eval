@@ -32,16 +32,28 @@ class RarePPLTask(DiagnosticTask):
         else:
             stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
 
-        # Categorize tokens
-        token_counts = stats["token_counts"]
-        sorted_ids = np.argsort(token_counts)
-        vocab_size = len(token_counts)
+        # Categorize tokens by corpus frequency, but **only among
+        # observed tokens**. With a ~12k-token eval corpus in a
+        # 50–200k-vocab model, ~90% of vocab ids have count 0 — if we
+        # argsort the full vocab, the bottom 20% is dominated by never-
+        # seen ids and ``cnt_rare`` ends up 0 (so ``ppl_rare`` becomes
+        # +inf for every model). Filter to observed ids before
+        # percentile-thresholding so the buckets are actually populated.
+        token_counts = np.asarray(stats["token_counts"])
+        observed_ids = np.flatnonzero(token_counts > 0)
+        observed_counts = token_counts[observed_ids]
+        # Stable sort by count; ties broken by id for determinism.
+        sort_order = np.lexsort((observed_ids, observed_counts))
+        sorted_observed = observed_ids[sort_order]
 
-        rare_thresh = int(vocab_size * 0.2)
-        freq_thresh = int(vocab_size * 0.8)
-
-        rare_ids = set(sorted_ids[:rare_thresh])
-        freq_ids = set(sorted_ids[freq_thresh:])
+        n_observed = sorted_observed.size
+        if n_observed == 0:
+            rare_ids, freq_ids = set(), set()
+        else:
+            rare_thresh = max(1, int(round(n_observed * 0.2)))
+            freq_thresh = max(1, n_observed - int(round(n_observed * 0.2)))
+            rare_ids = set(sorted_observed[:rare_thresh].tolist())
+            freq_ids = set(sorted_observed[freq_thresh:].tolist())
 
         nll_rare, cnt_rare = 0.0, 0
         nll_freq, cnt_freq = 0.0, 0

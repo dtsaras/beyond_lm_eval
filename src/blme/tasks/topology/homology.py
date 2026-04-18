@@ -68,8 +68,10 @@ class PersistentHomologyTask(DiagnosticTask):
                 # Take the mean pooling over the sequence to represent the sentence
                 for l_idx in target_layers:
                     # hidden_states includes embedding as index 0, so layer l_idx is l_idx + 1
+                    # .float() first: numpy doesn't accept bf16 tensors, and
+                    # ripser requires a standard numpy dtype.
                     hidden = out.hidden_states[l_idx + 1][0] # shape (seq_len, hidden_dim)
-                    sentence_rep = hidden.mean(dim=0).cpu().numpy()
+                    sentence_rep = hidden.mean(dim=0).float().cpu().numpy()
                     layer_representations[l_idx].append(sentence_rep)
                     
         results = {}
@@ -97,11 +99,11 @@ class PersistentHomologyTask(DiagnosticTask):
                  if death != np.inf:
                     lifespans_h1.append(death - birth)
                     
-            # Describe the topology topology
-            # Mean lifespan gives an idea of how "persistent" the structural features are.
-            results[f"layer_{l_idx}_mean_persistance_h0"] = float(np.mean(lifespans_h0)) if lifespans_h0 else 0.0
-            results[f"layer_{l_idx}_max_persistance_h0"] = float(np.max(lifespans_h0)) if lifespans_h0 else 0.0
-            results[f"layer_{l_idx}_mean_persistance_h1"] = float(np.mean(lifespans_h1)) if lifespans_h1 else 0.0
+            # Describe the topology.
+            # Mean lifespan gives an idea of how persistent the structural features are.
+            results[f"layer_{l_idx}_mean_persistence_h0"] = float(np.mean(lifespans_h0)) if lifespans_h0 else 0.0
+            results[f"layer_{l_idx}_max_persistence_h0"] = float(np.max(lifespans_h0)) if lifespans_h0 else 0.0
+            results[f"layer_{l_idx}_mean_persistence_h1"] = float(np.mean(lifespans_h1)) if lifespans_h1 else 0.0
             
             # The number of non-trivial loops
             results[f"layer_{l_idx}_num_loops_h1"] = len(lifespans_h1)

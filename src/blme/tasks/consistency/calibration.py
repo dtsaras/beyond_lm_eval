@@ -33,14 +33,33 @@ class CalibrationTask(DiagnosticTask):
         probs = torch.softmax(logits, dim=-1)
         confidences, predictions = torch.max(probs, dim=-1)
         accuracies = predictions.eq(labels)
-        
+
+        # Drop non-finite confidences before binning. Historic bug:
+        # fp16 logits on pythia-6.9b / 12b overflow to NaN → every
+        # ``mask = (conf > lo) & (conf <= hi)`` is False, ECE stays at
+        # the initial 0.0, and the model looks perfectly calibrated.
+        finite = torch.isfinite(confidences) & torch.isfinite(probs).all(dim=-1)
+        if not bool(finite.any()):
+            return {
+                "error": "All confidences are NaN/Inf (fp16 overflow?)",
+                "ece": float("nan"),
+                "brier_score": float("nan"),
+                "calibration_slope": float("nan"),
+                "calibration_intercept": float("nan"),
+                "num_predictions": 0,
+            }
+        confidences = confidences[finite]
+        predictions = predictions[finite]
+        accuracies = accuracies[finite]
+        labels = labels[finite]
+
         # Binning
         n_bins = self.config.get("n_bins", 10)
         bin_boundaries = np.linspace(0, 1, n_bins + 1)
-        
+
         ece = 0.0
         bin_stats = []
-        
+
         total_samples = confidences.numel()
         
         for i in range(n_bins):

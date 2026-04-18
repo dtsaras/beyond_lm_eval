@@ -69,6 +69,12 @@ BLME_RESEARCH_TASKS = [
     # RepE
     "repe_task_vectors", "repe_concept_separability",
     "repe_refusal_direction",
+    # Additional dynamics / causality (previously registered but not
+    # wired into the pipeline — the full rewrites landed in the round-3
+    # audit so they're paper-faithful now).
+    "dynamics_coe",
+    "causality_ablation",
+    "geometry_mahalanobis",
 ]
 
 # Y-variable tasks (perplexity, calibration, prediction entropy)

@@ -86,7 +86,7 @@ class EdgeAttributionTask(DiagnosticTask):
         all_top1_shares = []
         all_peak_layers = []
 
-        for text in prompts:
+        for pi, text in enumerate(prompts):
             try:
                 enc = tokenizer(text, return_tensors="pt",
                                 truncation=True, max_length=128).to(device)
@@ -95,7 +95,15 @@ class EdgeAttributionTask(DiagnosticTask):
                     continue
 
                 # --- Corrupted pass: shuffle the tokens to destroy meaning.
-                perm = torch.randperm(input_ids.shape[1], device=device)
+                # Seed the permutation per-prompt so reruns are
+                # reproducible; otherwise the corrupted baseline changes
+                # every invocation and the resulting attribution scores
+                # are noisy. A real counterfactual pair (clean/corrupted)
+                # would be better but requires a curated dataset.
+                _g = torch.Generator(device="cpu").manual_seed(pi * 997 + 11)
+                perm = torch.randperm(
+                    input_ids.shape[1], generator=_g
+                ).to(device)
                 corrupted_ids = input_ids[:, perm]
 
                 # Collect corrupted residual-stream states via hidden_states.

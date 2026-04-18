@@ -93,10 +93,15 @@ class HSICDependenceTask(DiagnosticTask):
             nhsic = hsic_ij / (norm + 1e-12)
             adjacent_hsic.append(nhsic)
 
-        # Input-to-layer HSIC (first layer vs all others)
+        # Input-to-layer HSIC (first layer vs every *later* layer).
+        # Historic bug: the loop started at ``i = 0``, including the
+        # self-pair ``HSIC(input, input) = 1.0``. That self-pair had no
+        # information content but pinned the list's ``max`` to 1.0 for
+        # every model and skewed ``hsic_compression_ratio`` by anchoring
+        # the denominator at a tautological 1.
         input_hsic = []
         K_input = gram_matrices[layers[0]]
-        for i in range(n_layers):
+        for i in range(1, n_layers):
             K_i = gram_matrices[layers[i]]
             hsic_val = float(torch.sum(K_input * K_i))
             norm = np.sqrt(self_hsic[layers[0]] * self_hsic[layers[i]])
@@ -108,7 +113,11 @@ class HSICDependenceTask(DiagnosticTask):
             "avg_adjacent_hsic": float(np.mean(adjacent_hsic)),
             "min_adjacent_hsic": float(np.min(adjacent_hsic)),
             "input_to_layer_hsic": input_hsic,
-            "hsic_compression_ratio": float(input_hsic[-1] / (input_hsic[0] + 1e-12))
-            if input_hsic
-            else 0.0,
+            # Compression: last-layer HSIC-to-input divided by
+            # first-transformer-block HSIC-to-input (both measured
+            # after the embedding layer, not the self-pair).
+            "hsic_compression_ratio": (
+                float(input_hsic[-1] / (input_hsic[0] + 1e-12))
+                if input_hsic else 0.0
+            ),
         }

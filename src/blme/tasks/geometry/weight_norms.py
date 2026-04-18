@@ -67,15 +67,22 @@ class WeightNormProfileTask(DiagnosticTask):
                 frob = float(W.norm().item())
                 frob_vals.append(frob)
 
-                # Spectral norm = largest singular value (cheap via power iteration
-                # or full SVD on typically small-ish weight matrices).
+                # Spectral norm = largest singular value. Stable rank
+                # ``||W||_F² / ||W||_2²`` is bounded above by the matrix
+                # rank ``min(W.shape)`` by construction — any value
+                # above that is a numerical artefact (has been observed
+                # at 10⁴ on Qwen3.5 shared-embedding matrices where
+                # SVD-on-bf16 returned a tiny ``S[0]`` relative to the
+                # Frobenius norm). Clip explicitly so one outlier
+                # module doesn't dominate the per-layer average.
                 try:
                     S = torch.linalg.svdvals(W)
                     spectral = float(S[0].item())
                     spec_vals.append(spectral)
-                    # Stable rank = ||W||_F^2 / ||W||_2^2
                     if spectral > 0:
-                        srank_vals.append(frob ** 2 / spectral ** 2)
+                        raw_srank = frob ** 2 / spectral ** 2
+                        max_rank = int(min(W.shape))
+                        srank_vals.append(min(raw_srank, float(max_rank)))
                     else:
                         srank_vals.append(0.0)
                 except Exception:

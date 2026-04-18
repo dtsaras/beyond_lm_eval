@@ -100,7 +100,8 @@ class PersistenceEntropyTask(DiagnosticTask):
                 
                 for l_idx in target_layers:
                     hidden = out.hidden_states[l_idx + 1][0]
-                    rep = hidden.mean(dim=0).cpu().numpy()
+                    # .float() first: numpy doesn't accept bf16.
+                    rep = hidden.mean(dim=0).float().cpu().numpy()
                     layer_reps[l_idx].append(rep)
         
         results = {}

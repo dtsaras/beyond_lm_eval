@@ -82,25 +82,39 @@ class SuperpositionIndexTask(DiagnosticTask):
 
         num_layers = len(layers)
 
-        # Collect MLP activations via hooks
+        # Collect MLP *intermediate* activations (the neuron axis).
+        # Historic bug: the hook targeted ``layer.mlp`` output, which is
+        # post-down_proj and already projected back into the residual
+        # stream (dense, not the sparse intermediate that Elhage et al.
+        # 2022 / Templeton et al. 2024 analyse for polysemanticity).
+        # We pre-hook ``down_proj`` and capture its INPUT — the
+        # ``silu(gate_proj(x)) * up_proj(x)`` tensor of shape
+        # ``(B, T, intermediate_size)`` — same approach as
+        # ``sparsity.py`` (see its 2026-04-15 fix).
+        from .sparsity import _find_down_proj, _is_projection_module
+
         activation_data = defaultdict(list)
         hooks = []
 
-        def get_hook(layer_idx):
-            def hook(module, input, output):
-                tensor = output[0] if isinstance(output, tuple) else output
-                # (batch, seq_len, dim) -> flatten to (tokens, dim)
-                flat = tensor.detach().cpu().reshape(-1, tensor.shape[-1])
+        def get_pre_hook(layer_idx):
+            def pre_hook(module, args, kwargs=None):
+                if not args:
+                    return
+                x = args[0]
+                if not isinstance(x, torch.Tensor):
+                    return
+                flat = x.detach().cpu().reshape(-1, x.shape[-1])
                 activation_data[layer_idx].append(flat)
-            return hook
+            return pre_hook
 
         for i, layer in enumerate(layers):
-            target = layer
-            if hasattr(layer, "mlp"):
-                target = layer.mlp
-            elif hasattr(layer, "feed_forward"):
-                target = layer.feed_forward
-            hooks.append(target.register_forward_hook(get_hook(i)))
+            mlp = getattr(layer, "mlp", None) or getattr(layer, "feed_forward", None)
+            if mlp is None:
+                continue
+            down_proj = _find_down_proj(mlp)
+            if down_proj is None:
+                continue
+            hooks.append(down_proj.register_forward_pre_hook(get_pre_hook(i)))
 
         try:
             with torch.no_grad():

@@ -32,35 +32,41 @@ except ImportError:
 
 def _count_betti(data, maxdim=1, threshold=None):
     """Count Betti numbers from a point cloud.
-    
-    Uses ripser to compute persistence and counts features alive at a 
-    specified threshold (or uses a heuristic: median death value).
-    
+
+    Uses ripser to compute persistence and counts features alive at a
+    specified threshold. When ``threshold`` is not provided, the
+    threshold is fixed at the **median of the upper-triangular pairwise
+    distance matrix** of the input cloud. This is a geometry-invariant
+    scale (independent of ripser's death-time distribution and robust
+    to outlier merges), so ``betti_0`` is comparable across models in
+    a way that the previous per-model "median H0 death" choice was not.
+
     Returns:
         (betti_0, betti_1): counts of connected components and loops
     """
+    if threshold is None:
+        try:
+            from scipy.spatial.distance import pdist
+            d_flat = pdist(np.asarray(data, dtype=np.float64))
+            d_flat = d_flat[np.isfinite(d_flat)]
+            threshold = float(np.median(d_flat)) if d_flat.size else 0.0
+        except Exception:
+            threshold = 0.0
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = ripser(data, maxdim=maxdim)
-    
+
     dgms = result['dgms']
-    
-    # For H0: count connected components
-    # Use a heuristic threshold: median of the finite death values
     h0 = dgms[0]
-    finite_deaths_h0 = [d for _, d in h0 if d != np.inf]
-    if threshold is None and finite_deaths_h0:
-        threshold = np.median(finite_deaths_h0)
-    elif threshold is None:
-        threshold = 0.0
-    
+
     # Count features alive at the threshold
     betti_0 = sum(1 for b, d in h0 if b <= threshold and (d > threshold or d == np.inf))
-    
+
     # For H1: simply count finite loops
     h1 = dgms[1]
     betti_1 = len([1 for b, d in h1 if d != np.inf and (d - b) > 1e-6])
-    
+
     return betti_0, betti_1
 
 
@@ -114,7 +120,8 @@ class BettiCurveTask(DiagnosticTask):
                 
                 for l_idx in range(num_layers):
                     hidden = out.hidden_states[l_idx + 1][0]
-                    rep = hidden.mean(dim=0).cpu().numpy()
+                    # .float() first: numpy doesn't accept bf16 tensors.
+                    rep = hidden.mean(dim=0).float().cpu().numpy()
                     layer_reps[l_idx].append(rep)
         
         betti_0_curve = []

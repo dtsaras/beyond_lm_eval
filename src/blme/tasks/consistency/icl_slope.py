@@ -115,30 +115,17 @@ class ICLSlopeTask(DiagnosticTask):
         # nll_by_k[k] = list of per-item NLLs
         nll_by_k: Dict[int, List[float]] = {k: [] for k in shot_counts}
 
+        from ..common import score_continuation
+
         with torch.no_grad():
             for item in items:
                 for k in shot_counts:
                     prompt, target = _build_prompt(item, k)
-                    full = prompt + target
-
-                    enc_full = tokenizer(full, return_tensors="pt",
-                                         truncation=True, max_length=512).to(device)
-                    enc_prompt = tokenizer(prompt, return_tensors="pt",
-                                           truncation=True, max_length=512).to(device)
-                    full_ids = enc_full["input_ids"][0]
-                    prompt_len = enc_prompt["input_ids"].shape[1]
-
-                    if full_ids.shape[0] <= prompt_len:
+                    res = score_continuation(model, tokenizer, prompt, target)
+                    if res is None:
                         continue
-
-                    out = model(**enc_full)
-                    logits = out.logits[0]
-                    pred_logits = logits[prompt_len - 1: -1]
-                    targets = full_ids[prompt_len:]
-                    if pred_logits.shape[0] != targets.shape[0] or pred_logits.shape[0] == 0:
-                        continue
-                    loss = F.cross_entropy(pred_logits, targets, reduction="mean")
-                    nll_by_k[k].append(float(loss.item()))
+                    mean_nll, _n_ans_tok, _ans_ids = res
+                    nll_by_k[k].append(float(mean_nll))
 
         mean_nll = {k: float(np.mean(v)) if v else float("nan")
                     for k, v in nll_by_k.items()}

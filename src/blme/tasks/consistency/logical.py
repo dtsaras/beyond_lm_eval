@@ -25,39 +25,33 @@ class LogicalConsistencyTask(DiagnosticTask):
 
         device = next(model.parameters()).device
 
-        if dataset is None:
-            dataset = [
-                {"premise": "John is a bachelor.", "conclusion": "John is unmarried."},
-                {"premise": "The car is completely destroyed.", "conclusion": "The car cannot be driven."},
-                {"premise": "Paris is the capital of France.", "conclusion": "Paris is in France."},
-                {"premise": "All mammals are warm-blooded.", "conclusion": "Dogs are warm-blooded."},
-                {"premise": "It is raining heavily outside.", "conclusion": "The ground is wet."},
-            ][:num_samples]
+        _BUNDLED = [
+            {"premise": "John is a bachelor.",
+             "conclusion": "John is unmarried."},
+            {"premise": "The car is completely destroyed.",
+             "conclusion": "The car cannot be driven."},
+            {"premise": "Paris is the capital of France.",
+             "conclusion": "Paris is in France."},
+            {"premise": "All mammals are warm-blooded.",
+             "conclusion": "Dogs are warm-blooded."},
+            {"premise": "It is raining heavily outside.",
+             "conclusion": "The ground is wet."},
+        ]
 
-        samples = list(dataset)[:num_samples]
+        # Only accept dataset entries that carry premise/conclusion.
+        usable = []
+        if dataset is not None and isinstance(dataset, list):
+            for item in dataset[:num_samples]:
+                if isinstance(item, dict) and {"premise", "conclusion"} <= set(item):
+                    usable.append(item)
+        if len(usable) < 1:
+            usable = _BUNDLED[:num_samples]
+
+        samples = list(usable)[:num_samples]
         if len(samples) < 1:
-             return {"error": "Need at least 1 sample with 'premise' and 'conclusion' keys"}
+            return {"error": "Need at least 1 (premise, conclusion) pair"}
 
-        if not all(k in samples[0] for k in ["premise", "conclusion"]):
-             return {"error": "Dataset must contain 'premise' and 'conclusion' keys"}
-
-        def get_conclusion_logprob(text, prompt_len):
-            """Compute mean log prob of tokens after prompt_len."""
-            ids = tokenizer.encode(text, return_tensors="pt", truncation=True, max_length=256).to(device)
-            if ids.shape[1] <= prompt_len or ids.shape[1] < 2:
-                return None
-            outputs = model(ids)
-            logits = outputs.logits
-            # Shifted log probs: logits[t] predicts token[t+1]
-            log_probs = F.log_softmax(logits, dim=-1)
-            shift_log_probs = log_probs[0, :-1, :]
-            shift_labels = ids[0, 1:]
-            token_log_probs = torch.gather(shift_log_probs, 1, shift_labels.unsqueeze(1)).squeeze(1)
-            # Only take log probs for conclusion tokens (after prompt_len - 1 in shifted array)
-            conclusion_log_probs = token_log_probs[prompt_len - 1:]
-            if conclusion_log_probs.numel() == 0:
-                return None
-            return conclusion_log_probs.mean().item()
+        from ..common import score_continuation
 
         conditional_logprobs = []
         unconditional_logprobs = []
@@ -68,21 +62,26 @@ class LogicalConsistencyTask(DiagnosticTask):
                 premise = s["premise"]
                 conclusion = s["conclusion"]
 
-                # P(conclusion | premise): tokenize premise+conclusion, score conclusion part
-                premise_ids = tokenizer.encode(premise, add_special_tokens=False)
-                combined_text = premise + " " + conclusion
-                combined_ids = tokenizer.encode(combined_text, add_special_tokens=False)
-                # prompt_len = number of tokens for the premise + space prefix
-                # Re-encode to get exact boundary
-                prompt_len = len(tokenizer.encode(premise + " ", add_special_tokens=False))
+                # P(conclusion | premise). Use a shared helper so the
+                # premise/conclusion boundary is found by character
+                # offsets — independent tokenisation produces
+                # inconsistent boundaries under BPE merges.
+                cond = score_continuation(model, tokenizer, premise + " ", conclusion)
 
-                cond_lp = get_conclusion_logprob(combined_text, prompt_len)
+                # P(conclusion) alone — same helper with empty prompt
+                # (the "log-prob of the sentence itself"). We prefix a
+                # single space so the tokenised "start of sentence"
+                # condition is identical to how the conclusion is
+                # tokenised inside the conditional prompt.
+                uncond = score_continuation(model, tokenizer, " ", conclusion)
 
-                # P(conclusion): tokenize conclusion alone, score all tokens
-                uncond_lp = get_conclusion_logprob(conclusion, 0)
-
-                if cond_lp is None or uncond_lp is None:
+                if cond is None or uncond is None:
                     continue
+
+                # The helper returns mean NLL (positive). Convert to
+                # log-probability (negative) to match the legacy API.
+                cond_lp = -cond[0]
+                uncond_lp = -uncond[0]
 
                 conditional_logprobs.append(cond_lp)
                 unconditional_logprobs.append(uncond_lp)

@@ -135,7 +135,9 @@ class KnowledgeCapacityTask(DiagnosticTask):
         shift_logits = logits[:, :-1, :]
         shift_labels = input_ids[:, 1:]
 
-        log_probs = F.log_softmax(shift_logits, dim=-1)
+        # Cast to fp32 before log_softmax so bf16 models produce
+        # fp32 log-probs (numpy doesn't accept bf16).
+        log_probs = F.log_softmax(shift_logits.float(), dim=-1)
         token_log_probs = log_probs.gather(
             2, shift_labels.unsqueeze(-1)
         ).squeeze(-1)  # (1, T-1)

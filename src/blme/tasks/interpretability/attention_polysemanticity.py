@@ -59,10 +59,14 @@ class AttentionEffectiveRankTask(DiagnosticTask):
         if not target_modules:
              return {"error": "Could not automatically locate attention output projections."}
 
-        # We sample a few random layers to avoid immense computation
+        # We sample a few random layers to avoid immense computation.
+        # Seed so the same 4 layers are picked across reruns / models
+        # (index-based, so comparable across architectures with ≥5
+        # attention output projections).
         import random
         if len(target_modules) > 4:
-             target_modules = random.sample(target_modules, 4)
+            _rng = random.Random(0)
+            target_modules = _rng.sample(target_modules, 4)
 
         entropies = []
 

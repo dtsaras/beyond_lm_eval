@@ -29,10 +29,9 @@ def _svd_metrics_for_layer(X):
     _trapz = getattr(np, "trapezoid", np.trapz)
     auc = _trapz(explained_variance) / max(1, len(explained_variance))
 
-    p = S / (np.sum(S) + 1e-12)
-    p = p[p > 1e-12]
-    entropy_sv = -np.sum(p * np.log(p))
-    effective_rank = float(np.exp(entropy_sv))
+    # Canonical Roy-Vetterli effective rank on σ² (shared helper).
+    from .utils import effective_rank as _effective_rank
+    effective_rank = float(_effective_rank(S))
 
     eigenvalues = S ** 2
     sum_eig = np.sum(eigenvalues)
@@ -49,9 +48,23 @@ def _svd_metrics_for_layer(X):
     cos_sims = np.sum(vecs1 * vecs2, axis=1)
     avg_cos_sim = float(np.mean(cos_sims))
 
+    # Conditioned on the numerical rank: on models where N < D the
+    # smallest singular value is float-noise at ~1e-7, so ``S[0]/S[-1]``
+    # reports 1e8 dominated by the numerical floor rather than the
+    # data's geometry. Cap the denominator at a relative-tolerance
+    # threshold of S[0] so ``cond_number`` reflects the effective
+    # conditioning of the numerical-rank subspace only.
+    rel_tol = float(S[0]) * max(S.shape) * np.finfo(S.dtype).eps
+    effective_rank_num = int(np.sum(S > rel_tol))
+    if effective_rank_num >= 1 and S[effective_rank_num - 1] > 0:
+        cond_number = float(S[0] / S[effective_rank_num - 1])
+    else:
+        cond_number = float("inf")
+
     return {
         "svd_auc": float(auc),
-        "cond_number": float(S[0] / S[-1]) if S[-1] > 0 else float("inf"),
+        "cond_number": cond_number,
+        "numerical_rank": effective_rank_num,
         "avg_cosine_similarity": avg_cos_sim,
         "effective_rank": effective_rank,
         "participation_ratio": participation_ratio,

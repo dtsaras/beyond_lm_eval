@@ -7,6 +7,12 @@ from tqdm import tqdm
 import logging
 logger = logging.getLogger("blme")
 
+try:
+    from transformers.pytorch_utils import Conv1D as _HFConv1D
+except Exception:
+    _HFConv1D = None
+
+
 @register_task("geometry_spectral")
 class WeightSpectralTask(DiagnosticTask):
     """
@@ -24,7 +30,13 @@ class WeightSpectralTask(DiagnosticTask):
         results = {}
         layer_stats = {}
 
-        TARGET_MODULES = (torch.nn.Linear, torch.nn.Conv1d)
+        # GPT-2 uses transformers.pytorch_utils.Conv1D (NOT torch.nn.Conv1d)
+        # for its QKV/MLP projections. Skipping it degrades the analysis to
+        # a single nn.Linear (lm_head) and makes std_alpha = 0.
+        TARGET_MODULES = [torch.nn.Linear, torch.nn.Conv1d]
+        if _HFConv1D is not None:
+            TARGET_MODULES.append(_HFConv1D)
+        TARGET_MODULES = tuple(TARGET_MODULES)
 
         alphas = []
         stable_ranks = []

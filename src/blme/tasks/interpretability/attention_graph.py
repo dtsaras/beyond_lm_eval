@@ -127,13 +127,18 @@ class AttentionGraphTopologyTask(DiagnosticTask):
                         agg_metrics["max_pageranks"].append(max_pr)
                         agg_metrics["sink_is_bos"].append(1 if sink_idx == 0 else 0)
                         
-                        # Edge Gini (Sparsity of the complete graph)
+                        # Edge Gini (Sparsity of the complete graph).
+                        # Guard the ``cum_edges[-1] == 0`` case — it can
+                        # happen on fully-zeroed / fully-masked attention
+                        # matrices and silently raised RuntimeWarning /
+                        # produced ±inf before.
                         flat_edges = np.sort(adj.flatten())
                         cum_edges = np.cumsum(flat_edges)
-                        # Gini formula
                         n = len(flat_edges)
-                        gini = (n + 1 - 2 * np.sum(cum_edges) / cum_edges[-1]) / n
-                        agg_metrics["edge_ginis"].append(gini)
+                        total = float(cum_edges[-1]) if n else 0.0
+                        if total > 0:
+                            gini = (n + 1 - 2 * np.sum(cum_edges) / total) / n
+                            agg_metrics["edge_ginis"].append(float(gini))
                         
         if not agg_metrics["max_pageranks"]:
              return {"error": "Sequence lengths too short or no samples."}

@@ -99,36 +99,105 @@ NORMALIZATIONS = {
 }
 
 
-def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, float]:
-    """Flatten a nested dict into {prefix.subkey: scalar} for all scalar values."""
+# Matches: layer0, layer_0, layer0_acc, layer_0_aie, layer_27_entropy, ...
+# and — only when the whole dict's keys share this shape — bare
+# integer indices like "0", "1", "2" (used by
+# ``interpretability_waa.layer_waa_alignments``).
+_LAYER_RE = re.compile(r"^layer_?(\d+)(?:_(.+))?$")
+_BARE_INT_RE = re.compile(r"^\d+$")
+
+
+def _summarise_list(vals: List[Any], key: str) -> Dict[str, float]:
+    """Return mean / std / min / max / slope / q25 / q50 / q75 for a
+    list of scalars, keyed under ``key``. Filters non-finite entries.
+    Returns an empty dict if no finite values remain."""
+    arr = np.asarray([float(v) for v in vals if v is not None], dtype=np.float64)
+    arr = arr[np.isfinite(arr)]
     out: Dict[str, float] = {}
+    if arr.size == 0:
+        return out
+    out[f"{key}.mean"] = float(arr.mean())
+    out[f"{key}.std"] = float(arr.std())
+    out[f"{key}.min"] = float(arr.min())
+    out[f"{key}.max"] = float(arr.max())
+    if arr.size >= 3:
+        xs = np.arange(arr.size)
+        slope, _ = np.polyfit(xs, arr, 1)
+        out[f"{key}.slope"] = float(slope)
+    n = arr.size
+    out[f"{key}.q25"] = float(arr[min(n - 1, max(0, int(0.25 * (n - 1))))])
+    out[f"{key}.q50"] = float(arr[min(n - 1, max(0, int(0.50 * (n - 1))))])
+    out[f"{key}.q75"] = float(arr[min(n - 1, max(0, int(0.75 * (n - 1))))])
+    return out
+
+
+def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, float]:
+    """Flatten a nested dict into {prefix.subkey: scalar} for all scalar
+    values.
+
+    Layer-indexed keys (``layer_0``, ``layer_0_aie``, ``layer0_acc``, …)
+    at this level are regrouped by suffix and summarised via
+    :func:`_summarise_list` so the resulting columns are
+    architecture-agnostic (mean / std / slope / q25 / q50 / q75 over
+    the layer axis). Without this, models with more layers fill a
+    ``layer_31`` column that shorter models leave NaN — inducing a
+    spurious depth-bias in any downstream PCA / Lasso / correlation
+    analysis.
+    """
+    out: Dict[str, float] = {}
+
+    # Special case: if *every* key in ``d`` is a bare integer, treat it
+    # as a layer-indexed scalar/dict bundle (used by
+    # ``interpretability_waa.layer_waa_alignments``).
+    if d and all(isinstance(k, str) and _BARE_INT_RE.match(k) for k in d.keys()):
+        d = {f"layer_{k}": v for k, v in d.items()}
+
+    # Split keys into layer-indexed groups vs passthrough.
+    layer_groups: Dict[str, Dict[int, Any]] = {}
+    passthrough: Dict[str, Any] = {}
     for k, v in d.items():
+        m = _LAYER_RE.match(k)
+        if m is None:
+            passthrough[k] = v
+            continue
+        idx = int(m.group(1))
+        suffix = m.group(2) or ""
+        layer_groups.setdefault(suffix, {})[idx] = v
+
+    # Emit per-layer summaries for any group with ≥3 layers; push the
+    # rest back into passthrough so the ≤2-layer case still appears.
+    for suffix, by_idx in layer_groups.items():
+        if len(by_idx) < 3:
+            for idx, v in by_idx.items():
+                restore = f"layer_{idx}_{suffix}" if suffix else f"layer_{idx}"
+                passthrough[restore] = v
+            continue
+        ordered = sorted(by_idx.items(), key=lambda t: t[0])
+        vals = [v for _, v in ordered]
+        group_prefix = f"{prefix}.{suffix}" if suffix and prefix else (suffix or prefix)
+        if all(isinstance(v, (int, float, bool)) for v in vals):
+            out.update(_summarise_list(vals, group_prefix))
+        elif all(isinstance(v, dict) for v in vals):
+            sub_keys: set = set()
+            for dv in vals:
+                sub_keys.update(dv.keys())
+            for sk in sub_keys:
+                sub_vals = [dv[sk] for dv in vals
+                            if sk in dv and isinstance(dv[sk], (int, float, bool))]
+                if len(sub_vals) >= 3:
+                    sk_prefix = f"{group_prefix}.{sk}" if group_prefix else sk
+                    out.update(_summarise_list(sub_vals, sk_prefix))
+
+    for k, v in passthrough.items():
         key = f"{prefix}.{k}" if prefix else k
-        if isinstance(v, (int, float, bool)) and not isinstance(v, bool):
-            out[key] = float(v) if np.isfinite(v) else np.nan
-        elif isinstance(v, bool):
+        if isinstance(v, bool):
             out[key] = float(v)
+        elif isinstance(v, (int, float)):
+            out[key] = float(v) if np.isfinite(v) else np.nan
         elif isinstance(v, dict):
             out.update(_flatten_dict(v, key))
-        elif isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v):
-            # For lists of scalars, compute summary stats
-            arr = np.asarray(v, dtype=np.float64)
-            arr = arr[np.isfinite(arr)]
-            if arr.size > 0:
-                out[f"{key}.mean"] = float(arr.mean())
-                out[f"{key}.std"] = float(arr.std())
-                out[f"{key}.min"] = float(arr.min())
-                out[f"{key}.max"] = float(arr.max())
-                if arr.size >= 3:
-                    # Slope of value vs index (for per-layer profiles)
-                    xs = np.arange(arr.size)
-                    slope, _ = np.polyfit(xs, arr, 1)
-                    out[f"{key}.slope"] = float(slope)
-                # Value at relative positions 0.25/0.5/0.75 (normalised depth)
-                n = arr.size
-                out[f"{key}.q25"] = float(arr[min(n - 1, max(0, int(0.25 * (n - 1))))])
-                out[f"{key}.q50"] = float(arr[min(n - 1, max(0, int(0.50 * (n - 1))))])
-                out[f"{key}.q75"] = float(arr[min(n - 1, max(0, int(0.75 * (n - 1))))])
+        elif isinstance(v, list) and v and all(isinstance(x, (int, float, bool)) for x in v):
+            out.update(_summarise_list(v, key))
     return out
 
 
@@ -394,12 +463,20 @@ def main():
     aggregated = meta.merge(features_df, on="model", how="left").merge(benchmarks_df, on="model", how="left")
 
     # ── Post-merge cleaning (from the BLME audit findings) ─────────────
-    # These fixes address issues discovered during the 2026-04-13 audit:
-    #   (a) ~35 hyperparameter constants leaked into the feature matrix
-    #   (b) dynamics_sharpness.n_params IS the parameter count (ρ=0.97 with log N)
-    #   (c) gemma4-e4b-it ECE=0.568 is a 20× outlier from a tokenizer/template bug
-    #   (d) geometry_perplexity metrics are inverted with model size (cache's
-    #       128-token evaluation breaks cross-model PPL comparisons)
+    # Audit timeline:
+    #   2026-04-13  (a) hyperparameter constants leaked as features
+    #   2026-04-13  (b) dynamics_sharpness.n_params is the parameter count
+    #   2026-04-13  (c) gemma4-e4b-it calibration is a chat-template bug
+    #   2026-04-17  (d) per-layer absolute-index columns cause depth bias
+    #                   (fixed in _flatten_dict above: layer-indexed keys
+    #                   now become mean/std/slope/q25/q50/q75 summaries)
+    #   2026-04-17  (e) cache shift-by-1 bug fixed ⇒ geometry_perplexity
+    #                   is no longer inverted; the __deprecated_inverted
+    #                   rename was retired.
+    #   2026-04-17  (f) gemma4-e4b-it perplexity ppl_overall=7311 (770× base
+    #                   model) — same chat-template / tokenisation bug as
+    #                   the calibration issue; null out perplexity for this
+    #                   one model so it doesn't dominate Pearson means.
 
     # (a) Drop features with zero variance across all models (these are
     # hyperparameter constants: n_samples, num_points, sam_rho, n_facts, ...).
@@ -435,21 +512,25 @@ def main():
         aggregated = aggregated.drop(columns=["dynamics_sharpness.n_params"])
         print("  Dropped dynamics_sharpness.n_params (confounded with model size)")
 
-    # (c) Null out gemma4-e4b-it's calibration values (the 20× ECE outlier
-    # appears to be a chat-template/tokenization bug in the calibration task).
-    cal_cols = [c for c in aggregated.columns
-                if c.startswith("consistency_calibration.")]
-    if cal_cols:
+    # (c) Null out gemma4-e4b-it's calibration AND perplexity values — both
+    # exhibit the same chat-template / tokenisation bug (ECE 20× base;
+    # ppl_overall 770× base at 7311 vs 9.56). All other gemma4 variants
+    # are fine, so the root cause is the -it tokenizer / chat template,
+    # not the metric.
+    corrupt_prefixes = ("consistency_calibration.", "geometry_perplexity.")
+    gemma_it_bad_cols = [c for c in aggregated.columns
+                          if c.startswith(corrupt_prefixes)]
+    if gemma_it_bad_cols:
         bad_idx = aggregated["model"] == "gemma4-e4b-it"
         if bad_idx.any():
             n_nulled = 0
-            for c in cal_cols:
+            for c in gemma_it_bad_cols:
                 before = aggregated.loc[bad_idx, c].notna().sum()
                 aggregated.loc[bad_idx, c] = np.nan
                 n_nulled += int(before)
             if n_nulled > 0:
-                print(f"  Nulled {n_nulled} calibration entries for gemma4-e4b-it "
-                      f"(ECE=0.568 is a 20× outlier — likely bug)")
+                print(f"  Nulled {n_nulled} calibration/perplexity entries for "
+                      f"gemma4-e4b-it (chat-template tokenization bug)")
 
     # (d) Add effective_rank_ratio = geometry_svd.effective_rank / d_model.
     # This is a more discriminative isotropy proxy than IsoScore (which
@@ -461,20 +542,6 @@ def main():
             / aggregated["d_model"].replace(0, np.nan)
         )
         print("  Added geometry_svd.effective_rank_ratio (= effective_rank / d_model)")
-
-    # (e) Flag the BLME geometry_perplexity columns as deprecated — they are
-    # inverted with model size (ρ=+0.65 with log N instead of negative) due to
-    # the cache's 128-token per-passage protocol. We keep them in the output
-    # for transparency but rename so any downstream analysis has to
-    # explicitly opt in to using a metric we know is broken.
-    ppl_cols = [c for c in aggregated.columns
-                if c.startswith("geometry_perplexity.")
-                and any(k in c for k in ["ppl", "mean_nll", "bits_per_char"])]
-    if ppl_cols:
-        rename = {c: f"{c}__deprecated_inverted" for c in ppl_cols}
-        aggregated = aggregated.rename(columns=rename)
-        print(f"  Renamed {len(ppl_cols)} geometry_perplexity columns with "
-              f"__deprecated_inverted suffix (metric inverted with model size)")
 
     # Compute composite benchmark score
     bench_cols = [c for c in aggregated.columns if c.startswith("benchmark_")]

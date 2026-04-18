@@ -107,16 +107,50 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
         sigma_w += diffs.T @ diffs
     sigma_w /= n
 
-    # Sigma_B: between-class scatter
+    # Sigma_B: between-class scatter. By construction it has rank
+    # ≤ K−1 (the centred class means span a (K-1)-dim affine subspace
+    # through the origin), so its full-rank inverse is numerically
+    # ill-defined in D ≫ K dimensions.
     centered = class_means - global_mean
     sigma_b = (centered.T @ centered) / K
 
-    # NC1: tr(Sigma_W @ pinv(Sigma_B)) / K
+    # NC1: tr(Σ_W · Σ_B⁺) / K, measured in the (K-1)-dim *Σ_B principal
+    # subspace* (Papyan, Han & Donoho 2020 Eq. 3 / §2.3). Naïve
+    # ``np.linalg.pinv(Σ_B, rcond=1e-10)`` keeps any eigenvalue above
+    # the tiny threshold and inverts it — on real LLM hidden states
+    # that promotes near-zero noise eigenvalues to ≈ 1/rcond and makes
+    # NC1 explode (3×10⁷ for pythia-70m in the study). We instead
+    # eigendecompose Σ_B, keep only the top K−1 eigenvalues (the
+    # rest are structural zeros), and rotate Σ_W into that subspace.
     try:
-        sigma_b_pinv = np.linalg.pinv(sigma_b, rcond=1e-10)
-        nc1 = float(np.trace(sigma_w @ sigma_b_pinv) / K)
+        eigvals, eigvecs = np.linalg.eigh(sigma_b)
+        # eigh returns ascending — take the top K-1.
+        order = np.argsort(eigvals)[::-1]
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+        k_eff = min(K - 1, d)
+        lam = eigvals[:k_eff]
+        V = eigvecs[:, :k_eff]
+
+        # Drop directions whose Σ_B eigenvalue is below a
+        # relative-tolerance threshold of the top eigenvalue — those
+        # are numerical zeros that leaked through eigh.
+        top = lam.max() if lam.size else 0.0
+        if top <= 0:
+            nc1 = float("nan")
+            subspace_rank = 0
+        else:
+            keep = lam > top * 1e-6
+            lam = lam[keep]
+            V = V[:, keep]
+            subspace_rank = int(keep.sum())
+            # Project Σ_W into this subspace and divide by the
+            # diagonal of Σ_B restricted to the same directions.
+            sigma_w_proj = V.T @ sigma_w @ V          # (k_eff, k_eff)
+            nc1 = float(np.trace(sigma_w_proj / lam[:, None]) / K)
     except np.linalg.LinAlgError:
         nc1 = float("nan")
+        subspace_rank = 0
 
     # NC2 — equinorm
     M = class_means - global_mean
@@ -140,6 +174,7 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
 
     return {
         "nc1_within_class_collapse": nc1,
+        "nc1_subspace_rank": int(subspace_rank),
         "nc2_equinorm_cv": nc2_equinorm_cv,
         "nc2_equiangularity_dev": nc2_equiangularity_dev,
         "n_classes": int(K),

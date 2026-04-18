@@ -97,33 +97,28 @@ class FormatRobustnessTask(DiagnosticTask):
         # immediately after the prompt
         next_token_matrix = np.full((len(qa), n_formats), -1, dtype=np.int64)
 
+        from ..common import score_continuation
+
         with torch.no_grad():
             for qi, (q, a) in enumerate(qa):
                 for fi, fmt in enumerate(_FORMATS):
                     prompt, ans = fmt(q, a)
-                    full = prompt + ans
 
-                    enc_full = tokenizer(full, return_tensors="pt").to(device)
+                    res = score_continuation(model, tokenizer, prompt, ans)
+                    if res is None:
+                        continue
+                    mean_nll, n_ans_tok, ans_ids = res
+                    nll_matrix[qi, fi] = float(mean_nll)
+
+                    # Top-1 next token after the prompt (zero-context QA).
+                    # We re-tokenise the prompt here to find the correct
+                    # logit slice. This is an O(1) extra call on top of
+                    # the scoring pass and gives us the argmax reliably
+                    # even when the combined tokenisation differs.
                     enc_prompt = tokenizer(prompt, return_tensors="pt").to(device)
-                    full_ids = enc_full["input_ids"][0]
-                    prompt_len = enc_prompt["input_ids"].shape[1]
-                    if full_ids.shape[0] <= prompt_len:
-                        continue
-
-                    out = model(**enc_full)
-                    logits = out.logits[0]
-
-                    # Score the answer tokens
-                    pred_logits = logits[prompt_len - 1: -1]
-                    targets = full_ids[prompt_len:]
-                    if pred_logits.shape[0] != targets.shape[0] or pred_logits.shape[0] == 0:
-                        continue
-                    losses = F.cross_entropy(pred_logits, targets, reduction="none")
-                    nll_matrix[qi, fi] = float(losses.mean().item())
-
-                    # Top-1 next token after the prompt (zero-context QA mode)
-                    next_token_logits = logits[prompt_len - 1]
-                    next_token_matrix[qi, fi] = int(next_token_logits.argmax().item())
+                    out = model(**enc_prompt)
+                    next_logits = out.logits[0, -1]
+                    next_token_matrix[qi, fi] = int(next_logits.argmax().item())
 
         # Per-question stats across formats
         per_q_std = np.nanstd(nll_matrix, axis=1)

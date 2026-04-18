@@ -25,56 +25,64 @@ class ParaphraseInvarianceTask(DiagnosticTask):
         
         device = next(model.parameters()).device
         
-        # We need paired paraphrases (pos) and unrelated (neg) examples
-        if dataset is None:
+        _BUNDLED = [
+            {"text1": "The quick brown fox jumps over the lazy dog.",
+             "text2": "A fast, dark-coloured fox leaps above a sleepy hound.",
+             "unrelated": "Machine learning is transforming data processing."},
+            {"text1": "Water boils at 100 degrees Celsius.",
+             "text2": "The boiling point of H2O is one hundred degrees Celsius.",
+             "unrelated": "The Eiffel Tower is located in Paris."},
+            {"text1": "She quickly finished her homework before dinner.",
+             "text2": "Before eating dinner she had already completed her schoolwork.",
+             "unrelated": "The Pacific Ocean is the largest ocean on Earth."},
+            {"text1": "The stock market dropped sharply on Friday.",
+             "text2": "On Friday the equity markets took a steep plunge.",
+             "unrelated": "Trees provide oxygen through photosynthesis."},
+            {"text1": "He couldn't find his keys anywhere.",
+             "text2": "His keys were nowhere to be found.",
+             "unrelated": "Mount Everest stands in the Himalayan range."},
+        ]
+
+        # Only accept dataset entries that actually carry the required
+        # (text1, text2, unrelated) triple. Generic BLME pipeline
+        # corpora are {"text": ...} and would otherwise drop straight
+        # through to the error path.
+        usable = []
+        if dataset is not None and isinstance(dataset, list):
+            for item in dataset[:num_samples]:
+                if isinstance(item, dict) and {"text1", "text2", "unrelated"} <= set(item):
+                    usable.append(item)
+
+        if len(usable) < 1:
             try:
                 from datasets import load_dataset
                 dset = load_dataset("coastalcph/mpararel", "en", split="train")
-                dataset = []
-                
-                # ParaRel provides multiple valid templates (pattern) for the same relation and subject-object pair.
-                # We group them to create valid text1 to text2 (same meaning) vs text3 (different relation) pairs.
-                # We'll just grab nearby samples for unrelated.
                 from collections import defaultdict
-                import random
-                
                 grouped = defaultdict(list)
                 for item in dset:
                     grouped[item["relation_id"]].append(item["text"])
-                    
                 relations = list(grouped.keys())
                 num_rel = len(relations)
-                
+                usable = []
                 for i in range(min(num_samples, 20)):
                     rel = relations[i % num_rel]
                     other_rel = relations[(i + 1) % num_rel]
-                    
                     if len(grouped[rel]) >= 2 and len(grouped[other_rel]) >= 1:
-                        text1 = grouped[rel][0]
-                        text2 = grouped[rel][1]
-                        unrelated = grouped[other_rel][0]
-                        dataset.append({"text1": text1, "text2": text2, "unrelated": unrelated})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [
-                    {
-                        "text1": "The quick brown fox jumps over the lazy dog.",
-                        "text2": "A fast, dark-colored fox leaps above a sleepy hound.",
-                        "unrelated": "Machine learning is transforming data processing."
-                    },
-                    {
-                        "text1": "Water boils at 100 degrees Celsius.",
-                        "text2": "The boiling point of H2O is one hundred degrees Celsius.",
-                        "unrelated": "The Eiffel Tower is located in Paris."
-                    },
-                ][:num_samples]
-            
-        samples = list(dataset)[:num_samples]
+                        usable.append({
+                            "text1": grouped[rel][0],
+                            "text2": grouped[rel][1],
+                            "unrelated": grouped[other_rel][0],
+                        })
+            except Exception as e:
+                logger.info(
+                    f"Warning: mpararel unavailable ({type(e).__name__}); "
+                    "using bundled triples."
+                )
+                usable = _BUNDLED[:num_samples]
+
+        samples = list(usable)[:num_samples]
         if len(samples) < 1:
-             return {"error": "Need at least 1 sample with 'text1', 'text2', and 'unrelated' keys"}
-             
-        if not all(k in samples[0] for k in ["text1", "text2", "unrelated"]):
-             return {"error": "Dataset must contain 'text1', 'text2', and 'unrelated' keys"}
+            return {"error": "Need at least 1 (text1, text2, unrelated) triple"}
 
         paraphrase_distances = []
         unrelated_distances = []
@@ -88,15 +96,18 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                 inputs2 = tokenizer(s["text2"], return_tensors="pt", truncation=True, max_length=128).to(device)
                 inputs3 = tokenizer(s["unrelated"], return_tensors="pt", truncation=True, max_length=128).to(device)
                 
-                # Get reps (using mean pooling over the sequence for sentence representation)
-                # We use the final layer hidden states
+                # Last-token hidden state (causal LM "sentence embedding").
+                # Historic code did a mean-pool over every position
+                # including BOS; for decoder-only models with a strong
+                # BOS attractor (Llama / Gemma) the BOS state dominated
+                # the mean and the paraphrase signal collapsed.
                 out1 = model(**inputs1, output_hidden_states=True)
                 out2 = model(**inputs2, output_hidden_states=True)
                 out3 = model(**inputs3, output_hidden_states=True)
-                
-                rep1 = out1.hidden_states[-1][0].mean(dim=0)
-                rep2 = out2.hidden_states[-1][0].mean(dim=0)
-                rep3 = out3.hidden_states[-1][0].mean(dim=0)
+
+                rep1 = out1.hidden_states[-1][0, -1].float()
+                rep2 = out2.hidden_states[-1][0, -1].float()
+                rep3 = out3.hidden_states[-1][0, -1].float()
                 
                 # Distances (L2)
                 paraphrase_distances.append(torch.norm(rep1 - rep2, p=2).item())

@@ -86,19 +86,27 @@ class ModelOutputCache:
         self,
         layer_idx: Union[int, str] = "all",
         num_samples: Optional[int] = None,
-    ) -> Union[torch.Tensor, Dict[int, torch.Tensor]]:
+        per_sample: bool = False,
+    ) -> Union[torch.Tensor, Dict[int, torch.Tensor], List[torch.Tensor], Dict[int, List[torch.Tensor]]]:
         """
         Return cached hidden states.
 
         Args:
-            layer_idx: ``"all"`` returns ``{layer: Tensor}``.
-                       An int returns a single ``Tensor (N, D)``.
+            layer_idx: ``"all"`` returns one entry per layer.
+                       An int returns a single layer's value.
                        Negative indexing is supported (``-1`` = last layer).
             num_samples: Optional cap on the number of samples to include.
                          Uses cached sample lengths to slice tokens.
+            per_sample: When True, the flat ``(Σ T_i, D)`` tensor is split
+                        back into a ``List[Tensor]`` of per-sample
+                        ``(T_i, D)`` chunks using the stored sample lengths.
+                        This is what CKA, RSA, LID and matrix-entropy need;
+                        the default flat layout silently mixes tokens from
+                        different documents.
 
         Returns:
-            Hidden states tensor(s).
+            Hidden states tensor(s), dict, list, or dict-of-list depending
+            on ``layer_idx`` / ``per_sample``.
         """
         if not self._populated:
             self._need_hidden = True
@@ -108,13 +116,32 @@ class ModelOutputCache:
             return None
 
         if layer_idx == "all":
-            return self._slice_hidden_states(self._hidden_states, num_samples)
+            sliced = self._slice_hidden_states(self._hidden_states, num_samples)
+            if per_sample:
+                return {
+                    li: self._split_by_samples(tensor, num_samples)
+                    for li, tensor in sliced.items()
+                    if tensor is not None
+                }
+            return sliced
 
-        n_layers = len(self._hidden_states)
-        actual = layer_idx if layer_idx >= 0 else n_layers + layer_idx
-        actual = max(0, min(actual, n_layers - 1))
+        # Resolve negative / out-of-range index against the highest
+        # available layer key (not len()), because populate() may leave
+        # gaps if some forward passes failed mid-run.
+        keys = sorted(self._hidden_states.keys())
+        if not keys:
+            return [] if per_sample else None
+        max_layer = keys[-1]
+        actual = layer_idx if layer_idx >= 0 else max_layer + 1 + layer_idx
+        actual = max(keys[0], min(actual, max_layer))
 
-        return self._slice_hidden_states({actual: self._hidden_states.get(actual)}, num_samples).get(actual, None)
+        sliced = self._slice_hidden_states(
+            {actual: self._hidden_states.get(actual)}, num_samples
+        )
+        tensor = sliced.get(actual, None)
+        if per_sample:
+            return self._split_by_samples(tensor, num_samples)
+        return tensor
 
     def get_attentions(self, num_samples: Optional[int] = None) -> Optional[Dict[int, List[torch.Tensor]]]:
         """Return cached attention weights ``{layer: [batch_attn, ...]}``."""
@@ -145,46 +172,112 @@ class ModelOutputCache:
         return self._labels[: min(num_samples, len(self._labels))]
 
     def get_prediction_stats(self, num_samples: Optional[int] = None):
-        """
-        Return (stats, embeddings) matching the signature of
-        ``collect_prediction_stats`` for backward-compatible tasks.
+        """Return ``(stats, embeddings)`` aligned for next-token prediction.
+
+        This mirrors :func:`collect_prediction_stats` — the non-cache
+        helper — which returns, per sample:
+
+            logits : (T-1, V)   logits at positions 0..T-2
+            labels : (T-1,)     target token ids at positions 1..T-1
+            hidden : (T-1, D)   last-layer hidden states at positions 0..T-2
+
+        Historic bug: this method used to return ``(1, T, V)``/``(1, T)``
+        tensors without the shift. Callers that did
+        ``torch.cat(stats["logits"], dim=0)`` would get a 3-D tensor and
+        comparisons would pair the distribution at position ``t`` with the
+        token at position ``t`` (the identity), silently inflating
+        calibration and deflating cross-entropy.
         """
         if not self._populated:
             self._need_hidden = True
             self.populate(need_hidden=True)
 
-        # Build stats dict
-        logits = self.get_logits(num_samples=num_samples) or []
-        labels = self.get_labels(num_samples=num_samples) or []
+        from .tasks.common import get_vocab_size, get_embeddings
 
-        # Compute token_counts from labels. Use the shared helper so
-        # multimodal models (Gemma 4, Llava, etc.) that nest vocab_size
-        # under config.text_config still work.
-        from .tasks.common import get_vocab_size
-        vocab_size = get_vocab_size(self.model) or 50257
+        raw_logits = self.get_logits(num_samples=num_samples) or []
+        raw_labels = self.get_labels(num_samples=num_samples) or []
+
+        # Per-sample last-layer hidden states before any shift.
+        hidden_per_sample: List[torch.Tensor] = []
+        if self._hidden_states:
+            last_layer = max(self._hidden_states.keys())
+            last_hidden = self._hidden_states.get(last_layer)
+            if last_hidden is not None:
+                hidden_per_sample = self._split_by_samples(last_hidden, num_samples)
+
+        shifted_logits: List[torch.Tensor] = []
+        shifted_labels: List[torch.Tensor] = []
+        shifted_hidden: List[torch.Tensor] = []
+        have_hidden = bool(hidden_per_sample)
+
+        for i, (lg, lb) in enumerate(zip(raw_logits, raw_labels)):
+            # Logits arrive as (1, T, V); labels as (1, T).
+            if lg.ndim != 3 or lb.ndim != 2:
+                continue
+            T = lg.shape[1]
+            if T < 2:
+                # Not enough positions to form a shifted pair.
+                continue
+
+            # Logits at t predict token at t+1.
+            lg_shift = lg[:, :-1, :].reshape(-1, lg.shape[-1]).float()
+            lb_shift = lb[:, 1:].reshape(-1).long()
+
+            # Hidden state for the same sample — if missing or the
+            # wrong shape, we skip the whole sample so the three lists
+            # stay in lock-step. Downstream consumers ``zip`` the three
+            # lists together (``consistency.py`` etc.) and silently
+            # dropping one would misalign samples.
+            h_shift = None
+            if have_hidden:
+                if i >= len(hidden_per_sample):
+                    continue
+                h = hidden_per_sample[i]
+                if h.ndim != 2 or h.shape[0] < T:
+                    continue
+                h_shift = h[:T - 1].float()
+
+            shifted_logits.append(lg_shift)
+            shifted_labels.append(lb_shift)
+            if h_shift is not None:
+                shifted_hidden.append(h_shift)
+
+        # Token counts: use unshifted input ids so frequency statistics
+        # reflect actual token exposure, matching
+        # ``collect_prediction_stats`` (``np.add.at(counts, ids, 1)``).
+        # Same rationale as in ``geometry/utils.py``: the *tokenizer* can
+        # emit ids larger than the model's ``config.vocab_size`` when
+        # special tokens were added post-hoc (e.g. Llama 3 with
+        # ``len(tokenizer) = 128 256`` vs ``vocab_size = 128 000``). We
+        # size the count array by the maximum id actually observed so
+        # downstream consumers never index out of bounds.
+        base_vocab = get_vocab_size(self.model) or 50257
+        tokenizer_len = int(
+            getattr(self.tokenizer, "__len__", lambda: 0)()
+        ) if hasattr(self.tokenizer, "__len__") else 0
+        vocab_size = max(base_vocab, tokenizer_len)
+        # Extend beyond even that if an observed id still exceeds.
+        for lbl in raw_labels:
+            m = int(lbl.max().item()) + 1 if lbl.numel() else 0
+            if m > vocab_size:
+                vocab_size = m
+
         token_counts = np.zeros(vocab_size, dtype=np.float64)
-        for lbl in labels:
+        for lbl in raw_labels:
             for t in lbl.view(-1).tolist():
                 if 0 <= t < vocab_size:
                     token_counts[t] += 1
 
         stats = {
-            "logits": logits,
-            "labels": labels,
+            "logits": shifted_logits,
+            "labels": shifted_labels,
             "token_counts": token_counts,
         }
+        if shifted_hidden:
+            stats["hidden"] = shifted_hidden
 
-        # Add last-layer hidden states if available (per-sample list)
-        if self._hidden_states:
-            last_layer = max(self._hidden_states.keys())
-            last_hidden = self._hidden_states.get(last_layer)
-            if last_hidden is not None:
-                stats["hidden"] = self._split_by_samples(last_hidden, num_samples)
-
-        # Embeddings = (V, D) from embedding layer
         embeddings = None
         try:
-            from blme.tasks.common import get_embeddings
             embeddings = get_embeddings(self.model)
         except Exception:
             pass

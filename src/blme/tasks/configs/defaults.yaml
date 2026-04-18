@@ -93,7 +93,12 @@ topology_persistence_entropy:
 # ---- Causality Tasks ----
 causality_tracing:
   num_samples: 3
-  noise_std: 0.1
+  # noise_std intentionally NOT set — leaving it unset lets the task
+  # compute it from the model's own subject-token embedding σ per
+  # Meng et al. 2022 §3.2 ("3 × σ(E)"). Hardcoding 0.1 here silently
+  # overrode the adaptive path and made AIE incomparable across
+  # architectures (v1 bug).
+  # noise_std: null
 
 causality_attention_knockout:
   num_samples: 3

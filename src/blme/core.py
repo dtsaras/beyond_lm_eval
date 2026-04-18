@@ -154,7 +154,30 @@ def evaluate(
             "geometry_perplexity",
             "consistency_calibration",
         }
-        cache_candidates = set(cache_hidden_tasks) | set(cache_logits_tasks)
+        # Two separate sets:
+        #   * ``cache_attn_tasks`` — tasks that actually consume
+        #     ``cache.get_attentions()``. Only for these do we need to
+        #     populate the expensive per-layer attention tensors.
+        #   * ``force_eager_tasks`` — tasks that require attention
+        #     weights at all (their own forward pass or the cache). On
+        #     modern transformers SDPA/Flash silently return None for
+        #     ``outputs.attentions``, so we must force eager even when
+        #     the task does its own forward pass. Caching is not needed.
+        cache_attn_tasks = {
+            "interpretability_attention_entropy",
+        }
+        force_eager_tasks = cache_attn_tasks | {
+            "interpretability_attention_graph",
+            "interpretability_attention_rank",
+            "interpretability_head_roles",
+            "interpretability_induction_heads",
+            "interpretability_attention_polysemanticity",
+        }
+        cache_candidates = (
+            set(cache_hidden_tasks)
+            | set(cache_logits_tasks)
+            | set(cache_attn_tasks)
+        )
 
         cache_tasks = []
         for task_name, cfg in resolved_task_configs.items():
@@ -177,7 +200,28 @@ def evaluate(
 
             if cache_num_samples and cache_num_samples > 0:
                 need_hidden = any(t in cache_hidden_tasks for t in cache_tasks)
-                need_attn = False
+                need_attn = any(t in cache_attn_tasks for t in cache_tasks)
+
+                # If any attention-consuming task is in the run, force
+                # the eager attention implementation *before* we
+                # populate the cache or invoke the task. On modern
+                # transformers the default is SDPA (or FA2) and those
+                # paths return ``None`` for ``outputs.attentions``
+                # regardless of ``output_attentions=True``.
+                force_eager = any(
+                    t in force_eager_tasks for t in diagnostic_tasks
+                )
+                if force_eager:
+                    try:
+                        if hasattr(model, "config"):
+                            model.config._attn_implementation = "eager"
+                        if hasattr(model, "set_attn_implementation"):
+                            model.set_attn_implementation("eager")
+                    except Exception as e:
+                        logger.info(
+                            f"Could not switch to eager attention: {e}. "
+                            "Attention-consuming tasks may fail."
+                        )
 
                 from .cache import ModelOutputCache
                 cache = ModelOutputCache(model, tokenizer, dataset=dataset, num_samples=cache_num_samples)

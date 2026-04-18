@@ -49,10 +49,15 @@ class PredictionEntropyTask(DiagnosticTask):
                 outputs = model(**inputs)
                 logits = outputs.logits  # (B, T, V)
 
-                # Compute probabilities (clamp inside log to avoid biasing
-                # the entropy sum on sparse distributions).
-                probs = torch.softmax(logits, dim=-1)  # (B, T, V)
-                log_probs = torch.log(probs.clamp(min=1e-12))
+                # Compute log-probabilities via ``log_softmax`` directly
+                # on logits so low-probability tokens don't first
+                # underflow to 0 inside ``softmax`` (in bf16/fp16 over a
+                # 150k-vocab that bias is non-trivial) and then get
+                # bumped back up by the ``clamp(min=1e-12)`` step. The
+                # ``log-sum-exp`` trick inside ``log_softmax`` keeps the
+                # full floating-point precision of the original logit.
+                log_probs = torch.log_softmax(logits, dim=-1)  # (B, T, V)
+                probs = log_probs.exp()
                 entropy = -(probs * log_probs).sum(dim=-1)  # (B, T)
                 all_entropies.extend(entropy[0].cpu().tolist())
 

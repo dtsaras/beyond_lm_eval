@@ -96,7 +96,9 @@ tasks:
   # ==========================================
   causality_tracing:
     num_samples: 3
-    noise_std: 0.1
+    # noise_std intentionally unset so the task computes 3×σ(E) per
+    # Meng et al. 2022 §3.2 (hardcoding 0.1 made AIE non-comparable
+    # across architectures — v1 bug).
     
   causality_attention_knockout:
     num_samples: 3

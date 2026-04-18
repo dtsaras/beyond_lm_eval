@@ -181,6 +181,95 @@ _NORM_ATTRS = [
 ]
 
 
+def score_continuation(model, tokenizer, prompt: str, answer: str):
+    """Score ``answer`` as a continuation of ``prompt`` without the
+    BPE-boundary bug that independent tokenisation of the two pieces
+    introduces.
+
+    Returns ``(mean_nll_nats, n_answer_tokens, answer_token_ids)`` or
+    ``None`` if scoring is not possible (e.g. the answer tokenises to
+    zero tokens, model has no logits, etc.).
+
+    How the boundary is found:
+
+      1. Tokenise ``prompt + answer`` once with
+         ``return_offsets_mapping=True`` (when the tokenizer supports
+         it) so each token carries its character range in the joined
+         string.
+      2. The first token whose *start* offset is ≥ ``len(prompt)`` is
+         the first answer token; everything before is prompt.
+      3. Fall back to ``len(tokenize(prompt))`` only if offset
+         mapping is unavailable — older slow tokenizers (SentencePiece
+         without offsets) use the prefix-length approximation, which
+         is the same approximation the historic BLME tasks used.
+
+    This function is used by every task that scores a string
+    continuation (``format_robustness``, ``icl_slope``,
+    ``consistency_logical``, ``consistency_paraphrase``,
+    ``consistency_contrastive``) to eliminate a systematic
+    tokenisation-boundary bias across models with different BPE
+    vocabularies.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    if not answer:
+        return None
+    device = next(model.parameters()).device
+    full = prompt + answer
+
+    # Prefer the fast tokenizer's offset mapping. Not all tokenizer
+    # classes accept ``return_offsets_mapping=True`` — in that case
+    # fall back to the prefix-length approximation.
+    prompt_len = None
+    try:
+        enc_full = tokenizer(
+            full, return_tensors="pt", return_offsets_mapping=True,
+        )
+        offsets = enc_full.get("offset_mapping", None)
+        if offsets is not None:
+            offs = offsets[0].tolist()
+            for i, (s, _e) in enumerate(offs):
+                if s >= len(prompt):
+                    prompt_len = i
+                    break
+            if prompt_len is None:
+                # Every token overlaps with the prompt — no answer
+                # tokens survived tokenisation.
+                return None
+        # offset_mapping is not a valid model kwarg; drop it.
+        enc_full = {k: v for k, v in enc_full.items() if k != "offset_mapping"}
+    except (TypeError, ValueError, Exception):  # pragma: no cover
+        enc_full = tokenizer(full, return_tensors="pt")
+
+    # Prefix-length fallback when offset mapping isn't available.
+    if prompt_len is None:
+        enc_prompt = tokenizer(prompt, return_tensors="pt")
+        prompt_len = int(enc_prompt["input_ids"].shape[1])
+
+    full_ids = enc_full["input_ids"][0]
+    if full_ids.shape[0] <= prompt_len:
+        return None
+
+    enc_full_dev = {
+        k: (v.to(device) if hasattr(v, "to") else v) for k, v in enc_full.items()
+    }
+    with torch.no_grad():
+        out = model(**enc_full_dev)
+    logits = out.logits[0]
+
+    pred_logits = logits[prompt_len - 1: -1]
+    targets = full_ids[prompt_len:].to(pred_logits.device)
+    if pred_logits.shape[0] != targets.shape[0] or pred_logits.shape[0] == 0:
+        return None
+    losses = F.cross_entropy(pred_logits, targets, reduction="none")
+    return (
+        float(losses.mean().item()),
+        int(targets.shape[0]),
+        targets.cpu().tolist(),
+    )
+
+
 def get_final_norm(model):
     """Get the final layer normalization module.
 

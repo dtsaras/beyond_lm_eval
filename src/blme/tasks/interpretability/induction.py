@@ -281,12 +281,16 @@ class InductionHeadTask(DiagnosticTask):
 
             # Causal validation: how much more does ablating top-k heads
             # hurt induction accuracy compared to ablating random heads?
-            # Positive = top-k matters more than random. Normalised by
-            # baseline so it lives in roughly [-1, 1].
+            # Positive = top-k matters more than random. Reported as a
+            # *raw* accuracy difference (not normalised by baseline) so
+            # that cross-model comparisons aren't distorted by the
+            # model-dependent baseline level (pythia-70m has baseline
+            # ≈ 0.5 while llama3-8b has ≈ 0.98; dividing by those
+            # numbers artificially inflates small-model scores). The
+            # accuracy drop itself is already bounded in [-1, 1].
             top_drop = baseline_acc - top_ablated_acc
             rand_drop = baseline_acc - rand_ablated_acc
-            denom = max(baseline_acc, 1e-6)
-            causal_validation = (top_drop - rand_drop) / denom
+            causal_validation = top_drop - rand_drop
 
             result.update({
                 "induction_baseline_acc": float(baseline_acc),

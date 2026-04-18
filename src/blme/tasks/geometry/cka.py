@@ -91,15 +91,49 @@ class CKATask(DiagnosticTask):
                 cka_matrix[i, j] = cka
                 cka_matrix[j, i] = cka
                 
-        # Structure results
+        # Compute reviewer-meaningful scalar summaries and suppress
+        # ``cka_matrix`` + ``layers`` from the top-level dict.
+        #
+        # Historic bug: the aggregator's ``_flatten_dict`` dropped
+        # ``cka_matrix`` (list-of-lists, not 1-D) and then produced
+        # ``cka.layers.{mean,std,min,max,slope,...}`` as descriptive
+        # statistics of the layer-index vector [0, 1, …, N-1]. That
+        # contaminated ~8 feature columns with pure layer-count
+        # proxies — reviewer-visible if anyone inspects what those
+        # columns actually encode.
+        n = n_layers
+        iu = np.triu_indices(n, k=1)  # off-diagonal upper triangle
+        off_diag = cka_matrix[iu] if iu[0].size else np.array([], dtype=float)
+
+        diagonal_off1 = np.array(
+            [cka_matrix[i, i + 1] for i in range(n - 1)],
+            dtype=float,
+        ) if n > 1 else np.array([], dtype=float)
+
+        def _stat(arr, fn, fallback=float("nan")):
+            return float(fn(arr)) if arr.size else fallback
+
         results = {
-            "cka_matrix": cka_matrix.tolist(), # List of lists
-            "layers": layers
+            # Core adjacent-layer measure (paper's headline quantity).
+            "avg_adjacent_cka": _stat(diagonal_off1, np.mean, 0.0),
+            "min_adjacent_cka": _stat(diagonal_off1, np.min),
+            "max_adjacent_cka": _stat(diagonal_off1, np.max),
+            "std_adjacent_cka": _stat(diagonal_off1, np.std),
+            # Global off-diagonal summary: picks up "all pairs of layers".
+            "mean_offdiag_cka": _stat(off_diag, np.mean),
+            "std_offdiag_cka": _stat(off_diag, np.std),
+            "min_offdiag_cka": _stat(off_diag, np.min),
+            "max_offdiag_cka": _stat(off_diag, np.max),
+            # Early-vs-late comparison: layer 0 vs layer N-1.
+            "early_late_cka": (
+                float(cka_matrix[0, -1]) if n >= 2 else float("nan")
+            ),
+            # First-to-middle (captures early representation drift).
+            "first_middle_cka": (
+                float(cka_matrix[0, n // 2]) if n >= 3 else float("nan")
+            ),
+            # First-to-last normalised depth distance; lower => layers
+            # diverge more across depth.
+            "n_layers": int(n),
         }
-        
-        # Add some summary stats
-        # e.g. avg CKA between adjacent layers
-        diagonal_off1 = [cka_matrix[i, i+1] for i in range(n_layers-1)]
-        results["avg_adjacent_cka"] = float(np.mean(diagonal_off1)) if diagonal_off1 else 0.0
-        
         return results

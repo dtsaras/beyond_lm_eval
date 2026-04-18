@@ -93,9 +93,18 @@ class AblationRobustnessTask(DiagnosticTask):
                         h_state = clean_states[l_idx + 1] # shape: (batch, seq, dim)
                         dim = h_state.shape[-1]
                         
-                        # Select k% random indices to ablate
+                        # Select k% random indices to ablate — seeded per
+                        # (layer, k_pct) pair so the *same* set of feature
+                        # positions is ablated across models / reruns of
+                        # the same model. Without this, each call drew a
+                        # fresh random subset from the global RNG, so the
+                        # degradation curve at k_pct was jittery and
+                        # non-reproducible.
                         num_ablate = max(1, int(dim * k_pct))
-                        ablate_indices = torch.randperm(dim)[:num_ablate].to(device)
+                        _g = torch.Generator(device="cpu").manual_seed(
+                            (int(l_idx) * 10_000) + int(k_pct * 1_000_000)
+                        )
+                        ablate_indices = torch.randperm(dim, generator=_g)[:num_ablate].to(device)
                         
                         seq_mean = h_state.mean(dim=1, keepdim=True) # shape: (batch, 1, dim)
                         

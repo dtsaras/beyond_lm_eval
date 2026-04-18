@@ -78,7 +78,20 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         
         layers = get_layers(model)
         num_layers = len(layers)
-        target_layer = num_layers // 2 # Approximation for arbitrary models
+        # Extract the target layer from the SAE id if possible
+        # ("blocks.8.hook_resid_pre" → 8), falling back to the middle
+        # layer. The previous code ignored the SAE's trained hook point
+        # and applied it at ``num_layers // 2`` — for GPT-2 small that's
+        # layer 6, but the default SAE is trained on layer 8's
+        # residual-pre, so the L0 counts were computed on the wrong
+        # hidden state.
+        import re as _re
+        m = _re.search(r"blocks\.(\d+)\.", sae_id or "")
+        if m is not None:
+            parsed = int(m.group(1))
+            target_layer = max(0, min(num_layers - 1, parsed))
+        else:
+            target_layer = num_layers // 2
         
         active_features_counts = []
         max_active_features = []

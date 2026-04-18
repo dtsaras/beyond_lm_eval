@@ -12,6 +12,34 @@ import os
 import tempfile
 import atexit
 
+
+def effective_rank(S: np.ndarray) -> float:
+    """Roy & Vetterli 2007 effective rank, computed on the eigenvalues
+    of the Gram matrix (i.e. the *squared* singular values). This is
+    the canonical "exponential-entropy" effective rank:
+
+        erank = exp(− Σ pᵢ log pᵢ),   where pᵢ = σᵢ² / Σ σⱼ²
+
+    All BLME geometry tasks should funnel through this helper so the
+    "effective rank" feature is comparable across tasks (the legacy
+    versions of ``collapse.py``, ``isotropy.py`` and
+    ``unembedding.py`` used ``pᵢ = σᵢ / Σ σⱼ`` — numerically different
+    and not the paper convention).
+    """
+    S = np.asarray(S, dtype=np.float64)
+    if S.size == 0:
+        return 0.0
+    sq = S * S
+    total = float(sq.sum())
+    if total <= 0 or not np.isfinite(total):
+        return 0.0
+    p = sq / total
+    p = p[p > 0]
+    if p.size == 0:
+        return 0.0
+    entropy_sv = float(-np.sum(p * np.log(p)))
+    return float(np.exp(entropy_sv))
+
 _OFFLOAD_FILES = []
 
 def _cleanup_offload_files():
@@ -155,7 +183,17 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
     """
     use_offload = use_disk_offload or (os.environ.get("BLME_DISK_OFFLOAD", "0") == "1")
     stats = {
-        "token_counts": np.zeros(tokenizer.vocab_size),
+        # Llama-3 and friends: ``tokenizer.vocab_size`` is the number of
+        # *base* BPE merges (128 000) but the added-special-tokens push
+        # the id range up to 128 256. ``len(tokenizer)`` is the safe
+        # upper bound that ``input_ids`` can contain; falling back to
+        # the model's config covers multimodal wrappers.
+        "token_counts": np.zeros(
+            max(
+                len(tokenizer) if hasattr(tokenizer, "__len__") else 0,
+                int(getattr(tokenizer, "vocab_size", 0) or 0),
+            ) or 50257,
+        ),
     }
 
     if use_offload:

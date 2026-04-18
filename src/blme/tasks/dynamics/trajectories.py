@@ -49,11 +49,13 @@ class LatentInterpolationTask(DiagnosticTask):
         slerp_entropies = defaultdict(list)
         alphas = np.linspace(0, 1, steps)
 
+        # Seeded RNG for reproducible pair sampling across runs.
+        import random as _random
+        _rng = _random.Random(0)
         count = 0
         with torch.no_grad():
             while count < num_pairs:
-                import random
-                s1, s2 = random.sample(samples, 2)
+                s1, s2 = _rng.sample(samples, 2)
 
                 h_states = []
                 for s in [s1, s2]:

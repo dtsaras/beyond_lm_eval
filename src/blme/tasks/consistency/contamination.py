@@ -69,8 +69,10 @@ class ContaminationDetectionTask(DiagnosticTask):
                 shift_logits = logits[:, :-1, :]
                 shift_labels = input_ids[:, 1:]
 
-                # Per-token log probabilities
-                log_probs = F.log_softmax(shift_logits, dim=-1)
+                # Per-token log probabilities — cast to fp32 before
+                # log_softmax so bf16 models (which otherwise return
+                # bf16 log-probs that numpy cannot convert) work.
+                log_probs = F.log_softmax(shift_logits.float(), dim=-1)
                 token_log_probs = log_probs.gather(
                     2, shift_labels.unsqueeze(-1)
                 ).squeeze(-1)  # (1, T-1)

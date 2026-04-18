@@ -64,7 +64,8 @@ class LinearProbingTask(DiagnosticTask):
                 all_labels.append(labels)
 
                 for layer_idx, hs in enumerate(hidden_states):
-                    feats = hs[0, :-1, :].cpu().numpy()  # (T-1, D)
+                    # .float() first: numpy doesn't accept bf16.
+                    feats = hs[0, :-1, :].float().cpu().numpy()  # (T-1, D)
                     if layer_idx not in layer_features:
                         layer_features[layer_idx] = []
                     layer_features[layer_idx].append(feats)

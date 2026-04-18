@@ -28,6 +28,7 @@ from typing import Dict, List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
@@ -92,9 +93,19 @@ class GradientFlowTask(DiagnosticTask):
                            for li in range(n_layers)]
                 try:
                     out = model(**enc)
-                    logits = out.logits[0, -1]
-                    target_id = int(logits.argmax().item())
-                    logits[target_id].backward()
+                    # Shifted next-token cross-entropy. This is the loss
+                    # Pascanu et al. 2013 uses to measure gradient flow.
+                    # Backpropagating the argmax-logit, as the legacy
+                    # code did, ties the measurement to the model's own
+                    # greedy prediction — different targets across
+                    # models make the resulting norms incommensurable.
+                    shift_logits = out.logits[..., :-1, :].contiguous()
+                    shift_labels = enc["input_ids"][..., 1:].contiguous()
+                    loss = F.cross_entropy(
+                        shift_logits.view(-1, shift_logits.size(-1)),
+                        shift_labels.view(-1),
+                    )
+                    loss.backward()
                 finally:
                     for h in handles:
                         h.remove()
@@ -129,12 +140,20 @@ class GradientFlowTask(DiagnosticTask):
         else:
             flow_entropy = float("nan")
 
-        # Slope of log(norm) vs layer index (gradient decay/growth rate)
-        log_norms = np.log(mean_norms.clip(min=1e-30))
-        valid = np.isfinite(log_norms)
-        if valid.sum() >= 2:
-            xs = np.arange(n_layers)[valid]
-            ys = log_norms[valid]
+        # Slope of log(norm) vs normalised depth (gradient decay/growth
+        # rate per unit of depth, cross-model comparable). Regressing on
+        # raw layer index yields a slope that scales as 1/n_layers — a
+        # 32-layer model and a 64-layer model with identical gradient
+        # profiles would get different slopes. Using ``xs / (n_layers-1)``
+        # gives per-depth-unit slope comparable across architectures.
+        # Drop exactly-zero layers before taking the log rather than
+        # clipping to 1e-30 — a clip injects spurious -inf-like values
+        # that corrupt the linear fit.
+        positive = mean_norms > 0
+        if positive.sum() >= 2:
+            denom = max(1, n_layers - 1)
+            xs = np.arange(n_layers)[positive] / float(denom)
+            ys = np.log(mean_norms[positive])
             slope = float(np.polyfit(xs, ys, 1)[0])
         else:
             slope = float("nan")
@@ -155,4 +174,5 @@ class GradientFlowTask(DiagnosticTask):
             "gradient_norm_max": float(mean_norms.max()),
             "gradient_norm_min": float(mean_norms.min()),
             "n_layers": n_layers,
+            "loss": "cross_entropy",
         }

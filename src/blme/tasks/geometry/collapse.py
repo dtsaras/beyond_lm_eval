@@ -61,11 +61,10 @@ class RepresentationCollapseTask(DiagnosticTask):
                     erank_per_layer.append(0.0)
                     continue
 
-            # Effective Rank (Roy & Vetterli 2007)
-            p = S / (np.sum(S) + 1e-12)
-            p = p[p > 1e-12]
-            entropy_sv = -np.sum(p * np.log(p))
-            erank = float(np.exp(entropy_sv))
+            # Effective Rank (Roy & Vetterli 2007) — canonical form
+            # operates on eigenvalues of the Gram matrix, i.e. σ².
+            from .utils import effective_rank
+            erank = effective_rank(S)
             erank_per_layer.append(erank)
 
         # Detect collapse: ratio of min erank to max erank

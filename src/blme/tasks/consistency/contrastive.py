@@ -20,54 +20,99 @@ class ContrastiveConsistencyTask(DiagnosticTask):
         
         device = next(model.parameters()).device
         
-        if dataset is None:
+        def _triples_from_pair(item):
+            """Normalise to a (prompt, target_true, target_false)
+            triple regardless of input shape. Accepts either the new
+            ``{prompt, target_true, target_false}`` form or the legacy
+            ``{factual, exclusive}`` form by reconstructing the common
+            prefix.
+            """
+            if {"prompt", "target_true", "target_false"} <= set(item):
+                return item["prompt"], item["target_true"], item["target_false"]
+            if {"factual", "exclusive"} <= set(item):
+                a, b = item["factual"], item["exclusive"]
+                i = 0
+                while i < len(a) and i < len(b) and a[i] == b[i]:
+                    i += 1
+                return a[:i], a[i:], b[i:]
+            return None
+
+        _BUNDLED_TRIPLES = [
+            {"prompt": "The capital of France is",
+             "target_true": " Paris.",
+             "target_false": " London."},
+            {"prompt": "Water boils at",
+             "target_true": " 100 degrees Celsius.",
+             "target_false": " 0 degrees Celsius."},
+            {"prompt": "A triangle has",
+             "target_true": " three sides.",
+             "target_false": " four sides."},
+        ]
+
+        usable = []
+        if dataset is not None and isinstance(dataset, list):
+            for item in dataset[:num_samples]:
+                if not isinstance(item, dict):
+                    continue
+                if {"prompt", "target_true", "target_false"} <= set(item) or \
+                   {"factual", "exclusive"} <= set(item):
+                    usable.append(item)
+
+        # If the input dataset doesn't carry contrastive triples (which
+        # is the case for the generic cache corpus), fall back to the
+        # counterfact-tracing split or the bundled examples. This keeps
+        # the task useful under BLME's default pipeline — the historic
+        # implementation did this too but the rewrite accidentally
+        # dropped the fallback.
+        if len(usable) < 1:
             try:
                 from datasets import load_dataset
-                # Load the NeelNanda/counterfact-tracing dataset and take the top num_samples
-                dset = load_dataset("NeelNanda/counterfact-tracing", split="train")
-                dataset = []
+                dset = load_dataset(
+                    "NeelNanda/counterfact-tracing", split="train",
+                )
+                usable = []
                 for i in range(min(num_samples, len(dset))):
                     item = dset[i]
-                    prompt = item["prompt"]
-                    factual = prompt + item["target_true"]
-                    exclusive = prompt + item["target_false"]
-                    dataset.append({"factual": factual, "exclusive": exclusive})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
-                dataset = [
-                    {"factual": "The capital of France is Paris.", "exclusive": "The capital of France is London."},
-                    {"factual": "Water boils at 100 degrees Celsius.", "exclusive": "Water boils at 0 degrees Celsius."},
-                    {"factual": "A triangle has three sides.", "exclusive": "A triangle has four sides."},
-                ][:num_samples]
-                
-        samples = list(dataset)[:num_samples]
+                    usable.append({
+                        "prompt": item["prompt"],
+                        "target_true": item["target_true"],
+                        "target_false": item["target_false"],
+                    })
+            except Exception as e:
+                logger.info(
+                    f"Warning: counterfact-tracing unavailable ({type(e).__name__}); "
+                    "using bundled triples."
+                )
+                usable = _BUNDLED_TRIPLES[:num_samples]
+
+        samples = list(usable)[:num_samples]
         if len(samples) < 1:
-             return {"error": "Need at least 1 sample with 'factual' and 'exclusive' keys"}
-             
-        if not all(k in samples[0] for k in ["factual", "exclusive"]):
-             return {"error": "Dataset must contain 'factual' and 'exclusive' keys"}
-             
-        def get_sequence_prob(text):
-            ids = tokenizer.encode(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-            if ids.shape[1] < 2:
-                return 1e-10
-            outputs = model(ids)
-            logits = outputs.logits
-            probs = F.softmax(logits, dim=-1)
-            shift_probs = probs[0, :-1, :]
-            shift_labels = ids[0, 1:]
-            token_probs = torch.gather(shift_probs, 1, shift_labels.unsqueeze(1)).squeeze(1)
-            mean_log_prob = torch.log(token_probs + 1e-10).mean()
-            return torch.exp(mean_log_prob).item()
-            
+            return {"error": "Need at least 1 sample"}
+
+        from ..common import score_continuation
+
         factual_probs = []
         exclusive_probs = []
         contrast_ratios = []
-        
+
         with torch.no_grad():
             for s in samples:
-                p_factual = get_sequence_prob(s["factual"])
-                p_exclusive = get_sequence_prob(s["exclusive"])
+                triple = _triples_from_pair(s)
+                if triple is None:
+                    continue
+                prompt, tgt_true, tgt_false = triple
+                # Score only the target tokens given the shared prompt —
+                # historic code scored the entire sequence including
+                # the prompt, so the metric diluted with prompt length
+                # and varied by tokeniser vocabulary.
+                true_res = score_continuation(model, tokenizer, prompt, tgt_true)
+                false_res = score_continuation(model, tokenizer, prompt, tgt_false)
+                if true_res is None or false_res is None:
+                    continue
+                # score_continuation returns mean NLL (positive) →
+                # convert to per-token probability via exp(-NLL).
+                p_factual = float(np.exp(-true_res[0]))
+                p_exclusive = float(np.exp(-false_res[0]))
                 factual_probs.append(p_factual)
                 exclusive_probs.append(p_exclusive)
                 if p_factual > 0:

@@ -53,10 +53,14 @@ def _lid_mle(distances, k):
     return -k / sum_log
 
 
-def _compute_lid_for_matrix(X, k, max_queries=500):
+def _compute_lid_for_matrix(X, k, max_queries=500, seed: int = 0):
     """Compute LID statistics for a single (N, D) data matrix.
 
     Returns a dict of statistics or *None* if there are too few points.
+    A fixed ``seed`` ensures reproducibility across reruns — the
+    previous ``np.random.choice`` call used the global RNG, so reruns
+    would draw different query subsets and yield different LID
+    statistics (paper-grade numbers should be deterministic).
     """
     X = X.float().numpy() if isinstance(X, torch.Tensor) else X
     finite_mask = np.all(np.isfinite(X), axis=1)
@@ -66,7 +70,8 @@ def _compute_lid_for_matrix(X, k, max_queries=500):
         return None
 
     n_queries = min(len(X), max_queries)
-    query_indices = np.random.choice(len(X), size=n_queries, replace=False)
+    rng = np.random.default_rng(seed)
+    query_indices = rng.choice(len(X), size=n_queries, replace=False)
 
     lid_estimates = []
     for qi in query_indices:

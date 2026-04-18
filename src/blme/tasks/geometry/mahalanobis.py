@@ -138,12 +138,25 @@ class MahalanobisOODTask(DiagnosticTask):
         X_ood = collect_hidden_states(model, tokenizer, dataset_ood, num_samples=len(dataset_ood))
         X_ood = X_ood.float().numpy()
 
-        # Compute Mahalanobis distance of ID samples to their OWN distribution
-        # (This establishes the baseline ID structural radius)
-        dists_id = _compute_mahalanobis_distances(X_id, X_id)
+        # Lee et al. 2018 scores **held-out** samples against a Gaussian
+        # fitted on a distinct training split. Re-using the same ID
+        # samples for both fit and score produces in-sample Mahalanobis
+        # distances that are systematically biased downward by leverage
+        # (~ p/n in the moderate-D regime, worse under D >> n and even
+        # with Ledoit-Wolf shrinkage). Split the ID set roughly 50/50
+        # so the ID-distance baseline matches the OOD-distance statistic.
+        n_id = X_id.shape[0]
+        fit_n = max(5, n_id // 2)
+        X_id_fit = X_id[:fit_n]
+        X_id_score = X_id[fit_n:]
+        if X_id_score.shape[0] < 2:
+            # Tiny-n fallback: use all of X_id as both fit and score,
+            # but flag the bias so downstream can see it.
+            X_id_fit = X_id
+            X_id_score = X_id
 
-        # Compute Mahalanobis distance of OOD samples to the ID distribution
-        dists_ood = _compute_mahalanobis_distances(X_id, X_ood)
+        dists_id = _compute_mahalanobis_distances(X_id_fit, X_id_score)
+        dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
 
         if not dists_id or not dists_ood:
             return {"error": "Failed to compute Mahalanobis distance (likely covariance singularity)."}
@@ -165,6 +178,9 @@ class MahalanobisOODTask(DiagnosticTask):
             "mean_mahalanobis_ood": mean_ood,
             "ood_separation_gap": mean_ood - mean_id,
             "ood_separation_ratio": mean_ood / max(mean_id, 1e-10),
+            "n_id_fit": int(X_id_fit.shape[0]),
+            "n_id_score": int(X_id_score.shape[0]),
+            "n_ood_score": int(X_ood.shape[0]),
         }
         if auroc is not None:
             result["auroc"] = auroc
