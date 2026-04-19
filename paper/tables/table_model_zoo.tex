@@ -3,44 +3,44 @@
 \toprule
 \textbf{Model} & \textbf{Family} & $N_{\text{params}}$ & $d_{\text{model}}$ & $L$ & $N_{\text{heads}}$ \\
 \midrule
-gemma4-e2b & Gemma 4 & 2.3B & 0 & 0 & 0 \\
-gemma4-e4b & Gemma 4 & 4.5B & 0 & 0 & 0 \\
-gemma4-e4b-it & Gemma 4 & 4.5B & 0 & 0 & 0 \\
-gemma4-31b & Gemma 4 & 31.0B & 0 & 0 & 0 \\
+gemma4-e2b & Gemma 4 & 2.3B & 1536 & 35 & 8 \\
+gemma4-e4b & Gemma 4 & 4.5B & 2560 & 42 & 8 \\
+gemma4-e4b-it & Gemma 4 & 4.5B & 2560 & 42 & 8 \\
+gemma4-31b & Gemma 4 & 31.0B & 5376 & 60 & 32 \\
 \midrule
-gpt2-small & GPT-2 & 124M & 0 & 0 & 0 \\
-gpt2-medium & GPT-2 & 355M & 0 & 0 & 0 \\
-gpt2-large & GPT-2 & 774M & 0 & 0 & 0 \\
-gpt2-xl & GPT-2 & 1.5B & 0 & 0 & 0 \\
+gpt2-small & GPT-2 & 124M & 768 & 12 & 12 \\
+gpt2-medium & GPT-2 & 355M & 1024 & 24 & 16 \\
+gpt2-large & GPT-2 & 774M & 1280 & 36 & 20 \\
+gpt2-xl & GPT-2 & 1.5B & 1600 & 48 & 25 \\
 \midrule
-llama3-1b & Llama 3 & 1.2B & 0 & 0 & 0 \\
-llama3-1b-it & Llama 3 & 1.2B & 0 & 0 & 0 \\
-llama3-3b & Llama 3 & 3.2B & 0 & 0 & 0 \\
-llama3-8b & Llama 3 & 8.0B & 0 & 0 & 0 \\
+llama3-1b & Llama 3 & 1.2B & 2048 & 16 & 32 \\
+llama3-1b-it & Llama 3 & 1.2B & 2048 & 16 & 32 \\
+llama3-3b & Llama 3 & 3.2B & 3072 & 28 & 24 \\
+llama3-8b & Llama 3 & 8.0B & 4096 & 32 & 32 \\
 \midrule
-olmo-1b & OLMo & 1.2B & 0 & 0 & 0 \\
+olmo-1b & OLMo & 1.2B & 2048 & 16 & 16 \\
 \midrule
-phi-2 & Phi & 2.7B & 0 & 0 & 0 \\
+phi-2 & Phi & 2.7B & 2560 & 32 & 32 \\
 \midrule
-pythia-70m & Pythia & 70M & 0 & 0 & 0 \\
-pythia-160m & Pythia & 162M & 0 & 0 & 0 \\
-pythia-410m & Pythia & 405M & 0 & 0 & 0 \\
-pythia-1b & Pythia & 1.0B & 0 & 0 & 0 \\
-pythia-1.4b & Pythia & 1.4B & 0 & 0 & 0 \\
-pythia-2.8b & Pythia & 2.8B & 0 & 0 & 0 \\
-pythia-6.9b & Pythia & 6.9B & 0 & 0 & 0 \\
-pythia-12b & Pythia & 11.8B & 0 & 0 & 0 \\
+pythia-70m & Pythia & 70M & 512 & 6 & 8 \\
+pythia-160m & Pythia & 162M & 768 & 12 & 12 \\
+pythia-410m & Pythia & 405M & 1024 & 24 & 16 \\
+pythia-1b & Pythia & 1.0B & 2048 & 16 & 8 \\
+pythia-1.4b & Pythia & 1.4B & 2048 & 24 & 16 \\
+pythia-2.8b & Pythia & 2.8B & 2560 & 32 & 32 \\
+pythia-6.9b & Pythia & 6.9B & 4096 & 32 & 32 \\
+pythia-12b & Pythia & 11.8B & 5120 & 36 & 40 \\
 \midrule
-qwen3.5-0.8b & Qwen 3.5 & 800M & 0 & 0 & 0 \\
-qwen3.5-0.8b-it & Qwen 3.5 & 800M & 0 & 0 & 0 \\
-qwen3.5-2b & Qwen 3.5 & 2.0B & 0 & 0 & 0 \\
-qwen3.5-2b-it & Qwen 3.5 & 2.0B & 0 & 0 & 0 \\
-qwen3.5-4b & Qwen 3.5 & 4.0B & 0 & 0 & 0 \\
-qwen3.5-4b-it & Qwen 3.5 & 4.0B & 0 & 0 & 0 \\
-qwen3.5-9b & Qwen 3.5 & 9.0B & 0 & 0 & 0 \\
-qwen3.5-9b-it & Qwen 3.5 & 9.0B & 0 & 0 & 0 \\
-qwen3.5-27b-it & Qwen 3.5 & 27.0B & 0 & 0 & 0 \\
+qwen3.5-0.8b & Qwen 3.5 & 800M & 1024 & 24 & 8 \\
+qwen3.5-0.8b-it & Qwen 3.5 & 800M & 1024 & 24 & 8 \\
+qwen3.5-2b & Qwen 3.5 & 2.0B & 2048 & 24 & 8 \\
+qwen3.5-2b-it & Qwen 3.5 & 2.0B & 2048 & 24 & 8 \\
+qwen3.5-4b & Qwen 3.5 & 4.0B & 2560 & 32 & 16 \\
+qwen3.5-4b-it & Qwen 3.5 & 4.0B & 2560 & 32 & 16 \\
+qwen3.5-9b & Qwen 3.5 & 9.0B & 4096 & 32 & 16 \\
+qwen3.5-9b-it & Qwen 3.5 & 9.0B & 4096 & 32 & 16 \\
+qwen3.5-27b-it & Qwen 3.5 & 27.0B & 5120 & 64 & 24 \\
 \midrule
-tinyllama-1.1b & TinyLlama & 1.1B & 0 & 0 & 0 \\
+tinyllama-1.1b & TinyLlama & 1.1B & 2048 & 22 & 32 \\
 \bottomrule
 \end{tabular}
