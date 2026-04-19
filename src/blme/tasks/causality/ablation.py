@@ -104,21 +104,30 @@ class AblationRobustnessTask(DiagnosticTask):
                         _g = torch.Generator(device="cpu").manual_seed(
                             (int(l_idx) * 10_000) + int(k_pct * 1_000_000)
                         )
-                        ablate_indices = torch.randperm(dim, generator=_g)[:num_ablate].to(device)
-                        
+                        # Keep ``ablate_indices`` on CPU and move inside
+                        # the hook so device_map=auto models (where the
+                        # target layer may live on a different GPU than
+                        # cuda:0) don't raise device-mismatch errors.
+                        ablate_indices_cpu = torch.randperm(dim, generator=_g)[:num_ablate]
+
                         seq_mean = h_state.mean(dim=1, keepdim=True) # shape: (batch, 1, dim)
-                        
-                        def get_ablation_hook(indices, mean_vals):
+
+                        def get_ablation_hook(indices_cpu, mean_vals):
                             def hook(module, input, output):
                                 out_tensor = (output[0] if isinstance(output, tuple) else output).clone()
-                                # Replace selected features with their sequence-mean
-                                out_tensor[..., indices] = mean_vals[..., indices]
+                                # Replace selected features with their sequence-mean.
+                                # Move indices and mean_vals to the layer's
+                                # output device in case of model sharding.
+                                dev = out_tensor.device
+                                idx = indices_cpu.to(dev)
+                                mean_dev = mean_vals.to(dev) if mean_vals.device != dev else mean_vals
+                                out_tensor[..., idx] = mean_dev[..., idx]
                                 if isinstance(output, tuple):
                                     return (out_tensor,) + output[1:]
                                 return out_tensor
                             return hook
                             
-                        hooks.append(layers[l_idx].register_forward_hook(get_ablation_hook(ablate_indices, seq_mean)))
+                        hooks.append(layers[l_idx].register_forward_hook(get_ablation_hook(ablate_indices_cpu, seq_mean)))
                         
                     try:
                         loss = get_loss(ids)
