@@ -522,9 +522,11 @@ We expect that some geometric metrics (effective rank utilization, LID) capture 
 Several limitations deserve emphasis.
 First, \textbf{correlation does not imply causation}: observing that a metric correlates with performance does not establish that the measured property causes better performance.
 Experimental interventions during training would be needed to establish causal claims.
-Second, our sample size ($n \approx 30$) limits statistical power, particularly for within-family analyses.
-Third, all evaluations use English text from WikiText-103; intrinsic properties may behave differently for multilingual models evaluated on non-English benchmarks.
-Fourth, forward-pass metrics capture a snapshot of trained model behavior and do not reflect training dynamics.
+Second, our sample size ($n = 32$) limits statistical power. A $B = 200$ out-of-bag bootstrap gives a 95\% CI of $[+0.07, +0.90]$ on the held-out LASSO $R^2$ and $[-0.30, +1.03]$ on the gain over the $\log N_{\text{params}}$ baseline. The lower CI bound on the \emph{gain} is below zero, so at $\alpha = 0.05$ our data cannot reject the null that the intrinsic signals add nothing; the median bootstrap gain is $+0.30$, which agrees with the point estimate.
+Third, cross-family transfer is data-hungry: the pooled leave-one-family-out $R^2 = 0.27$ masks two opposite regimes — on held-out families with $\geq 8$ models (Pythia, Qwen~3.5) the LASSO materially beats the baseline (MAE reduction of $0.08$--$0.16$), but on single-model families (OLMo, Phi, TinyLlama) the simpler baseline is safer. The intrinsic-metric recipe therefore works best when a new architecture family ships a multi-scale zoo.
+Fourth, all evaluations use English text from WikiText-103; intrinsic properties may behave differently for multilingual models evaluated on non-English benchmarks.
+Fifth, forward-pass metrics capture a snapshot of trained model behavior and do not reflect training dynamics.
+Sixth, several of the strongest size-independent predictors (tokenizer efficiency, vocabulary size, word-tracking) are confounded with training-data volume and tokenizer generation rather than representing pure geometric properties of the trained model.
 
 % ------------------------------------------------------------
 \subsection{Implications}
@@ -541,9 +543,12 @@ If intrinsic metrics predict benchmark performance beyond model size, this has i
 % ============================================================
 
 We have presented a systematic framework for correlating intrinsic model properties with downstream language model performance.
-Our metric taxonomy classifies 30 diagnostic measurements by data dependency and model aspect, while our normalization framework enables fair comparison across models with different architectures.
-The Effective Dimensionality Gradient provides a principled, threshold-free measure of information compression that operationalizes bottleneck theory for pretrained transformers.
-Together with the open-source BLME toolkit, this work provides the infrastructure for moving beyond benchmark scores toward understanding the representational foundations of language model capability.
+Our metric taxonomy classifies 72 diagnostic measurements by data dependency and model aspect; our normalization framework enables fair comparison across models with different architectures.
+A sparse LASSO on the resulting 731 features predicts composite benchmark capability at held-out $R^2 = 0.77$ versus $R^2 = 0.43$ for a $\log N_{\text{params}}$-only baseline, a $+0.34$ absolute improvement from intrinsic signals alone.
+After controlling for scale, the strongest predictors are RepE task-vector diversity, contextualized word-tracking, local intrinsic dimensionality, weight-activation alignment, Matrix Nuclear-Norm, and the massive-activation outlier signature --- a genuinely heterogeneous mix of geometry, interpretability, and causality signals rather than a single dominant category.
+The effective-rank depth profile (collapse ratio and per-layer quantiles) adds a FDR-significant signal beyond $\log N_{\text{params}}$, operationalizing bottleneck theory for pretrained transformers.
+Cross-family transfer remains an open challenge: leave-one-family-out $R^2 = 0.27$ works well when the held-out family has many models and poorly when it has few.
+Together with the open-source BLME toolkit (\url{https://github.com/dtsaras/beyond_lm_eval}), this work provides the infrastructure for moving beyond benchmark scores toward understanding the representational foundations of language model capability.
 
 % ============================================================
 % Bibliography
