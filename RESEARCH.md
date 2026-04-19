@@ -261,7 +261,23 @@ summary) and `geometry_collapse.collapse_ratio` (final/max ratio).
 
 At n=32 models, minimum detectable Spearman ρ at α=0.05, power=0.80
 is **r ≈ 0.45**. Within-family Pythia (n=8): only r > 0.7. All
-reported results clearing the power bar.
+reported univariate/partial results from Steps 1–2 clear the power
+bar.
+
+Out-of-bag bootstrap (B=200) on the LASSO LOO R²:
+
+| Metric | Point | 95 % OOB CI | Median |
+|---|---|---|---|
+| LASSO OOB R² | 0.766 | [+0.07, +0.90] | +0.66 |
+| Baseline log(N) OOB R² | 0.429 | [−0.51, +0.71] | +0.36 |
+| Gain over baseline | +0.336 | [−0.30, +1.03] | +0.30 |
+
+The OOB CIs are wide (~ ± 0.4 around the median) because only ~12
+models per bootstrap are held out. The gain CI's lower bound of
+−0.30 means at the 5 %-level the data cannot rule out the LASSO
+doing *worse* than log(N); the median and mean are both comfortably
+positive. See `scripts/bootstrap_lasso_r2.py` and
+`results/study_v2/analysis/bootstrap_ci.json`.
 
 ---
 

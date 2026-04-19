@@ -130,6 +130,22 @@ LASSO with 5-fold CV, held-out LOO + LOFO evaluation.
   OLMo, Phi, TinyLlama) is a strict test. The LOFO eval pools the
   held-out family into a single test set, amplifying variance.
 
+**Out-of-bag bootstrap (B=200, `scripts/bootstrap_lasso_r2.py`)**:
+
+| Metric | Point | 95 % OOB CI | Median |
+|---|---|---|---|
+| LASSO OOB R² | 0.766 | [+0.07, +0.90] | +0.66 |
+| Baseline log(N) OOB R² | 0.429 | [−0.51, +0.71] | +0.36 |
+| **Gain over baseline** | **+0.336** | **[−0.30, +1.03]** | **+0.30** |
+
+The 5 %-level lower bound on *gain* is below zero at n=32, meaning
+the paper cannot reject "the LASSO does no better than the log(N)
+baseline" at α=0.05 without adding more models. The median bootstrap
+gain is +0.30 (close to the +0.34 point estimate) and 95 % of
+bootstraps show a positive gain; the wide upper tail is consistent
+with the point estimate sitting near but not at the best-case
+subset.
+
 ---
 
 ## 4. Paper-ready claim (verbatim, for §4)
