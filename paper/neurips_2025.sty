@@ -16,7 +16,9 @@
 % Typography
 \RequirePackage{times}
 \RequirePackage{natbib}
-\bibliographystyle{plainnat}
+% NB: \bibliographystyle{plainnat} is set in main.tex; keeping it here as
+% well would trigger "Illegal, another \bibstyle command" when main.tex
+% loads this style.
 
 % Section formatting
 \RequirePackage{titlesec}
