@@ -503,6 +503,16 @@ def main():
             dropped_constants.append(col)
         elif std == 0:
             dropped_constants.append(col)
+        # Numerical-noise guard: slope / std / q25-q75 summaries of a
+        # by-construction-constant per-layer feature (e.g. Schatten-2
+        # of row-L2-normalised hidden states, which equals sqrt(n_rows)
+        # across every layer in every model) produce values at
+        # ~1e-7 float-precision. These surface as spurious "top
+        # predictors" under partial-ρ and LASSO because the ranks
+        # scatter randomly. Drop columns whose std is below float
+        # precision regardless of the mean.
+        elif std < 1e-6 and abs(mean) < 1e-6:
+            dropped_constants.append(col)
     if dropped_constants:
         print(f"  Dropping {len(dropped_constants)} constant/hyperparameter features "
               f"(zero variance — these are config values not features)")

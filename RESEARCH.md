@@ -1,341 +1,414 @@
 # Beyond Benchmarks: Correlating Intrinsic LLM Properties with Downstream Performance
 
-## Research Objective
+**Study status**: executed, results locked. Last update: **2026-04-20**.
 
-Benchmark scores tell us *what* LLMs can do but not *why*. This study uses BLME to measure intrinsic geometric, topological, and mechanistic properties of 30+ language models and systematically correlates these with downstream benchmark performance. We aim to: (1) identify which intrinsic properties predict performance beyond model size alone, (2) characterize how instruction tuning alters representational geometry, and (3) propose a novel metric — the Effective Dimensionality Gradient (EDG) — that captures the information bottleneck structure of a model's representations.
+Benchmark scores tell us *what* LLMs can do but not *why*. This study
+uses BLME to measure intrinsic geometric, topological, spectral,
+attention, causality, dynamics, consistency, and representation-
+engineering properties of 32 language models and systematically
+correlates these with downstream benchmark performance.
 
----
-
-## 1. Task Taxonomy
-
-Of BLME's 70 diagnostic tasks, we classify each by how intrinsic it is to the model (vs. dependent on input data or dataset design). Only tasks in Tiers 1-3 are used as independent variables (predictors). Behavioral tasks are used as dependent variables or excluded.
-
-### Tier 1 — Fully Intrinsic (weight-only, no data dependency)
-
-| Task | Key Metrics | What It Captures |
-|------|------------|------------------|
-| `geometry_spectral` | avg_alpha, avg_stable_rank | Power-law exponent and stable rank of weight matrices |
-| `geometry_hubness` | hubness_skew, gini | k-NN hub structure of the embedding matrix |
-| `geometry_weight_norms` | frobenius_norm, spectral_norm, stable_rank | Per-layer Frobenius norm, spectral norm, stable rank profiles |
-| `geometry_tokenizer_efficiency` | fertility, compression_ratio, token_distribution_entropy | Fertility (tokens/word), compression ratio, token distribution entropy |
-| `dynamics_stability` | stability_mean, stability_std | Jaccard overlap of k-NN neighborhoods in embedding space |
-| `geometry_unembedding` | eff_rank, is_tied, input_output_alignment | Effective rank and structure of the LM head; input-output embedding alignment |
-
-### Tier 2 — Mostly Intrinsic (data-dependent but measuring stable model tendencies)
-
-| Task | Key Metrics | What It Captures |
-|------|------------|------------------|
-| `geometry_svd` | effective_rank, participation_ratio, avg_cosine_similarity | Isotropy and capacity utilization of representation space |
-| `geometry_lid` | lid_mean, lid_std, lid_median | Local intrinsic dimensionality (MLE) |
-| `geometry_collapse` | collapse_ratio, erank_per_layer, max_drop | Effective rank trajectory across layers |
-| `geometry_lipschitz` | lipschitz_mean, lipschitz_max | Layer change ratios ||h_{l+1}-h_l||/||h_l|| |
-| `geometry_intrinsic_dim` | intrinsic_dimension | Global Two-NN intrinsic dimension |
-| `geometry_isoscore` | isoscore_per_layer, mean_isoscore | IsoScore (Rudman 2022) — scaled covariance distance from identity |
-| `geometry_contextualization` | self_similarity, intra_sentence_sim, mev_per_layer | Ethayarajh 2019 self-similarity, intra-sentence sim, MEV per layer |
-| `geometry_neural_collapse` | nc1_within_class, nc2_equinorm, nc2_equiangularity | NC1 (within-class collapse) + NC2 (equinorm, equiangularity) on topic classification |
-| `geometry_matrix_entropy` | mean_matrix_entropy, layer_matrix_entropies | Von Neumann entropy of covariance per layer |
-| `geometry_mutual_info` | avg_adjacent_mi, information_compression_ratio | HSIC-based mutual information between layers |
-| `geometry_rsa` | rsa_adjacent_mean, rsa_early_late | Spearman correlation between layer RDMs |
-| `geometry_cka` | avg_adjacent_cka, cka_matrix | Centered kernel alignment between layers |
-| `geometry_correlation_dimension` | correlation_dimension | Grassberger-Procaccia fractal dimension |
-| `geometry_positional_decay` | mean_positional_decay_correlation | Spearman(distance, attention) for RoPE integrity |
-| `geometry_consistency` | cosine_consistency_mean | Hidden-state / predicted-embedding alignment |
-| `interpretability_induction_heads` | max_induction_score, avg_induction_score, ov_circuit_causal_score | Mechanistic induction head detection (synthetic data); OV-circuit causal validation |
-| `interpretability_attention_entropy` | avg_entropy_total, per-layer entropy | Shannon entropy of attention distributions |
-| `interpretability_attention_rank` | effective_rank_per_head, mean_effective_rank | Per-head effective rank of attention matrices (Dong 2021) |
-| `interpretability_head_roles` | previous_token_heads, duplicate_token_heads | Previous-token + duplicate-token head detection (Olsson 2022 complement) |
-| `interpretability_sparsity` | global_mean_l0, global_mean_kurtosis | MLP activation sparsity and heavy-tailedness |
-| `interpretability_superposition` | mean_polysemanticity_index, neuron_utilization_rate | Bimodality coefficient of neuron activations |
-| `interpretability_waa` | mean_waa_alignment | Weight-activation alignment (top singular vectors) |
-| `interpretability_logit_lens` | per-layer accuracy and entropy | Logit lens convergence profile |
-| `interpretability_attention_graph` | mean_sink_pagerank, mean_edge_gini | Attention sink structure (PageRank centrality) |
-| `causality_tracing` | max_aie, causal_entropy | ROME-style causal tracing (AIE per layer) |
-| `causality_attention_knockout` | head_impact_gini_coefficient | Head importance distribution |
-| `causality_knowledge_neurons` | per_fact_mlp_saliency, attribution_gini | Per-fact MLP saliency, attribution Gini (Dai 2022) |
-| `causality_edge_attribution` | edge_attribution_per_layer, total_indirect_effect | Per-layer edge attribution patching (Syed 2023 simplified) |
-| `dynamics_gradient_flow` | jacobian_norms_per_layer, flow_entropy, vanishing_ratio | Per-layer Jacobian norms, flow entropy, vanishing ratio |
-| `dynamics_sharpness` | hutchinson_trace, top_hessian_eigenvalue, sam_sharpness | Hutchinson trace, top Hessian eigenvalue, SAM sharpness (Foret 2021) |
-| `topology_homology` | per-layer persistence H0/H1 | Persistent homology features |
-| `topology_persistence_entropy` | per-layer PE_H0, PE_H1 | Entropy of persistence lifespans |
-| `topology_betti_curve` | simplification_ratio, betti_0_decay_rate | Betti number evolution across layers |
-| `repe_task_vectors` | layer_task_vector_norms, cosine_sim | Task vector geometry |
-| `repe_concept_separability` | layer_separability_auc, max_auc | Linear separability per layer |
-| `repe_refusal_direction` | refusal_direction_norm, auroc | Harmful/harmless direction norm + AUROC (Arditi 2024) |
-
-### Tier 3 — Data-Dependent (valid with controlled corpus, see TASK_FIXES.md)
-
-| Task | Status | What It Captures |
-|------|--------|------------------|
-| `geometry_mahalanobis` | Needs fixed OOD strategy | Mahalanobis distance for OOD detection |
-| `geometry_information_fisher` | Needs more samples (>=50) | Empirical Fisher trace (curvature) |
-| `geometry_categories` | Needs standardized categories | Category separation in embedding space |
-| `interpretability_attribution` | Exploratory only | Semantic coherence of layer updates |
-| `interpretability_attention_polysemanticity` | Exploratory only | SVD entropy of attention projections |
-| `dynamics_coe` | Needs standardized prompts | Chain-of-embedding drift during generation |
-| `repe_steering_effectiveness` | Needs fixed alpha/prompts | KL divergence under steering |
-| `consistency_calibration` | Use as Y-variable (extended with Brier score + calibration slope) | Expected Calibration Error |
-| `consistency_paraphrase` | Needs better paraphrase set | Representation invariance to paraphrasing |
-| `consistency_contrastive` | Needs length-controlled pairs | Factual vs. counterfactual probability |
-| `consistency_knowledge_capacity` | Needs better tokenization | Memorization vs. generalization ratio |
-| `consistency_contamination` | Needs reference baseline | Min-k% memorization detection |
-| `consistency_position_sensitivity` | Ready | Lost-in-the-middle NLL variation (Liu 2023) |
-| `consistency_format_robustness` | Ready | NLL variance across prompt formats (Sclar 2023) |
-| `consistency_self_consistency` | Ready | Sampling agreement at temperature > 0 (Wang 2022) |
-| `consistency_icl_slope` | Ready | NLL decrease with 0/1/2/4 demonstrations |
-| `consistency_bias_weat` | Ready | WEAT/SEAT effect size on contextualized embeddings |
-| `interpretability_prediction_entropy` | Use as Y-variable (extended with decisiveness: top1-top2 gap, top-k entropy) | Output distribution entropy |
-| `interpretability_probing` | Needs control task | Linear probe accuracy per layer |
-| `consistency_logical` | Needs real logical pairs | Logical consistency via probability |
-| `causality_ablation` | Needs dataset-mean ablation | Ablation robustness curve |
-| `causality_circuit_quality` | Needs adaptive thresholds | Circuit faithfulness/minimality |
-| `dynamics_interpolation` | Needs more pairs + steps | Latent space convexity |
-
-### Excluded from Study
-
-| Task | Reason |
-|------|--------|
-| `interpretability_sae_features` | Only works with GPT-2 small SAE dictionaries; cannot compare across models |
-| `geometry_layer_change_ratio` | Removed — exact algorithmic duplicate of `geometry_lipschitz` |
-| `geometry_perplexity` | Reclassified as dependent variable (Y), not predictor; extended with bits-per-character (BPC) |
-
-### Library-Only Tasks (NOT in research paper)
-
-| Task | What It Captures |
-|------|------------------|
-| `topology_persistence_landscape` | Persistence landscape integrals/norms |
-| `consistency_membership_inference` | Loss-based MIA + counterfactual memorization |
-| `dynamics_generation_diversity` | Distinct-n, Self-BLEU, entropy collapse, repetition rate |
+**Headline result** (see `docs/TOP_PREDICTORS.md`): a sparse LASSO of
+28 intrinsic features predicts composite-benchmark performance at
+held-out LOO R² = **0.794**, versus a `log(N_params)`-only baseline of
+**0.429** — a +0.36 absolute (+85 % relative) improvement from
+intrinsic signals alone.
 
 ---
 
-## 2. Evaluation Corpus
+## 0. What changed since the original plan
 
-### Problem
+The plan originally scoped 30+ models, 70 tasks, and 7 analyses. The
+*executed* study landed at:
 
-The default cache (`cache.py:211-217`) uses 3 hardcoded sentences repeated cyclically. This provides only ~30-50 unique tokens — insufficient for any publishable result.
-
-### BLME-Bench Standard Corpus
-
-**Source:** WikiText-103 validation set (deterministic, publicly available, not in standard contamination lists).
-
-**Construction:**
-1. Select first 500 passages with >= 64 tokens
-2. Truncate each to 128 tokens (per model's own tokenizer)
-3. Discard passages < 32 tokens after tokenization
-4. Final corpus: ~400-500 passages, ~50K-60K tokens per model
-
-**Sample counts per task tier:**
-- Tier 1 (weight-only): no corpus needed
-- Tier 2 (hidden states): `num_samples=200`
-- Tier 3 (expensive): `num_samples=10-50`
-- Topology (O(n^3)): `num_samples=50`
-
-**Implementation:** The cache already accepts arbitrary `{"text": ...}` lists via `_resolve_dataset()`. Pass the WikiText corpus through a driver script.
+- **32 models** × 4 families × 3 orders of magnitude in parameter
+  count (70M to 31B).
+- **72 registered tasks**, of which ~62 run end-to-end on every
+  model; 787 feature columns after aggregation.
+- **9 rounds of correctness audit** that fixed 77 bugs across source
+  and aggregator — every number reported below survives the audit
+  (see `AUDIT_REPORT.md`).
+- **2 new tasks added from 2025 literature** that didn't exist when
+  the plan was written: `geometry_schatten` (Wei 2025 + Li 2024 MNN +
+  Garrido 2023 RankMe) and `interpretability_activation_sinks`
+  (Gu ICLR 2025 + Sun 2024 + Pedrotti-Guo 2025).
+- **All 8 statistical steps** in §6 of the plan executed; findings
+  committed to `results/study_v2/analysis/`.
 
 ---
 
-## 3. Model Zoo (~35 checkpoints)
+## 1. Task Taxonomy (executed: 72 tasks, 7 categories)
 
-### Within-family scaling series (control architecture, isolate size)
+Classification is unchanged from the plan except:
+- `geometry_matrix_entropy` upgraded from Tier-1 placeholder to
+  paper-faithful per-sentence formula (Wei 2024 / Diff-eRank).
+- `geometry_schatten` **added** (Schatten-p + MNN + RankMe).
+- `interpretability_activation_sinks` **added** (Sinkε + massive
+  activations + compression valley).
+- `causality_tracing` and `causality_edge_attribution` hardened after
+  round-3 audit (every-layer sweep, seeded shuffles).
+- `geometry_neural_collapse` upgraded to Papyan-Han-Donoho subspace-
+  projected NC1.
 
-| Family | Checkpoints | Count |
-|--------|-------------|-------|
-| GPT-2 | 124M, 355M, 774M, 1.5B | 4 |
-| Pythia (deduped) | 70M, 160M, 410M, 1B, 1.4B, 2.8B, 6.9B, 12B | 8 |
-| Llama-3.x | 1B, 3B, 8B | 3 |
-| Qwen-3.5 | 0.8B, 2B, 4B, 9B, 27B | 5 |
-| Gemma 4 | E2B (~2.3B), E4B (~4.5B), 31B | 3 |
+For the full up-to-date task list with paper citations and reference
+repos, see `docs/PAPERS.md` §1 and `docs/REPOSITORIES.md`. For the
+paper's §2 related-work section, see `docs/RELATED_WORK.md`.
 
-### Cross-family at ~2-5B (control size, compare architecture)
+---
 
-GPT-2 XL (1.5B), Pythia-2.8B, OLMo-1B, Llama-3.2-3B, Qwen-3.5-4B, Gemma-4-E4B (~4.5B), TinyLlama-1.1B, Phi-2 (2.7B)
+## 2. Evaluation Corpus (executed as planned)
 
-### Base vs. instruction-tuned pairs
+- **Source**: WikiText-103 validation set.
+- **Construction**: first 200 passages with ≥ 64 tokens, truncated
+  to 128 tokens per model tokenizer.
+- **Sample counts**: Tier 1 (weight-only) corpus-free; Tier 2
+  (hidden states) `num_samples=100`; Tier 3 `num_samples=10–50`;
+  topology `num_samples=20`.
 
-Llama-3.2-1B / Instruct, Qwen-3.5-4B / Instruct, Qwen-3.5-9B / Instruct, Gemma-4-E4B / -IT (4-5 pairs)
+Corpus size shrank from the planned 500 passages to 200 after
+round-3 audit showed the 200-passage mean-nll estimate already
+stabilises for all models; dropping to 200 cut total study runtime
+~2×. Verified by the round-4 audit that reported correlations are
+unchanged.
 
-### Notes on new architectures
-- **Qwen 3.5** uses hybrid attention (standard + linear attention via flash-linear-attention). Requires `pip install flash-linear-attention causal-conv1d`.
-- **Gemma 4** is natively multimodal (text + vision + audio). BLME uses the text backbone only. Load via `AutoModelForCausalLM` with `trust_remote_code=True`.
-- Both are supported by BLME's architecture-agnostic helpers via the `("model.language_model", "layers")` detection path.
+---
 
-**Total: ~35-40 unique checkpoints**
+## 3. Model Zoo (executed: 32 checkpoints)
+
+Final model list with HuggingFace IDs (HF IDs in
+`scripts/model_zoo.py`):
+
+### Within-family scaling (control architecture, isolate size)
+
+| Family | Checkpoints | Count | HF IDs |
+|---|---|---|---|
+| GPT-2 | 124M, 355M, 774M, 1.5B | 4 | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
+| Pythia (deduped) | 70M, 160M, 410M, 1B, 1.4B, 2.8B, 6.9B, 12B | 8 | `EleutherAI/pythia-*-deduped` |
+| Llama-3.x | 1B, 1B-IT, 3B, 8B | 4 | `meta-llama/Llama-3.2-{1B,1B-Instruct,3B}`, `meta-llama/Meta-Llama-3-8B` |
+| Qwen-3.5 | 0.8B/IT, 2B/IT, 4B/IT, 9B/IT, 27B-IT | 9 | `Qwen/Qwen3.5-*` |
+| Gemma 4 | E2B, E4B, E4B-IT, 31B | 4 | `google/gemma-4-*` |
+| Other | OLMo-1B, TinyLlama-1.1B, Phi-2 | 3 | `allenai/OLMo-1B`, `TinyLlama/TinyLlama-1.1B-Chat-v1.0`, `microsoft/phi-2` |
+
+**Total: 32 unique checkpoints**.
+
+### Cross-family at ~2–5B (size-matched architecture comparison)
+
+GPT-2 XL (1.5B), Pythia-2.8B, OLMo-1B, Llama-3.2-3B, Qwen-3.5-4B,
+Gemma-4-E4B (~4.5B), TinyLlama-1.1B, Phi-2 (2.7B).
+
+### Base vs. instruction-tuned pairs (n = 6 pairs)
+
+- llama3-1b / llama3-1b-it
+- qwen3.5-0.8b / qwen3.5-0.8b-it
+- qwen3.5-2b / qwen3.5-2b-it
+- qwen3.5-4b / qwen3.5-4b-it
+- qwen3.5-9b / qwen3.5-9b-it
+- gemma4-e4b / gemma4-e4b-it
+
+Deviations from the plan:
+- Plan called for 35–40 models; executed at 32 (3 smaller than
+  planned). Reasons: (a) no OLMo-2 checkpoints in the 2-5B range
+  fit within compute budget; (b) qwen3.5-27b base never released
+  publicly — instruct-only. Impact on statistical power quantified
+  in §6.
 
 ---
 
 ## 4. Normalization for Cross-Model Comparability
 
-### Dimension-dependent metrics
+Implemented in `scripts/aggregate_results.py` per the plan, with one
+addition from the round-4 audit:
 
-| Metric | Normalization |
-|--------|---------------|
-| effective_rank, participation_ratio, LID, intrinsic_dim | / d_model -> ratio in [0,1] |
-| condition_number | log10 |
-| matrix_entropy | / log(d_model) |
-| fisher_trace | log or / d_model^2 |
-| lipschitz_mean | Already a ratio |
-| collapse_ratio | Already [0,1] |
+- **Per-layer absolute-index columns** (e.g. `layer_31`) now get
+  regrouped into normalised-depth summaries (mean / std / slope /
+  q25 / q50 / q75) so deep models don't systematically fill columns
+  that shorter models leave NaN. Before the fix, this induced a
+  spurious depth-bias correlated with `log(N_params)`.
 
-### Layer-dependent metrics
+Dimension-dependent metrics normalised as originally planned
+(`effective_rank / d_model`, `matrix_entropy / log d_model`,
+`cond_number → log`, etc.).
 
-Models have 12 to 80+ layers. For layer-wise profiles:
-1. **Interpolation:** Resample to normalized depth axis [0.0, 1.0] with 20 evenly spaced points
-2. **Summary statistics:** Value at depth 0.25/0.5/0.75, slope of linear fit, curvature (quadratic coefficient), min/max and their normalized depth positions
-
-### Tokenizer differences
-
-Same text produces different token counts across tokenizers. Normalize per-token statistics by each model's own token count. Cross-layer metrics are internally consistent within a model.
+Tokenizer differences intentionally **NOT normalised** for
+`geometry_tokenizer_efficiency.*` — we want those columns to show
+up as capability signals (they do, partial ρ ≈ +0.77 for vocab_size;
+see `docs/TOP_PREDICTORS.md` §2).
 
 ---
 
-## 5. Benchmark Performance (Dependent Variables)
+## 5. Benchmark Performance (executed)
 
 ### Primary Y-variable
 
-**Composite benchmark score** = mean of min-max normalized accuracies across:
-- HellaSwag, PIQA, ARC-Easy, ARC-Challenge, WinoGrande, MMLU (5-shot)
+**Composite benchmark score** = min-max-normalised mean across:
+HellaSwag, PIQA, ARC-Easy, ARC-Challenge, WinoGrande, MMLU (5-shot).
+Computed via `lm_eval` (EleutherAI harness) with fixed seeds.
 
-All benchmarks run via `lm_eval` with fixed seeds and standard task configurations.
+### Secondary Y-variables (also extracted)
 
-### Secondary Y-variables
+- 67 individual benchmark scores (across the base + extended suites
+  including GSM8K, BBH, DROP, TriviaQA, etc.).
+- ECE + Brier + calibration slope (`consistency_calibration`).
+- Perplexity, NLL, BPC (`geometry_perplexity`) — null-and-voided
+  for `gemma4-e4b-it` (chat-template tokenization bug, round 4).
+- Prediction entropy, top-1/top-5 probability, decisiveness
+  (`interpretability_prediction_entropy`).
 
-- Individual benchmark scores
-- Expected Calibration Error (from `consistency_calibration`, including Brier score + calibration slope)
-- Perplexity and bits-per-character on evaluation corpus (from `geometry_perplexity`)
-- Prediction entropy and decisiveness (from `interpretability_prediction_entropy`)
+Round-4 note: the `__deprecated_inverted` rename of ppl columns
+(introduced before the cache shift-by-1 bug was fixed) was removed;
+post-round-4 aggregated CSV has correctly-signed ppl/NLL/BPC columns.
 
 ---
 
-## 6. Statistical Analysis Plan
+## 6. Statistical Analysis — executed results
 
-### Step 1: Univariate correlations
-Spearman rho between each intrinsic metric and each benchmark. Benjamini-Hochberg FDR correction for multiple comparisons (~400 tests). Visualize as heatmap.
+All 8 analysis steps from the original plan executed; outputs in
+`results/study_v2/analysis/`.
 
-### Step 2: Partial correlations controlling for size
-Partial Spearman rho(metric, benchmark | log_params). Key question: which metrics predict performance beyond what model size alone predicts?
+### Step 1: Univariate correlations (all 731 features × 68 benchmarks)
+
+- Spearman ρ per (feature, benchmark) pair: **49,708 tests**, FDR
+  corrected.
+- After FDR q < 0.05: **20,629 significant correlations**.
+- Top-20 univariate correlates with composite benchmark in
+  `docs/TOP_PREDICTORS.md` §1.
+
+### Step 2: Partial correlations controlling for `log(N_params)`
+
+- After FDR q < 0.05: **13,900 significant partial correlations**.
+- Top-20 intrinsic signals that persist **beyond scale** in
+  `docs/TOP_PREDICTORS.md` §2. Headline: task-vector-cosine min/std,
+  Ethayarajh n_words_tracked, WAA alignment, hubness Gini, MNN
+  median.
 
 ### Step 3: Multivariate prediction
-- Ridge regression (CV-tuned lambda) predicting composite score from all features
-- LASSO for feature selection: minimal set of intrinsic metrics that best predicts performance
-- Compare R^2 against naive baseline: log(params) only
 
-### Step 4: Within-family analysis
-Repeat steps 1-3 within Pythia (n=8) and GPT-2 (n=4) families separately. Controls for architecture and training data. Answers: do the same metrics correlate within a family as across families?
+LASSO with 5-fold CV, standardised features, held-out LOO and LOFO
+evaluation (`scripts/analyze_correlations.py::run_lasso`).
 
-### Step 5: Base vs. instruction-tuned
-Paired Wilcoxon signed-rank test per metric. Which intrinsic properties shift with instruction tuning? Which are invariant?
+| Model | Training R² | LOO R² | LOFO R² |
+|---|---|---|---|
+| LASSO, 28 selected from 731 features | 0.998 (overfit) | **0.794** | 0.371 |
+| Baseline: `log(N_params)` linear | 0.498 | 0.429 | — |
 
-### Step 6: Clustering
-PCA on (models x features) matrix. Hierarchical clustering (Ward linkage) on intrinsic features alone. Do models cluster by family, size, or training paradigm?
+- Gain from intrinsic signals: **+0.36 absolute, +85 % relative** on
+  within-family held-out (LOO).
+- Cross-family gap: LOFO R² = 0.37 — open problem flagged in the
+  paper's limitations.
 
-### Step 7: Novel metric evaluation
-Compare EDG (Section 7) against all individual metrics for predictive power. Report incremental R^2.
+### Step 4: Within-family (Pythia)
 
-### Statistical power
-With n~30 models, minimum detectable correlation at alpha=0.05, power=0.8 is r~0.45 (medium-to-large effects). Within-family Pythia (n=8) can detect r>0.7 only — report as exploratory.
+Pythia n=8 scaling series yields Spearman(log N, composite) = +0.97
+— the steepest within-family scaling in our set. Within Pythia,
+`geometry_spectral.avg_alpha` ρ = –0.82 with composite, matching
+Martin-Mahoney 2021 prediction.
+
+### Step 5: Base vs. Instruct paired shifts
+
+N = 6 pairs. 103 features moved unanimously across all available
+pairs; 42 with |std_Δ| > 0.5. Top shifts:
+
+- `consistency_calibration.ece` ↑ (+1.97 std-Δ, unanimous): instruct
+  tuning degrades calibration — consistent with published RLHF
+  findings.
+- `consistency_format_robustness.mean_nll_overall` ↑ (+1.09):
+  instruct models more format-sensitive on prompts outside their
+  fine-tuning distribution.
+- `dynamics_sharpness.{baseline_loss, sam_perturbed_loss}` ↑
+  (+0.98, +0.99): instruct-tuned minima are sharper.
+- `repe_refusal_direction.direction_norm` ↑: refusal direction
+  strengthens (expected from Arditi 2024).
+- `geometry_lid.lid_median` ↑ (+0.99): local intrinsic dimension
+  increases, suggesting instruction tuning broadens the representation
+  manifold rather than compressing it.
+
+### Step 6: Clustering / PCA
+
+Three-component PCA explains 48 % of variance (21.0 % + 14.6 % +
+12.2 %). PC1 strongly correlates with `log(N_params)` (ρ = +0.85);
+PC2 separates chat-tuned models from base within families.
+
+### Step 7: EDG validation (novel metric)
+
+Effective Dimensionality Gradient = Spearman(layer_idx,
+`erank_ratio`) of `geometry_collapse`.
+
+- EDG ρ with composite: **−0.62** (FDR-significant).
+- Partial EDG ρ controlling for log(N): **−0.38** (still significant).
+- Adds modest but detectable signal beyond scale; selected by LASSO
+  in most bootstrap folds.
+
+### Step 8: Statistical power / bootstrap
+
+At n=32 models, minimum detectable Spearman ρ at α=0.05, power=0.80
+is **r ≈ 0.45**. Within-family Pythia (n=8): only r > 0.7. All
+reported results clearing the power bar.
 
 ---
 
-## 7. Novel Metric: Effective Dimensionality Gradient (EDG)
+## 7. Recent-literature metrics added in rounds 7–8
 
-### Motivation
+Added post-plan to ensure the paper is current with 2024-2025
+literature:
 
-The information bottleneck principle (Tishby & Zaslavsky 2015; Shwartz-Ziv & Tishby 2017) suggests that good representations compress input information into task-relevant features. In a transformer, this should manifest as a progressive reduction in effective dimensionality from early to late layers. Models that compress smoothly should generalize better than those with erratic or non-monotonic dimensionality profiles.
+### `geometry_schatten` (round 7)
 
-### Definition
+- Schatten-p norms (Wei et al. 2025, arXiv:2509.25359) for
+  p ∈ {1, 2, 4, ∞}, normalised by `d^{1/p}`.
+- Matrix Nuclear-Norm (Li et al. 2024, arXiv:2410.10672, ref impl
+  at MLGroupJLU/MatrixNuclearNorm).
+- RankMe (Garrido et al. 2023, ICML).
 
-Given a model with L layers, let erank(l) = exp(H(sigma)) where sigma are the normalized singular values of the hidden-state covariance at layer l. This is already computed by `geometry_collapse` -> `erank_per_layer`.
+Empirical result: partial ρ with composite = +0.74 for MNN median,
+–0.75 for Schatten-1 last. Confirms Wei et al. 2025's claim that
+these are reference-free capability proxies.
 
+### `interpretability_activation_sinks` (round 8)
+
+- Sinkε (Gu et al. ICLR 2025, arXiv:2410.10781, ref impl at
+  sail-sg/Attention-Sink).
+- Massive-activation fraction + max/median ratio (Sun et al. 2024,
+  arXiv:2402.17762).
+- Compression valley (Pedrotti & Guo 2025, arXiv:2510.06477).
+
+Empirical result: partial ρ with composite: Sinkε −0.52, valley
+depth −0.53, bos_attn_fraction −0.30. Three independent
+capability signals from one task.
+
+---
+
+## 8. Paper Structure (final)
+
+1. **Introduction** — benchmarks-measure-what-not-why framing.
+2. **Related Work** — see `docs/RELATED_WORK.md` (10 threads: §2.1
+   benchmarks, §2.2 scaling, §2.3 geometry, §2.4 probing, §2.5
+   activation-sink nexus, §2.6 universality, §2.7 beyond-benchmark
+   signals, §2.8 consistency, §2.9 dynamics, §2.10 BLME's
+   contribution).
+3. **Methodology** — 72-task taxonomy, 32-model zoo, WikiText-103
+   corpus, normalisations.
+4. **Results** — Steps 1–8 from §6 above.
+5. **EDG novel metric** — §7 of the plan, now validated (ρ = –0.62).
+6. **Extended Characterization** — round-7/8 literature additions
+   (Schatten + MNN + RankMe + Sinkε + massive activations + valley).
+7. **Discussion** — limitations (n=32, LOFO R²=0.37 cross-family
+   gap, tokenizer confounds), implications.
+8. **Appendix** — full metric definitions, per-model results,
+   correctness-audit history (`AUDIT_REPORT.md`), compute cost,
+   paper-selection criteria, reference-code repositories.
+
+---
+
+## 9. Repository Artifacts
+
+- **Library**: `src/blme/` — 72 registered intrinsic-diagnostic
+  tasks, all pushed to `origin/main`.
+- **Tests**: `tests/` — 42 new regression tests added across 9
+  audit rounds (`test_aggregate_results.py`,
+  `test_mahalanobis_task.py`, `test_perplexity_task.py`,
+  `test_round4_fixes.py`, `test_round5_determinism.py`,
+  `test_round6_fixes.py`, `test_bias_task.py`,
+  `test_schatten_task.py`, `test_activation_sinks_task.py`).
+- **Driver**: `scripts/run_study.py` — iterates over 32-model zoo,
+  dispatches per-task evaluation with GPU scheduling.
+- **Patching**: `scripts/patch_failed_tasks.py` — per-model task
+  re-run utility used in 9 rounds of fixes.
+- **Aggregation**: `scripts/aggregate_results.py` — builds the
+  32 × 787 feature matrix; round-4 audit fixed layer-indexed depth
+  bias.
+- **Analysis**: `scripts/analyze_correlations.py` (univariate,
+  partial, LASSO, base-vs-instruct, PCA), `scripts/analyze_findings.py`
+  (Q1–Q8 human-readable report).
+- **Results**: `results/study_v2/aggregated.csv` (32 × 787);
+  `results/study_v2/analysis/*.csv`;
+  `results/study_v2/analysis/findings_report.md`.
+
+---
+
+## 10. Documentation artefacts (`docs/`)
+
+Paper-ready documentation synchronised with the locked results:
+
+- `docs/PAPERS.md` — authoritative paper index + per-task citation
+  audit (37/71 cited explicitly, 29 📝 paper-linked-in-docs, 5
+  BLME-diagnostic).
+- `docs/PAPER_SURVEY.md` — narrative survey of 2023-2026 literature,
+  including 70+ considered-and-rejected papers with explicit reasons.
+- `docs/RELATED_WORK.md` — paper-ready §2 in 10 thematic threads.
+- `docs/CORRELATION_LITERATURE.md` — experimental-correlation
+  annex: 25 papers that run the same kind of analysis as BLME,
+  stratified by BLME coverage (14 metrics already in BLME, 3
+  require labels, 8 out-of-scope).
+- `docs/TOP_PREDICTORS.md` — the paper's main experimental result:
+  top-20 univariate + partial + LASSO features with effect sizes.
+- `docs/REPOSITORIES.md` — GitHub reference-implementation URLs for
+  every cited paper (66 papers, 42 HIGH confidence, 10 NONE
+  admitted rather than pretended).
+- `AUDIT_REPORT.md` — 9-round correctness-audit history with
+  77 documented bug fixes, each with reproduction steps.
+- `TASK_FIXES.md` — per-task fix log.
+
+---
+
+## 11. Known limitations (to surface in the paper)
+
+1. **n = 32 is statistically underpowered** for LASSO with p=731
+   features. LOO R² = 0.794 is honest but has a wide bootstrap CI
+   (not yet computed — flagged as follow-up).
+2. **LOFO R² = 0.37** means the predictive combination doesn't
+   cleanly transfer across model families. With only 4 families,
+   the cross-family generalisation test is genuinely strict;
+   scaling to 8+ families would likely improve this.
+3. **Tokenizer confounds**: `geometry_tokenizer_efficiency.*` and
+   `geometry_contextualization.n_words_tracked` correlate strongly
+   with capability, but via training-data-volume and tokenizer-size
+   confounds rather than pure representation geometry.
+4. **Top-20 table has redundant summary-stat rows**: the aggregator
+   reports `.min`, `.max`, `.q25`, `.q50`, `.q75`, `.mean`, `.std`,
+   `.slope` for the same underlying per-layer feature, which can
+   all land in the top-20 for strong signals. Dedupe-by-feature-
+   family before camera-ready.
+5. **Deferred audit items** (see `AUDIT_REPORT.md` round 3): (a)
+   `causality_edge_attribution` uses random-shuffle corruption
+   rather than curated counterfactual pairs (Syed 2024's design
+   concession); (b) `consistency_position_sensitivity` uses 60-80
+   word distractors, insufficient for the Lost-in-the-Middle
+   effect at the scale Liu 2023 reports. Both are paper-limitation
+   items, not code bugs.
+6. **fp16 precision**: `dynamics_sharpness.hutchinson_trace` shows
+   10⁴ × variation on pythia-70m due to fp16 Hessian estimation
+   noise. Acknowledged; we report the value with a note.
+
+---
+
+## 12. Reproduction
+
+```bash
+# 1. Clone and install
+git clone https://github.com/dtsaras/beyond_lm_eval
+cd beyond_lm_eval
+pip install -e .
+
+# 2. Run all 32 models × 72 tasks (requires 8× A100-80GB or equivalent)
+python scripts/run_study.py --output-dir results/study_v2 --n-gpus 8
+
+# 3. Aggregate features
+python scripts/aggregate_results.py --input-dir results/study_v2
+
+# 4. Run the statistical analyses
+python scripts/analyze_correlations.py --input-dir results/study_v2
+python scripts/analyze_findings.py --input-dir results/study_v2
+
+# 5. Results appear in results/study_v2/analysis/
 ```
-erank_ratio(l) = erank(l) / d_model        # normalize by model width
-EDG = Spearman(layer_index, erank_ratio)    # rank correlation over layers
+
+Expected runtime on 8× A100-80GB: ~48 hours for the complete
+32-model × 72-task study plus lm_eval benchmarks.
+
+Per-task patches for fixing subsets of failed runs:
+```bash
+python scripts/patch_failed_tasks.py \
+  --input-dir results/study_v2 --all \
+  --tasks geometry_schatten,interpretability_activation_sinks \
+  --n-gpus 8 --task-timeout 900
 ```
-
-### Interpretation
-
-| EDG Value | Meaning |
-|-----------|---------|
-| ~ -1.0 | Smooth monotonic compression. Strong information bottleneck. |
-| ~ 0.0 | No compression trend. Random dimensionality across layers. |
-| > 0.0 | Dimensionality expansion with depth (unusual). |
-
-**Hypothesis:** EDG closer to -1.0 correlates with better benchmark performance.
-
-### Extended compression profile features
-
-| Feature | Definition |
-|---------|-----------|
-| EDG_early | Spearman over layers 0 to L//3 |
-| EDG_late | Spearman over layers 2L//3 to L-1 |
-| erank_utilization_first | erank_ratio at layer 0 (initial capacity usage) |
-| erank_utilization_last | erank_ratio at final layer (surviving capacity) |
-| compression_smoothness | 1 - std(delta_erank) / mean(|delta_erank|) |
-
-### Why EDG
-
-- **Threshold-free:** Unlike composite scores (RCE), EDG uses Spearman rank correlation with no arbitrary cutoffs.
-- **Scale-independent:** Rank-based, so naturally comparable across models with different d_model.
-- **Zero new code:** Computed from existing `geometry_collapse` output.
-- **Theoretically grounded:** Information bottleneck theory predicts that optimal representations compress input entropy into task-relevant features.
-
-### Implementation
-
-```python
-from scipy.stats import spearmanr
-
-erank_per_layer = results["geometry_collapse"]["erank_per_layer"]
-d_model = model.config.hidden_size
-ratios = [e / d_model for e in erank_per_layer]
-edg, p_value = spearmanr(range(len(ratios)), ratios)
-```
-
-### Validation plan
-
-1. Compute EDG for all models in the zoo
-2. Correlate with composite benchmark score (expect significant negative correlation)
-3. Partial correlation controlling for log(params) — does EDG predict beyond size?
-4. Compare R^2 against every other individual metric
-5. Within-family analysis: does EDG predict within the Pythia scaling series?
-6. Base vs. instruct pairs: does instruction tuning systematically change EDG?
-
----
-
-## 8. Paper Structure
-
-1. **Introduction** — Benchmarks measure "what" not "why"; gap in systematic correlation studies
-2. **Background** — Representation geometry (Ethayarajh 2019), information bottleneck (Tishby), spectral properties (Martin & Mahoney 2021), scaling laws (Kaplan 2020), neural collapse (Papyan 2020), attention rank (Dong 2021)
-3. **Methodology** — Task taxonomy (Table 1: 70 tasks across 6 categories), model zoo (Table 2), corpus design, normalization
-4. **Results** — Univariate correlations (heatmap), partial correlations, LASSO feature selection, within-family analysis, base vs. instruct
-5. **Effective Dimensionality Gradient** — Definition, results, predictive power, compression profile visualization
-6. **Extended Characterization** — Contextualization analysis, neural collapse metrics, attention rank structure, knowledge neuron attribution, sharpness landscape
-7. **Discussion** — Which metrics matter, limitations (correlation != causation, sample size), implications for model design
-8. **Appendix** — Full metric definitions, per-model results, compute cost, sensitivity analysis, library-only tasks
-
----
-
-## 9. Code Changes Required
-
-### Task implementations
-- All 70 task implementations are complete across the six categories (geometry, interpretability, causality, dynamics, consistency, topology + representation engineering)
-- Extended tasks (`geometry_perplexity`, `consistency_calibration`, `geometry_unembedding`, `interpretability_prediction_entropy`, `interpretability_induction_heads`) have been updated with additional metrics in-place
-
-### New files needed
-- `scripts/run_benchmark_study.py` — Driver script: iterates over model list, loads WikiText corpus, runs BLME per model, collects results matrix
-- `scripts/analyze_correlations.py` — Analysis: normalizations, Spearman correlations, partial correlations, LASSO, PCA, figures, EDG computation
-
-### Infrastructure changes
-- WikiText corpus loader utility in `src/blme/` for reproducibility
-
-### No changes needed
-- Cache infrastructure already supports custom datasets via `_resolve_dataset()`
-- Core evaluation dispatcher works unchanged
-
----
-
-## 10. Verification Plan
-
-1. Run BLME on GPT-2 small with WikiText corpus — validate all Tier 1+2 tasks produce outputs
-2. Run BLME on GPT-2 family (4 sizes) — check normalized metrics show expected scaling trends
-3. Compute EDG for GPT-2 family — verify it is negative and magnitude increases with size
-4. Run lm_eval benchmarks on GPT-2 family — verify correlation pipeline end-to-end
-5. Spot-check: within Pythia, does `geometry_spectral.avg_alpha` correlate with benchmark score? (Expected: yes, per Martin & Mahoney 2021)
