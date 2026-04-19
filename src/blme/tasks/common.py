@@ -160,12 +160,16 @@ def apply_lm_head(model, hidden_states):
     """
     head = get_lm_head(model)
     if head is not None:
-        dtype = next(head.parameters()).dtype
-        return head(hidden_states.to(dtype)).float()
+        params = next(head.parameters())
+        # On ``device_map=auto`` models (e.g. pythia-12b, qwen3.5-27b
+        # with device_map sharding) the lm_head can live on a different
+        # GPU than the caller's hidden state. Move the input to the
+        # head's device before projecting.
+        return head(hidden_states.to(params.device).to(params.dtype)).float()
     # Fallback: h @ E^T (works for tied embeddings)
     E = get_embeddings(model)
     if E is not None:
-        return hidden_states.float() @ E.float().T
+        return hidden_states.to(E.device).float() @ E.float().T
     raise RuntimeError("Cannot project hidden states to vocab: no lm_head or embeddings found")
 
 

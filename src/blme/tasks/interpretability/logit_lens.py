@@ -141,8 +141,13 @@ class LogitLensTask(DiagnosticTask):
                     except RuntimeError:
                         continue
 
+                    # On device_map=auto models, ``preds`` lands on the
+                    # lm-head's device while ``final_preds`` may be on
+                    # another GPU (from the original forward). Move to
+                    # the same device before comparing.
                     preds = logits.argmax(dim=-1)
-                    acc = (preds == final_preds).float().mean().item()
+                    fp = final_preds.to(preds.device) if preds.device != final_preds.device else final_preds
+                    acc = (preds == fp).float().mean().item()
                     layer_accs[i].append(acc)
 
                     probs = F.softmax(logits, dim=-1)

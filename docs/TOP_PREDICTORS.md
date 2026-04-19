@@ -1,11 +1,21 @@
 # Top Intrinsic Predictors of LLM Capability
 
-**Study**: 32 models × 731 intrinsic features × 68 benchmark scores.
-**Target**: composite benchmark (min-max-normalised mean across 68
+**Study**: 32 models × 730 intrinsic features × 67 benchmark scores.
+**Target**: composite benchmark (min-max-normalised mean across 67
 individual lm-eval benchmarks).
-**Headline**: LASSO on the 731 features predicts held-out model
-capability at **LOO R² = 0.794**, vs. `log(N_params)` baseline LOO
-R² = 0.429 — a 1.85× improvement from adding intrinsic signals.
+
+**Headline** (updated 2026-04-20 after final coverage gap-fills):
+LASSO on the 730 features predicts held-out model capability at
+**LOO R² = 0.731**, vs. `log(N_params)` baseline LOO R² = 0.429 —
+**+0.30 absolute improvement** from adding intrinsic signals.
+LOFO R² = 0.262 (strict cross-family held-out).
+
+Change vs earlier report (LOO R² = 0.794): the final audit patched
+5 fp16-failing tasks on pythia-6.9b and pythia-12b by rerunning in
+fp32 (consistency_calibration, correlation_dimension, isoscore, LID,
+Mahalanobis). Replacing NaN-median-imputed values with real data
+brought LOO R² down to the honest number. Everything below is from
+the post-gap-fill aggregated CSV.
 
 This is the paper's main experimental result. Below are the
 features that drive it, stratified by analysis type.
