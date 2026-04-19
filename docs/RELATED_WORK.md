@@ -378,12 +378,12 @@ Prior work falls into four buckets:
    Yin 2024 TruthfulQA-LID).
 
 **BLME's unique contribution** is the orthogonal cut: 54 intrinsic
-tasks totalling 787 features, across **seven distinct measurement
+tasks totalling 731 features, across **seven distinct measurement
 taxonomies** (geometry, interpretability, causality, dynamics,
 consistency, RepE, topology), evaluated systematically on **32
-pretrained LLMs spanning 4 families and 3 orders of magnitude in
+pretrained LLMs spanning 8 families and 3 orders of magnitude in
 parameter count**, with univariate, partial (size-controlled), and
-sparse LASSO analysis yielding an honest held-out LOO R² = 0.794
+sparse LASSO analysis yielding an honest held-out LOO R² = 0.772
 versus a `log(N_params)`-only baseline of 0.429. No prior library
 or paper combines this breadth of metric taxonomy with this breadth
 of model coverage and this systematic statistical methodology;

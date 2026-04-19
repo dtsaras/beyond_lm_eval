@@ -9,10 +9,10 @@ engineering properties of 32 language models and systematically
 correlates these with downstream benchmark performance.
 
 **Headline result** (see `docs/TOP_PREDICTORS.md`): a sparse LASSO of
-28 intrinsic features predicts composite-benchmark performance at
-held-out LOO R² = **0.731**, versus a `log(N_params)`-only baseline of
-**0.429** — a +0.30 absolute (+70 % relative) improvement from
-intrinsic signals alone. LOFO R² = **0.262** (strict cross-family).
+26 intrinsic features predicts composite-benchmark performance at
+held-out LOO R² = **0.772**, versus a `log(N_params)`-only baseline of
+**0.429** — a +0.34 absolute (+80 % relative) improvement from
+intrinsic signals alone. LOFO R² = **0.266** (strict cross-family).
 
 ---
 
@@ -21,8 +21,9 @@ intrinsic signals alone. LOFO R² = **0.262** (strict cross-family).
 The plan originally scoped 30+ models, 70 tasks, and 7 analyses. The
 *executed* study landed at:
 
-- **32 models** × 4 families × 3 orders of magnitude in parameter
-  count (70M to 31B).
+- **32 models** × 8 families (gpt2, pythia, llama3, qwen3.5, gemma4,
+  olmo, phi, tinyllama) × 3 orders of magnitude in parameter count
+  (70M to 31B).
 - **72 registered tasks**, of which ~62 run end-to-end on every
   model; 734 raw feature columns + 68 benchmark columns + 4 metadata
   columns after aggregation; 730 features carried into the correlation
@@ -169,15 +170,15 @@ All 8 analysis steps from the original plan executed; outputs in
 
 ### Step 1: Univariate correlations (all 730 features × 68 benchmarks)
 
-- Spearman ρ per (feature, benchmark) pair: **49,640 tests**, FDR
+- Spearman ρ per (feature, benchmark) pair: **49,708 tests**, FDR
   corrected.
-- After FDR q < 0.05: **21,252 significant correlations**.
+- After FDR q < 0.05: **21,245 significant correlations**.
 - Top-20 univariate correlates with composite benchmark in
   `docs/TOP_PREDICTORS.md` §1.
 
 ### Step 2: Partial correlations controlling for `log(N_params)`
 
-- After FDR q < 0.05: **15,790 significant partial correlations**.
+- After FDR q < 0.05: **16,892 significant partial correlations**.
 - Top-20 intrinsic signals that persist **beyond scale** in
   `docs/TOP_PREDICTORS.md` §2. Headline: task-vector-cosine min/std,
   Ethayarajh n_words_tracked, WAA alignment, hubness Gini, MNN
@@ -190,15 +191,16 @@ evaluation (`scripts/analyze_correlations.py::run_lasso`).
 
 | Model | Training R² | LOO R² | LOFO R² |
 |---|---|---|---|
-| LASSO, 31 selected from 730 features | 0.999 (overfit; expected at n<<p) | **0.731** | **0.262** |
+| LASSO, 26 selected from 731 features | 0.998 (overfit; expected at n<<p) | **0.772** | **0.266** |
 | Baseline: `log(N_params)` linear | 0.498 | 0.429 | — |
 
-- Gain from intrinsic signals: **+0.30 absolute, +70 % relative** on
+- Gain from intrinsic signals: **+0.34 absolute, +80 % relative** on
   within-family held-out (LOO).
-- Cross-family gap: LOFO R² = 0.262 — weak transfer; open problem
-  flagged in the paper's limitations. With only 4 families
-  (GPT-2, Pythia, Llama3, Qwen3.5, Gemma4) this is a strict test;
-  scaling to 8+ families would likely improve this.
+- Cross-family gap: LOFO R² = 0.266 — weak transfer; open problem
+  flagged in the paper's limitations. With 8 families (GPT-2, Pythia,
+  Llama3, Qwen3.5, Gemma4, OLMo, Phi, TinyLlama) this is a strict
+  test; the LOFO eval pools the held-out family into a single test
+  set, which amplifies variance on small per-family sample counts.
 
 ### Step 4: Within-family (Pythia)
 
@@ -310,7 +312,7 @@ capability signals from one task.
    +0.71 respectively, controlling for scale).
 6. **Extended Characterization** — round-7/8 literature additions
    (Schatten + MNN + RankMe + Sinkε + massive activations + valley).
-7. **Discussion** — limitations (n=32, LOFO R²=0.262 cross-family
+7. **Discussion** — limitations (n=32, LOFO R²=0.266 cross-family
    gap, tokenizer confounds), implications.
 8. **Appendix** — full metric definitions, per-model results,
    correctness-audit history (`AUDIT_REPORT.md`), compute cost,
@@ -371,13 +373,18 @@ Paper-ready documentation synchronised with the locked results:
 
 ## 11. Known limitations (to surface in the paper)
 
-1. **n = 32 is statistically underpowered** for LASSO with p=730
-   features. LOO R² = 0.794 is honest but has a wide bootstrap CI
-   (not yet computed — flagged as follow-up).
-2. **LOFO R² = 0.37** means the predictive combination doesn't
-   cleanly transfer across model families. With only 4 families,
-   the cross-family generalisation test is genuinely strict;
-   scaling to 8+ families would likely improve this.
+1. **n = 32 is statistically underpowered** for LASSO with p=731
+   features. LOO R² = 0.772 is honest but the out-of-bag bootstrap
+   95 % CI on held-out R² spans **[+0.07, +0.90]** (B=200 OOB
+   resamples, `scripts/bootstrap_lasso_r2.py`). The lower CI bound
+   is > 0, so the signal is non-trivially better than chance, but
+   the width reflects that n=32 provides only weak statistical
+   power for model selection on p=731. Median OOB gain over the
+   log(N) baseline is **+0.30 [−0.30, +1.03]**.
+2. **LOFO R² = 0.266** means the predictive combination doesn't
+   cleanly transfer across model families. With 8 families, the
+   cross-family generalisation test is genuinely strict; scaling to
+   8+ families would likely improve this.
 3. **Tokenizer confounds**: `geometry_tokenizer_efficiency.*` and
    `geometry_contextualization.n_words_tracked` correlate strongly
    with capability, but via training-data-volume and tokenizer-size
