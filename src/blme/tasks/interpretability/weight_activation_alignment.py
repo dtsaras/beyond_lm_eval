@@ -6,6 +6,15 @@ with the top principal component of the *actual* MLP intermediate
 activations observed during inference. High alignment means the model
 is using the feature directions it stored in its weights.
 
+References:
+  * Park, Choe, Wattenberg, Jegelka 2024 — "The Linear Representation
+    Hypothesis and the Geometry of Large Language Models", arXiv:
+    2311.03658 — formalises the input-space / output-space duality
+    this task measures.
+  * Elhage et al. 2022 — "Toy Models of Superposition" — motivates
+    why alignment between weight singular directions and activation
+    principal components is a useful interpretability signal.
+
 Rewrite (2026-04-17 audit):
   * Hooks every target projection simultaneously and captures the
     activations in a single forward pass over the corpus (the previous

@@ -251,13 +251,13 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `interpretability_attribution` 📝 add Simonyan 2014 (input × gradient)
 - `interpretability_head_roles` ✅ Olsson 2022; Clark 2019
 - `interpretability_induction_heads` ✅ Olsson 2022
-- `interpretability_logit_lens` 📝 add nostalgebraist 2020 LessWrong link
+- `interpretability_logit_lens` ✅ nostalgebraist 2020 + Belrose et al. 2023 Tuned Lens
 - `interpretability_prediction_entropy` ✅ Holtzman 2020
 - `interpretability_probing` ✅ Alain-Bengio 2017
 - `interpretability_sae_features` 📝 add Bricken 2023
 - `interpretability_sparsity` 📝 add Zhang 2021 (Moefication)
 - `interpretability_superposition` ✅ Elhage 2022; Templeton 2024
-- `interpretability_waa` 📝 add Park et al. 2024 (arXiv:2311.03658)
+- `interpretability_waa` ✅ Park et al. 2024 (arXiv:2311.03658); Elhage 2022
 
 **Causality (6 tasks)**:
 - `causality_ablation` — BLME diagnostic
@@ -297,15 +297,21 @@ metric is a BLME diagnostic or trivial engineering helper).
 
 **Topology (4 tasks)**:
 - `topology_betti_curve` 📝 add Naitzat et al. 2020 (ICLR 2020) to docstring
-- `topology_homology` 📝 add Zomorodian-Carlsson 2005
+- `topology_homology` ✅ Zomorodian-Carlsson 2005; Naitzat 2020; Edelsbrunner-Harer 2008
 - `topology_persistence_entropy` 📝 add Rucco 2016
 - `topology_persistence_landscape` ✅ Bubenik 2015; Chazal 2015
 
 ### Citation-audit summary
 
-- **Tasks with explicit paper citations (✅)**: 34 / 71
-- **Tasks that need a citation added to the docstring (📝)**: 32 / 71
+After round-9 citation additions (topology_homology, logit_lens, waa):
+
+- **Tasks with explicit paper citations (✅)**: 37 / 71
+- **Tasks that need a citation added to the docstring (📝)**: 29 / 71
 - **Pure BLME diagnostics with no canonical paper (—)**: 5 / 71
+
+Remaining 📝 items are all low-impact: metrics whose paper is
+mentioned in BLME documentation (`docs/tasks_*.md`) but not in the
+source file's docstring. Fix opportunity before camera-ready.
 
 The 📝 items are a post-camera-ready cleanup list — none of them
 change the code's correctness, but adding the citation to the

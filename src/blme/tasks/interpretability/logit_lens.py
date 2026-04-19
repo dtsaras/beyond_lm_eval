@@ -1,3 +1,21 @@
+"""Logit Lens — decode intermediate hidden states via the final LM head.
+
+Originally proposed by nostalgebraist (2020) — *interpreting GPT: the
+logit lens* — the technique projects every layer's residual stream
+through the model's own ``lm_head`` to get per-layer token
+predictions, then reports per-layer accuracy and entropy relative to
+the final prediction.
+
+References:
+  * nostalgebraist 2020 — https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/
+    "interpreting GPT: the logit lens".
+  * Belrose, Furman, Smith, Halawi, Ostrovsky, McKinney, Biderman,
+    Steinhardt 2023 — "Eliciting Latent Predictions from Transformers
+    with the Tuned Lens", arXiv:2303.08112 (the learned-probe variant
+    — deliberately not used here, since we want the model-quality
+    signal that tuned probes wash out).
+"""
+
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings, get_layers, apply_lm_head, get_final_norm

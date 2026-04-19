@@ -1,3 +1,18 @@
+"""Persistent Homology on hidden-state point clouds.
+
+Standard Topological Data Analysis pipeline: take a set of hidden
+representations, build the Vietoris-Rips filtration, compute
+persistence diagrams with ripser, and report the H₀ / H₁ lifespans.
+
+References:
+  * Zomorodian, Carlsson 2005 — "Computing Persistent Homology",
+    *Discrete and Computational Geometry* 33(2).
+  * Edelsbrunner, Harer 2008 — "Persistent Homology: a Survey".
+  * Naitzat, Zhitnikov, Lim 2020 — "Topology of Deep Neural
+    Networks", ICLR (motivation for applying TDA to learned
+    representations).
+"""
+
 import torch
 import numpy as np
 import warnings
@@ -22,6 +37,9 @@ class PersistentHomologyTask(DiagnosticTask):
     Takes a set of hidden representations and computes their persistent homology
     using the Vietoris-Rips complex, specifically extracting Betti-0 and Betti-1
     persistent features (holes/clusters in the manifold).
+
+    See module docstring for paper references (Zomorodian-Carlsson
+    2005, Edelsbrunner-Harer 2008, Naitzat-Zhitnikov-Lim 2020).
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistent Homology (TDA)...")
