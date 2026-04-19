@@ -32,7 +32,7 @@
 
 \begin{abstract}
 Benchmark leaderboards rank language models by \emph{what} they can do, yet reveal little about \emph{why} one model outperforms another.
-We present a systematic study that measures over 30 intrinsic geometric, topological, and mechanistic properties of 30+ language model checkpoints spanning five model families and correlates these with downstream benchmark performance.
+We present a systematic study that measures 72 intrinsic geometric, topological, mechanistic, and dynamics properties (731 features after aggregation) of 32 pretrained language model checkpoints spanning eight model families and three orders of magnitude in parameter count, and correlates these with 68 benchmark scores. A sparse LASSO on these features predicts held-out composite benchmark capability at leave-one-out $R^2 = 0.77$ versus $R^2 = 0.43$ for a $\log N_{\text{params}}$-only baseline, a $+0.34$ absolute improvement from the intrinsic signals alone.
 Our contributions are threefold.
 First, we introduce a taxonomy of intrinsic diagnostic metrics organized by data dependency and a normalization framework that enables fair comparison across models with different hidden dimensions, layer counts, and tokenizers.
 Second, we identify which intrinsic properties predict benchmark performance after controlling for parameter count, and characterize how instruction tuning alters representational geometry.
@@ -55,9 +55,9 @@ No prior study has systematically measured a comprehensive suite of geometric, t
 This paper bridges that gap. We make the following contributions:
 
 \begin{enumerate}
-  \item \textbf{Metric taxonomy and normalization framework.} We classify 30 intrinsic diagnostic metrics into three tiers based on data dependency (weight-only, data-dependent but stable, and data-dependent requiring controlled design) and six categories (geometry, topology, interpretability, causality, dynamics, and representation engineering). We develop a normalization framework that accounts for differences in model width, depth, and tokenization, enabling principled cross-model comparison.
+  \item \textbf{Metric taxonomy and normalization framework.} We classify 72 intrinsic diagnostic metrics into three tiers based on data dependency (weight-only, data-dependent but stable, and data-dependent requiring controlled design) and seven categories (geometry, topology, interpretability, causality, dynamics, consistency, and representation engineering). We develop a normalization framework that accounts for differences in model width, depth, and tokenization, enabling principled cross-model comparison.
 
-  \item \textbf{Systematic correlation study.} We evaluate all metrics across 30+ checkpoints spanning five model families (GPT-2, Pythia, Llama~3, Qwen~2.5, and others), performing univariate and partial correlations, multivariate feature selection, within-family scaling analysis, and base-versus-instruction-tuned comparisons.
+  \item \textbf{Systematic correlation study.} We evaluate all metrics across 32 checkpoints spanning eight model families (GPT-2, Pythia, Llama~3, Qwen~3.5, Gemma~4, OLMo, Phi, and TinyLlama), performing univariate and partial correlations, multivariate feature selection, within-family scaling analysis, and base-versus-instruction-tuned comparisons. Our sparse LASSO yields a held-out $\text{LOO } R^2 = 0.77$ versus $R^2 = 0.43$ for the $\log N_{\text{params}}$ baseline; leave-one-family-out $R^2 = 0.27$ reveals that cross-family generalization remains an open problem.
 
   \item \textbf{Effective Dimensionality Gradient (EDG).} We propose a novel metric that captures the information bottleneck compression structure of a model by measuring the monotonicity of effective rank reduction across layers. EDG is threshold-free, scale-independent, and computed from existing measurements with zero additional cost.
 
@@ -560,7 +560,7 @@ Together with the open-source BLME toolkit, this work provides the infrastructur
 \label{app:metrics}
 % ============================================================
 
-This appendix provides the full mathematical definition, hypothesis, and intuition for each of the 28 diagnostic metrics used as independent variables in our study. Metrics are organized by category. For each metric we state:
+This appendix provides the full mathematical definition, hypothesis, and intuition for the 72 diagnostic metrics used as independent variables in our study (the appendix below describes a representative subset; the complete task list is at \url{https://github.com/dtsaras/beyond_lm_eval} in \texttt{src/blme/tasks}). Metrics are organized by category. For each metric we state:
 \begin{itemize}
   \item \textbf{Tier}: 1 (weight-only) or 2 (data-dependent, stable).
   \item \textbf{Data requirement}: None, hidden states, attention maps, or interventional (activation patching).
