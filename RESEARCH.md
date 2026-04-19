@@ -24,7 +24,9 @@ The plan originally scoped 30+ models, 70 tasks, and 7 analyses. The
 - **32 models** × 4 families × 3 orders of magnitude in parameter
   count (70M to 31B).
 - **72 registered tasks**, of which ~62 run end-to-end on every
-  model; 787 feature columns after aggregation.
+  model; 734 raw feature columns + 68 benchmark columns + 4 metadata
+  columns after aggregation; 730 features carried into the correlation
+  analysis after constant-column filtering.
 - **9 rounds of correctness audit** that fixed 77 bugs across source
   and aggregator — every number reported below survives the audit
   (see `AUDIT_REPORT.md`).
@@ -165,17 +167,17 @@ post-round-4 aggregated CSV has correctly-signed ppl/NLL/BPC columns.
 All 8 analysis steps from the original plan executed; outputs in
 `results/study_v2/analysis/`.
 
-### Step 1: Univariate correlations (all 731 features × 68 benchmarks)
+### Step 1: Univariate correlations (all 730 features × 68 benchmarks)
 
-- Spearman ρ per (feature, benchmark) pair: **49,708 tests**, FDR
+- Spearman ρ per (feature, benchmark) pair: **49,640 tests**, FDR
   corrected.
-- After FDR q < 0.05: **20,629 significant correlations**.
+- After FDR q < 0.05: **21,252 significant correlations**.
 - Top-20 univariate correlates with composite benchmark in
   `docs/TOP_PREDICTORS.md` §1.
 
 ### Step 2: Partial correlations controlling for `log(N_params)`
 
-- After FDR q < 0.05: **13,900 significant partial correlations**.
+- After FDR q < 0.05: **15,790 significant partial correlations**.
 - Top-20 intrinsic signals that persist **beyond scale** in
   `docs/TOP_PREDICTORS.md` §2. Headline: task-vector-cosine min/std,
   Ethayarajh n_words_tracked, WAA alignment, hubness Gini, MNN
@@ -188,7 +190,7 @@ evaluation (`scripts/analyze_correlations.py::run_lasso`).
 
 | Model | Training R² | LOO R² | LOFO R² |
 |---|---|---|---|
-| LASSO, 28 selected from 730 features | 0.999 (overfit; expected at n<<p) | **0.731** | **0.262** |
+| LASSO, 31 selected from 730 features | 0.999 (overfit; expected at n<<p) | **0.731** | **0.262** |
 | Baseline: `log(N_params)` linear | 0.498 | 0.429 | — |
 
 - Gain from intrinsic signals: **+0.30 absolute, +70 % relative** on
@@ -200,45 +202,58 @@ evaluation (`scripts/analyze_correlations.py::run_lasso`).
 
 ### Step 4: Within-family (Pythia)
 
-Pythia n=8 scaling series yields Spearman(log N, composite) = +0.97
-— the steepest within-family scaling in our set. Within Pythia,
-`geometry_spectral.avg_alpha` ρ = –0.82 with composite, matching
-Martin-Mahoney 2021 prediction.
+Pythia n=8 scaling series yields Spearman(log N, composite) = +0.88
+— a strong within-family scaling relation. Within Pythia,
+`geometry_spectral.median_alpha` ρ = –0.88 and
+`geometry_spectral.std_alpha` ρ = –0.83 with composite — both
+consistent with Martin-Mahoney 2021's prediction that heavier-tailed
+spectra indicate better-trained models.
 
 ### Step 5: Base vs. Instruct paired shifts
 
-N = 6 pairs. 103 features moved unanimously across all available
-pairs; 42 with |std_Δ| > 0.5. Top shifts:
+N = 6 pairs. 102 features moved unanimously across all available
+pairs; 28 with |std_Δ| > 0.5. Top shifts:
 
-- `consistency_calibration.ece` ↑ (+1.97 std-Δ, unanimous): instruct
+- `consistency_calibration.ece` ↑ (+2.00 std-Δ, unanimous): instruct
   tuning degrades calibration — consistent with published RLHF
   findings.
-- `consistency_format_robustness.mean_nll_overall` ↑ (+1.09):
-  instruct models more format-sensitive on prompts outside their
-  fine-tuning distribution.
-- `dynamics_sharpness.{baseline_loss, sam_perturbed_loss}` ↑
-  (+0.98, +0.99): instruct-tuned minima are sharper.
+- `consistency_format_robustness.mean_nll_overall` ↑ (+1.09,
+  unanimous): instruct models more format-sensitive on prompts outside
+  their fine-tuning distribution.
+- `causality_ablation.loss_ablate_{1%,5%,10%,25%}` ↑ (+0.99 to +1.10,
+  unanimous): instruct models are more fragile to targeted neuron
+  ablation.
+- `dynamics_sharpness.sam_perturbed_loss` ↑ (+0.99, unanimous):
+  instruct-tuned minima are sharper.
 - `repe_refusal_direction.direction_norm` ↑: refusal direction
   strengthens (expected from Arditi 2024).
-- `geometry_lid.lid_median` ↑ (+0.99): local intrinsic dimension
+- `geometry_lid.lid_median` ↑ (+1.02): local intrinsic dimension
   increases, suggesting instruction tuning broadens the representation
   manifold rather than compressing it.
 
 ### Step 6: Clustering / PCA
 
-Three-component PCA explains 48 % of variance (21.0 % + 14.6 % +
-12.2 %). PC1 strongly correlates with `log(N_params)` (ρ = +0.85);
-PC2 separates chat-tuned models from base within families.
+Three-component PCA explains 49.5 % of variance (21.4 % + 15.6 % +
+12.5 %). PC1 aligns with composite-benchmark performance (ρ = +0.84)
+and with `log(N_params)` (ρ = +0.60); PC2 separates chat-tuned
+models from base within families.
 
-### Step 7: EDG validation (novel metric)
+### Step 7: Effective-rank gradient validation (novel metric)
 
-Effective Dimensionality Gradient = Spearman(layer_idx,
-`erank_ratio`) of `geometry_collapse`.
+We measure how the effective rank of the hidden-state covariance
+changes with depth via `geometry_collapse.erank_per_layer` (per-layer
+summary) and `geometry_collapse.collapse_ratio` (final/max ratio).
 
-- EDG ρ with composite: **−0.62** (FDR-significant).
-- Partial EDG ρ controlling for log(N): **−0.38** (still significant).
-- Adds modest but detectable signal beyond scale; selected by LASSO
-  in most bootstrap folds.
+- `geometry_collapse.collapse_ratio` ρ with composite: **+0.47**
+  (univariate, FDR-significant); **partial ρ = +0.68** controlling
+  for log(N) (q = 0.0006).
+- `geometry_collapse.erank_per_layer.q75` partial ρ = **+0.71**
+  (q = 0.0002) — the single strongest collapse-family predictor
+  beyond scale, appearing at position 17 in `docs/TOP_PREDICTORS.md`
+  §2.
+- The depth-profile of effective rank therefore adds a
+  FDR-significant signal beyond log(N), validating the Cloninger-
+  Klindt 2024 compression-valley picture.
 
 ### Step 8: Statistical power / bootstrap
 
@@ -290,7 +305,9 @@ capability signals from one task.
 3. **Methodology** — 72-task taxonomy, 32-model zoo, WikiText-103
    corpus, normalisations.
 4. **Results** — Steps 1–8 from §6 above.
-5. **EDG novel metric** — §7 of the plan, now validated (ρ = –0.62).
+5. **Effective-rank gradient** — §7 of the plan, validated via
+   collapse_ratio and erank_per_layer.q75 (partial ρ = +0.68 and
+   +0.71 respectively, controlling for scale).
 6. **Extended Characterization** — round-7/8 literature additions
    (Schatten + MNN + RankMe + Sinkε + massive activations + valley).
 7. **Discussion** — limitations (n=32, LOFO R²=0.262 cross-family
@@ -316,12 +333,12 @@ capability signals from one task.
 - **Patching**: `scripts/patch_failed_tasks.py` — per-model task
   re-run utility used in 9 rounds of fixes.
 - **Aggregation**: `scripts/aggregate_results.py` — builds the
-  32 × 787 feature matrix; round-4 audit fixed layer-indexed depth
+  32 × 806 feature matrix; round-4 audit fixed layer-indexed depth
   bias.
 - **Analysis**: `scripts/analyze_correlations.py` (univariate,
   partial, LASSO, base-vs-instruct, PCA), `scripts/analyze_findings.py`
   (Q1–Q8 human-readable report).
-- **Results**: `results/study_v2/aggregated.csv` (32 × 787);
+- **Results**: `results/study_v2/aggregated.csv` (32 × 806);
   `results/study_v2/analysis/*.csv`;
   `results/study_v2/analysis/findings_report.md`.
 
@@ -354,7 +371,7 @@ Paper-ready documentation synchronised with the locked results:
 
 ## 11. Known limitations (to surface in the paper)
 
-1. **n = 32 is statistically underpowered** for LASSO with p=731
+1. **n = 32 is statistically underpowered** for LASSO with p=730
    features. LOO R² = 0.794 is honest but has a wide bootstrap CI
    (not yet computed — flagged as follow-up).
 2. **LOFO R² = 0.37** means the predictive combination doesn't

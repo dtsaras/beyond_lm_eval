@@ -116,7 +116,7 @@ LASSO with 5-fold CV, held-out LOO + LOFO evaluation.
 
 | Metric | Training R² | LOO R² | LOFO R² |
 |---|---|---|---|
-| LASSO (730 features → 28 selected) | 0.999 (overfit; expected at n<<p) | **0.731** | 0.262 |
+| LASSO (730 features → 31 selected) | 0.999 (overfit; expected at n<<p) | **0.731** | 0.262 |
 | Linear baseline, `log(N_params)` only | 0.498 | 0.429 | — |
 
 **Interpretation**:
@@ -132,7 +132,7 @@ LASSO with 5-fold CV, held-out LOO + LOFO evaluation.
 ## 4. Paper-ready claim (verbatim, for §4)
 
 > Using 32 pretrained LLMs spanning 5 families and 3 orders of
-> magnitude in parameter count, a LASSO combining 28 intrinsic
+> magnitude in parameter count, a LASSO combining 31 intrinsic
 > metrics computed from weights and hidden-state activations
 > (without any benchmark data) predicts composite benchmark
 > performance at held-out leave-one-out R² = **0.731**, compared
