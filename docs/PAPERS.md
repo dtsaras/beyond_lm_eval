@@ -11,9 +11,15 @@ Sections:
 4. [Update procedure](#4-update-procedure)
 
 For the higher-level narrative (survey methodology, selection
-criteria, experimental-correlation annex, top-predictor results)
-see the companion docs: `PAPER_SURVEY.md`, `CORRELATION_LITERATURE.md`,
-`TOP_PREDICTORS.md`.
+criteria, experimental-correlation annex, top-predictor results,
+paper-ready related-work section, and reference-implementation repo
+index) see the companion docs:
+- `PAPER_SURVEY.md` — inclusion/exclusion survey narrative
+- `RELATED_WORK.md` — paper-ready §2 in thematic threads
+- `CORRELATION_LITERATURE.md` — experimental-correlation papers
+- `TOP_PREDICTORS.md` — main experimental result
+- **`REPOSITORIES.md`** — GitHub reference-implementation URLs for
+  every cited paper (66 papers mapped, added 2026-04-20)
 
 ---
 
