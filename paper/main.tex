@@ -502,8 +502,18 @@ We refrain from making significance claims given the small pair count and the do
 \label{sec:clustering}
 % ------------------------------------------------------------
 
-We perform PCA on the (models $\times$ features) matrix to visualize the intrinsic property landscape.
-Hierarchical clustering (Ward linkage) on the standardized feature matrix tests whether models cluster by family, size tier, or training paradigm when grouped solely by their intrinsic properties.
+We perform PCA on the ($32$ models $\times$ $731$ features) standardised matrix to visualise the intrinsic-property landscape.
+The top three components explain $49.5\%$ of total variance ($21.4\%$, $15.6\%$, $12.5\%$).
+PC1 aligns strongly with the composite benchmark ($\rho = +0.84$) and moderately with $\log N_{\text{params}}$ ($\rho = +0.60$), suggesting PC1 captures a latent ``capability'' axis that is correlated with but not reducible to scale.
+PC2 separates chat-tuned from base models within each family, consistent with the unanimous instruction-tuning shifts reported in \Cref{sec:instruct}.
+See \Cref{fig:pca-clustering}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/fig_pca_clustering.pdf}
+  \caption{PCA of the $32 \times 731$ intrinsic-feature matrix. Models are colored by family and shaped by base/instruct status. PC$1$--$3$ explain $21.4\%$, $15.6\%$, $12.5\%$ of variance. PC$1$ correlates with composite benchmark ($\rho = +0.84$) and $\log N_{\text{params}}$ ($\rho = +0.60$); PC$2$ separates chat-tuned from base within each family.}
+  \label{fig:pca-clustering}
+\end{figure}
 
 % ------------------------------------------------------------
 \subsection{EDG Evaluation}
@@ -532,13 +542,12 @@ Within-family results (Pythia $n=8$, GPT-2 $n=4$) have limited power and are rep
 % ============================================================
 
 % ------------------------------------------------------------
-\subsection{Expected Findings}
+\subsection{Findings}
 % ------------------------------------------------------------
 
-Based on prior work, we anticipate several patterns.
-The spectral exponent $\alpha$ should correlate with benchmark performance, consistent with the Heavy-Tailed Self-Regularization theory~\citep{martin2021implicit}.
-Instruction tuning is expected to increase attention entropy (broader, less specialized attention patterns) and decrease activation sparsity.
-EDG should be negative for well-performing models, with magnitude increasing with scale, reflecting deeper compression in larger models.
+Several predicted patterns from prior work are confirmed in our data.
+The spectral exponent $\alpha$ correlates with within-Pythia composite performance at $\rho = -0.88$ on \texttt{median\_alpha} and $-0.83$ on \texttt{std\_alpha}, consistent with Heavy-Tailed Self-Regularization~\citep{martin2021implicit}.
+Instruction tuning produces large unanimous shifts in calibration (ECE $+2.0\sigma$, calibration intercept $-1.4\sigma$) consistent with the known RLHF calibration-damage effect, and unanimously sharpens the loss landscape ($+0.99\sigma$ Hutchinson trace and SAM-perturbed loss) supporting the specialisation hypothesis. The effective-rank depth profile, which operationalises information-bottleneck theory, predicts capability beyond scale: \texttt{collapse\_ratio} partial $\rho = +0.68$ and \texttt{erank\_per\_layer.q75} partial $\rho = +0.71$ controlling for $\log N_{\text{params}}$.
 
 Partial correlations will reveal which of these effects survive after controlling for model size.
 We expect that some geometric metrics (effective rank utilization, LID) capture aspects of representation quality that size alone does not predict---for instance, two models of similar size but different training recipes may differ substantially in their compression profiles.
