@@ -61,6 +61,7 @@ TASK_CATEGORY = {
     "interpretability_superposition": ("interpretability", 2),
     "interpretability_waa": ("interpretability", 2),
     "interpretability_attention_graph": ("interpretability", 2),
+    "interpretability_activation_sinks": ("interpretability", 2),
     # Causality
     "causality_tracing": ("causality", 2),
     "causality_attention_knockout": ("causality", 2),

@@ -80,6 +80,11 @@ BLME_RESEARCH_TASKS = [
     # Garrido et al. 2023 — all new spectral representations of
     # capability.
     "geometry_schatten",
+    # Round-8: attention-sink + massive-activation + compression-
+    # valley (Gu et al. ICLR 2025, Sun et al. 2024, Pedrotti & Guo
+    # arXiv:2510.06477) — three linked phenomena the 2024-2025
+    # literature unifies as the BOS-as-bias-channel mechanism.
+    "interpretability_activation_sinks",
 ]
 
 # Y-variable tasks (perplexity, calibration, prediction entropy)

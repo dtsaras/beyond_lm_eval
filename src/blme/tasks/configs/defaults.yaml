@@ -40,6 +40,12 @@ geometry_schatten:
   num_samples: 10
   max_length: 128
 
+interpretability_activation_sinks:
+  num_samples: 10
+  max_length: 128
+  sink_epsilon: 0.3
+  massive_threshold_ratio: 100.0
+
 geometry_rsa:
   num_samples: 20
   max_tokens: 200
