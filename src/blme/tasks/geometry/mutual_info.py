@@ -13,11 +13,20 @@ class HSICDependenceTask(DiagnosticTask):
     """
     Measures statistical dependence between layer representations using
     normalized HSIC (Hilbert-Schmidt Independence Criterion) with a linear
-    kernel.  This is mathematically equivalent to Linear CKA (Centered
-    Kernel Alignment) from Kornblith et al., 2019.
+    kernel. Mathematically equivalent to Linear CKA from Kornblith 2019
+    when normalised by √(HSIC(X,X)·HSIC(Y,Y)).
 
-    Ref: Kornblith et al., "Similarity of Neural Network Representations
-         Revisited", ICML 2019. arXiv:1905.00414
+    References:
+      * Gretton, Bousquet, Smola, Schölkopf 2005 — "Measuring Statistical
+        Dependence with Hilbert-Schmidt Norms", ALT 2005. The original
+        HSIC formulation used here.
+      * Kornblith, Norouzi, Lee, Hinton 2019 — "Similarity of Neural
+        Network Representations Revisited", ICML 2019, arXiv:1905.00414.
+        HSIC → CKA normalisation in Section 3.
+
+    ``input_to_layer_hsic.mean`` enters BLME's top-24 partial predictors
+    at +0.68 partial ρ (`docs/TOP_PREDICTORS.md` §2), measuring how
+    strongly per-layer activations still depend on the input embedding.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

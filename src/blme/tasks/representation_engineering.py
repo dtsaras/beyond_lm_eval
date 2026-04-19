@@ -20,10 +20,24 @@ logger = logging.getLogger("blme")
 class TaskVectorGeometryTask(DiagnosticTask):
     """
     Implements a Representation Engineering (RepE) task vector extraction.
-    Takes paired contrastive datasets (e.g. true vs false statements) and 
+    Takes paired contrastive datasets (e.g. true vs false statements) and
     extracts the 'Reading Vector' / 'Task Vector' by taking the mean difference
     of the activations at the last token. Measures the geometry (norm, distinctness)
     of the resulting vector.
+
+    References:
+      * Zou, Phan, Chen et al. 2023 — "Representation Engineering: A
+        Top-Down Approach to AI Transparency", arXiv:2310.01405. The
+        contrastive-pair reading-vector construction used here is
+        Section 3 of that paper.
+      * Ilharco, Ribeiro, Wortsman et al. 2023 — "Editing Models with
+        Task Arithmetic", ICLR 2023, arXiv:2212.04089. Introduced the
+        task-vector construction in weight space; the activation-space
+        analogue measured here is the RepE variant.
+      * The cosine-similarity / norm / orthogonality diagnostics over
+        per-layer task vectors are BLME's own; they are the #1 predictor
+        of composite benchmark capability beyond scale in our 32-model
+        study (`docs/TOP_PREDICTORS.md`).
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Task Vector Geometry (RepE)...")

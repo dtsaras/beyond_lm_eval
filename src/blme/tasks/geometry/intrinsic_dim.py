@@ -11,8 +11,18 @@ logger = logging.getLogger("blme")
 @register_task("geometry_intrinsic_dim")
 class IntrinsicDimensionTask(DiagnosticTask):
     """
-    Estimates the Intrinsic Dimension (ID) of the embedding manifold using the Two-NN estimator.
-    Ref: 'Estimating the intrinsic dimension of datasets by a minimal neighborhood information' (Facco et al., 2017)
+    Estimates the Intrinsic Dimension (ID) of the embedding manifold
+    using the Two-NN estimator.
+
+    References:
+      * Facco, d'Errico, Rodriguez, Laio 2017 — "Estimating the Intrinsic
+        Dimension of Datasets by a Minimal Neighborhood Information",
+        Scientific Reports 7, arXiv:1705.10933. The Two-NN estimator used
+        here.
+      * Ansuini, Laio, Macke, Zoccolan 2019 — "Intrinsic Dimension of
+        Data Representations in Deep Neural Networks", NeurIPS 2019,
+        arXiv:1905.12784. Characterises the per-layer ID profile that
+        this task produces for language models.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Intrinsic Dimension Estimation (Two-NN)...")

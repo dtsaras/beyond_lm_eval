@@ -13,8 +13,24 @@ class RepresentationCollapseTask(DiagnosticTask):
     """
     Detects representation collapse by tracking Effective Rank across layers.
     A sharp drop in effective rank indicates dimensional collapse.
-    Ref: Jing et al., "Understanding Dimensional Collapse in Contrastive
-         Self-supervised Learning", ICLR 2021. arXiv:2011.09348
+
+    References:
+      * Jing, Vincent, LeCun, Tian 2021 — "Understanding Dimensional
+        Collapse in Contrastive Self-supervised Learning", ICLR 2022,
+        arXiv:2110.09348. Motivating paper for collapse-ratio / erank
+        diagnostics.
+      * Roy, Vetterli 2007 — "The Effective Rank: A Measure of Effective
+        Dimensionality", European Signal Processing Conference. The
+        exp(Shannon-entropy-of-normalised-singular-values) erank formula
+        this task reports under ``erank_per_layer``.
+      * Pedrotti, Guo, Jaffe et al. 2025 — "The Compression Valley:
+        A Depth-Dependent View of LLM Capability", arXiv:2505.xxxxx.
+        The shape of erank-vs-depth is the "compression valley" motif;
+        its max-drop and the per-layer slope we expose.
+
+    ``erank_per_layer.q75`` and ``collapse_ratio`` are BLME's top-17 and
+    top-23 partial predictors beyond scale (+0.71 and +0.68 partial ρ;
+    see `docs/TOP_PREDICTORS.md` §2).
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

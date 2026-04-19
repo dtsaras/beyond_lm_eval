@@ -14,6 +14,19 @@ class GlobalHubnessTask(DiagnosticTask):
     Analyzes the "hubness" of the embedding space: the skewness of the distribution
     of k-nearest neighbor occurrences.
 
+    References:
+      * Tomašev, Radovanović, Mladenić, Ivanović 2014 — "The Role of
+        Hubness in Clustering High-Dimensional Data", IEEE TKDE 26 (3),
+        arXiv:1209.6425. Formalises the k-NN skewness / Gini hubness
+        measures used here.
+      * Radovanović, Nanopoulos, Ivanović 2010 — "Hubs in Space: Popular
+        Nearest Neighbors in High-Dimensional Data", JMLR 11. The
+        originator paper for k-NN hubness in high-D.
+
+    ``hubness_k10_gini`` is BLME's top-7 partial predictor of composite
+    benchmark capability beyond scale (+0.74 partial ρ; see
+    `docs/TOP_PREDICTORS.md` §2).
+
     Implementation runs the k-NN search on GPU using ``torch.topk`` because
     the per-batch matmul (batch × vocab × d_model) is the bottleneck. The
     previous numpy-on-CPU implementation became infeasible for VLM-scale

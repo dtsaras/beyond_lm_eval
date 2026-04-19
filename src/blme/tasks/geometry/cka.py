@@ -13,7 +13,19 @@ class CKATask(DiagnosticTask):
     """
     Computes Centered Kernel Alignment (CKA) between all layers of the model.
     Focuses on Linear CKA which is efficient for N > D.
-    Ref: Kornblith et al. (2019)
+
+    References:
+      * Kornblith, Norouzi, Lee, Hinton 2019 — "Similarity of Neural
+        Network Representations Revisited", ICML 2019, arXiv:1905.00414.
+        The linear-CKA formulation is Section 3.
+      * Cortes, Mohri, Rostamizadeh 2012 — "Algorithms for Learning
+        Kernels Based on Centered Alignment", arXiv:1203.0550 (the
+        HSIC-based foundation of CKA).
+
+    Per-pair min/mean/std off-diagonal CKA enter BLME's top-25 partial
+    predictors (`docs/TOP_PREDICTORS.md` §2): min_offdiag_cka at +0.74
+    partial ρ controlling for log(N), std_offdiag_cka at −0.74, and
+    min_adjacent_cka at +0.69.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKA Layer Similarity Analysis...")
