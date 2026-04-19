@@ -75,6 +75,11 @@ BLME_RESEARCH_TASKS = [
     "dynamics_coe",
     "causality_ablation",
     "geometry_mahalanobis",
+    # Round-7: 2025-2026 literature additions. Schatten-p norms +
+    # Matrix Nuclear-Norm + RankMe (Wei et al. 2025, Li et al. 2024,
+    # Garrido et al. 2023 — all new spectral representations of
+    # capability.
+    "geometry_schatten",
 ]
 
 # Y-variable tasks (perplexity, calibration, prediction entropy)

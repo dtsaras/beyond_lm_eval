@@ -21,3 +21,4 @@ from .contextualization import ContextualizationTask
 from .neural_collapse import NeuralCollapseTask
 from .weight_norms import WeightNormProfileTask
 from .tokenizer_efficiency import TokenizerEfficiencyTask
+from .schatten import SchattenNormTask

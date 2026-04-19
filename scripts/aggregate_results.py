@@ -49,6 +49,7 @@ TASK_CATEGORY = {
     "geometry_prediction_alignment": ("geometry", 2),
     "geometry_contextualization": ("geometry", 2),
     "geometry_neural_collapse": ("geometry", 2),
+    "geometry_schatten": ("geometry", 2),
     # Interpretability
     "interpretability_logit_lens": ("interpretability", 2),
     "interpretability_attention_entropy": ("interpretability", 2),

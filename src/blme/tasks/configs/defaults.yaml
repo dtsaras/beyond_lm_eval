@@ -36,6 +36,10 @@ geometry_correlation_dimension:
 geometry_matrix_entropy:
   num_samples: 10
 
+geometry_schatten:
+  num_samples: 10
+  max_length: 128
+
 geometry_rsa:
   num_samples: 20
   max_tokens: 200
