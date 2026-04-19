@@ -223,13 +223,13 @@ metric is a BLME diagnostic or trivial engineering helper).
 
 **Geometry (24 tasks)**:
 - `geometry_categories` — 📝 add citation (no canonical paper; BLME-custom category coherence)
-- `geometry_cka` ✅ Kornblith et al. 2019
-- `geometry_collapse` ✅ Thilak & Maddox 2021; Roy-Vetterli 2007
+- `geometry_cka` ✅ Kornblith et al. 2019 + Cortes et al. 2012 (round 10)
+- `geometry_collapse` ✅ Jing 2021; Roy-Vetterli 2007; Pedrotti-Guo 2025 (round 10)
 - `geometry_contextualization` ✅ Ethayarajh 2019
 - `geometry_correlation_dimension` 📝 add Grassberger-Procaccia 1983
-- `geometry_hsic` ✅ Kornblith 2019; Gretton 2005
-- `geometry_hubness` 📝 add Tomašev et al. 2014
-- `geometry_intrinsic_dim` 📝 add Facco et al. 2017 (Sci. Rep.) to docstring
+- `geometry_hsic` ✅ Gretton 2005 + Kornblith 2019 CKA equivalence (round 10)
+- `geometry_hubness` ✅ Tomašev et al. 2014; Radovanović 2010 (round 10)
+- `geometry_intrinsic_dim` ✅ Facco et al. 2017 Two-NN; Ansuini 2019 (round 10)
 - `geometry_isoscore` ✅ Rudman et al. 2022
 - `geometry_lid` 📝 add Levina-Bickel 2004 + Ma et al. 2018
 - `geometry_lipschitz` 📝 add Virmaux-Scaman 2018 (Lipschitz constant of DNNs)
@@ -244,7 +244,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `geometry_schatten` ✅ Wei 2025, Li 2024, Garrido 2023
 - `geometry_spectral` ✅ Martin-Mahoney 2019/2021
 - `geometry_svd` — standard SVD diagnostics
-- `geometry_tokenizer_efficiency` — BLME diagnostic
+- `geometry_tokenizer_efficiency` ✅ Rust 2021 fertility; Rajput 2024 (round 10)
 - `geometry_unembedding` 📝 add Lan et al. 2024 (Unembedding Dark Matter) for purity
 - `geometry_weight_norms` — BLME diagnostic
 
@@ -299,7 +299,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `repe_concept_separability` ✅ Zou 2023
 - `repe_refusal_direction` ✅ Arditi 2024; Zou 2023
 - `repe_steering_effectiveness` ✅ Zou 2023; Turner 2023
-- `repe_task_vectors` ✅ Ilharco 2023
+- `repe_task_vectors` ✅ Zou 2023 RepE + Ilharco 2023 Task Arithmetic (round 10)
 
 **Topology (4 tasks)**:
 - `topology_betti_curve` 📝 add Naitzat et al. 2020 (ICLR 2020) to docstring
@@ -309,15 +309,20 @@ metric is a BLME diagnostic or trivial engineering helper).
 
 ### Citation-audit summary
 
-After round-9 citation additions (topology_homology, logit_lens, waa):
+After round-10 citation additions (top-25 partial-ρ task files —
+repe_task_vectors, geometry_cka, hubness, collapse,
+tokenizer_efficiency, mutual_info, intrinsic_dim):
 
-- **Tasks with explicit paper citations (✅)**: 37 / 71
-- **Tasks that need a citation added to the docstring (📝)**: 29 / 71
-- **Pure BLME diagnostics with no canonical paper (—)**: 5 / 71
+- **Tasks with explicit paper citations (✅)**: 45 / 72
+- **Tasks that need a citation added to the docstring (📝)**: 22 / 72
+- **Pure BLME diagnostics with no canonical paper (—)**: 5 / 72
 
-Remaining 📝 items are all low-impact: metrics whose paper is
-mentioned in BLME documentation (`docs/tasks_*.md`) but not in the
-source file's docstring. Fix opportunity before camera-ready.
+Remaining 📝 items are low-impact: metrics whose paper is mentioned
+in BLME documentation (`docs/tasks_*.md`) but not in the source file's
+docstring. Fix opportunity before camera-ready. Round-10 focused on
+the 6 tasks that appear in the paper's top-25 partial-ρ predictor
+table (`docs/TOP_PREDICTORS.md` §2); the remaining 📝 tasks are all
+outside the top-25 and thus less important to the paper's claims.
 
 The 📝 items are a post-camera-ready cleanup list — none of them
 change the code's correctness, but adding the citation to the
