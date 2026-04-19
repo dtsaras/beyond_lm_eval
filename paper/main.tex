@@ -569,10 +569,10 @@ Sixth, several of the strongest size-independent predictors (tokenizer efficienc
 \subsection{Implications}
 % ------------------------------------------------------------
 
-If intrinsic metrics predict benchmark performance beyond model size, this has implications for multiple audiences.
-\textbf{Model developers} could monitor intrinsic properties during training as early indicators of model quality, potentially reducing reliance on expensive benchmark evaluations.
-\textbf{Benchmark designers} could complement behavioral evaluations with diagnostic metrics that reveal \emph{why} performance varies.
-\textbf{Theorists} would gain empirical grounding for connecting representation geometry to generalization.
+The $+0.34$ absolute held-out $R^2$ gain from intrinsic signals over $\log N_{\text{params}}$ has concrete implications for multiple audiences.
+\textbf{Model developers} can monitor the $26$ LASSO-selected features during training as early indicators of model quality (several are single-forward-pass measurements that cost far less than a full benchmark sweep). In particular the $6$ cross-cited top partial predictors --- RepE task-vector diversity, Ethayarajh word-tracking, LID, weight-activation alignment, Matrix Nuclear-Norm, and massive-activation ratio --- span measurement categories and are therefore not redundant sensors of a single underlying signal.
+\textbf{Benchmark designers} can complement behavioral evaluations with these diagnostics to reveal \emph{why} performance varies across architectures. The per-family LOFO breakdown suggests that within a family the cheap diagnostic signals suffice; across families the log-parameter baseline is still a strong default.
+\textbf{Theorists} gain empirical grounding for information-bottleneck-style theories: the effective-rank depth profile (\texttt{collapse\_ratio} partial $\rho = +0.68$) carries FDR-significant capability signal beyond $\log N_{\text{params}}$, and the Pedrotti-Guo~2025 compression-valley motif shows up in our data as the dominant cross-architecture erank profile shape.
 
 % ============================================================
 \section{Conclusion}
