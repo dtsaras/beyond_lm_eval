@@ -377,10 +377,14 @@ Secondary dependent variables include individual benchmark scores, perplexity on
 \label{sec:univariate}
 % ------------------------------------------------------------
 
-We compute Spearman rank correlations between each intrinsic metric and each benchmark score across all models.
-With approximately 30 metrics and 7 dependent variables, this yields $\sim\!200$ tests.
-We apply Benjamini--Hochberg false discovery rate (FDR) correction at $q = 0.05$.
-Results will be presented as a heatmap with significant correlations marked.
+We compute Spearman rank correlations between each of the $731$ intrinsic features and each of the $68$ benchmark scores across $32$ models, yielding $49{,}708$ hypothesis tests. We apply Benjamini--Hochberg false discovery rate (FDR) correction at $q = 0.05$; $21{,}245$ tests survive ($\approx 43\%$), of which $356$ target the composite benchmark directly. \Cref{fig:correlation-heatmap} shows the corresponding correlation heatmap. The top univariate predictors of composite capability (after deduplication by feature family; see \Cref{tab:top-corr} for the partial-correlation version) include RepE task-vector cosine-similarity ($|\rho| = 0.92$), WikiText-103 perplexity ($|\rho| = 0.89$), $1\%$-ablation loss ($|\rho| = 0.87$), and the Schatten-$4$ norm introduced by Wei et al.~2025 ($|\rho| = 0.83$).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_correlation_heatmap.pdf}
+  \caption{Univariate Spearman correlation heatmap across $68$ benchmarks (columns) and the top $30$ intrinsic feature families by $|\rho|$ with composite benchmark (rows). Color indicates signed $\rho$; white cells are FDR-corrected $q > 0.05$. The dense block structure on the left reflects the scale-driven nature of most benchmark correlations; the within-row heterogeneity reflects per-metric specificity.}
+  \label{fig:correlation-heatmap}
+\end{figure}
 
 % ------------------------------------------------------------
 \subsection{Partial Correlations Controlling for Model Size}
@@ -390,10 +394,9 @@ Results will be presented as a heatmap with significant correlations marked.
 Many intrinsic metrics correlate with model size, which itself strongly predicts benchmark performance.
 To identify metrics with predictive value \emph{beyond} scale, we compute partial Spearman correlations:
 \begin{equation}
-  \rho_S(\text{metric}, \text{benchmark} \mid \log N_{\text{params}})
+  \rho_S(\text{metric}, \text{benchmark} \mid \log N_{\text{params}}).
 \end{equation}
-where we partial out the log of total parameter count.
-Metrics that retain significant partial correlations are candidates for capturing qualitative aspects of model quality independent of quantity.
+After FDR correction, $16{,}892$ of the $49{,}708$ tests ($\approx 34\%$) remain significant ($q < 0.05$), and $277$ specifically target the composite benchmark. The top-$25$ deduplicated families (\Cref{tab:top-corr}) are dominated by RepE task-vector diversity ($\rho_{\text{partial}} = -0.82$; Ilharco 2023), contextualized word-tracking ($-0.82$; Ethayarajh 2019), local intrinsic dimensionality ($+0.80$; Levina-Bickel 2004), weight-activation alignment ($-0.78$; Park et al.~2024), and --- new to $2024$/$2025$ --- the Matrix Nuclear-Norm ($+0.74$; Li et al.~2024) and the massive-activation outlier signature ($-0.71$; Sun et al.~2024).
 
 % ------------------------------------------------------------
 \subsection{Multivariate Prediction}
@@ -434,9 +437,10 @@ Partial Spearman correlations (controlling for $\log N_{\text{params}}$; \Cref{t
 \label{sec:within-family}
 % ------------------------------------------------------------
 
-We repeat the univariate and multivariate analyses within the Pythia family ($n=8$) and GPT-2 family ($n=4$) separately.
-Within-family analysis controls for architecture and training data, revealing whether the same metrics that predict across families also predict within a family.
-With small sample sizes, these results are exploratory: the minimum detectable Spearman correlation at $\alpha = 0.05$ with power $0.8$ is $r \approx 0.71$ for $n = 8$.
+We repeat the univariate analysis within the Pythia family ($n=8$), which is our largest single-family zoo spanning $70$M to $12$B parameters with controlled architecture and training data.
+Within Pythia, the log-parameter--composite correlation is $\rho_S(\log N, \text{composite}) = +0.88$, a strong scaling relation.
+The strongest size-independent signals within Pythia are \texttt{geometry\_spectral.median\_alpha} ($\rho = -0.88$) and \texttt{geometry\_spectral.std\_alpha} ($\rho = -0.83$) with composite, both consistent with the Martin-Mahoney~2021 prediction that heavier-tailed weight-matrix spectra indicate better-trained models.
+Smaller families (GPT-$2$ $n=4$, Gemma-$4$ $n=4$) are reported in the supplementary material; with $n \leq 4$ the minimum detectable Spearman correlation at $\alpha = 0.05$ and power $0.8$ exceeds the largest effect size of interest, so we treat those as descriptive only.
 
 % ------------------------------------------------------------
 \subsection{Base vs.\ Instruction-Tuned}
