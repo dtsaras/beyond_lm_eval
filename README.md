@@ -10,17 +10,17 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**51 diagnostic tasks** across 7 categories:
+**72 diagnostic tasks** across 7 categories:
 
-| Category | Examples | What it measures |
-|----------|----------|-----------------|
-| **Geometry** (20) | SVD isotropy, LID, CKA, Lipschitz, collapse, layer change ratio | Representation space structure |
-| **Interpretability** (12) | Logit lens, attention entropy, probing, sparsity, superposition | Internal mechanisms |
-| **Topology** (3) | Persistent homology, Betti curves, persistence entropy | Manifold shape |
-| **Causality** (4) | Causal tracing, ablation, attention knockout, circuit quality | Information flow |
-| **Consistency** (6) | Calibration, paraphrase invariance, contamination, knowledge capacity | Output reliability |
-| **Dynamics** (3) | Stability, interpolation, chain-of-embedding drift | Temporal behavior |
-| **RepE** (3) | Task vectors, concept separability, steering effectiveness | Concept encoding |
+| Category | Count | Examples | What it measures |
+|----------|-------|----------|-----------------|
+| **Geometry** | 25 | SVD isotropy, LID, CKA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy | Representation space structure |
+| **Interpretability** | 15 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
+| **Consistency** | 12 | Calibration, paraphrase / logical / contrastive invariance, ICL slope, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
+| **Causality** | 6 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons | Information flow |
+| **Dynamics** | 6 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity | Temporal behavior |
+| **RepE** | 4 | Task vectors, concept separability, steering effectiveness, refusal direction | Concept encoding |
+| **Topology** | 4 | Persistent homology, Betti curves, persistence entropy / landscape | Manifold shape |
 
 ## Installation
 
