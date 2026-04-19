@@ -400,10 +400,34 @@ Metrics that retain significant partial correlations are candidates for capturin
 \label{sec:multivariate}
 % ------------------------------------------------------------
 
-We train Ridge regression models (with cross-validated regularization) to predict the composite benchmark score from all intrinsic features.
-LASSO regression is used for feature selection, identifying the minimal subset of metrics that best predicts performance.
-We report $R^2$ and compare against a naive baseline using $\log N_{\text{params}}$ as the sole predictor.
+We train a sparse LASSO with $5$-fold cross-validated regularization to predict the composite benchmark score from all $731$ intrinsic features, and evaluate its ability to generalize to unseen models via leave-one-out (LOO) and leave-one-family-out (LOFO) held-out $R^2$.
+We compare against a naive baseline using $\log N_{\text{params}}$ as the sole predictor.
 The key question is: how much variance in benchmark performance can intrinsic metrics explain beyond what model size alone accounts for?
+
+\paragraph{Headline result.}
+The LASSO selects $26$ features (out of $731$) and achieves held-out $\text{LOO } R^2 = 0.77$, versus $\text{LOO } R^2 = 0.43$ for the $\log N_{\text{params}}$ baseline --- a $+0.34$ absolute ($+80\%$ relative) improvement from intrinsic signals alone (\Cref{tab:lasso}). The $B = 200$ out-of-bag bootstrap yields a $95\%$ CI of $[+0.07, +0.90]$ on the LASSO's held-out $R^2$ and $[-0.30, +1.03]$ on the gain over the baseline; the median bootstrap gain is $+0.30$, consistent with the point estimate.
+
+\paragraph{Cross-family generalization.}
+The pooled $\text{LOFO } R^2 = 0.27$ is substantially smaller than the $\text{LOO } R^2$, indicating that cross-family transfer remains an open challenge. A per-family breakdown reveals two opposite regimes: on held-out families with $\geq 8$ models (Pythia, Qwen~3.5) the LASSO beats the $\log N$ baseline by $0.08$--$0.16$ MAE, while on single-model families (OLMo, Phi, TinyLlama) the simpler baseline is safer. The intrinsic-metric recipe therefore works best when a new architecture family ships a multi-scale zoo.
+
+\paragraph{Which features drive the prediction?}
+Partial Spearman correlations (controlling for $\log N_{\text{params}}$; \Cref{tab:top-corr}) identify the signals that predict capability beyond raw scale. The top six feature families are: RepE task-vector cosine-similarity diversity (Ilharco~2023), contextualized word-tracking (Ethayarajh~2019), local intrinsic dimensionality (Levina-Bickel~2004), weight-activation alignment (Park et al.~2024), the Matrix Nuclear-Norm (Li et al.~2024), and the massive-activation outlier signature (Sun et al.~2024). No single measurement category dominates --- the top-$25$ deduplicated partial predictors span geometry ($15$), interpretability ($5$), causality ($2$), topology ($2$), and representation engineering ($1$).
+
+\begin{table}[t]
+\centering
+\caption{LASSO-selected features (top 15 by $|\beta|$) from the 731-feature intrinsic-metric matrix. Coefficients are in the standardised feature space (each feature centered and scaled to unit variance). The selection is sparse: only $26$ of $731$ features have non-zero coefficients. See \texttt{results/study\_v2/analysis/lasso\_features.csv} for the full list.}
+\label{tab:lasso}
+\small
+\input{tables/table_lasso_selection}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Top-$25$ partial Spearman correlations with composite benchmark, controlling for $\log N_{\text{params}}$. Features are deduplicated by family (the aggregator emits $8$ summary statistics per per-layer feature; this table reports one row per family at the representative summary with highest $|\rho|$). All entries significant at FDR $q < 0.001$.}
+\label{tab:top-corr}
+\small
+\input{tables/table_top_correlations}
+\end{table}
 
 % ------------------------------------------------------------
 \subsection{Within-Family Analysis}
