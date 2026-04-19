@@ -10,9 +10,9 @@ correlates these with downstream benchmark performance.
 
 **Headline result** (see `docs/TOP_PREDICTORS.md`): a sparse LASSO of
 28 intrinsic features predicts composite-benchmark performance at
-held-out LOO R² = **0.794**, versus a `log(N_params)`-only baseline of
-**0.429** — a +0.36 absolute (+85 % relative) improvement from
-intrinsic signals alone.
+held-out LOO R² = **0.731**, versus a `log(N_params)`-only baseline of
+**0.429** — a +0.30 absolute (+70 % relative) improvement from
+intrinsic signals alone. LOFO R² = **0.262** (strict cross-family).
 
 ---
 
@@ -188,13 +188,15 @@ evaluation (`scripts/analyze_correlations.py::run_lasso`).
 
 | Model | Training R² | LOO R² | LOFO R² |
 |---|---|---|---|
-| LASSO, 28 selected from 731 features | 0.998 (overfit) | **0.794** | 0.371 |
+| LASSO, 28 selected from 730 features | 0.999 (overfit; expected at n<<p) | **0.731** | **0.262** |
 | Baseline: `log(N_params)` linear | 0.498 | 0.429 | — |
 
-- Gain from intrinsic signals: **+0.36 absolute, +85 % relative** on
+- Gain from intrinsic signals: **+0.30 absolute, +70 % relative** on
   within-family held-out (LOO).
-- Cross-family gap: LOFO R² = 0.37 — open problem flagged in the
-  paper's limitations.
+- Cross-family gap: LOFO R² = 0.262 — weak transfer; open problem
+  flagged in the paper's limitations. With only 4 families
+  (GPT-2, Pythia, Llama3, Qwen3.5, Gemma4) this is a strict test;
+  scaling to 8+ families would likely improve this.
 
 ### Step 4: Within-family (Pythia)
 
@@ -291,7 +293,7 @@ capability signals from one task.
 5. **EDG novel metric** — §7 of the plan, now validated (ρ = –0.62).
 6. **Extended Characterization** — round-7/8 literature additions
    (Schatten + MNN + RankMe + Sinkε + massive activations + valley).
-7. **Discussion** — limitations (n=32, LOFO R²=0.37 cross-family
+7. **Discussion** — limitations (n=32, LOFO R²=0.262 cross-family
    gap, tokenizer confounds), implications.
 8. **Appendix** — full metric definitions, per-model results,
    correctness-audit history (`AUDIT_REPORT.md`), compute cost,

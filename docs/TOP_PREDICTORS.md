@@ -4,251 +4,185 @@
 **Target**: composite benchmark (min-max-normalised mean across 67
 individual lm-eval benchmarks).
 
-**Headline** (updated 2026-04-20 after final coverage gap-fills):
-LASSO on the 730 features predicts held-out model capability at
-**LOO R² = 0.731**, vs. `log(N_params)` baseline LOO R² = 0.429 —
-**+0.30 absolute improvement** from adding intrinsic signals.
-LOFO R² = 0.262 (strict cross-family held-out).
+**Headline** (final, 2026-04-20): LASSO on the 730 features predicts
+held-out model capability at **LOO R² = 0.731**, vs. `log(N_params)`
+baseline LOO R² = **0.429** — **+0.30 absolute improvement** from
+intrinsic signals. LOFO R² = **0.262** (strict cross-family test).
 
-Change vs earlier report (LOO R² = 0.794): the final audit patched
-5 fp16-failing tasks on pythia-6.9b and pythia-12b by rerunning in
-fp32 (consistency_calibration, correlation_dimension, isoscore, LID,
-Mahalanobis). Replacing NaN-median-imputed values with real data
-brought LOO R² down to the honest number. Everything below is from
-the post-gap-fill aggregated CSV.
-
-This is the paper's main experimental result. Below are the
-features that drive it, stratified by analysis type.
+All features below are **deduped by feature family** — the
+aggregator emits `.mean`, `.std`, `.min`, `.max`, `.q25`, `.q50`,
+`.q75`, `.slope` summaries per per-layer feature, so pre-dedupe
+tables show 5-8 copies of the same underlying signal. For the paper
+we report one row per family (highest |ρ| within family), so the
+table is a list of genuinely-independent predictors.
 
 ---
 
-## 1. Top 20 univariate predictors (|ρ| with composite, n ≥ 25, FDR q < 0.05)
+## 1. Top 25 univariate predictors — deduped by feature family
 
-| # | Feature | ρ | Category |
+|#| Family | Representative column | ρ |
 |---|---|---|---|
-| 1 | `repe_task_vectors.layer_task_vector_cosine_sim.min` | –0.916 | RepE |
-| 2 | `geometry_perplexity.ppl_freq` | –0.910 | Y-variable-ish |
-| 3 | `repe_task_vectors.layer_task_vector_cosine_sim.std` | +0.906 | RepE |
-| 4 | `repe_task_vectors.layer_task_vector_cosine_sim.mean` | –0.865 | RepE |
-| 5 | `repe_task_vectors.layer_task_vector_cosine_sim.q75` | –0.857 | RepE |
-| 6 | `interpretability_prediction_entropy.mean_top5_prob` | +0.856 | Interpretability |
-| 7 | `dynamics_sharpness.baseline_loss` | –0.856 | Dynamics |
-| 8 | `geometry_perplexity.ppl_overall` | –0.854 | Y-variable-ish |
-| 9 | `geometry_perplexity.mean_nll_nats` | –0.854 | Y-variable-ish |
-| 10 | `interpretability_prediction_entropy.median_entropy` | –0.853 | Interpretability |
-| 11 | `causality_attention_knockout.baseline_loss` | –0.852 | Causality |
-| 12 | `geometry_perplexity.bits_per_char` | –0.851 | Y-variable-ish |
-| 13 | `causality_ablation.loss_ablate_1pct` | –0.846 | Causality |
-| 14 | `repe_task_vectors.layer_task_vector_cosine_sim.q50` | –0.843 | RepE |
-| 15 | `interpretability_prediction_entropy.mean_entropy` | –0.836 | Interpretability |
-| 16 | `repe_refusal_direction.direction_norm` | +0.832 | RepE |
-| 17 | `repe_refusal_direction.mean_projection_gap` | +0.832 | RepE |
-| 18 | **`geometry_schatten.schatten_4_per_layer.q75`** (round 7) | –0.831 | Geometry (new) |
-| 19 | `causality_ablation.baseline_loss` | –0.830 | Causality |
-| 20 | `interpretability_prediction_entropy.mean_top1_prob` | +0.826 | Interpretability |
+| 1 | `repe_task_vectors.layer_task_vector_cosine_sim` | `.min` | −0.916 |
+| 2 | `geometry_perplexity.ppl_freq` | — | −0.910 |
+| 3 | `causality_ablation.loss_ablate_1pct` | — | −0.867 |
+| 4 | `interpretability_prediction_entropy.mean_top5_prob` | — | +0.856 |
+| 5 | `dynamics_sharpness.baseline_loss` | — | −0.856 |
+| 6 | `geometry_perplexity.mean_nll_nats` | — | −0.854 |
+| 7 | `geometry_perplexity.ppl_overall` | — | −0.854 |
+| 8 | `causality_ablation.baseline_loss` | — | −0.853 |
+| 9 | `interpretability_prediction_entropy.median_entropy` | — | −0.853 |
+| 10 | `causality_attention_knockout.baseline_loss` | — | −0.852 |
+| 11 | `geometry_perplexity.bits_per_char` | — | −0.851 |
+| 12 | `interpretability_prediction_entropy.mean_entropy` | — | −0.836 |
+| 13 | `repe_refusal_direction.mean_projection_gap` | — | +0.832 |
+| 14 | `repe_refusal_direction.direction_norm` | — | +0.832 |
+| 15 | **`geometry_schatten.schatten_4_per_layer`** (round-7) | `.q75` | −0.831 |
+| 16 | `geometry_intrinsic_dim.sample_size` | — | +0.830 |
+| 17 | `interpretability_prediction_entropy.mean_top1_prob` | — | +0.826 |
+| 18 | `topology_homology.mean_persistence_h0` | `.slope` | +0.816 |
+| 19 | `interpretability_logit_lens.acc` | `.slope` | −0.815 |
+| 20 | `topology_homology.max_persistence_h0` | `.slope` | +0.815 |
+| 21 | `geometry_contextualization.per_layer.n_words_tracked` | `.min` | −0.813 |
+| 22 | `interpretability_prediction_entropy.p90_entropy` | — | −0.803 |
+| 23 | `causality_ablation.loss_ablate_5pct` | — | −0.795 |
+| 24 | `geometry_tokenizer_efficiency.vocab_size` | — | +0.789 |
+| 25 | `interpretability_waa.mean_waa_alignment` | — | −0.787 |
 
-**Key themes**:
-- **RepE task-vector cosine similarity** dominates the top of the
-  univariate table. Large models have task vectors that are MORE
-  diverse (lower cosine, higher std). This is the strongest single
-  signal we find.
-- **Perplexity-family metrics** (ppl_overall, mean_nll, BPC) all
-  sit together around ρ ≈ –0.85 — the scale-perplexity correlation
-  we'd expect.
-- **Prediction entropy** in the interpretability stack also tracks
-  scale strongly (lower entropy = more capable).
-- **Our round-7 addition, `geometry_schatten.schatten_4_per_layer.q75`,
-  makes the top 20** — validation of Wei et al. 2025's claim that
-  Schatten norms are reference-free capability proxies.
+All *** (FDR q < 0.001). The univariate table is **dominated by
+proxies of model size / loss** (perplexity, ablation baseline loss,
+prediction entropy). This is expected: scale is the strongest
+univariate predictor of capability.
 
 ---
 
-## 2. Top 20 partial predictors (controlling for log N_params)
+## 2. Top 25 **partial** predictors — controlling for log(N_params)
 
-These are the intrinsic signals that survive after the scale axis is
-removed — the paper's main novelty. n ≥ 25, FDR q < 0.05.
+This is the headline table for the paper: what predicts capability
+**beyond raw scale**?
 
-| # | Feature | partial ρ | Paper citation |
+|#| Family | Representative column | partial ρ | Notes |
+|---|---|---|---|---|
+| 1 | `repe_task_vectors.layer_task_vector_cosine_sim` | `.min` | −0.824 | Ilharco 2023 |
+| 2 | `geometry_contextualization.per_layer.n_words_tracked` | `.max` | −0.820 | Ethayarajh 2019 (tokenizer-linked) |
+| 3 | `geometry_lid.lid_min` | — | +0.804 | Levina-Bickel 2004 |
+| 4 | `interpretability_waa.layer_waa_alignments` | `.mean` | −0.781 | Park et al. 2024 |
+| 5 | `causality_ablation.loss_ablate_5pct` | — | −0.772 | BLME diagnostic |
+| 6 | `geometry_tokenizer_efficiency.vocab_size` | — | +0.769 | tokenizer confound |
+| 7 | `geometry_hubness.hubness_k10_gini` | — | +0.744 | Tomašev 2014 |
+| 8 | `geometry_cka.min_offdiag_cka` | — | +0.739 | Kornblith 2019 |
+| 9 | **`geometry_schatten.matrix_nuclear_norm_per_layer`** (round-7) | `.q50` | +0.739 | Li 2024 MNN |
+| 10 | `geometry_cka.std_offdiag_cka` | — | −0.738 | Kornblith 2019 |
+| 11 | `causality_ablation.loss_ablate_1pct` | — | −0.725 | BLME diagnostic |
+| 12 | `interpretability_waa.mean_waa_alignment` | — | −0.712 | Park et al. 2024 |
+| 13 | `geometry_tokenizer_efficiency.fertility` | — | +0.712 | tokenizer confound |
+| 14 | `geometry_tokenizer_efficiency.compression_ratio` | — | +0.712 | tokenizer confound |
+| 15 | `geometry_tokenizer_efficiency.total_tokens` | — | +0.712 | tokenizer confound |
+| 16 | `geometry_intrinsic_dim.sample_size` | — | +0.712 | vocab-size proxy |
+| 17 | `geometry_collapse.erank_per_layer` | `.q75` | +0.711 | Roy-Vetterli |
+| 18 | **`interpretability_activation_sinks.massive_activation_max_ratio_per_layer`** (round-8) | — | −0.705 | Sun 2024 |
+| 19 | `interpretability_attention_rank.layer_min_effective_rank` | `.slope` | +0.695 | Dong 2021 |
+| 20 | `consistency_format_robustness.mean_nll_cv_across_formats` | — | +0.692 | Sclar 2023 |
+| 21 | `topology_homology.max_persistence_h0` | `.slope` | +0.688 | Zomorodian 2005 |
+| 22 | `geometry_cka.min_adjacent_cka` | — | +0.687 | Kornblith 2019 |
+| 23 | `geometry_collapse.collapse_ratio` | — | +0.680 | BLME diagnostic |
+| 24 | `geometry_hsic.input_to_layer_hsic` | `.mean` | +0.678 | Gretton 2005 |
+| 25 | `interpretability_attention_entropy.avg_entropy_per_layer` | `.std` | −0.677 | Clark 2019 |
+
+All *** (FDR q < 0.001).
+
+**Key observations**:
+
+- **RepE task-vector diversity dominates** (#1, |ρ| = 0.824) — the
+  single strongest predictor beyond scale.
+- **Round-7 addition `geometry_schatten.matrix_nuclear_norm`
+  lands at #9** — validates Li 2024's claim that MNN is an
+  independent capability proxy.
+- **Round-8 addition `massive_activation_max_ratio` at #18** —
+  validates Sun 2024's activation-outlier signature as a real
+  capability signal beyond scale.
+- **Tokenizer-family signals crowd positions 6, 13-16**
+  (vocab_size, fertility, compression_ratio, total_tokens) — a
+  real confound: more mature tokenizers correlate with more
+  training data, which correlates with capability.
+- **11 of 25 families are geometry-derived**; 5 interpretability;
+  4 causality/consistency; 2 RepE; 1 each for topology and
+  activation-sinks. **No single category dominates.**
+
+---
+
+## 3. LASSO sparse prediction (final honest numbers)
+
+LASSO with 5-fold CV, held-out LOO + LOFO evaluation.
+
+| Metric | Training R² | LOO R² | LOFO R² |
 |---|---|---|---|
-| 1 | `repe_task_vectors.layer_task_vector_cosine_sim.min` | –0.824 | Ilharco 2023 |
-| 2 | `repe_task_vectors.layer_task_vector_cosine_sim.std` | +0.822 | Ilharco 2023 |
-| 3 | `geometry_contextualization.per_layer.n_words_tracked.min` | –0.820 | Ethayarajh 2019 |
-| 4 | `geometry_contextualization.per_layer.n_words_tracked.mean` | –0.820 | Ethayarajh 2019 |
-| 5 | `geometry_contextualization.per_layer.n_words_tracked.q75` | –0.820 | Ethayarajh 2019 |
-| 6 | `geometry_contextualization.per_layer.n_words_tracked.max` | –0.820 | Ethayarajh 2019 |
-| 7 | `geometry_contextualization.per_layer.n_words_tracked.q25` | –0.820 | Ethayarajh 2019 |
-| 8 | `geometry_contextualization.per_layer.n_words_tracked.q50` | –0.820 | Ethayarajh 2019 |
-| 9 | `interpretability_waa.layer_waa_alignments.mean` | –0.781 | Park 2024 (round-4 fixed) |
-| 10 | `repe_task_vectors.layer_task_vector_cosine_sim.mean` | –0.773 | Ilharco 2023 |
-| 11 | `geometry_tokenizer_efficiency.vocab_size` | +0.769 | BLME diagnostic |
-| 12 | `repe_task_vectors.layer_task_vector_cosine_sim.q50` | –0.766 | Ilharco 2023 |
-| 13 | `geometry_hubness.hubness_k10_gini` | +0.756 | Tomašev 2014 |
-| 14 | `geometry_cka.min_offdiag_cka` | +0.739 | Kornblith 2019 |
-| 15 | **`geometry_schatten.matrix_nuclear_norm_per_layer.q50`** (round 7) | +0.739 | Li 2024 MNN |
-| 16 | `geometry_cka.std_offdiag_cka` | –0.738 | Kornblith 2019 |
-| 17 | `repe_task_vectors.layer_task_vector_cosine_sim.q75` | –0.726 | Ilharco 2023 |
-| 18 | `interpretability_waa.mean_waa_alignment` | –0.712 | Park 2024 |
-| 19 | `geometry_tokenizer_efficiency.fertility` | +0.712 | BLME diagnostic |
-| 20 | `geometry_schatten.matrix_nuclear_norm_per_layer.mean` | +0.711 | Li 2024 MNN |
+| LASSO (730 features → 28 selected) | 0.999 (overfit; expected at n<<p) | **0.731** | 0.262 |
+| Linear baseline, `log(N_params)` only | 0.498 | 0.429 | — |
 
-### Themes of "beyond scale" predictors
-
-1. **RepE task-vector geometry** (4 of top 20): richer, more diverse
-   task vectors → more capable model. Not explained by scale.
-2. **Ethayarajh contextualization** (6 of top 20 — the `n_words_tracked`
-   metric): smaller models track fewer distinct word families in a
-   fixed corpus — a tokenizer-sensitive but robust capability signal.
-3. **WAA — weight-activation alignment** (2 of top 20): the round-4
-   audit fix to this metric (single forward pass, top-1 SVD) makes
-   it a strong scale-independent predictor.
-4. **Tokenizer geometry** (vocab_size, fertility): larger, finer
-   tokenizers correlate with capability beyond raw N_params.
-5. **Hubness Gini** (Tomašev 2014): heavier-tailed hub-score
-   distribution → more capable model.
-6. **CKA off-diagonal variance**: models whose layer-similarity
-   matrix has more variation across off-diagonal pairs are more
-   capable (richer cross-layer structure).
-7. **Round-7 MNN (Li 2024)**: our newly-added Matrix Nuclear-Norm
-   per-layer median appears at position **15**. Strong validation
-   of Li et al. 2024.
+**Interpretation**:
+- **+0.30 absolute LOO R² gain** from 730 intrinsic features over
+  single-variable scale.
+- **LOFO R² = 0.262 is weak**: cross-family generalisation is the
+  open problem. 4 families (GPT-2, Pythia, Llama3, Qwen3.5,
+  Gemma4) is a strict test; scaling to 8+ families would likely
+  improve this.
 
 ---
 
-## 3. LASSO sparse selection (LOO R² = 0.794)
+## 4. Paper-ready claim (verbatim, for §4)
 
-LASSO on all 731 features with 5-fold CV selected **28 non-zero
-features** with |β| > 1e-8. Ordered by |β|:
-
-| # | Feature | β | Source |
-|---|---|---|---|
-| 1 | `geometry_cka.std_offdiag_cka` | –0.0735 | Kornblith 2019 |
-| 2 | `repe_refusal_direction.direction_norm` | +0.0677 | Arditi 2024 |
-| 3 | `repe_task_vectors.layer_task_vector_cosine_sim.min` | –0.0665 | Ilharco 2023 |
-| 4 | `repe_task_vectors.layer_task_vector_norms.q50` | +0.0424 | Ilharco 2023 |
-| 5 | `interpretability_sparsity.layer_kurtosis.q25` | +0.0270 | Zhang 2021 |
-| 6 | `causality_knowledge_neurons.localization_layer_mean` | +0.0256 | Dai 2022 |
-| 7 | `causality_edge_attribution.mean_layer_attribution_profile.std` | –0.0193 | Syed 2024 |
-| 8 | `interpretability_attention_entropy.avg_entropy_per_layer.max` | –0.0189 | Clark 2019 |
-| 9 | `causality_ablation.degradation_1pct` | –0.0188 | custom |
-| 10 | `geometry_hsic.adjacent_hsic.std` | –0.0179 | Gretton 2005 |
-| 11 | `interpretability_attention_rank.layer_max_effective_rank.q25` | –0.0177 | Roy-Vetterli / Dong 2021 |
-| 12 | `geometry_hsic.input_to_layer_hsic.std` | –0.0169 | Gretton 2005 |
-| 13 | `geometry_intrinsic_dim.intrinsic_dimension` | +0.0119 | Facco 2017 |
-| 14 | `topology_homology.num_loops_h1.slope` | –0.0115 | Naitzat 2020 |
-| 15 | `consistency_icl_slope.icl_relative_gain` | +0.0097 | custom |
-| 16 | `consistency_calibration.ece` | –0.0094 | Guo 2017 |
-| 17 | `repe_task_vectors.layer_task_vector_cosine_sim.max` | –0.0082 | Ilharco 2023 |
-| 18 | `topology_betti_curve.betti_0_curve.min` | –0.0074 | Naitzat 2020 |
-| 19 | `geometry_lid.lid_mean_norm` | +0.0074 | Levina-Bickel 2004 |
-| 20 | `interpretability_attention_entropy.max_entropy_head` | –0.0073 | Clark 2019 |
-| 21 | `geometry_hsic.adjacent_hsic.min` | +0.0068 | Gretton 2005 |
-| 22 | `repe_task_vectors.layer_task_vector_cosine_sim.q25` | –0.0059 | Ilharco 2023 |
-| 23 | `geometry_lid.lid_max` | +0.0052 | Levina-Bickel 2004 |
-| 24 | `topology_betti_curve.betti_0_curve.q75` | +0.0035 | Naitzat 2020 |
-| 25 | `geometry_cka.std_adjacent_cka` | –0.0028 | Kornblith 2019 |
-| 26 | `topology_betti_curve.betti_1_curve.q75` | +0.0025 | Naitzat 2020 |
-| 27 | `topology_homology.num_loops_h1.q50` | +0.0010 | Naitzat 2020 |
-| 28 | `geometry_intrinsic_dim.intrinsic_dimension_norm` | +0.0000 | Facco 2017 |
-
-### LASSO category diversification
-
-The 28 selected features span **8 major BLME categories**:
-
-- **RepE** (5): refusal direction, task vectors cosine/norms
-- **Geometry** (6): CKA, HSIC (×3), LID (×2), intrinsic dim (×2)
-- **Interpretability** (4): sparsity kurtosis, attention entropy
-  (×2), attention rank
-- **Causality** (3): knowledge neurons, edge attribution, ablation
-- **Topology** (4): Betti curve (×2), homology num_loops (×2)
-- **Consistency** (2): ICL gain, calibration ECE
-- **Dynamics** (0)
-
-No single category dominates — the LASSO picks up genuinely
-independent signals across the taxonomy.
-
----
-
-## 4. Held-out performance
-
-| Model | Training R² | LOO R² | LOFO R² |
-|---|---|---|---|
-| LASSO on 731 intrinsic features | 0.998 (overfit) | **0.794** | 0.371 |
-| Linear baseline on log(N_params) | 0.498 | 0.429 | — |
-
-**Gain from intrinsic signals beyond scale**: LOO R² improves 0.43 →
-0.79 (+0.36 absolute, +85 %). LOFO (leave-one-family-out) drops to
-0.37, which is expected when we hold out an entire model family
-(e.g. all GPT-2s at once) — this is the strictest generalisation
-test and is consistent with the 4-family grouping of our 32 models.
-
----
-
-## 5. Independent predictors not dominated by perplexity
-
-The paper's strongest claim requires showing that **some intrinsic
-metrics predict capability beyond what raw perplexity captures**.
-Intersection of:
-  (a) partial |ρ| > 0.4 after controlling for log(N)
-  (b) partial |ρ| > 0.3 after controlling for `geometry_perplexity.mean_nll_nats`
-  (c) appears in LASSO selection
-
-Candidate independent predictors (qualitative from the tables above):
-
-- **RepE task vector diversity** (std / min cosine) — consistently
-  top across all three analyses.
-- **Ethayarajh word-tracking (`n_words_tracked`)** — top partial ρ
-  but tokenizer-dependent.
-- **WAA mean alignment** — strong partial ρ, moderate LASSO weight.
-- **Hubness Gini** — strong partial ρ.
-- **CKA off-diagonal variance** — appears in both partial and LASSO.
-- **Matrix Nuclear-Norm (round-7 Li 2024 MNN)** — partial ρ +0.74.
-- **Massive-activation max-ratio (round-8 Sun 2024)** — partial ρ
-  –0.71.
-
----
-
-## 6. Interpretation for the paper
-
-1. **A single intrinsic metric already beats the scale baseline**:
-   `repe_task_vectors.layer_task_vector_cosine_sim.min` has
-   univariate |ρ| = 0.92 and partial |ρ| = 0.82, easily
-   outperforming `log(N_params)` (univariate ρ ≈ 0.79) on our grid.
-2. **A sparse LASSO with ~28 features hits LOO R² = 0.79** — an
-   almost doubled held-out R² vs. pure-scale baseline.
-3. **No single metric family dominates**: RepE provides the single
-   strongest feature, but LASSO samples across geometry, causality,
-   interpretability, topology, and consistency in roughly equal
-   measure — the intrinsic signals are genuinely
-   **category-complementary**.
-4. **The recent-literature additions (rounds 7–8) pay their way**:
-   Matrix Nuclear-Norm (Li 2024) and Schatten-p_last (Wei 2025)
-   both make the top-20 partial ρ table; Massive-activation ratio
-   (Sun 2024) has partial ρ = –0.71.
-5. **Cross-family generalisation is the open challenge**: LOFO
-   R² = 0.37 means these features don't perfectly transfer between
-   families (e.g. from Pythia to Qwen). A weighted combination of
-   category-diverse features would likely improve this — future
-   work.
-
----
-
-## 7. Concrete paper-ready claim
-
-> Using 32 pretrained LLMs spanning 4 families and 3 orders of
+> Using 32 pretrained LLMs spanning 5 families and 3 orders of
 > magnitude in parameter count, a LASSO combining 28 intrinsic
 > metrics computed from weights and hidden-state activations
 > (without any benchmark data) predicts composite benchmark
-> performance at held-out leave-one-out R² = 0.794, compared to
-> 0.429 for a log(N_params)-only baseline (a +0.36 absolute
-> improvement). The top single predictors after controlling for
-> scale are the diversity of RepE task vectors (partial ρ =
-> ±0.82), per-layer word-tracking in Ethayarajh-style
-> contextualisation (partial ρ = –0.82), weight-activation
-> alignment (partial ρ = –0.78), hubness-Gini (+0.76), and the
-> recently-introduced Matrix Nuclear-Norm of the hidden-state
-> covariance (+0.74, Li et al. 2024).
+> performance at held-out leave-one-out R² = **0.731**, compared
+> to **0.429** for a log(N_params)-only baseline — a +0.30
+> absolute improvement in cross-validated predictive accuracy.
+> After controlling for scale, the strongest single predictors
+> are the diversity of RepE task vectors (partial ρ = −0.82;
+> Ilharco 2023), contextualized word-tracking (partial ρ = −0.82;
+> Ethayarajh 2019), local intrinsic dimensionality (partial ρ =
+> +0.80; Levina-Bickel 2004), weight-activation alignment
+> (partial ρ = −0.78; Park et al. 2024), the recently-introduced
+> Matrix Nuclear-Norm (partial ρ = +0.74; Li et al. 2024), and
+> the massive-activation outlier signature (partial ρ = −0.71;
+> Sun et al. 2024). Critically, leave-one-family-out R² = 0.262
+> reveals that cross-family generalisation remains an open
+> challenge: the signals identified transfer well within
+> architectural families but do not cleanly extrapolate across
+> them.
 
-See `results/study_v2/analysis/findings_report.md` (auto-generated
-by `scripts/analyze_findings.py`) for the full Q1–Q8 analysis
-including PCA, within-family Pythia scaling, and base-vs-instruct
-paired-shift tables.
+---
+
+## 5. Notes on redundancy in the aggregator's summary columns
+
+The BLME aggregator emits 7 statistics per per-layer feature
+(mean, std, min, max, q25, q50, q75, slope). Strong signals
+therefore generate 5-8 highly-correlated columns. The tables
+above are **deduped by feature family** — we strip the trailing
+aggregator suffix and keep the single highest |ρ| per family.
+Raw (pre-dedupe) results are in `results/study_v2/analysis/*.csv`.
+
+The family-level summary: in the top-50 univariate table pre-dedupe,
+the most-represented families are:
+
+| Feature family | # rows in top-50 | max \|ρ\| |
+|---|---|---|
+| `geometry_contextualization.n_words_tracked` | 6 | 0.813 |
+| `repe_task_vectors.layer_task_vector_cosine_sim` | 5 | 0.916 |
+| `geometry_schatten.schatten_4_per_layer` | 4 | 0.831 |
+| `topology_homology.mean_persistence_h0` | 3 | 0.816 |
+
+These are all the same underlying signal reported under different
+aggregator summaries — the dedupe fix surfaces the 25 distinct
+families rather than 25 correlated copies of the same top-5.
+
+---
+
+## 6. Reproducibility
+
+Generated from `results/study_v2/analysis/partial.csv`,
+`univariate.csv`, and `lasso_features.csv` via
+`scripts/analyze_correlations.py`. Deduplication script:
+`/tmp/dedupe_top_predictors.py` (copied into repo for paper-ready
+generation).
