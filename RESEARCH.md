@@ -202,6 +202,38 @@ evaluation (`scripts/analyze_correlations.py::run_lasso`).
   test; the LOFO eval pools the held-out family into a single test
   set, which amplifies variance on small per-family sample counts.
 
+**Per-family LOFO breakdown (MAE, lower = better)**:
+
+| Family | n | MAE (LASSO) | MAE (log N) | Δ |
+|---|---|---|---|---|
+| **pythia** | 8 | **0.163** | 0.325 | **+0.162 (LASSO wins)** |
+| **qwen3.5** | 9 | **0.202** | 0.278 | **+0.075 (LASSO wins)** |
+| llama3 | 4 | 0.112 | 0.094 | −0.018 (tie) |
+| olmo | 1 | 0.270 | 0.273 | +0.003 (tie) |
+| gemma4 | 4 | 0.240 | 0.172 | −0.068 (baseline wins) |
+| tinyllama | 1 | 0.300 | 0.214 | −0.086 (baseline wins) |
+| gpt2 | 4 | 0.247 | 0.137 | −0.110 (baseline wins) |
+| phi | 1 | 0.366 | 0.125 | −0.240 (baseline wins) |
+
+(See `results/study_v2/analysis/lofo_per_family.json`.)
+
+The per-family breakdown reveals the LOFO R² = 0.266 pooled number
+masks two opposite regimes:
+
+- **When the held-out family is large (pythia n=8, qwen3.5 n=9)**, the
+  intrinsic LASSO materially outperforms the log(N) baseline (MAE
+  reduction 0.08–0.16).
+- **When the held-out family is small (phi, tinyllama, olmo all n=1;
+  gemma4, gpt2, llama3 n=4)**, the LASSO typically underperforms the
+  baseline, partly because log(N) already does most of the work within
+  a narrow family and the LASSO overfits to the heterogeneous
+  training set.
+
+Practical takeaway for the paper: **intrinsic-metric transfer is real
+but data-hungry**. The recipe works when you can spare ≥ 7–8 held-out
+models of a new architecture; on a brand-new architecture with only
+1–4 models the log(N) baseline is safer.
+
 ### Step 4: Within-family (Pythia)
 
 Pythia n=8 scaling series yields Spearman(log N, composite) = +0.88
