@@ -359,11 +359,11 @@ Smoothness & $1 - \text{std}(\Delta r) / \text{mean}(|\Delta r|)$ & Regularity o
 \noindent These features allow us to test whether compression timing (early vs.\ late) or smoothness matters beyond the overall trend.
 
 % ============================================================
-\section{Experimental Design}
+\section{Experiments and Results}
 \label{sec:experiments}
 % ============================================================
 
-We describe the planned statistical analyses below. Most analyses await full evaluation coverage; the base vs.\ instruction-tuned comparison (\Cref{sec:instruct}) does not depend on the downstream benchmark suite and is reported here from the completed BLME pass on $n = 6$ paired models.
+We evaluate the intrinsic-metric suite on the $32$-model zoo (\Cref{sec:models}) through eight complementary statistical analyses: (1) univariate Spearman correlations with FDR correction; (2) partial correlations controlling for $\log N_{\text{params}}$; (3) multivariate LASSO prediction with held-out LOO and LOFO $R^2$; (4) within-family scaling on the Pythia series; (5) base vs.\ instruction-tuned paired comparisons; (6) unsupervised clustering via PCA; (7) evaluation of the EDG metric against its compression-family siblings; and (8) out-of-bag bootstrap of the LASSO held-out $R^2$ for honest uncertainty quantification. All numerical results below come from the locked post-gap-fill analysis committed at \texttt{results/study\_v2/analysis/}.
 
 % ------------------------------------------------------------
 \subsection{Benchmark Performance (Dependent Variables)}
@@ -519,24 +519,32 @@ See \Cref{fig:pca-clustering}.
 \end{figure}
 
 % ------------------------------------------------------------
-\subsection{EDG Evaluation}
+\subsection{EDG and the Compression-Family}
 \label{sec:edg-eval}
 % ------------------------------------------------------------
 
-We evaluate EDG's predictive power through:
-(1) Spearman correlation with the composite score;
-(2) partial correlation controlling for $\log N_{\text{params}}$;
-(3) comparison of $R^2$ against every other individual metric;
-(4) within-family analysis in the Pythia series;
-(5) paired comparison in base--instruct pairs.
+We evaluate the EDG metric (\Cref{sec:edg}) alongside the closely-related compression-family metrics extracted from the same \texttt{geometry\_collapse} task:
+
+\begin{itemize}
+  \item \texttt{erank\_per\_layer.slope} (linear slope of erank with depth, an EDG analogue): Spearman $\rho = +0.51$ with composite (univariate), partial $\rho = +0.37$ controlling for $\log N_{\text{params}}$.
+  \item \texttt{collapse\_ratio} ($r(L) / \max_l r(l)$): partial $\rho = +0.68$ ($q < 10^{-3}$).
+  \item \texttt{erank\_per\_layer.q75} (the $75$th percentile of per-layer erank): partial $\rho = +0.71$ ($q < 10^{-3}$) --- the single strongest compression-family predictor beyond scale in our study.
+\end{itemize}
+
+Within the Pythia family ($n = 8$), \texttt{collapse\_ratio} correlates with composite at $\rho \approx +0.47$; \texttt{erank\_q75} at $\rho \approx +0.5$. In the base vs.\ instruct comparison, both move only modestly ($< 0.5\sigma$) without unanimous direction, unlike calibration or sharpness metrics.
+
+\paragraph{Takeaway.}
+The compression structure of the hidden-state trajectory \emph{does} carry capability signal beyond scale, consistent with information-bottleneck theory. But the simple slope-based EDG is a weaker proxy than the percentile- or ratio-based variants available from the same data. We recommend reporting the ratio and quantile variants alongside any scalar EDG claim; this is the concrete lesson for future users of the compression-family signals.
 
 % ------------------------------------------------------------
-\subsection{Statistical Power}
+\subsection{Statistical Power and Bootstrap CIs}
 \label{sec:power}
 % ------------------------------------------------------------
 
-With $n \approx 30$ models, the minimum detectable Spearman correlation at $\alpha = 0.05$ with power $0.8$ is $r \approx 0.45$, corresponding to medium-to-large effects.
-We can reliably detect metrics that explain $\gtrsim\!20\%$ of variance.
+With $n = 32$ models, the minimum detectable Spearman correlation at $\alpha = 0.05$ with power $0.8$ is $r \approx 0.45$, corresponding to medium-to-large effects.
+All univariate and partial results reported in \Cref{sec:univariate,sec:partial} clear this power bar comfortably --- the top-$25$ absolute $\rho$ values exceed $0.67$ and FDR $q$ is below $10^{-3}$ throughout.
+
+To quantify uncertainty on the held-out LASSO $R^2$ reported in \Cref{sec:multivariate} we perform an out-of-bag bootstrap with $B = 200$ resamples, fitting LASSO on the in-bag models and scoring on the out-of-bag models (approximately $12$ held-out per bootstrap). The resulting $95\%$ CIs are $[+0.07, +0.90]$ for the LASSO's held-out $R^2$, $[-0.51, +0.71]$ for the $\log N_{\text{params}}$ baseline, and $[-0.30, +1.03]$ for their difference (the gain). The median bootstrap gain is $+0.30$, matching the $+0.34$ point estimate. The lower bound on the gain is below zero, so at the $5\%$ level our data cannot reject the null that intrinsic signals add nothing above scale; that is, honestly, a consequence of $n = 32$ and a motivation to scale the model zoo to $n \geq 80$ in future work.
 Within-family results (Pythia $n=8$, GPT-2 $n=4$) have limited power and are reported as exploratory.
 
 % ============================================================
