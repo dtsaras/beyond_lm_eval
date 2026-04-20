@@ -112,72 +112,36 @@ Our methodology addresses three questions: \emph{what} do we measure, \emph{what
 \label{sec:taxonomy}
 % ------------------------------------------------------------
 
-We organize 30 diagnostic metrics along two axes: \emph{category} (the aspect of the model being probed) and \emph{tier} (the degree of data dependency). \Cref{tab:taxonomy} presents the full classification.
+We organise $72$ diagnostic tasks along two axes: \emph{category} (the aspect of the model being probed) and \emph{tier} (the degree of data dependency).
+Tier-1 metrics use model weights only; tier-2 metrics require a forward pass through a fixed corpus (\Cref{sec:corpus}); tier-3 metrics require interventional or backward passes (gradients, activation patching). \Cref{tab:taxonomy} presents counts per category; the complete task list is in \Cref{app:metrics} and in the open-source library's \texttt{src/blme/tasks/} directory.
 
 \begin{table}[t]
 \centering
-\caption{Taxonomy of intrinsic diagnostic metrics. Tier~1 metrics require only model weights. Tier~2 metrics require a forward pass on a standard corpus but measure stable model tendencies independent of specific input content. All metrics in this table serve as independent variables (predictors). See \Cref{app:metrics} for full definitions.}
+\caption{Categories of intrinsic diagnostic tasks. Representative metrics are listed; full per-task definitions are in \Cref{app:metrics}.}
 \label{tab:taxonomy}
 \small
-\begin{tabular}{@{}llll@{}}
+\begin{tabular}{@{}llp{8.3cm}@{}}
 \toprule
-\textbf{Category} & \textbf{Tier} & \textbf{Metric} & \textbf{Key Quantities} \\
+\textbf{Category} & \textbf{N} & \textbf{Representative metrics (selected)} \\
 \midrule
-\multirow{14}{*}{Geometry}
-  & 1 & Weight Spectral & $\bar\alpha$, stable rank \\
-  & 1 & Embedding Hubness & skewness, Gini \\
-  & 1 & Unembedding Structure & effective rank, tied \\
-  \cmidrule(l){2-4}
-  & 2 & SVD Isotropy & effective rank, participation ratio \\
-  & 2 & Local Intrinsic Dim.\ (LID) & $\overline{\text{LID}}$, $\sigma_{\text{LID}}$ \\
-  & 2 & Representation Collapse & collapse ratio, max drop \\
-  & 2 & Lipschitz Continuity & $\bar{L}$, $L_{\max}$ \\
-  & 2 & Matrix Entropy & $\bar{H}_{\text{vN}}$ \\
-  & 2 & Intrinsic Dimension & Two-NN estimate \\
-  & 2 & Correlation Dimension & $D_2$ (Grassberger--Procaccia) \\
-  & 2 & RSA & $\bar\rho_{\text{adj}}$, $\rho_{\text{early-late}}$ \\
-  & 2 & CKA & $\overline{\text{CKA}}_{\text{adj}}$ \\
-  & 2 & HSIC & compression ratio \\
-  & 2 & Positional Decay & $\bar\rho_{\text{pos}}$ \\
+Geometry & $25$ & Spectral ($\alpha$), SVD isotropy, effective rank, LID, intrinsic dimension, collapse, Lipschitz, Matrix Entropy, Schatten-$p$ + Matrix Nuclear-Norm, CKA, HSIC, hubness, RSA, contextualisation, tokenizer efficiency, unembedding structure, positional decay \\
+Interpretability & $15$ & Logit lens, attention entropy, attention-rank, probing, sparsity, superposition, WAA, head roles, induction heads, activation sinks, attribution, SAE features, attention graph \\
+Consistency & $12$ & Calibration, paraphrase / logical / contrastive / self-consistency, ICL slope, format robustness, position sensitivity, contamination, knowledge capacity, bias (WEAT), membership inference \\
+Causality & $6$ & Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons \\
+Dynamics & $6$ & Sharpness (Hutchinson trace, SAM), gradient flow, stability, interpolation, chain-of-embedding, generation diversity \\
+RepE & $4$ & Task vectors, concept separability, steering effectiveness, refusal direction \\
+Topology & $4$ & Persistent homology (H$_0$, H$_1$), Betti curves, persistence entropy, persistence landscape \\
 \midrule
-\multirow{3}{*}{Topology}
-  & 2 & Persistent Homology & $\bar{p}_{H_0}$, $\bar{p}_{H_1}$, loops \\
-  & 2 & Betti Curves & simplification ratio \\
-  & 2 & Persistence Entropy & PE$_{H_0}$, PE$_{H_1}$ \\
-\midrule
-\multirow{7}{*}{Interpretability}
-  & 2 & Logit Lens & per-layer accuracy, entropy \\
-  & 2 & Attention Entropy & $\bar{H}_{\text{attn}}$ \\
-  & 2 & Induction Heads & max/mean induction score \\
-  & 2 & Activation Sparsity & $\bar{L}_0$, kurtosis \\
-  & 2 & Superposition Index & polysemanticity, utilization \\
-  & 2 & Weight--Activation Alignment & $\overline{\text{WAA}}$ \\
-  & 2 & Attention Graph & sink PageRank, edge Gini \\
-\midrule
-\multirow{2}{*}{Causality}
-  & 2 & Causal Tracing & max AIE, causal entropy \\
-  & 2 & Attention Knockout & impact Gini \\
-\midrule
-\multirow{2}{*}{Rep.\ Eng.}
-  & 2 & Task Vectors & layer norms, cosine sim \\
-  & 2 & Concept Separability & layer AUC, max AUC \\
+\textbf{Total} & $\mathbf{72}$ & \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Tier~1 (weight-only)} metrics require no input data. They analyze the spectral properties of weight matrices, the hub structure of the embedding matrix, and the effective rank of the unembedding (language model head) matrix. These serve as a natural baseline: if weight-only metrics already predict performance, hidden-state analysis may be unnecessary for some applications.
+\textbf{Tier~1 (weight-only)} metrics require no input data. They analyse the spectral properties of weight matrices, the hub structure of the embedding matrix, and the effective rank of the unembedding (language model head) matrix. These serve as a natural baseline: if weight-only metrics already predict performance, hidden-state analysis may be unnecessary for some applications.
 
-\textbf{Tier~2 (data-dependent, stable)} metrics require a forward pass through a fixed evaluation corpus (\Cref{sec:corpus}). They measure properties of hidden-state geometry, attention patterns, and mechanistic structure. While computed on specific inputs, they capture stable model tendencies rather than input-specific phenomena---analogous to measuring a building's resonant frequency by striking it with a standard hammer.
+\textbf{Tier~2 (data-dependent, stable)} metrics require a forward pass through the fixed evaluation corpus (\Cref{sec:corpus}). They measure properties of hidden-state geometry, attention patterns, and mechanistic structure. While computed on specific inputs, they capture stable model tendencies rather than input-specific phenomena.
 
-We further classify metrics by the \emph{aspect} of the model they probe:
-
-\begin{itemize}
-  \item \textbf{Geometry} (14 metrics): Spectral decompositions of weight matrices (Tier~1) and hidden-state covariance matrices (Tier~2), measuring capacity utilization, isotropy, intrinsic dimensionality, and inter-layer similarity.
-  \item \textbf{Topology} (3 metrics): Persistent homology of hidden-state point clouds via Vietoris--Rips complexes, capturing the topological complexity of representation manifolds.
-  \item \textbf{Interpretability} (7 metrics): Functional organization of the model including prediction convergence (logit lens), attention structure, activation sparsity, and mechanistic circuit detection.
-  \item \textbf{Causality} (2 metrics): Interventional measurements via activation patching (causal tracing) and head ablation, quantifying the localization and distribution of causal effects.
-  \item \textbf{Representation Engineering} (2 metrics): Task vector geometry and linear concept separability across layers, measuring how cleanly the model encodes high-level concepts.
-\end{itemize}
+\textbf{Tier~3 (interventional)} metrics require backward passes (sharpness, gradient flow) or activation-patching interventions (causal tracing, knowledge neurons, attention knockout). They are the most expensive to compute but capture causal structure not visible in weight or forward-pass data alone.
 
 % ------------------------------------------------------------
 \subsection{Model Zoo}
