@@ -184,37 +184,37 @@ We further classify metrics by the \emph{aspect} of the model they probe:
 \label{sec:models}
 % ------------------------------------------------------------
 
-We select approximately 30 checkpoints organized to support three types of analysis (\Cref{tab:models}).
+We evaluate $32$ publicly-available checkpoints spanning $8$ families and three orders of magnitude in parameter count ($70$M--$31$B), organised to support within-family scaling, cross-family comparison, and base-vs-instruct paired analyses (\Cref{tab:models}).
 
 \begin{table}[t]
 \centering
-\caption{Model zoo organized by experimental purpose. All models use publicly available weights.}
+\caption{Model zoo: $32$ checkpoints, $8$ families, $70$M--$31$B parameters. ``-it'' suffixes indicate instruction-tuned variants; remaining rows are base models. All weights are publicly available on HuggingFace.}
 \label{tab:models}
 \small
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llr@{}}
 \toprule
-\textbf{Purpose} & \textbf{Models} & \textbf{Count} \\
+\textbf{Family} & \textbf{Variants} & \textbf{N} \\
 \midrule
-\multirow{4}{*}{\shortstack[l]{Within-family\\scaling}} & GPT-2: 124M, 355M, 774M, 1.5B & 4 \\
-  & Pythia (deduped): 70M, 160M, 410M, 1B, 1.4B, 2.8B, 6.9B, 12B & 8 \\
-  & Llama~3.x: 1B, 3B, 8B & 3 \\
-  & Qwen~2.5: 0.5B, 1.5B, 3B, 7B & 4 \\
+GPT-$2$ & small, medium, large, xl ($124$M--$1.5$B) & $4$ \\
+Pythia (deduped) & $70$M, $160$M, $410$M, $1$B, $1.4$B, $2.8$B, $6.9$B, $12$B & $8$ \\
+Llama-$3.x$ & $1$B, $1$B-it, $3$B, $8$B & $4$ \\
+Qwen-$3.5$ & $0.8$B, $0.8$B-it, $2$B, $2$B-it, $4$B, $4$B-it, $9$B, $9$B-it, $27$B-it & $9$ \\
+Gemma-$4$ & e$2$b, e$4$b, e$4$b-it, $31$b & $4$ \\
+OLMo & $1$B & $1$ \\
+Phi & $2$ & $1$ \\
+TinyLlama & $1.1$B & $1$ \\
 \midrule
-\shortstack[l]{Cross-family\\(1--3B)} & GPT-2~XL, Pythia-1.4B, OLMo-1B, Llama-3.2-1B, & \multirow{2}{*}{8} \\
-  & Qwen-2.5-1.5B, Gemma-2B, TinyLlama-1.1B, Phi-2 & \\
-\midrule
-\shortstack[l]{Base vs.\\instruct} & Llama-3.2-1B, Qwen-2.5-1.5B, Qwen-2.5-7B & 3 pairs \\
+\textbf{Total} & & \textbf{$32$} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Within-family scaling series} hold architecture and training data constant while varying model size, allowing us to isolate the effect of scale on intrinsic properties.
+\textbf{Within-family scaling series} (Pythia $n=8$, Qwen-$3.5$ $n=9$, Llama-$3.x$ $n=4$, GPT-$2$ $n=4$, Gemma-$4$ $n=4$) hold architecture and training data constant while varying model size, allowing us to isolate the effect of scale on intrinsic properties.
 The Pythia suite~\citep{biderman2023pythia} is particularly valuable: eight sizes trained on identical data with identical hyperparameters (modulo those that scale with size).
 
-\textbf{Cross-family comparison} at approximately matched parameter count (1--3B) holds size roughly constant while varying architecture, training data, and training recipe.
-This reveals which intrinsic properties differ across model families independently of scale.
+\textbf{Cross-family comparison} spans eight distinct architecture/training-recipe combinations, revealing which intrinsic properties differ across model families independently of scale.
 
-\textbf{Base versus instruction-tuned pairs} isolate the effect of alignment training on representational structure.
+\textbf{Base versus instruction-tuned pairs} ($n = 6$: Llama-$3.2$-$1$B, Qwen-$3.5$-$\{0.8, 2, 4, 9\}$B, Gemma-$4$-e$4$b) isolate the effect of alignment training on representational structure. The Qwen-$3.5$-$27$B and Gemma-$4$-$31$B variants ship only as instruct checkpoints and contribute to the absolute benchmark comparison but not to the paired base/instruct analysis.
 
 % ------------------------------------------------------------
 \subsection{Evaluation Corpus}
