@@ -73,12 +73,16 @@ MODELS = [
      "purpose": ["scaling"]},
 
     # ── Llama 2 family (2 sizes, older generation) ───────────────────
+    # Gated on HF — needs Meta's license acceptance on the HF account
+    # used by the machine running the study. Kept in the zoo so that the
+    # "full" roster is visible; skipped automatically when the token does
+    # not have access.
     {"id": "meta-llama/Llama-2-7b-hf", "name": "llama2-7b", "family": "llama2",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "meta-llama/Llama-2-70b-hf", "name": "llama2-70b", "family": "llama2",
      "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation", "scale-anchor"]},
+     "purpose": ["scaling", "generation", "scale-anchor", "gated"]},
 
     # ── Llama 3 / 3.1 / 3.2 / 3.3 family (expanded generation axis) ──
     {"id": "meta-llama/Llama-3.2-1B", "name": "llama3-1b", "family": "llama3",
@@ -93,9 +97,11 @@ MODELS = [
     {"id": "meta-llama/Meta-Llama-3-8B", "name": "llama3-8b", "family": "llama3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling"]},
+    # Meta-Llama-3-70B (base) is gated for matthieu637 — Llama-3.1-70B
+    # below is the accessible scale-anchor substitute.
     {"id": "meta-llama/Meta-Llama-3-70B", "name": "llama3-70b", "family": "llama3",
      "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "scale-anchor"]},
+     "purpose": ["scaling", "scale-anchor", "gated"]},
     {"id": "meta-llama/Llama-3.1-8B", "name": "llama3.1-8b", "family": "llama3.1",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling", "generation"]},
@@ -177,37 +183,41 @@ MODELS = [
      "purpose": ["scaling"]},
 
     # ── Gemma 1 family (2 sizes, oldest generation) ──────────────────
+    # Gated for matthieu637 — needs either token swap on eez130 or
+    # license acceptance. Runs fail with a 403 at config.json download.
     {"id": "google/gemma-2b", "name": "gemma1-2b", "family": "gemma1",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-7b", "name": "gemma1-7b", "family": "gemma1",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
 
     # ── Gemma 2 family (3 sizes) ─────────────────────────────────────
+    # Gated for matthieu637 — same situation as Gemma-1.
     {"id": "google/gemma-2-2b", "name": "gemma2-2b", "family": "gemma2",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-2-9b", "name": "gemma2-9b", "family": "gemma2",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-2-27b", "name": "gemma2-27b", "family": "gemma2",
      "dtype": "bfloat16", "n_gpus": 3, "attn": "eager", "trust_remote_code": False,
-     "purpose": ["scaling", "generation", "scale-anchor"]},
+     "purpose": ["scaling", "generation", "scale-anchor", "gated"]},
 
     # ── Gemma 3 family (4 sizes — pt = pretrained, base variant) ─────
+    # Gated for matthieu637 — same situation.
     {"id": "google/gemma-3-1b-pt", "name": "gemma3-1b", "family": "gemma3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-3-4b-pt", "name": "gemma3-4b", "family": "gemma3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-3-12b-pt", "name": "gemma3-12b", "family": "gemma3",
      "dtype": "bfloat16", "n_gpus": 2, "attn": "eager", "trust_remote_code": True,
-     "purpose": ["scaling", "generation"]},
+     "purpose": ["scaling", "generation", "gated"]},
     {"id": "google/gemma-3-27b-pt", "name": "gemma3-27b", "family": "gemma3",
      "dtype": "bfloat16", "n_gpus": 3, "attn": "eager", "trust_remote_code": True,
-     "purpose": ["scaling", "generation", "scale-anchor"]},
+     "purpose": ["scaling", "generation", "scale-anchor", "gated"]},
 
     # ── Gemma 4 family (3 base + 1 IT, bf16) ──────────────────────────
     {"id": "google/gemma-4-E2B", "name": "gemma4-e2b", "family": "gemma4",
