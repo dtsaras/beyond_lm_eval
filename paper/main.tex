@@ -1235,7 +1235,7 @@ If you can train a simple linear classifier to distinguish concepts from hidden 
 
 \begin{table}[h]
 \centering
-\caption{Complete model specifications. All models are decoder-only autoregressive transformers with publicly available weights.}
+\caption{Complete specifications for the $32$ evaluated models. All are decoder-only autoregressive transformers with publicly available weights. Layer / head counts come from each model's HuggingFace config; values marked $^\ast$ for Qwen-$3.5$-$27$B-it are estimates (the 27B checkpoint was not downloaded to the analysis machine). Base and instruction-tuned variants within a family share an architecture, so ``(base, -it)'' rows list the shared architecture once.}
 \label{tab:model-details}
 \small
 \begin{tabular}{@{}llrrrr@{}}
@@ -1256,14 +1256,23 @@ Pythia-2.8B & Pythia & 2.8B & 2560 & 32 & 32 \\
 Pythia-6.9B & Pythia & 6.9B & 4096 & 32 & 32 \\
 Pythia-12B & Pythia & 12B & 5120 & 36 & 40 \\
 \midrule
-Llama-3.2-1B & Llama~3 & 1.2B & 2048 & 16 & 32 \\
+Llama-3.2-1B (base, -it) & Llama~3 & 1.2B & 2048 & 16 & 32 \\
 Llama-3.2-3B & Llama~3 & 3.2B & 3072 & 28 & 24 \\
-Llama-3.1-8B & Llama~3 & 8B & 4096 & 32 & 32 \\
+Llama-3-8B & Llama~3 & 8B & 4096 & 32 & 32 \\
 \midrule
-Qwen-2.5-0.5B & Qwen~2.5 & 0.5B & 896 & 24 & 14 \\
-Qwen-2.5-1.5B & Qwen~2.5 & 1.5B & 1536 & 28 & 12 \\
-Qwen-2.5-3B & Qwen~2.5 & 3B & 2048 & 36 & 16 \\
-Qwen-2.5-7B & Qwen~2.5 & 7B & 3584 & 28 & 28 \\
+Qwen-3.5-0.8B (base, -it) & Qwen~3.5 & 800M & 1024 & 24 & 8 \\
+Qwen-3.5-2B (base, -it) & Qwen~3.5 & 2B & 2048 & 24 & 8 \\
+Qwen-3.5-4B (base, -it) & Qwen~3.5 & 4B & 2560 & 32 & 16 \\
+Qwen-3.5-9B (base, -it) & Qwen~3.5 & 9B & 4096 & 32 & 16 \\
+Qwen-3.5-27B-it & Qwen~3.5 & 27B & 5120 & 48$^\ast$ & 24$^\ast$ \\
+\midrule
+Gemma-4-e2B & Gemma~4 & 2.3B & 1536 & 35 & 8 \\
+Gemma-4-e4B (base, -it) & Gemma~4 & 4.5B & 2560 & 42 & 8 \\
+Gemma-4-31B & Gemma~4 & 31B & 5376 & 60 & 32 \\
+\midrule
+OLMo-1B & OLMo & 1.2B & 2048 & 16 & 16 \\
+Phi-2 & Phi & 2.7B & 2560 & 32 & 32 \\
+TinyLlama-1.1B & TinyLlama & 1.1B & 2048 & 22 & 32 \\
 \bottomrule
 \end{tabular}
 \end{table}
