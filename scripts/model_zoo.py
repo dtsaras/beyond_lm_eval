@@ -3,11 +3,21 @@ Model zoo definition for the BLME benchmark study.
 
 Each entry specifies the HuggingFace model ID, dtype, number of GPUs
 needed, and any special loading flags. Models are grouped by experimental
-purpose (within-family scaling, cross-family, base-vs-instruct).
+purpose — within-family scaling, cross-family, base-vs-instruct, and
+the newer "generation" axis (Llama-2/3/3.1/3.3, Qwen-2/2.5/3/3.5,
+Gemma-1/2/3/4) — to test whether intrinsic-metric profiles shift
+systematically across a single lab's successive releases.
 
-GPU budget: 8x RTX 3090 (24 GB each), 192 GB total.
+GPU budget: 8x RTX 3090 (24 GB each), 192 GB total. 70B-class bf16
+weights fit (≈140 GB) with ~50 GB headroom for activations when
+evaluated at 128-token context; the "scale-anchor" purpose tag marks
+these large models used to extend the LOFO held-out regime beyond the
+31B ceiling of the original study.
+
 All models loaded in bfloat16 (or float32 for GPT-2/Pythia which don't
-support bf16). No quantization — we need clean intrinsic metrics.
+support bf16 reliably — Pythia-6.9B/12B need fp32 to avoid forward-pass
+NaN on prediction-entropy / sharpness / gradient-flow tasks). No
+quantization — we need clean intrinsic metrics.
 """
 
 # Each entry: {
@@ -62,7 +72,15 @@ MODELS = [
      "dtype": "float16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling"]},
 
-    # ── Llama 3 family (3 base + 1 instruct, bf16, 1 GPU each) ────────
+    # ── Llama 2 family (2 sizes, older generation) ───────────────────
+    {"id": "meta-llama/Llama-2-7b-hf", "name": "llama2-7b", "family": "llama2",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+    {"id": "meta-llama/Llama-2-70b-hf", "name": "llama2-70b", "family": "llama2",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+
+    # ── Llama 3 / 3.1 / 3.2 / 3.3 family (expanded generation axis) ──
     {"id": "meta-llama/Llama-3.2-1B", "name": "llama3-1b", "family": "llama3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling", "cross-family"]},
@@ -72,9 +90,60 @@ MODELS = [
     {"id": "meta-llama/Llama-3.2-3B", "name": "llama3-3b", "family": "llama3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling", "cross-family"]},
-    {"id": "meta-llama/Llama-3.1-8B", "name": "llama3-8b", "family": "llama3",
+    {"id": "meta-llama/Meta-Llama-3-8B", "name": "llama3-8b", "family": "llama3",
      "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
      "purpose": ["scaling"]},
+    {"id": "meta-llama/Meta-Llama-3-70B", "name": "llama3-70b", "family": "llama3",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "scale-anchor"]},
+    {"id": "meta-llama/Llama-3.1-8B", "name": "llama3.1-8b", "family": "llama3.1",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+    {"id": "meta-llama/Llama-3.1-70B", "name": "llama3.1-70b", "family": "llama3.1",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+    {"id": "meta-llama/Llama-3.3-70B-Instruct", "name": "llama3.3-70b-it", "family": "llama3.3",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["generation", "instruct", "scale-anchor"]},
+
+    # ── Qwen 2 family (3 sizes, older generation) ────────────────────
+    {"id": "Qwen/Qwen2-1.5B", "name": "qwen2-1.5b", "family": "qwen2",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen2-7B", "name": "qwen2-7b", "family": "qwen2",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen2-72B", "name": "qwen2-72b", "family": "qwen2",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+
+    # ── Qwen 2.5 family (4 sizes — 1.5B, 7B, 32B, 72B) ───────────────
+    {"id": "Qwen/Qwen2.5-1.5B", "name": "qwen2.5-1.5b", "family": "qwen2.5",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen2.5-7B", "name": "qwen2.5-7b", "family": "qwen2.5",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen2.5-32B", "name": "qwen2.5-32b", "family": "qwen2.5",
+     "dtype": "bfloat16", "n_gpus": 4, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+    {"id": "Qwen/Qwen2.5-72B", "name": "qwen2.5-72b", "family": "qwen2.5",
+     "dtype": "bfloat16", "n_gpus": 8, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+
+    # ── Qwen 3 family (4 sizes — 1.7B, 8B, 14B, 32B) ─────────────────
+    {"id": "Qwen/Qwen3-1.7B", "name": "qwen3-1.7b", "family": "qwen3",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen3-8B", "name": "qwen3-8b", "family": "qwen3",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen3-14B", "name": "qwen3-14b", "family": "qwen3",
+     "dtype": "bfloat16", "n_gpus": 2, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "Qwen/Qwen3-32B", "name": "qwen3-32b", "family": "qwen3",
+     "dtype": "bfloat16", "n_gpus": 4, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
 
     # ── Qwen 3.5 family (4 base + 4 instruct, bf16) ───────────────────
     # Note: For Qwen 3.5, bare ID = instruct (-It), -Base suffix = pretrained.
@@ -106,6 +175,39 @@ MODELS = [
     {"id": "Qwen/Qwen3.5-27B", "name": "qwen3.5-27b-it", "family": "qwen3.5",
      "dtype": "bfloat16", "n_gpus": 3, "attn": "eager", "trust_remote_code": True,
      "purpose": ["scaling"]},
+
+    # ── Gemma 1 family (2 sizes, oldest generation) ──────────────────
+    {"id": "google/gemma-2b", "name": "gemma1-2b", "family": "gemma1",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-7b", "name": "gemma1-7b", "family": "gemma1",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+
+    # ── Gemma 2 family (3 sizes) ─────────────────────────────────────
+    {"id": "google/gemma-2-2b", "name": "gemma2-2b", "family": "gemma2",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-2-9b", "name": "gemma2-9b", "family": "gemma2",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-2-27b", "name": "gemma2-27b", "family": "gemma2",
+     "dtype": "bfloat16", "n_gpus": 3, "attn": "eager", "trust_remote_code": False,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
+
+    # ── Gemma 3 family (4 sizes — pt = pretrained, base variant) ─────
+    {"id": "google/gemma-3-1b-pt", "name": "gemma3-1b", "family": "gemma3",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-3-4b-pt", "name": "gemma3-4b", "family": "gemma3",
+     "dtype": "bfloat16", "n_gpus": 1, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-3-12b-pt", "name": "gemma3-12b", "family": "gemma3",
+     "dtype": "bfloat16", "n_gpus": 2, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation"]},
+    {"id": "google/gemma-3-27b-pt", "name": "gemma3-27b", "family": "gemma3",
+     "dtype": "bfloat16", "n_gpus": 3, "attn": "eager", "trust_remote_code": True,
+     "purpose": ["scaling", "generation", "scale-anchor"]},
 
     # ── Gemma 4 family (3 base + 1 IT, bf16) ──────────────────────────
     {"id": "google/gemma-4-E2B", "name": "gemma4-e2b", "family": "gemma4",
