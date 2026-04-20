@@ -1,18 +1,36 @@
 # Beyond Benchmarks: Correlating Intrinsic LLM Properties with Downstream Performance
 
-**Study status**: executed, results locked. Last update: **2026-04-20**.
+**Study status**: v2 executed and locked (32 models); v3 extension in
+progress (58 models with Llama/Qwen/Gemma generation axis + 70B-class
+anchors). Last update: **2026-04-20**.
 
 Benchmark scores tell us *what* LLMs can do but not *why*. This study
 uses BLME to measure intrinsic geometric, topological, spectral,
 attention, causality, dynamics, consistency, and representation-
-engineering properties of 32 language models and systematically
+engineering properties of pretrained language models and systematically
 correlates these with downstream benchmark performance.
 
-**Headline result** (see `docs/TOP_PREDICTORS.md`): a sparse LASSO of
-26 intrinsic features predicts composite-benchmark performance at
-held-out LOO R² = **0.772**, versus a `log(N_params)`-only baseline of
-**0.429** — a +0.34 absolute (+80 % relative) improvement from
+**v2 headline result** (see `docs/TOP_PREDICTORS.md`; 32 models): a sparse
+LASSO of 26 intrinsic features predicts composite-benchmark performance
+at held-out LOO R² = **0.772**, versus a `log(N_params)`-only baseline
+of **0.429** — a +0.34 absolute (+80 % relative) improvement from
 intrinsic signals alone. LOFO R² = **0.266** (strict cross-family).
+
+**v3 extension** (in progress, 58 models): adds 26 checkpoints across a
+**generation axis** (Llama-2/3/3.1/3.3, Qwen-2/2.5/3/3.5, Gemma-1/2/3/4)
+plus 6 scale anchors in the 70B class (Llama-{2,3,3.1}-70B, Llama-3.3-
+70B-Instruct, Qwen-{2,2.5}-72B). The goals of v3:
+1. Test whether intrinsic-metric profiles shift systematically across a
+   single lab's successive model releases (a new dimension of the study).
+2. Extend the LOFO held-out regime past the 31B ceiling of v2 so the
+   cross-family generalisation result has anchors that actually push the
+   prediction task.
+3. Measure whether LOFO R² improves with more training data per
+   held-out family.
+
+Results will be stored in `results/study_v3/` to keep v2 locked for the
+paper's current headline numbers; v3 will be a follow-up "extended
+study" section once complete.
 
 ---
 
