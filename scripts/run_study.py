@@ -196,7 +196,7 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
         )
         elapsed = time.time() - t0
         if result.returncode == 0:
-            logger.info(f"[DONE]  lm_eval {name} ({elapsed:.0f}s)")
+            logger.info(f"[DONE]  lm_eval(basic) {name} ({elapsed:.0f}s)")
 
             # Also run MMLU 5-shot
             cmd_mmlu = [
@@ -208,7 +208,14 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
                 "--batch_size", "auto",
                 "--output_path", os.path.join(output_dir, "lm_eval", f"{name}_mmlu"),
             ]
-            subprocess.run(cmd_mmlu, env=env, capture_output=True, text=True, timeout=14400)
+            logger.info(f"[START] mmlu {name} (GPUs: {gpu_ids or 'all'})")
+            t_m = time.time()
+            r_m = subprocess.run(cmd_mmlu, env=env, capture_output=True, text=True, timeout=14400)
+            m_elapsed = time.time() - t_m
+            if r_m.returncode == 0:
+                logger.info(f"[DONE]  mmlu {name} ({m_elapsed:.0f}s)")
+            else:
+                logger.error(f"[FAIL]  mmlu {name}: {r_m.stderr[-500:]}")
             return name, "success"
         else:
             logger.error(f"[FAIL]  lm_eval {name}: {result.stderr[-500:]}")
