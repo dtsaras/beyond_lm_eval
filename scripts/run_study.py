@@ -130,9 +130,11 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
     logger.info(f"[START] BLME {name} (GPUs: {gpu_ids or 'all'})")
     t0 = time.time()
 
+    # BLME timeout: 2h default, 4h for 70B+ models (pipeline parallel is slow).
+    blme_timeout = 14400 if model_entry["n_gpus"] >= 8 else 7200
     try:
         result = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=7200
+            cmd, env=env, capture_output=True, text=True, timeout=blme_timeout
         )
         elapsed = time.time() - t0
         if result.returncode == 0:
@@ -146,7 +148,7 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
                 f.write(result.stderr)
             return name, "failed"
     except subprocess.TimeoutExpired:
-        logger.error(f"[TIMEOUT] BLME {name} (>7200s)")
+        logger.error(f"[TIMEOUT] BLME {name} (>{blme_timeout}s)")
         return name, "timeout"
     except Exception as e:
         logger.error(f"[ERROR] BLME {name}: {e}")
