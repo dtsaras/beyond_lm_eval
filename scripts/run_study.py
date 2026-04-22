@@ -130,8 +130,11 @@ def run_blme_model(model_entry, output_dir, gpu_ids=None):
     logger.info(f"[START] BLME {name} (GPUs: {gpu_ids or 'all'})")
     t0 = time.time()
 
-    # BLME timeout: 2h default, 4h for 70B+ models (pipeline parallel is slow).
-    blme_timeout = 14400 if model_entry["n_gpus"] >= 8 else 7200
+    # BLME timeout: 2h default, 8h for 70B+ models. Pipeline parallel across
+    # 8 GPUs is ~4-6× slower than tensor parallel per-task because only one
+    # GPU computes at a time, and the 50-task suite aggregates to 5-6h on
+    # Llama-3.1-70B in practice.
+    blme_timeout = 28800 if model_entry["n_gpus"] >= 8 else 7200
     try:
         result = subprocess.run(
             cmd, env=env, capture_output=True, text=True, timeout=blme_timeout
