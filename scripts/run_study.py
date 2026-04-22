@@ -182,7 +182,8 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
         model_args_parts.append("trust_remote_code=True")
     lm_eval_model_args = ",".join(model_args_parts)
 
-    # Run main benchmarks (0-shot)
+    # Run main benchmarks (0-shot). Timeouts: 4h default, 8h for 70B+ models.
+    lm_eval_timeout = 28800 if model_entry["n_gpus"] >= 8 else 14400
     cmd = [
         sys.executable, "-m", "lm_eval",
         "--model", "hf",
@@ -197,7 +198,7 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
 
     try:
         result = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=14400
+            cmd, env=env, capture_output=True, text=True, timeout=lm_eval_timeout
         )
         elapsed = time.time() - t0
         if result.returncode == 0:
@@ -215,7 +216,7 @@ def run_lmeval_model(model_entry, output_dir, gpu_ids=None):
             ]
             logger.info(f"[START] mmlu {name} (GPUs: {gpu_ids or 'all'})")
             t_m = time.time()
-            r_m = subprocess.run(cmd_mmlu, env=env, capture_output=True, text=True, timeout=14400)
+            r_m = subprocess.run(cmd_mmlu, env=env, capture_output=True, text=True, timeout=lm_eval_timeout)
             m_elapsed = time.time() - t_m
             if r_m.returncode == 0:
                 logger.info(f"[DONE]  mmlu {name} ({m_elapsed:.0f}s)")
