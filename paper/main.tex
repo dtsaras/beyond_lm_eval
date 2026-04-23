@@ -95,6 +95,9 @@ Our EDG metric operationalizes this principle for pretrained transformers by mea
 \paragraph{Recent reference-free capability proxies (2024--2025).}
 A wave of recent papers proposes single intrinsic scalars that correlate with capability without requiring benchmark data: the Matrix Nuclear-Norm~\citep{li2024matrix}, Schatten-$p$ norms with norm-preservation normalisation~\citep{wei2025schatten}, weight-activation alignment measured through Jacobian-spectrum concentration~\citep{park2024waa}, and massive-activation outlier ratios~\citep{sun2024massiveactivations}. Closely related, \citet{pedrotti2025compressionvalley} characterise a ``compression valley'' in per-layer effective rank that emerges consistently across families. BLME implements all of these as first-class metrics and tests them head-to-head in a single study; to our knowledge this is the first cross-metric evaluation of the 2024--2025 additions on a shared model zoo.
 
+\paragraph{Experimental correlation studies at smaller scope.}
+Prior work has repeatedly tested \emph{individual} intrinsic metrics against \emph{individual} benchmarks, typically on a few models at a time. \citet{garrido2023rankme} showed that the effective rank of hidden representations (``RankMe'') predicts the quality of learned embeddings without any labels. \citet{wei2024matrixentropy} found the per-layer matrix entropy separates trained from random networks and correlates with performance for a handful of open models. \citet{cavagnero2025lessismore} and \citet{bonfanti2025geometrytokens} study intrinsic-dimension profiles of hidden states for 3--10 models each. \citet{gu2025attentionsinks} and \citet{pedrotti2025compressionvalley} examine attention-sink and compression signatures, each on 4--12 models. On the scaling-law side, \citet{ruan2025observational} and \citet{isik2024sloth} correlate downstream scores with model size and compute using dozens of checkpoints but no intrinsic signals. Two probing lines~\citep{azaria2023internalstate,kadavath2022calibration} show hidden-state features predict \emph{per-question} correctness, a distinct but related question. Our contribution is orthogonal to each of these: we run \emph{all} the above families of signals simultaneously on a controlled $32$-model zoo (extended to $58$ in the v3 follow-up), quantify their mutual redundancy after partialling out size, and use a sparse multivariate combination to make cross-model held-out capability predictions that no single-metric prior study reports.
+
 \paragraph{Scaling laws.}
 \citet{kaplan2020scaling} established power-law relationships between model size, data, and compute with loss.
 \citet{wei2022emergent} documented emergent abilities that appear at scale.
@@ -148,29 +151,33 @@ Topology & $4$ & Persistent homology (H$_0$, H$_1$), Betti curves, persistence e
 \label{sec:models}
 % ------------------------------------------------------------
 
-We evaluate $32$ publicly-available checkpoints spanning $8$ families and three orders of magnitude in parameter count ($70$M--$31$B), organised to support within-family scaling, cross-family comparison, and base-vs-instruct paired analyses (\Cref{tab:models}).
+The study reported in \S\ref{sec:experiments} evaluates $32$ publicly-available checkpoints spanning $8$ families and three orders of magnitude in parameter count ($70$M--$31$B; \Cref{tab:models}). An extension study (v3, in progress at time of submission) adds $26$ more checkpoints --- the older Llama-$2$, Gemma-$1$/$2$/$3$ and Qwen-$2$/$2.5$/$3$ generations plus $70$B-class scale anchors --- to probe two new questions: (a) whether intrinsic-metric profiles shift systematically across a single lab's successive releases (``generation axis''), and (b) whether the $\text{LOFO } R^2 = 0.27$ cross-family result improves when the held-out regime is pushed past the $31$B ceiling. Headline numbers in this paper are all on the locked $32$-model v2 zoo; v3 results will appear as a follow-up supplementary study.
 
 \begin{table}[t]
 \centering
-\caption{Model zoo: $32$ checkpoints, $8$ families, $70$M--$31$B parameters. ``-it'' suffixes indicate instruction-tuned variants; remaining rows are base models. All weights are publicly available on HuggingFace.}
+\caption{Model zoo: $32$ checkpoints (v2, main results in \S\ref{sec:experiments}), $8$ families, $70$M--$31$B parameters. ``-it'' suffixes indicate instruction-tuned variants; remaining rows are base models. All weights are publicly available on HuggingFace. The v3 extension adds $26$ more checkpoints as scale anchors and a within-lab generation axis ($+$Llama-$2/3/3.1/3.3$-$70$B, $+$Qwen-$2/2.5/3$ across sizes, $+$Gemma-$1/2/3$ across sizes).}
 \label{tab:models}
 \small
-\begin{tabular}{@{}llr@{}}
+\begin{tabular}{@{}llrl@{}}
 \toprule
-\textbf{Family} & \textbf{Variants} & \textbf{N} \\
+\textbf{Family} & \textbf{Variants (v2)} & \textbf{N} & \textbf{v3 additions} \\
 \midrule
-GPT-$2$ & small, medium, large, xl ($124$M--$1.5$B) & $4$ \\
-Pythia (deduped) & $70$M, $160$M, $410$M, $1$B, $1.4$B, $2.8$B, $6.9$B, $12$B & $8$ \\
-Llama-$3.x$ & $1$B, $1$B-it, $3$B, $8$B & $4$ \\
-Qwen-$3.5$ & $0.8$B, $0.8$B-it, $2$B, $2$B-it, $4$B, $4$B-it, $9$B, $9$B-it, $27$B-it & $9$ \\
-Gemma-$4$ & e$2$b, e$4$b, e$4$b-it, $31$b & $4$ \\
-OLMo & $1$B & $1$ \\
-Phi & $2$ & $1$ \\
-TinyLlama & $1.1$B & $1$ \\
+GPT-$2$ & small, medium, large, xl ($124$M--$1.5$B) & $4$ & --- \\
+Pythia (deduped) & $70$M, $160$M, $410$M, $1$B, $1.4$B, $2.8$B, $6.9$B, $12$B & $8$ & --- \\
+Llama-$3.x$ & $1$B, $1$B-it, $3$B, $8$B & $4$ & $+$ Llama-$3.1$-$8$B/$70$B, Llama-$3.3$-$70$B-it \\
+Qwen-$3.5$ & $0.8$B, $0.8$B-it, $2$B, $2$B-it, $4$B, $4$B-it, $9$B, $9$B-it, $27$B-it & $9$ & $+$ Qwen-$2/2.5/3$ (2B--72B) \\
+Gemma-$4$ & e$2$b, e$4$b, e$4$b-it, $31$b & $4$ & $+$ Gemma-$1/2/3$ (1B--27B)$^\dagger$ \\
+OLMo & $1$B & $1$ & --- \\
+Phi & $2$ & $1$ & --- \\
+TinyLlama & $1.1$B & $1$ & --- \\
 \midrule
-\textbf{Total} & & \textbf{$32$} \\
+\textbf{Total (v2)} & & \textbf{$32$} & \\
+\textbf{Total (v2+v3)} & & \textbf{$58$} & \\
 \bottomrule
 \end{tabular}
+\begin{flushleft}\footnotesize
+$^\dagger$Gemma-$1/2/3$ and Llama-$2$ runs pending HF license acceptance on the evaluation account.
+\end{flushleft}
 \end{table}
 
 \textbf{Within-family scaling series} (Pythia $n=8$, Qwen-$3.5$ $n=9$, Llama-$3.x$ $n=4$, GPT-$2$ $n=4$, Gemma-$4$ $n=4$) hold architecture and training data constant while varying model size, allowing us to isolate the effect of scale on intrinsic properties.
@@ -179,6 +186,8 @@ The Pythia suite~\citep{biderman2023pythia} is particularly valuable: eight size
 \textbf{Cross-family comparison} spans eight distinct architecture/training-recipe combinations, revealing which intrinsic properties differ across model families independently of scale.
 
 \textbf{Base versus instruction-tuned pairs} ($n = 6$: Llama-$3.2$-$1$B, Qwen-$3.5$-$\{0.8, 2, 4, 9\}$B, Gemma-$4$-e$4$b) isolate the effect of alignment training on representational structure. The Qwen-$3.5$-$27$B and Gemma-$4$-$31$B variants ship only as instruct checkpoints and contribute to the absolute benchmark comparison but not to the paired base/instruct analysis.
+
+\textbf{Generation axis (v3 only)} pairs the \emph{same} training lab's successive releases at comparable sizes: Llama-$2/3/3.1/3.3$ at $7/8$B and $70$B, Qwen-$2/2.5/3/3.5$ at $\sim 1.5/2$B and $\sim 7/8$B, and Gemma-$1/2/3/4$ at $\sim 2$B and $\sim 27/31$B. This design lets us ask whether intrinsic signals drift in a predictable direction as a lab iterates on its training recipe --- a question the single-generation v2 zoo cannot address.
 
 % ------------------------------------------------------------
 \subsection{Evaluation Corpus}
