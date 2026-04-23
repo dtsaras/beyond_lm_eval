@@ -907,6 +907,42 @@ Does the model pay more attention to nearby tokens? In models with rotary positi
 
 \textbf{Normalization.} Spearman correlation is in $[-1, 1]$; no normalization needed.
 
+% --------------------------------------------------------
+\subsubsection{Contextualization (\texttt{geometry\_contextualization})}
+\label{app:contextualization}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states over a corpus with repeated tokens
+
+\textbf{Definition.} Following~\citet{ethayarajh2019contextual}, for each word $w$ appearing in multiple contexts we compute the mean pairwise cosine similarity of its per-layer embeddings (\emph{self-similarity}), the top-PC explained variance of its context-matrix (\emph{Maximum Explainable Variance} / MEV), and the count of distinct word types that meet the minimum-contexts threshold in the fixed corpus. Self-similarity is anisotropy-corrected by subtracting the random-pair baseline.
+
+\textbf{Hypothesis.} More capable models use their embedding space more contextually: lower self-similarity and lower MEV correlate with downstream capability after controlling for scale. The word-count signal co-varies with tokenizer maturity.
+
+\textbf{Normalization.} Cosine similarity and MEV $\in [0,1]$ after correction; word counts reported per-sample.
+
+% --------------------------------------------------------
+\subsubsection{Tokenizer Efficiency (\texttt{geometry\_tokenizer\_efficiency})}
+\label{app:tokenizer-efficiency}
+
+\textbf{Tier:} 1 (tokenizer only, no model forward pass) \quad \textbf{Data requirement:} Evaluation corpus text
+
+\textbf{Definition.} Following~\citet{rust2021tokenizer}, we report fertility (tokens per whitespace-delimited word), compression ratio (tokens per UTF-8 character), token entropy (Shannon entropy of the empirical token frequency distribution), vocabulary utilisation (fraction of vocabulary entries that appear), plus raw vocabulary size and total tokens.
+
+\textbf{Hypothesis.} Tokenizer efficiency co-varies with training-data volume and training recipe maturity. We include these as an \emph{explicit confound} so the partial-correlation analysis can factor out tokenizer-linked effects from representation-geometry signals.
+
+\textbf{Normalization.} Fertility and compression ratio are dimensionless; entropy is in nats; utilisation $\in [0,1]$.
+
+% --------------------------------------------------------
+\subsubsection{Schatten-$p$ and Matrix Nuclear-Norm (\texttt{geometry\_schatten})}
+\label{app:schatten}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states
+
+\textbf{Definition.} For the per-layer row-L2-normalised hidden-state matrix $\hat H^{(l)} \in \mathbb{R}^{N \times d_{\text{model}}}$, we compute the Schatten-$p$ quasi-norm $\|\hat H^{(l)}\|_p = (\sum_i \sigma_i^p)^{1/p}$ for $p \in \{1, 2, 4, \infty\}$, the Matrix Nuclear Norm (MNN; $p=1$ with $1/\sqrt{N}$ normalisation per~\citet{li2024matrix}), and the RankMe effective-rank estimator~\citep{garrido2023rankme}. Per-layer values are summarised into mean/std/quantiles/slope.
+
+\textbf{Hypothesis.} Norm-preserving Schatten-$p$~\citep{wei2025schatten} predicts capability without benchmark data. MNN specifically upper-bounds both rank and nuclear norm and is proposed as a single capability scalar. RankMe directly estimates an ``effective dimensionality'' of the representation subspace.
+
+\textbf{Normalization.} Row-L2-normalisation before SVD makes Schatten-$p$ comparable across different $d_{\text{model}}$.
+
 % ============================================================
 \subsection{Topology Metrics}
 \label{app:topology}
@@ -1137,6 +1173,35 @@ Viewing attention as a graph reveals global information flow patterns. A model w
 
 \textbf{Normalization.} PageRank is in $[0, 1]$; Gini is in $[0, 1]$.
 
+% --------------------------------------------------------
+\subsubsection{Attention Rank Collapse (\texttt{interpretability\_attention\_rank})}
+\label{app:attention-rank}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Attention maps
+
+\textbf{Definition.} Following~\citet{dong2021attention}, for each head's attention matrix $A^{(l,h)} \in \mathbb{R}^{T \times T}$ we compute the \emph{effective rank} via the SVD-entropy formula $\text{erank}(A) = \exp(-\sum_i \hat\sigma_i \log \hat\sigma_i)$, where $\hat\sigma_i$ are normalised singular values. We report mean/min/max across heads and a per-layer summary.
+
+\textbf{Hypothesis.} Deep transformers without skip connections and MLPs drift toward rank-1 attention (the ``rank collapse'' phenomenon~\citep{dong2021attention}). Effective rank tracks how much each head distinguishes queries. Our experiments find that the layer-wise minimum effective-rank \emph{slope} (how fast rank recovers after the collapse point) is a strong partial predictor of capability beyond scale.
+
+\textbf{Normalization.} Effective rank $\in [1, T]$; we normalise by the sequence length $T$ to report an utilisation ratio.
+
+% --------------------------------------------------------
+\subsubsection{Activation Sinks and Massive Activations (\texttt{interpretability\_activation\_sinks})}
+\label{app:activation-sinks}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Hidden states
+
+\textbf{Definition.} We combine three recent signals into a single task:
+\begin{itemize}[leftmargin=*]
+  \item \emph{Attention sink $\epsilon$-metric} (Sink$\epsilon$, \citet{gu2025attentionsinks}): the fraction of attention mass that the last-layer attention routes to ``sink'' tokens (tokens whose aggregate incoming attention exceeds a threshold), a diagnostic of how the model uses its ``no-op'' attention.
+  \item \emph{Massive activations} (\citet{sun2024massiveactivations}): per-layer, the ratio between the peak channel magnitude and the mean channel magnitude. Outlier ratios above $\sim 1000$ indicate massive-activation phenomena.
+  \item \emph{Compression valley} (\citet{pedrotti2025compressionvalley}): the depth-wise profile of effective rank, checking whether it exhibits a single trough (``valley'').
+\end{itemize}
+
+\textbf{Hypothesis.} All three signals have been independently proposed as correlates of capability. Running them jointly on the same model zoo lets us test whether they are redundant or complementary. In our partial-correlation analysis, the \emph{massive-activation max-ratio} (per-layer) is the only sub-feature that enters the top-$25$ predictors (partial $\rho = -0.71$).
+
+\textbf{Normalization.} Sink$\epsilon$ and the compression-valley depth are already ratios; the massive-activation ratio is log-transformed for reporting.
+
 % ============================================================
 \subsection{Causality Metrics}
 \label{app:causality}
@@ -1190,8 +1255,17 @@ By disabling one head at a time and measuring damage, we map the importance land
 
 \textbf{Normalization.} Gini is in $[0, 1]$; $\Delta\mathcal{L}$ is in loss units (nats or bits).
 
-% ============================================================
-\subsection{Representation Engineering Metrics}
+% --------------------------------------------------------
+\subsubsection{Targeted-Ablation Degradation (\texttt{causality\_ablation})}
+\label{app:ablation}
+
+\textbf{Tier:} 2 \quad \textbf{Data requirement:} Interventional (MLP neuron ablation); baseline loss on the evaluation corpus
+
+\textbf{Definition.} We ablate the top-$k\%$ of MLP neurons (by activation magnitude, averaged over the evaluation corpus) for $k \in \{1, 5, 10, 25\}\%$ in each layer and measure the resulting increase in cross-entropy loss: $\text{loss\_ablate}_{k\%} = \mathcal{L}_{\text{ablated}} - \mathcal{L}_{\text{baseline}}$. We also record the baseline loss itself ($\mathcal{L}_{\text{baseline}}$) as a diagnostic.
+
+\textbf{Hypothesis.} Models that degrade sharply under small ablation fractions rely on concentrated neuron knowledge; models that tolerate larger ablations have more distributed representations. Ablation loss at small $k$ is strongly correlated with the baseline loss (and therefore with perplexity and scale); we include the $k\%$-ablation vector to separate the ``fragility profile'' from raw perplexity. Both $\texttt{loss\_ablate\_1pct}$ and $\texttt{loss\_ablate\_5pct}$ enter the top-$25$ partial predictors of capability beyond scale.
+
+\textbf{Normalization.} Loss values are in nats; we also report them as multiples of the baseline loss for cross-model comparability.
 \label{app:repe}
 % ============================================================
 
