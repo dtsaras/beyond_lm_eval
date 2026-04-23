@@ -16,6 +16,7 @@
 \usepackage{enumitem}
 \usepackage{nicefrac}
 \usepackage{microtype}
+\usepackage{longtable}
 
 % Compact lists
 \setlist{nosep,leftmargin=*}
@@ -1312,7 +1313,78 @@ If you can train a simple linear classifier to distinguish concepts from hidden 
 \textbf{Normalization.} AUC is in $[0.5, 1]$; no normalization needed.
 
 % ============================================================
-\section{Model Zoo Details}
+\subsection{Compact catalogue: remaining $38$ tasks}
+\label{app:task-catalogue}
+% ============================================================
+
+The tasks below contribute features to the LASSO and partial-correlation analyses in \S\ref{sec:experiments} but are less prominent in the top-$25$ partial predictor table (\Cref{tab:top-corr}). For each we list a one-line definition, the primary citation if any, and the data tier (Tier-1 = weight-only; Tier-2 = data-dependent forward pass; Tier-3 = interventional / backward pass). Full per-task implementations are in the open-source library at \texttt{src/blme/tasks/}.
+
+\begin{longtable}{@{}llp{7.3cm}ll@{}}
+\caption{Compact catalogue of the $38$ remaining BLME tasks contributing features to the analysis.}
+\label{tab:task-catalogue}\\
+\toprule
+\textbf{Category} & \textbf{Task} & \textbf{One-line definition} & \textbf{Citation} & \textbf{Tier} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{c}{\tablename\ \thetable{} -- continued}\\
+\toprule
+\textbf{Category} & \textbf{Task} & \textbf{One-line definition} & \textbf{Citation} & \textbf{Tier} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+% --- Geometry (8) -----------------------------------------------
+Geometry & \texttt{geometry\_isoscore} & Isotropy as geometric-mean eigenvalue ratio of hidden-state covariance. & \citet{rudman2022isoscore} & 2 \\
+Geometry & \texttt{geometry\_mahalanobis} & Mean Mahalanobis distance of last-hidden-states from corpus centroid. & \citet{lee2018mahalanobis} & 2 \\
+Geometry & \texttt{geometry\_perplexity} & WikiText-$103$ perplexity decomposition: overall, rare-token, frequent-token. & Shannon (1948) & 2 \\
+Geometry & \texttt{geometry\_neural\_collapse} & Papyan-Han-Donoho NC$1$--NC$4$ class-mean collapse scalars. & \citet{papyan2020prevalence} & 2 \\
+Geometry & \texttt{geometry\_weight\_norms} & Per-layer Frobenius + stable-rank weight-matrix norms. & BLME diagnostic & 1 \\
+Geometry & \texttt{geometry\_categories} & Category-coherence scores on a fixed concept taxonomy. & BLME diagnostic & 2 \\
+Geometry & \texttt{geometry\_prediction\_alignment} & Agreement of weight-only vs hidden-state predictions. & BLME diagnostic & 2 \\
+Geometry & \texttt{geometry\_representation\_sensitivity} & Natural-gradient Fisher-information-geometry diagnostics. & \citet{amari1998natural} & 2 \\
+\midrule
+% --- Interpretability (6) ---------------------------------------
+Interp. & \texttt{interpretability\_head\_roles} & Head role scores (previous-token, duplicate-token, copy-suppression). & \citet{olsson2022context,clark2019what} & 2 \\
+Interp. & \texttt{interpretability\_prediction\_entropy} & Mean/median/top-$k$ probabilities of next-token prediction distribution. & \citet{holtzman2020curious} & 2 \\
+Interp. & \texttt{interpretability\_probing} & Linear probe accuracy across semantic tasks. & Alain-Bengio (2017) & 2 \\
+Interp. & \texttt{interpretability\_attribution} & Input $\times$ gradient attribution saliency statistics. & Simonyan et al. (2014) & 3 \\
+Interp. & \texttt{interpretability\_sae\_features} & Sparse-autoencoder feature occupancy ratios. & \citet{templeton2024scaling} & 2 \\
+Interp. & \texttt{interpretability\_attention\_effective\_rank} & Per-head polysemanticity: rank of attention-output projection. & \citet{templeton2024scaling} & 2 \\
+\midrule
+% --- Causality (3) ----------------------------------------------
+Causality & \texttt{causality\_circuit\_quality} & ACDC-style sub-graph identification quality. & Conmy et al. (2023) & 3 \\
+Causality & \texttt{causality\_edge\_attribution} & Edge-level attribution via integrated gradients (EAP). & Syed et al. (2024) & 3 \\
+Causality & \texttt{causality\_knowledge\_neurons} & Dai-et-al. knowledge-neuron localization metrics. & Dai et al. (2022) & 3 \\
+\midrule
+% --- Dynamics (6) -----------------------------------------------
+Dynamics & \texttt{dynamics\_sharpness} & Hutchinson-trace estimate + SAM-perturbed loss. & Foret et al. (2021); Yao (2020) & 3 \\
+Dynamics & \texttt{dynamics\_gradient\_flow} & L$2$ norm of per-layer input-output Jacobian and entropy across layers. & Pascanu (2013) & 3 \\
+Dynamics & \texttt{dynamics\_stability} & Noise-injection stability of hidden states. & BLME diagnostic & 2 \\
+Dynamics & \texttt{dynamics\_interpolation} & Slerp interpolation distance between hidden states. & Loshchilov-Hutter (2019) & 2 \\
+Dynamics & \texttt{dynamics\_coe} & Chain-of-Embedding drift across layers. & \citet{wang2025coe} & 2 \\
+Dynamics & \texttt{dynamics\_generation\_diversity} & Distinct n-gram ratios across sampled generations. & Li (2016); Zhu (2018) & 2 \\
+\midrule
+% --- Consistency (12) -------------------------------------------
+Consistency & \texttt{consistency\_calibration} & ECE, Brier score, calibration intercept/slope. & \citet{guo2017calibration} & 2 \\
+Consistency & \texttt{consistency\_paraphrase} & NLL cross-paraphrase coefficient of variation. & Kirichenko et al. (2023) & 2 \\
+Consistency & \texttt{consistency\_logical} & Invariance under logically equivalent rewrites. & Saparov-He (2023) & 2 \\
+Consistency & \texttt{consistency\_contrastive} & NLL spread across contrastive prompt pairs. & Elazar et al. (2021) & 2 \\
+Consistency & \texttt{consistency\_self\_consistency} & Majority-vote agreement across multiple samples. & \citet{wang2022self} & 2 \\
+Consistency & \texttt{consistency\_icl\_slope} & In-context accuracy vs shot count slope. & Brown (2020); Min (2022) & 2 \\
+Consistency & \texttt{consistency\_format\_robustness} & NLL variation across prompt templates. & \citet{sclar2023quantifying} & 2 \\
+Consistency & \texttt{consistency\_position\_sensitivity} & NLL vs answer position in prompt (U-curve depth). & Liu et al. (2023) & 2 \\
+Consistency & \texttt{consistency\_contamination} & Min-$K\%$ probability (train-set leakage heuristic). & Shi et al. (2023) & 2 \\
+Consistency & \texttt{consistency\_knowledge\_capacity} & Allen-Zhu \& Li knowledge-bit capacity proxy. & Allen-Zhu-Li (2024) & 2 \\
+Consistency & \texttt{consistency\_bias\_weat} & WEAT bias effect sizes on fixed word associations. & Caliskan et al. (2017) & 2 \\
+Consistency & \texttt{consistency\_membership\_inference} & Min-$K\%$-prob membership-inference attack signal. & Shi et al. (2023) & 2 \\
+\midrule
+% --- Topology (1) -----------------------------------------------
+Topology & \texttt{topology\_persistence\_landscape} & Bubenik persistence landscape of $H_0$/$H_1$ features. & \citet{bubenik2015statistical} & 2 \\
+\midrule
+% --- RepE (2) ---------------------------------------------------
+RepE & \texttt{repe\_refusal\_direction} & Refusal-direction norm + projection gap between base/instruct prompts. & \citet{arditi2024refusal} & 2 \\
+RepE & \texttt{repe\_steering\_effectiveness} & Activation-steering vector effectiveness (Zou-style). & \citet{zou2023representation}; Turner (2023) & 2 \\
+\end{longtable}
 \label{app:models}
 % ============================================================
 
