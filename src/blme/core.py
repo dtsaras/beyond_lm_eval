@@ -229,8 +229,18 @@ def evaluate(
                 cache = ModelOutputCache(model, tokenizer, dataset=dataset, num_samples=cache_num_samples)
                 cache.populate(need_hidden=need_hidden, need_attentions=need_attn)
 
+        # SIGALRM-based per-task timeouts only work on the main thread of a Unix
+        # process. Detect this once so the per-task loop never tries (and fails)
+        # to install a handler off the main thread (Audit-V2 infra:7).
+        import threading
+        can_timeout = (
+            hasattr(signal, "SIGALRM")
+            and threading.current_thread() is threading.main_thread()
+        )
         if not hasattr(signal, "SIGALRM"):
             logger.warning("signal.SIGALRM not available (non-Unix). Per-task timeouts disabled.")
+        elif not can_timeout:
+            logger.warning("evaluate() not on the main thread. Per-task timeouts disabled.")
 
         logger.info(f"Running {len(diagnostic_tasks)} diagnostic tasks...")
         for task_name in tqdm(diagnostic_tasks, desc="BLME tasks", unit="task"):
@@ -239,10 +249,16 @@ def evaluate(
             timeout_sec = t_config.get("timeout", task_timeout)
 
             t_start = time.perf_counter()
+            # Initialize before the try so the finally never raises
+            # UnboundLocalError if signal.signal() itself fails (e.g. when
+            # evaluate() runs off the main thread). See Audit-V2 infra:7.
+            old_handler = None
+            alarm_armed = False
             try:
-                if hasattr(signal, "SIGALRM"):
+                if can_timeout:
                     old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-                    signal.alarm(timeout_sec)
+                    signal.alarm(int(timeout_sec))
+                    alarm_armed = True
 
                 task = task_cls(config=t_config)
                 result = task.evaluate(model, tokenizer, dataset=dataset, cache=cache)
@@ -258,7 +274,7 @@ def evaluate(
                 logger.error(f"Task '{task_name}' failed: {e}")
                 task_errors[task_name] = str(e)
             finally:
-                if hasattr(signal, "SIGALRM"):
+                if alarm_armed:
                     signal.alarm(0)
                     signal.signal(signal.SIGALRM, old_handler)
                 elapsed = time.perf_counter() - t_start

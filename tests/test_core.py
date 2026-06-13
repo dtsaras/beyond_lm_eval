@@ -73,6 +73,57 @@ def test_evaluate_error_isolation(mock_get_task, mock_load, mock_model, mock_tok
 
 @patch("blme.core.load_model_and_tokenizer")
 @patch("blme.core.get_task")
+def test_evaluate_off_main_thread_does_not_crash(mock_get_task, mock_load, mock_model, mock_tokenizer):
+    """Audit-V2 infra:7 regression: signal.signal() raises off the main thread.
+
+    The finally block must not raise UnboundLocalError on ``old_handler``; the
+    per-task timeout simply degrades to disabled and the run completes.
+    """
+    import threading
+
+    mock_load.return_value = (mock_model, mock_tokenizer)
+    mock_task_instance = MagicMock()
+    mock_task_instance.evaluate.return_value = {"diag_metric": 1.0}
+    mock_task_cls = MagicMock(return_value=mock_task_instance)
+    mock_get_task.side_effect = lambda name: mock_task_cls if name == "my_diag" else None
+
+    box = {}
+
+    def run():
+        box["results"] = evaluate(model_args="pretrained=test", tasks=["my_diag"])
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+
+    # The run completed and the task succeeded despite signal binding failing.
+    assert "results" in box, "evaluate() crashed off the main thread"
+    assert box["results"]["summary"]["completed_tasks"] == 1
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
+def test_evaluate_accepts_float_timeout(mock_get_task, mock_load, mock_model, mock_tokenizer):
+    """Audit-V2 infra:7 regression: a float per-task timeout must not raise.
+
+    signal.alarm() requires an int; the dispatcher now coerces it.
+    """
+    mock_load.return_value = (mock_model, mock_tokenizer)
+    mock_task_instance = MagicMock()
+    mock_task_instance.evaluate.return_value = {"diag_metric": 1.0}
+    mock_task_cls = MagicMock(return_value=mock_task_instance)
+    mock_get_task.side_effect = lambda name: mock_task_cls if name == "my_diag" else None
+
+    results = evaluate(
+        model_args="pretrained=test",
+        tasks=["my_diag"],
+        task_configs={"my_diag": {"timeout": 1.5}},
+    )
+    assert results["summary"]["completed_tasks"] == 1
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
 def test_evaluate_saves_json(mock_get_task, mock_load, mock_model, mock_tokenizer, tmp_path):
     """Test that results.json is saved when output_dir is provided."""
     import json
