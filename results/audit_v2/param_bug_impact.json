@@ -1,0 +1,23 @@
+{
+  "n_models": 46,
+  "n_families": 13,
+  "n_models_with_corrupt_param_count": 14,
+  "feature_count_full": 737,
+  "feature_count_size_removed": 715,
+  "LOO": {
+    "lasso_full": 0.7773246431516404,
+    "lasso_size_removed": 0.7839272632123296,
+    "baseline_buggy": 0.05590160503201114,
+    "baseline_corrected": 0.6290012174348796,
+    "gain_published": 0.7214230381196293,
+    "gain_honest": 0.15492604577745006
+  },
+  "LOFO": {
+    "lasso_full": 0.5032297162836097,
+    "lasso_size_removed": 0.49678743518737956,
+    "baseline_buggy": -0.26120198853223786,
+    "baseline_corrected": 0.5755664282459598,
+    "gain_published": 0.7644317048158475,
+    "gain_honest": -0.07877899305858027
+  }
+}

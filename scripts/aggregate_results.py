@@ -404,6 +404,17 @@ MANUAL_PARAM_COUNTS_M = {
     "gemma4-e2b": 2300, "gemma4-e4b": 4500, "gemma4-e4b-it": 4500,
     "gemma4-31b": 31000,
     "olmo-1b": 1180, "tinyllama-1.1b": 1100, "phi-2": 2700,
+    # --- v3 extension models (Audit-V2 fix: previously missing -> fillna(1) ---
+    # bug silently assigned these log(1e6) and crippled the log(N) baseline) ---
+    "llama2-7b": 6738, "llama2-70b": 68976,
+    "llama3-70b": 70554, "llama3.1-8b": 8030, "llama3.1-70b": 70554,
+    "llama3.3-70b-it": 70554,
+    "qwen2-1.5b": 1544, "qwen2-7b": 7616, "qwen2-72b": 72706,
+    "qwen2.5-1.5b": 1544, "qwen2.5-7b": 7616, "qwen2.5-32b": 32764, "qwen2.5-72b": 72706,
+    "qwen3-1.7b": 1720, "qwen3-8b": 8190, "qwen3-14b": 14768, "qwen3-32b": 32762,
+    "gemma1-2b": 2510, "gemma1-7b": 8538,
+    "gemma2-2b": 2614, "gemma2-9b": 9242, "gemma2-27b": 27227,
+    "gemma3-1b": 1000, "gemma3-4b": 4300, "gemma3-12b": 12000, "gemma3-27b": 27000,
 }
 
 
@@ -432,7 +443,21 @@ def main():
     if not args.skip_hf_config:
         meta = _fetch_hf_config_sizes(meta)
     meta["n_params_M"] = meta["model"].map(MANUAL_PARAM_COUNTS_M)
-    meta["log_n_params"] = np.log(meta["n_params_M"].fillna(1) * 1e6)
+    # Audit-V2 fix: never fall back to 1 param (== log(1e6) sentinel) — that
+    # silently cripples the log(N_params) baseline. Fall back to the size-based
+    # estimate (12*L*d^2, in millions) when a manual count is missing, then assert
+    # that every analyzed model ended up with a real, positive parameter count.
+    if "n_params_est" in meta.columns:
+        est_M = meta["n_params_est"] / 1e6
+        meta["n_params_M"] = meta["n_params_M"].fillna(est_M)
+    missing = meta.loc[meta["n_params_M"].isna() | (meta["n_params_M"] <= 1), "model"].tolist()
+    if missing:
+        raise ValueError(
+            "Missing/invalid parameter counts for models "
+            f"{missing}: add them to MANUAL_PARAM_COUNTS_M. Refusing to fall back "
+            "to 1 param, which would corrupt the log(N_params) baseline."
+        )
+    meta["log_n_params"] = np.log(meta["n_params_M"] * 1e6)
 
     # Extract BLME features
     print("Extracting BLME features...")
