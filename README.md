@@ -10,11 +10,11 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**72 diagnostic tasks** across 7 categories:
+**74 diagnostic tasks** across 7 categories:
 
 | Category | Count | Examples | What it measures |
 |----------|-------|----------|-----------------|
-| **Geometry** | 25 | SVD isotropy, LID, CKA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy | Representation space structure |
+| **Geometry** | 27 | SVD isotropy, LID, CKA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation | Representation space structure |
 | **Interpretability** | 15 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
 | **Consistency** | 12 | Calibration, paraphrase / logical / contrastive invariance, ICL slope, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
 | **Causality** | 6 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons | Information flow |

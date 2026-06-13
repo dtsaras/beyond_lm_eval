@@ -707,3 +707,212 @@ def test_effective_rank_consistent_convention():
         f"σ² erank ({sq_form}) should be < σ erank ({lin_form}) "
         "for decreasing spectra; if equal, the helper isn't squaring."
     )
+
+
+# ---------------------------------------------------------------------------
+# Trajectory curvature (Hosseini & Fedorenko, NeurIPS 2023)
+# ---------------------------------------------------------------------------
+
+def test_trajectory_curvature_collinear_is_zero():
+    """Collinear points x_t = t·u: every difference vector is u, so
+    every angle is exactly 0."""
+    from blme.tasks.geometry.trajectory_curvature import _mean_curvature
+
+    u = np.array([1.0, 2.0, -0.5, 3.0])
+    X = np.stack([t * u for t in range(10)])
+    assert np.isclose(_mean_curvature(X), 0.0, atol=1e-6)
+
+
+def test_trajectory_curvature_right_angle_zigzag():
+    """Planar right-angle zigzag: consecutive difference vectors
+    alternate between (1,0) and (0,1) — every angle is pi/2."""
+    from blme.tasks.geometry.trajectory_curvature import (
+        _mean_curvature, _trajectory_angles,
+    )
+
+    X = np.array([[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]], dtype=np.float64)
+    angles = _trajectory_angles(X)
+    assert angles.shape == (3,)
+    assert np.allclose(angles, np.pi / 2, atol=1e-9)
+    assert np.isclose(_mean_curvature(X), np.pi / 2, atol=1e-9)
+
+
+def test_trajectory_curvature_hexagon():
+    """Regular hexagon vertices walked in order: each step rotates the
+    difference vector by the exterior angle pi/3."""
+    from blme.tasks.geometry.trajectory_curvature import _trajectory_angles
+
+    thetas = np.arange(7) * np.pi / 3  # close the loop: 7 points, 6 edges
+    X = np.stack([np.cos(thetas), np.sin(thetas)], axis=1)
+    angles = _trajectory_angles(X)
+    assert angles.shape == (5,)
+    assert np.allclose(angles, np.pi / 3, atol=1e-9)
+
+
+def test_trajectory_curvature_degenerate_no_nan():
+    """Repeated identical points produce zero-norm difference vectors —
+    the touching angles must be skipped (not NaN), and a T=2 sample is
+    skipped cleanly at the pooling level."""
+    import torch
+    from blme.tasks.geometry.trajectory_curvature import (
+        _pooled_layer_curvature, _trajectory_angles,
+    )
+
+    # Trajectory with stalls: diffs are [0, u, u, 0, u] — only the
+    # (u, u) pair forms a valid angle (= 0).
+    X = np.array(
+        [[0, 0], [0, 0], [1, 0], [2, 0], [2, 0], [3, 0]], dtype=np.float64,
+    )
+    angles = _trajectory_angles(X)
+    assert angles.size == 1
+    assert np.all(np.isfinite(angles))
+
+    # All-identical trajectory yields no valid angle.
+    assert _trajectory_angles(np.zeros((8, 4))).size == 0
+
+    # Pooling: degenerate + too-short samples are skipped; the hexagon
+    # contributes the only angles, so the result is finite (pi/3).
+    thetas = np.arange(7) * np.pi / 3
+    hexagon = np.stack([np.cos(thetas), np.sin(thetas)], axis=1)
+    chunks = [
+        torch.zeros(6, 2),            # repeated identical points
+        torch.randn(2, 2),            # T=2: fewer than skip+3 tokens
+        torch.from_numpy(np.vstack([[5.0, 5.0], hexagon])),  # BOS + hexagon
+    ]
+    pooled = _pooled_layer_curvature(chunks, skip_first=1)
+    assert np.isfinite(pooled)
+    assert np.isclose(pooled, np.pi / 3, atol=1e-6)
+
+
+def test_trajectory_curvature_integration(mock_model, mock_tokenizer):
+    """End-to-end on the conftest toy models: finite floats, curvature
+    in [0, pi], finite straightening ratio."""
+    from blme.tasks.geometry.trajectory_curvature import TrajectoryCurvatureTask
+
+    dataset = [{"text": f"sample passage number {i}"} for i in range(4)]
+    task = TrajectoryCurvatureTask(config={"num_samples": 4})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+
+    assert isinstance(results, dict)
+    assert "error" not in results, f"trajectory curvature failed: {results}"
+    for key in (
+        "curvature_mean_first_layer", "curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "curvature_overall_mean",
+        "straightening_ratio", "curvature_slope",
+        "curvature_q25", "curvature_q50", "curvature_q75",
+    ):
+        assert key in results, f"missing {key}"
+        assert np.isfinite(results[key]), f"{key} not finite: {results[key]}"
+    for key in (
+        "curvature_mean_first_layer", "curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "curvature_overall_mean",
+    ):
+        assert 0.0 <= results[key] <= np.pi
+
+
+# ---------------------------------------------------------------------------
+# Marchenko-Pastur bulk deviation (Marchenko & Pastur 1967; BBP 2005)
+# ---------------------------------------------------------------------------
+
+def test_mp_bulk_iid_null():
+    """iid standard normal activations: essentially no eigenvalue
+    escapes the (tolerance-buffered) MP bulk and the spectrum matches
+    the MP law closely."""
+    from blme.tasks.geometry.rmt_bulk import _mp_layer_metrics
+
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((2000, 200))
+    m = _mp_layer_metrics(X, edge_tol=0.05, fixed_gamma=None)
+
+    assert "error" not in m
+    assert m["outlier_frac"] <= 0.01, f"iid null produced outliers: {m}"
+    assert m["ks_distance"] < 0.05, f"KS too large for iid null: {m}"
+    assert np.isclose(m["gamma"], 0.1)
+
+
+def test_mp_bulk_planted_spike_detected():
+    """BBP-supercritical rank-1 spike: X = Z + 5·outer(u, v) with unit
+    v gives a population spike of strength 25 ≫ sqrt(gamma), so at
+    least one eigenvalue must exit the bulk with positive energy."""
+    from blme.tasks.geometry.rmt_bulk import _mp_layer_metrics
+
+    rng = np.random.default_rng(1)
+    N, D = 2000, 200
+    Z = rng.standard_normal((N, D))
+    u = rng.standard_normal(N)
+    v = rng.standard_normal(D)
+    v /= np.linalg.norm(v)
+    X = Z + 5.0 * np.outer(u, v)
+
+    m = _mp_layer_metrics(X, edge_tol=0.05, fixed_gamma=None)
+    assert "error" not in m
+    assert m["outlier_frac"] >= 1.0 / D, f"planted spike not detected: {m}"
+    assert m["spike_energy"] > 0.0
+
+
+def test_mp_bulk_constant_dimension_dropped():
+    """A zero-variance dimension cannot be z-scored — it must be
+    dropped (and counted) without poisoning any metric with NaN."""
+    from blme.tasks.geometry.rmt_bulk import _mp_layer_metrics
+
+    rng = np.random.default_rng(2)
+    X = rng.standard_normal((1000, 100))
+    X[:, 7] = 3.14  # constant dimension
+
+    m = _mp_layer_metrics(X, edge_tol=0.05, fixed_gamma=0.25)
+    assert "error" not in m
+    assert m["n_dims_dropped"] == 1
+    for key in ("outlier_frac", "spike_energy", "ks_distance", "gamma",
+                "outlier_frac_g25", "spike_energy_g25", "ks_distance_g25"):
+        assert np.isfinite(m[key]), f"{key} is NaN after dropping dim: {m}"
+    assert np.isclose(m["gamma"], 99 / 1000)
+
+
+def test_mp_bulk_edge_and_cdf_sanity():
+    """gamma = 0.25 ⇒ bulk edge (1 + 0.5)² = 2.25; the numerically
+    integrated MP CDF must vanish below the bulk, reach 1 above it,
+    and be monotone."""
+    from blme.tasks.geometry.rmt_bulk import (
+        _mp_bulk_edge, _mp_cdf, _mp_layer_metrics, _mp_lower_edge,
+    )
+
+    assert np.isclose(_mp_bulk_edge(0.25), 2.25, atol=1e-12)
+    assert np.isclose(_mp_lower_edge(0.25), 0.25, atol=1e-12)
+
+    grid = np.linspace(0.0, 3.0, 301)
+    cdf = _mp_cdf(grid, 0.25)
+    assert np.isclose(cdf[0], 0.0, atol=1e-6)
+    assert np.isclose(cdf[-1], 1.0, atol=1e-3)
+    assert np.all(np.diff(cdf) >= -1e-12), "MP CDF must be monotone"
+    # No point mass for gamma <= 1.
+    assert _mp_cdf(np.array([0.2]), 0.25)[0] < 1e-6
+
+    # With N=800, D=200 the gamma actually used is 0.25, so the bulk
+    # edge applied inside the metric equals (1 + sqrt(0.25))².
+    rng = np.random.default_rng(3)
+    m = _mp_layer_metrics(rng.standard_normal((800, 200)),
+                          edge_tol=0.05, fixed_gamma=None)
+    assert np.isclose(m["gamma"], 0.25)
+    assert np.isclose(_mp_bulk_edge(m["gamma"]), 2.25, atol=1e-9)
+
+
+def test_mp_bulk_integration(mock_model, mock_tokenizer):
+    """End-to-end on the conftest toy models: per-tag scalars present
+    and the gamma-matched metrics finite."""
+    from blme.tasks.geometry.rmt_bulk import MPBulkDeviationTask
+
+    dataset = [{"text": f"sample passage number {i}"} for i in range(8)]
+    task = MPBulkDeviationTask(config={"num_samples": 8})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+
+    assert isinstance(results, dict)
+    assert "error" not in results, f"mp_bulk_deviation failed: {results}"
+    for tag in ("first", "mid", "last"):
+        for stem in ("mp_outlier_frac", "mp_spike_energy", "mp_ks_distance"):
+            key = f"{stem}_{tag}"
+            assert key in results, f"missing {key}"
+            assert np.isfinite(results[key]), f"{key} not finite"
+        assert 0.0 <= results[f"mp_outlier_frac_{tag}"] <= 1.0
+        assert results[f"_meta_mp_gamma_{tag}"] > 0
+        assert results[f"_meta_mp_n_tokens_{tag}"] > 0
+    assert np.isfinite(results["mp_ks_distance_mean"])

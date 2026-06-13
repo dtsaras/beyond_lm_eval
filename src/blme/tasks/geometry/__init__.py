@@ -22,3 +22,5 @@ from .neural_collapse import NeuralCollapseTask
 from .weight_norms import WeightNormProfileTask
 from .tokenizer_efficiency import TokenizerEfficiencyTask
 from .schatten import SchattenNormTask
+from .trajectory_curvature import TrajectoryCurvatureTask
+from .rmt_bulk import MPBulkDeviationTask

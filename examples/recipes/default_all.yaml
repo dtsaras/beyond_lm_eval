@@ -79,6 +79,17 @@ tasks:
   geometry_mahalanobis:
     num_samples: 50
 
+  geometry_trajectory_curvature:
+    num_samples: 100
+    skip_first_tokens: 1
+
+  geometry_mp_bulk_deviation:
+    num_samples: 100
+    layers: first_mid_last
+    max_tokens: 20000
+    edge_tol: 0.05
+    fixed_gamma: 0.25
+
   # ==========================================
   # Topology Tasks
   # ==========================================

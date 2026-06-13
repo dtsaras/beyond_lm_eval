@@ -12,7 +12,7 @@ _register_all_tasks()
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (22) ---
+    # --- Geometry (26) ---
     "geometry_svd",
     "geometry_isoscore",
     "geometry_categories",
@@ -37,6 +37,8 @@ EXPECTED_TASKS = [
     "geometry_unembedding",
     "geometry_weight_norms",
     "geometry_tokenizer_efficiency",
+    "geometry_trajectory_curvature",
+    "geometry_mp_bulk_deviation",
     # --- Interpretability (14) ---
     "interpretability_attention_effective_rank",
     "interpretability_attention_entropy",

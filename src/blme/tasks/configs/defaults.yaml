@@ -90,6 +90,17 @@ geometry_mahalanobis:
   num_samples: 50
   ood_strategy: shuffle  # "shuffle" or "random"
 
+geometry_trajectory_curvature:
+  num_samples: 100
+  skip_first_tokens: 1  # drop BOS — its hidden state is an extreme outlier
+
+geometry_mp_bulk_deviation:
+  num_samples: 100
+  layers: first_mid_last  # bound eigvalsh cost to 3 layers
+  max_tokens: 20000
+  edge_tol: 0.05   # Tracy-Widom O(N^-2/3) finite-size buffer at the bulk edge
+  fixed_gamma: 0.25  # also emit *_g25 variants at a common D/N aspect ratio
+
 # ---- Topology Tasks ----
 topology_homology:
   num_samples: 20

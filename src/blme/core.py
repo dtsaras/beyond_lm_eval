@@ -149,6 +149,8 @@ def evaluate(
             "geometry_rsa",
             "geometry_matrix_entropy",
             "geometry_cka",
+            "geometry_trajectory_curvature",
+            "geometry_mp_bulk_deviation",
         }
         cache_logits_tasks = {
             "geometry_perplexity",

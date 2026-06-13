@@ -33,6 +33,7 @@ it's cited. Sorted alphabetically by first author.
 | Paper | Task(s) | Identifier | Source file |
 |---|---|---|---|
 | **Arditi, Obeso, Syed, Paleka, Panickssery, Gurnee, Nanda 2024** — *Refusal in Language Models Is Mediated by a Single Direction* | `repe_refusal_direction` | arXiv:2406.11717 | `representation_engineering.py` |
+| **Baik, Ben Arous, Péché 2005** — *Phase transition of the largest eigenvalue for nonnull complex sample covariance matrices* (BBP transition) | `geometry_mp_bulk_deviation.mp_outlier_frac`, `.mp_spike_energy` | arXiv:math/0403022 (*Ann. Probab.* 33(5), 1643–1697) | `geometry/rmt_bulk.py` |
 | **Bubenik 2015** — *Statistical Topological Data Analysis using Persistence Landscapes* | `topology_persistence_landscape` | arXiv:1501.00179 | `topology/persistence_landscape.py` |
 | **Caliskan, Bryson, Narayanan 2017** — *Semantics derived automatically from language corpora contain human-like biases* | `consistency_bias_weat` | *Science* 356(6334) | `consistency/bias.py` |
 | **Carlini, Tramer, Wallace, Jagielski, Herbert-Voss, Lee, Roberts, Brown, Song, Erlingsson, Oprea, Raffel 2021** — *Extracting Training Data from Large Language Models* | `consistency_membership_inference`, `consistency_contamination` | arXiv:2012.07805 | `consistency/membership_inference.py` |
@@ -50,6 +51,7 @@ it's cited. Sorted alphabetically by first author.
 | **Gu, Pang, Du, Liu, Collier, Lin 2025** — *When Attention Sink Emerges in Language Models: An Empirical View* (ICLR 2025 Spotlight) | `interpretability_activation_sinks.sink_epsilon_fraction` | arXiv:2410.10781 | `interpretability/activation_sinks.py` |
 | **Guo, Pleiss, Sun, Weinberger 2017** — *On Calibration of Modern Neural Networks* | `consistency_calibration` | ICML 2017 | `consistency/calibration.py` |
 | **Holtzman, Buys, Du, Forbes, Choi 2020** — *The Curious Case of Neural Text Degeneration* | `interpretability_prediction_entropy` | arXiv:1904.09751 | `interpretability/prediction_entropy.py` |
+| **Hosseini, Fedorenko 2023** — *Large language models implicitly learn to straighten neural sentence trajectories to construct a predictive representation of natural language* | `geometry_trajectory_curvature` | arXiv:2311.04930 (NeurIPS 2023) | `geometry/trajectory_curvature.py` |
 | **Ilharco, Ribeiro, Wortsman, Schmidt, Hajishirzi, Farhadi 2023** — *Editing Models with Task Arithmetic* | `repe_task_vectors` | ICLR 2023 | `representation_engineering.py` |
 | **Kornblith, Norouzi, Lee, Hinton 2019** — *Similarity of Neural Network Representations Revisited* | `geometry_cka`, `geometry_hsic` | arXiv:1905.00414 | `geometry/cka.py`, `geometry/mutual_info.py` |
 | **Kriegeskorte, Mur, Bandettini 2008** — *Representational Similarity Analysis* | `geometry_rsa` | *Front. Syst. Neurosci.* 2 | `geometry/rsa.py` |
@@ -60,6 +62,7 @@ it's cited. Sorted alphabetically by first author.
 | **Li, Lizhi, Sondak, Wang 2025** — *Tracing the Representation Geometry of Language Models from Pretraining to Post-training* | metrics already implemented via `geometry_schatten.rankme` + `geometry_spectral.avg_alpha` | arXiv:2509.23024 | `geometry/schatten.py` (comment) |
 | **Liu, Lin, Hu, Manning, Liang 2023** — *Lost in the Middle: How Language Models Use Long Contexts* | `consistency_position_sensitivity` | arXiv:2307.03172 | `consistency/position_sensitivity.py` |
 | **Ma, Li, Wang, Erfani, Wijewickrema, Schoenebeck, Song, Houle, Bailey 2018** — *Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality* | `geometry_lid` | ICLR 2018 | `geometry/lid.py` |
+| **Marchenko, Pastur 1967** — *Distribution of eigenvalues for some sets of random matrices* | `geometry_mp_bulk_deviation` | *Mat. Sb.* 72(114):4, 507–536; English transl. *Math. USSR-Sb.* 1(4), 457–483 | `geometry/rmt_bulk.py` |
 | **Martin, Mahoney 2019a** — *Traditional and Heavy-Tailed Self Regularization in Neural Network Models* | `geometry_spectral.avg_alpha` | arXiv:1901.08276 | `geometry/spectral.py` |
 | **Martin, Mahoney 2019b / 2021** — *Heavy-Tailed Universality Predicts Trends in Test Accuracies* (Nature Comms. 2021) | `geometry_spectral.avg_alpha` | arXiv:1901.08278, Nat. Comms. 12:4122 | `geometry/spectral.py` |
 | **May, Wang, Bordia, Bowman, Rudinger 2019** — *On Measuring Social Biases in Sentence Encoders* (SEAT) | `consistency_bias_weat` | arXiv:1903.10561 | `consistency/bias.py` |
