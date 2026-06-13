@@ -72,7 +72,7 @@ def _svd_metrics_for_layer(X):
 
 
 def _isoscore(X: np.ndarray) -> float:
-    """IsoScore (Rudman et al. 2022, arXiv:2207.10341).
+    """IsoScore (Rudman et al., Findings of ACL 2022, arXiv:2108.07344).
 
     Measures how close the empirical covariance of a point cloud is to a
     scaled identity — a more discriminative notion of isotropy than the
@@ -127,7 +127,7 @@ def _isoscore(X: np.ndarray) -> float:
 @register_task("geometry_isoscore")
 class IsoScoreTask(DiagnosticTask):
     """
-    IsoScore (Rudman et al. 2022, arXiv:2207.10341).
+    IsoScore (Rudman et al., Findings of ACL 2022, arXiv:2108.07344).
 
     A scalar in [0, 1] measuring how close the empirical covariance of the
     final-layer hidden states is to a scaled identity matrix. Higher = more

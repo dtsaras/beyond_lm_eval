@@ -4,11 +4,13 @@ Three related spectral measurements of the hidden-state matrix at each
 layer:
 
 1. **Schatten-p norms** ``‖X‖_{S_p} = (Σ σᵢ^p)^{1/p}`` for
-   ``p ∈ {1, 2, 4, ∞}`` — validated as reference-free text-quality
-   proxies by Wei et al. 2025 ("From Internal Representations to Text
-   Quality", arXiv:2509.25359). Schatten-1 = nuclear norm,
+   ``p ∈ {1, 2, 4, ∞}`` (classical; named after R. Schatten) — used as
+   reference-free text-quality proxies by Yusupov et al. 2025 ("From
+   Internal Representations to Text Quality: A Geometric Approach to LLM
+   Evaluation", arXiv:2509.25359). Schatten-1 = nuclear norm,
    Schatten-2 = Frobenius, Schatten-∞ = spectral (largest singular
-   value).
+   value). NB: that paper's own conclusion is that Schatten/MOM scores
+   largely track *output length* once it is controlled — see AUDIT_V2 §5.
 
 2. **Matrix Nuclear-Norm (MNN)** — Li et al. 2024
    (arXiv:2410.10672) — an L1,2-norm-based approximation to the true
@@ -28,7 +30,7 @@ layer:
    arXiv:2509.23024). We expose both so the paper can discuss the
    difference.
 
-Reports the per-layer profile and a "last-layer" headline (Wei et al.
+Reports the per-layer profile and a "last-layer" headline (Yusupov et al.
 convention for the MLP-output representation) for each metric, as well
 as mean/std/slope/q25/q50/q75 summaries via the aggregator's layer
 collapse.

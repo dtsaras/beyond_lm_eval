@@ -71,11 +71,11 @@ it's cited. Sorted alphabetically by first author.
 | **Naitzat, Zhitnikov, Lim 2020** — *Topology of Deep Neural Networks* | `topology_betti_curve` | ICLR 2020 | `topology/betti_curve.py` |
 | **nostalgebraist 2020** — *interpreting GPT: the logit lens* | `interpretability_logit_lens` | LessWrong 2020 | `interpretability/logit_lens.py` |
 | **Olsson, Elhage, Nanda, Joseph, DasSarma, Henighan, Mann, Askell, Bai, Chen, Conerly, Drain, Ganguli, Hatfield-Dodds, Hernandez, Johnston, Jones, Kernion, Lovitt, Ndousse, Amodei, Brown, Clark, Kaplan, McCandlish, Olah 2022** — *In-context Learning and Induction Heads* | `interpretability_induction_heads`, `interpretability_head_roles` | Transformer Circuits 2022 | `interpretability/induction.py`, `head_roles.py` |
-| **Papyan, Han, Donoho 2020** — *Prevalence of neural collapse during the terminal phase of deep learning training* | `geometry_neural_collapse` | arXiv:2008.03465 (PNAS 117) | `geometry/neural_collapse.py` |
+| **Papyan, Han, Donoho 2020** — *Prevalence of neural collapse during the terminal phase of deep learning training* | `geometry_neural_collapse` | arXiv:2008.08186 (PNAS 117) | `geometry/neural_collapse.py` |
 | **Pascanu, Mikolov, Bengio 2013** — *On the difficulty of training recurrent neural networks* | `dynamics_gradient_flow` | ICML 2013 | `dynamics/gradient_flow.py` |
 | **Pedrotti, Guo 2025** — *Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin* | `interpretability_activation_sinks.valley_*` | arXiv:2510.06477 | `interpretability/activation_sinks.py` |
 | **Roy, Vetterli 2007** — *The Effective Rank: A Measure of Effective Dimensionality* | `geometry_svd.effective_rank`, `geometry/utils.effective_rank` | EUSIPCO 2007 | `geometry/utils.py`, `collapse.py` |
-| **Rudman, Gillman, Rayne, Eickhoff 2022** — *IsoScore: Measuring the Uniformity of Embedding Space Utilization* | `geometry_isoscore` | arXiv:2207.10341 | `geometry/isotropy.py` |
+| **Rudman, Gillman, Rayne, Eickhoff 2022** — *IsoScore: Measuring the Uniformity of Embedding Space Utilization* | `geometry_isoscore` | arXiv:2108.07344 (Findings of ACL 2022) | `geometry/isotropy.py` |
 | **Sclar, Choi, Tsvetkov, Suhr 2023** — *Quantifying Language Models' Sensitivity to Spurious Features in Prompt Design* | `consistency_format_robustness` | arXiv:2310.11324 | `consistency/format_robustness.py` |
 | **Shi, Ajith, Xia, Huang, Liu, Blevins, Chen, Zettlemoyer 2023** — *Detecting Pretraining Data from Large Language Models* (Min-K % Prob) | `consistency_contamination` | arXiv:2310.16789 | `consistency/contamination.py` |
 | **Sun, Chen, Bai, Hu, Xiong, Kolter 2024** — *Massive Activations in Large Language Models* | `interpretability_activation_sinks.massive_activation_*` | arXiv:2402.17762 | `interpretability/activation_sinks.py` |
@@ -86,7 +86,7 @@ it's cited. Sorted alphabetically by first author.
 | **Wang, Wei, Schuurmans, Le, Chi, Zhou 2022** — *Self-Consistency Improves Chain of Thought Reasoning* | `consistency_self_consistency` | arXiv:2203.11171 | `consistency/self_consistency.py` |
 | **Wang, Wu, Dai, Lin, Xiong, Wang 2025** — *Chain-of-Embedding in Latent Space Enables LLMs to Reason Through Tasks* (ICLR 2025) | `dynamics_coe` | arXiv:2410.13640 | `dynamics/coe.py` |
 | **Wei, Tan, Li, Wang, Huang 2024** — *Large Language Model Evaluation via Matrix Entropy* (aka Diff-eRank) | `geometry_matrix_entropy` | arXiv:2401.17139 | `geometry/matrix_entropy.py` |
-| **Wei et al. 2025** — *From Internal Representations to Text Quality: A Geometric Approach to LLM Evaluation* | `geometry_schatten` (Schatten-p norms) | arXiv:2509.25359 | `geometry/schatten.py` |
+| **Yusupov et al. 2025** — *From Internal Representations to Text Quality: A Geometric Approach to LLM Evaluation* | `geometry_schatten` (Schatten-p norms) | arXiv:2509.25359 | `geometry/schatten.py` |
 | **Xiao, Tian, Chen, Han, Han 2023** — *Efficient Streaming Language Models with Attention Sinks* | attention-sink motivation, cited in `activation_sinks.py` | arXiv:2309.17453 | `interpretability/activation_sinks.py` |
 | **Yao, Gholami, Keutzer, Mahoney 2020** — *PyHessian: Neural Networks Through the Lens of the Hessian* | `dynamics_sharpness` (Hutchinson trace) | arXiv:1912.07145 | `dynamics/sharpness.py` |
 | **Yeom, Giacomelli, Fredrikson, Jha 2018** — *Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting* | `consistency_membership_inference` | arXiv:1709.01604 | `consistency/membership_inference.py` |

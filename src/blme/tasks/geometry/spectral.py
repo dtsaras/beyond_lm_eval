@@ -18,8 +18,15 @@ class WeightSpectralTask(DiagnosticTask):
     """
     Analyzes the spectral properties of weight matrices.
     Metrics:
-    - Stable Rank: ||W||_F^2 / ||W||_2^2 (Bartlett et al., 2020)
-    - Power Law Alpha: Fit to singular value distribution (Martin & Mahoney, 2021)
+    - Stable Rank: ||W||_F^2 / ||W||_2^2 (Bartlett, Foster & Telgarsky,
+      NeurIPS 2017, arXiv:1706.08498)
+    - Power Law Alpha: Hill estimator over the top tail of the *singular
+      values* (Martin & Mahoney HT-SR, 2021). NB: Martin & Mahoney fit the
+      power law to the empirical spectral density of the *eigenvalues*
+      λ = σ² (via the powerlaw MLE with a KS-optimal x_min), so this
+      ``alpha`` is on a different scale (≈ 2·α_MM − 1) and is a
+      monotone transform of the published WeightWatcher α — ranking is
+      preserved but values are not comparable. See AUDIT_V2 §5.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Weight Spectral Analysis...")

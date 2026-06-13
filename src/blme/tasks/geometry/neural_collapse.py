@@ -1,5 +1,5 @@
 """
-Neural Collapse — Papyan, Han & Donoho 2020 (arXiv:2008.03465).
+Neural Collapse — Papyan, Han & Donoho 2020 (arXiv:2008.08186).
 
 Measures the geometric properties of last-layer representations grouped by
 class label. Three metrics from the Neural Collapse phenomenon:
