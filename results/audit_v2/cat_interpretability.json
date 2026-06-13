@@ -1,0 +1,744 @@
+{
+ "category": "interpretability",
+ "tasks": [
+  {
+   "task": "interpretability_attention_entropy",
+   "file": "src/blme/tasks/interpretability/attention.py",
+   "paper_claimed": "Clark et al. 2019, \"What Does BERT Look At? An Analysis of BERT's Attention\" (EMNLP BlackBoxNLP); caveat citation Jain & Wallace 2019",
+   "paper_url": "https://arxiv.org/abs/1906.04341",
+   "paper_verified": "Kevin Clark, Urvashi Khandelwal, Omer Levy, Christopher D. Manning, \"What Does BERT Look At? An Analysis of BERT's Attention\", BlackboxNLP Workshop 2019 (co-located with ACL 2019, not EMNLP as the docstring says), arXiv:1906.04341. Defining sentence verified from paper \u00a73.3: \"we compute the average entropy of each head's attention distribution\"; high-entropy heads \"spend at most 10% of their attention mass on any single word ... roughly a bag-of-vectors representation\".",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "BUG",
+   "intuition": "Attention entropy quantifies how sharply each head concentrates its probability mass over the context: low-entropy heads implement selective token-to-token operations (induction, syntactic attachment), while high-entropy heads compute approximate bag-of-words averages of the sentence (Clark et al. 2019). The per-layer entropy profile therefore summarizes how much of a model's attention budget performs targeted routing versus diffuse context mixing. Because capable models are expected to develop more specialized, sparse attention routing with scale and training quality, mean and depth-resolved head entropy provide a cheap, architecture-agnostic correlate of mechanistic maturity.",
+   "issues": [
+    {
+     "id": "attention_entropy:1",
+     "severity": "HIGH",
+     "claim": "Non-finite per-head entropies are not filtered before scalar aggregation, so avg_entropy_total, min/max_entropy_head and all three normalized scalars are NaN in the shipped v3 results for pythia-6.9b and pythia-12b \u2014 the only fp16 pythia checkpoints \u2014 creating dtype/size-correlated missingness inside a scaling family.",
+     "evidence": "attention.py:109-136: `p = layer_att.float().clamp(min=1e-12)` does not handle NaN (clamp passes NaN through), then `np.mean(np.stack(entropies))`, `np.min`, `np.max` aggregate without nan-filtering. Shipped data: results/study_v3/aggregated.csv rows pythia-6.9b/pythia-12b have avg_entropy_total=NaN, avg_normalized_entropy_total=NaN while avg_entropy_per_layer.mean=1.62/1.66 survives only because the aggregator's _summarise_list \"Filters non-finite entries\" (scripts/aggregate_results.py:114). model_zoo.py:68-73 confirms these two are the only float16 pythia models (2.8b is float32 and is fully populated). This is the same missingness pathology fixes #17/#36 targeted.",
+     "proposed_fix": "Drop non-finite head entropies before aggregation (mask `np.isfinite`), use np.nanmean/np.nanmin/np.nanmax for the scalars, and emit a `nonfinite_head_fraction` diagnostic so fp16 attention overflow is visible instead of silently nulling columns.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_entropy:2",
+     "severity": "MEDIUM",
+     "claim": "Causal-mask entropy normalization is not position-aware: the entropy of query row t is capped at log(t+1), not log(T), so dividing the position-averaged entropy by log(median_T) leaves a sequence-length-dependent ceiling that varies across tokenizers.",
+     "evidence": "attention.py:110-112 computes entropy per query row and averages over all positions including t=0 (always entropy 0); attention.py:126-127,134-136 divide by log(median_T). Numerical repro: a maximally-uniform causal model scores normalized entropy 0.771 at T=64, 0.799 at T=128, 0.841 at T=512 (mean row entropy = log(T!)/T \u2248 log T \u2212 1), so the achievable ceiling drifts with T. Shipped median_seq_len spans 124 (gpt2/pythia/phi) to 149 (tinyllama) in study_v3/aggregated.csv, so part of the cross-model variance in avg_normalized_entropy_total is tokenizer geometry, not attention behavior. Clark et al. measured BERT (bidirectional, fixed max length) where every row has the same log(T) cap, so this is an unhandled adaptation gap for causal LMs.",
+     "proposed_fix": "Normalize per row: entropy_t / log(t+1) for t >= 1 (skip the deterministic t=0 row), then average; or report the ratio of mean entropy to the uniform-causal baseline log(T!)/T computed at the same T.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_entropy:3",
+     "severity": "LOW",
+     "claim": "The non-cache fallback path tokenizes with no truncation while the cache path truncates at 512 and sibling attention tasks at 128, so the same model can yield different entropy values depending on which path executes, with an O(T^2) memory hazard on long passages.",
+     "evidence": "attention.py:69 `inputs = tokenizer(text, return_tensors=\"pt\").to(model.device)` (no truncation/max_length) vs cache.py:352 `truncation=True, max_length=512`; attention_rank.py:87-88 and attention_graph.py:96 both use max_length=128. load_default_corpus (cache.py:455-459) only filters passages by >=50 characters, so raw WikiText paragraphs can exceed 512 tokens.",
+     "proposed_fix": "Add truncation=True, max_length=512 to the fallback tokenizer call to match the cache path exactly.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Independent of d_model and vocab; heads and layers enter only as equal-weight means, so H/L differences are benign. Tokenizer enters through sequence length: median_T spans 124-149 across the v3 zoo and the division by log(median_T) only partially removes it because of the position-cap ceiling (issue 2, ~1-2% drift from T alone plus the larger non-position-aware bias). Note the entropy task sees cache-truncated sequences (<=512, observed median up to 149) while attention_rank/graph cap at 128, so the attention tasks are not computed on identical token windows.",
+   "degeneracy_notes": "T=1: row entropy 0 and norm_factor guard log(max(2, median_T)) prevents division blowup. One-hot/constant attention gives exactly 0 via the 1e-12 clamp (0*log0 handled). NaN attention probabilities (fp16 overflow) pass through clamp and poison all scalar aggregates \u2014 observed in shipped v3 for pythia-6.9b/12b (issue 1). Cache path skips samples with missing layers via the `valid` flag; empty attention lists return error dicts.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Feed the entropy loop one synthetic sample: 1 layer, 1 head, T=2, attention [[1,0],[0.5,0.5]]. Row entropies are [0, ln2], so avg_entropy_total must equal ln(2)/2 = 0.346574; median_T=2 gives norm_factor=ln2 and avg_normalized_entropy_total must equal exactly 0.5. Add a second sample with a NaN entry and assert the scalars remain finite after the fix.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "interpretability_attention_rank",
+   "file": "src/blme/tasks/interpretability/attention_rank.py",
+   "paper_claimed": "Dong, Cordonnier, Loukas 2021, \"Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth\", arXiv:2103.03404 (docstring and PAPERS.md row)",
+   "paper_url": "https://arxiv.org/abs/2103.03404",
+   "paper_verified": "Yihe Dong, Jean-Baptiste Cordonnier, Andreas Loukas, \"Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth\", ICML 2021, arXiv:2103.03404 \u2014 exists, but its rank-collapse result concerns the network OUTPUT (token representations), not attention matrices. The estimator actually implemented is Olivier Roy, Martin Vetterli, \"The Effective Rank: A Measure of Effective Dimensionality\", EUSIPCO 2007 (erank = exp(H(p)), p_i = sigma_i / sum_k sigma_k), which the docstring names internally and which I verified matches the code exactly.",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "The Roy-Vetterli effective rank of a head's TxT attention map counts how many distinct query-conditional attention patterns the head expresses: effective rank near 1 means every query attends identically (a collapsed, content-independent head such as a pure BOS sink), while high effective rank means rich query-dependent routing. Aggregated across heads and tracked across depth via a Spearman trend, the metric operationalizes the token-uniformity concern of Dong et al. (2021) at the level of attention maps: capable models should retain diverse, structured attention deep into the network rather than degenerating into uniform or sink-only patterns, so depth-resistant effective rank is a plausible correlate of capability.",
+   "issues": [
+    {
+     "id": "attention_rank:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the docstring asserts \"Dong et al. show that as transformer depth grows, attention matrices tend to converge toward rank-1 (token uniformity)\", but Dong et al.'s theorem is about token representations \u2014 the abstract states \"without skip connections or multi-layer perceptrons (MLPs), the output converges doubly exponentially to a rank-1 matrix\" (measured via the residual ||X - 1x^T||) \u2014 and the paper neither defines nor measures effective rank of attention probability matrices.",
+     "evidence": "attention_rank.py:4-7 (\"Dong et al. show that ... attention matrices tend to converge toward rank-1\"); arXiv:2103.03404 abstract (fetched 2026-06-13): \"the output converges doubly exponentially to a rank-1 matrix\" with \"a strong inductive bias towards 'token uniformity'\" \u2014 'output' = token representation matrix, not attention maps. The implemented estimator is Roy & Vetterli 2007 effective rank (verified: erank(I_8)=8.0, erank(rank-1 sink)=1.0 in repro), applied to a different object than Dong et al. study. PAPERS.md:42 lists Dong as the task's defining paper.",
+     "proposed_fix": "Make Roy & Vetterli 2007 the primary citation for the metric; demote Dong et al. 2021 to motivation and correct the docstring to say their result concerns token representations, with the attention-map effective rank as a related but distinct diagnostic. Update PAPERS.md row accordingly.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_rank:2",
+     "severity": "MEDIUM",
+     "claim": "core.py's eager-attention force-switch is nested inside the cache-setup block (`if cache_tasks:` / `if cache_num_samples > 0:`), so a run containing only non-cache attention tasks (attention_rank and/or attention_graph, which are not cache candidates) on an SDPA-default model never switches to eager and both tasks return error dicts \u2014 an incomplete remnant of fix #7.",
+     "evidence": "core.py:192 `if cache_tasks:` -> core.py:201 `if cache_num_samples and cache_num_samples > 0:` -> core.py:211-219 force_eager switch; attention_rank/attention_graph are absent from cache_candidates (core.py:166-180), so `blme evaluate --tasks interpretability_attention_rank` alone leaves cache_tasks empty and skips lines 211-219 entirely; attention_rank.py:94-98 then returns the \"Reload with attn_implementation='eager'\" error. Full study runs are unaffected because cache tasks are always present (run_study.py:44-95).",
+     "proposed_fix": "Hoist the force_eager check (which already iterates over diagnostic_tasks, not cache_tasks) out of the cache-setup conditional so it runs whenever any force_eager_tasks member is scheduled.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#7"
+    },
+    {
+     "id": "attention_rank:3",
+     "severity": "LOW",
+     "claim": "Docstring promises a \"rank-collapse ratio: how much the effective rank decreases from early to late layers\" but the code emits a Spearman correlation (rank_collapse_trend_spearman), not a ratio.",
+     "evidence": "attention_rank.py:16-17 (\"rank-collapse ratio\") vs attention_rank.py:124-137/148 which compute and return only `rank_collapse_trend_spearman`.",
+     "proposed_fix": "Update the docstring to describe the Spearman trend (or additionally emit late/early mean-rank ratio if the ratio is wanted).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "No d_model/vocab dependence (operates on TxT row-stochastic maps). T is capped at max_length=128 on the shared corpus (median ~124 tokens), so the unnormalized mean_effective_rank is mildly T-sensitive across tokenizers; mean_normalised_effective_rank (er/T) and the Spearman depth trend are dimensionless, and Spearman is invariant to layer count since it uses only layer ordering (no normalized-depth fix needed, unlike #45/#59 slope cases). GQA/MQA models still expose per-query-head attentions so head counts compare fairly. Shipped v3 values look sane (mean_normalised 0.06-0.59, trend negative for most models).",
+   "degeneracy_notes": "Inputs with T<4 are skipped; _effective_rank returns NaN on SVD failure, zero singular-value sum, or empty matrices, and NaNs are filtered before list append (attention_rank.py:111-113), so unlike attention_entropy this task is NaN-robust \u2014 confirmed by fp16 pythia-6.9b/12b having fully-populated columns in v3. One-hot sink matrix gives exactly 1.0; identity gives exactly T. Fully deterministic (no RNG). If the first sample errors mid-run the task returns an error dict; <3 valid layers yields NaN trend.",
+   "test_status": "none",
+   "proposed_golden_test": "Unit-test _effective_rank directly: assert _effective_rank(np.eye(4)) == pytest.approx(4.0), _effective_rank(M) == pytest.approx(1.0) for M with all rows = e_0, and for A=[[1,0],[0.5,0.5]] assert exp(-sum(p*log p)) with p from hand-computed singular values sqrt(eig([[1.25,0.25],[0.25,0.25]])) \u2014 pins the Roy-Vetterli convention (sigma, not sigma^2, L1-normalized, nats).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "interpretability_attention_effective_rank",
+   "file": "src/blme/tasks/interpretability/attention_polysemanticity.py",
+   "paper_claimed": "\"Lorsa: Disentangling Atomic Attention Units from Attention Superposition\" (2025) \u2014 title as given in docstring, no authors/arXiv id; docs/tasks_interpretability.md \u00a73 instead cites Elhage et al. 2022 Toy Models of Superposition; PAPERS.md:124 says \"custom; Templeton et al. 2024 Scaling Monosemanticity is the closest benchmark\"",
+   "paper_url": "https://arxiv.org/abs/2504.20938",
+   "paper_verified": "The real Lorsa paper is Zhengfu He et al., \"Towards Understanding the Nature of Attention with Low-Rank Sparse Decomposition\", arXiv:2504.20938 (April 2025, Fudan/OpenMOSS) \u2014 the docstring's title is not the paper's actual title. Verified that Lorsa trains a sparse replacement of MHSA with single-dimensional OV circuits to disentangle attention superposition; it does not define SVD entropy of post-W_O attention outputs. No canonical paper defines the implemented metric; the estimator is Roy & Vetterli 2007 SVD-entropy/effective rank applied to a (T, d_model) activation matrix.",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "The SVD entropy of the combined post-W_O attention output over a sequence measures how many independent directions the attention block actually writes into the residual stream across positions: near-rank-1 output means the block contributes essentially one direction regardless of position (e.g., a pure BOS-sink/bias channel), while high entropy indicates positionally differentiated token mixing. To the extent capability requires attention layers to perform many distinct routing operations rather than acting as a fixed bias, higher output effective rank should track downstream performance. As a combined multi-head statistic, however, it cannot separate superposition within heads from diversity across heads \u2014 a limitation the docstring states but the category docs contradict.",
+   "issues": [
+    {
+     "id": "attention_effective_rank:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the docstring cites a paper title that does not exist (\"Lorsa: Disentangling Atomic Attention Units from Attention Superposition\"), and docs/tasks_interpretability.md \u00a73 misdescribes the method as SVD entropy of \"isolated value-projection outputs corresponding to specific heads\" under a class name (AttentionHeadPolysemanticityTask) that does not exist \u2014 the code computes entropy of the combined post-W_O output via class AttentionEffectiveRankTask.",
+     "evidence": "attention_polysemanticity.py:13-14 (wrong title, no arXiv id) vs the real arXiv:2504.20938 \"Towards Understanding the Nature of Attention with Low-Rank Sparse Decomposition\" (verified via web, which trains a sparse MHSA replacement rather than defining any SVD-entropy metric); docs/tasks_interpretability.md:23-29 (\"isolated value-projection outputs corresponding to specific heads\", \"AttentionHeadPolysemanticityTask\", citing Elhage 2022) vs attention_polysemanticity.py:9-11 (\"operates on the *combined* multi-head output (post-W_O), not individual head outputs\") and class at line 27.",
+     "proposed_fix": "Correct the docstring citation to arXiv:2504.20938 with the real title, marked as motivation only; cite Roy & Vetterli 2007 for the SVD-entropy estimator; rewrite docs \u00a73 to describe the combined post-W_O computation and the actual class/task names, or rename docs entry to 'Attention Output Effective Rank'.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_effective_rank:2",
+     "severity": "MEDIUM",
+     "claim": "The seeded 4-layer sample lands at different normalized depths for different layer counts, so models are compared at incommensurate depth fractions, and the in-code comment claiming index-based cross-architecture comparability is incorrect \u2014 an incomplete follow-up to fix #53.",
+     "evidence": "attention_polysemanticity.py:63-69: `random.Random(0).sample(target_modules, 4)` with the comment \"index-based, so comparable across architectures\". Repro: sorted(Random(0).sample(range(n),4)) gives depth fractions {0.0,0.36,0.55,1.0} for n=12, {0.04,0.35,0.52,0.57} for n=24, {0.06,0.52,0.77,0.84} for n=32, {0.06,0.42,0.62,0.67} for n=80 \u2014 entirely different depth profiles, and attention-output rank varies strongly with depth.",
+     "proposed_fix": "Replace random sampling with fixed depth quantiles: pick layers at normalized depths {0.125, 0.375, 0.625, 0.875} via round(q*(L-1)), making the sampled depths architecture-invariant and deterministic without an RNG.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#53"
+    },
+    {
+     "id": "attention_effective_rank:3",
+     "severity": "MEDIUM",
+     "claim": "phi-2's attention output projection is named `self_attn.dense`, which matches none of the six module-name patterns, so the task errors out for the zoo's entire phi family (family-correlated missingness if this task is ever added to a study run; it is currently absent from BLME_RESEARCH_TASKS).",
+     "evidence": "attention_polysemanticity.py:54-56 patterns ('attn.c_proj', 'attn.out_proj', 'self_attn.o_proj', 'self_attn.out_proj', 'attention.output.dense', 'attention.dense'); string check confirms none is a substring of 'model.layers.0.self_attn.dense' (PhiAttention uses q_proj/k_proj/v_proj/dense); model_zoo.py:243 includes microsoft/phi-2; run_study.py:44-87 confirms the task is not in the study list and results/study_v3/aggregated.csv has zero attention_effective_rank columns.",
+     "proposed_fix": "Add 'self_attn.dense' to the pattern list (it cannot collide with 'attention.dense' since matching is substring-based on full module paths), and add a unit test over representative module-name fixtures (gpt2, llama, neox, phi, bert, opt).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_effective_rank:4",
+     "severity": "LOW",
+     "claim": "The SVD entropy is reported unnormalized \u2014 its ceiling log(min(T, d_model)) depends on per-sample sequence length and on d_model \u2014 and the (T,D) matrix is not mean-centered, so the leading singular direction is dominated by the mean/anisotropy component; with num_samples defaulting to 3 the estimate is also high-variance.",
+     "evidence": "attention_polysemanticity.py:106-112 (raw -sum(S_norm*log S_norm), no division by log(min(mat.shape))); no centering before svdvals; defaults.yaml:161-162 num_samples: 3. Paper normalization scheme (\u00a73.4) requires dimension-sensitive metrics to be normalized (matrix entropy \u00f7 log d), which this output would bypass if added to a study.",
+     "proposed_fix": "Divide each matrix's entropy by log(min(T, D)) to get a [0,1] effective-rank ratio, optionally center rows first, and raise num_samples to >=10; alternatively report exp(H)/min(T,D).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_effective_rank:5",
+     "severity": "LOW",
+     "claim": "core.py's force_eager_tasks set lists this task under a stale name ('interpretability_attention_polysemanticity') that matches no registered task \u2014 dead entry, though harmless since the task hooks o_proj outputs and does not need output_attentions at all.",
+     "evidence": "core.py:174 'interpretability_attention_polysemanticity' vs registered name 'interpretability_attention_effective_rank' (attention_polysemanticity.py:26); registry dump confirms no task named *_polysemanticity exists.",
+     "proposed_fix": "Remove the stale entry (the task does not require eager attention), or correct the name if eager numerics are wanted for consistency.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#7"
+    }
+   ],
+   "comparability_notes": "Currently NOT in the study task list (run_study.py BLME_RESEARCH_TASKS) and absent from v2/v3 aggregated features, so no published numbers depend on it. If enabled: unnormalized entropy ceiling log(min(T,D)) couples the value to tokenizer sequence length (T<=128) and d_model; the 4 sampled layers sit at different depth fractions per architecture (issue 2); phi family errors out entirely (issue 3). After normalization and depth-stratified layer selection it would be reasonably cross-model comparable since the corpus and 128-token cap are shared.",
+   "degeneracy_notes": "Matrices with T<2 are skipped; zero singular-value sum skipped; S_norm>0 filter handles exact zeros (constant rows give near-rank-1, entropy near 0). NaN activations would flow into torch.linalg.svdvals unguarded (exception or NaN entropy; an exception aborts the task but hooks are removed via the round-6 try/finally, verified present at lines 85-116 along with the svdvals migration \u2014 fix #58 intact). Returns error dicts on no module match or no samples.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Register the hook on a stub module and feed a forward whose collected output is the 4x4 identity (batch 1): S=(1,1,1,1) so the entropy must equal exactly ln 4 = 1.386294; with output [[1,0],[0,0],...] (rank 1) entropy must be 0. Pins L1 normalization of singular values, nats, and no accidental squaring.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "interpretability_attention_graph",
+   "file": "src/blme/tasks/interpretability/attention_graph.py",
+   "paper_claimed": "Xiao, Tian, Chen, Han (& Lewis) 2023, \"Efficient Streaming Language Models with Attention Sinks\", arXiv:2309.17453 (docstring 'References'; docs/tasks_interpretability.md \u00a72 lists it as the Citation/Paper); PAPERS.md:123 adds \"Abnar & Zuidema 2020 Attention Rollout (topology part) + standard PageRank\"",
+   "paper_url": "https://arxiv.org/abs/2309.17453",
+   "paper_verified": "Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, Mike Lewis, \"Efficient Streaming Language Models with Attention Sinks\", ICLR 2024, arXiv:2309.17453 \u2014 verified; defines sinks as \"strong attention scores towards initial tokens as a 'sink' even if they are not semantically important\" (raw attention mass, no PageRank/Gini). Abnar & Zuidema, \"Quantifying Attention Flow in Transformers\", ACL 2020, arXiv:2005.00928 \u2014 verified; \"We propose two methods for approximating the attention to input tokens given attention weights, attention rollout and attention flow\" \u2014 neither is PageRank. No canonical paper defines PageRank-centrality + edge-Gini on attention graphs; the composite is BLME-custom (PageRank: Page et al. 1999; Gini: standard).",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "Treating each head's attention matrix as a weighted directed graph, PageRank centrality identifies tokens that absorb the flow of attention (sinks), and the Gini coefficient over edge weights measures how unequally attention is distributed across possible token-to-token links. Strong ubiquitous sinks act as no-op/bias channels (Xiao et al. 2023), so the degree of sink concentration and global edge sparsity summarize how much of the attention apparatus performs genuine routing versus idling \u2014 structural properties that plausibly co-vary with training maturity and capability. On causal LMs, however, both statistics carry large mask-induced baselines that must be removed before cross-model interpretation.",
+   "issues": [
+    {
+     "id": "attention_graph:1",
+     "severity": "HIGH",
+     "claim": "PageRank on a causal attention graph is structurally confounded: token 0 is quasi-absorbing (row 0 can only self-attend), so even perfectly uniform attention with zero sink behavior yields argmax(PR)=0 with max_pr=0.62 at T=16 (0.45 at T=128) \u2014 bos_sink_ratio cannot distinguish sink from no-sink, and mean_sink_pagerank carries a large T-dependent structural baseline rather than measuring model behavior.",
+     "evidence": "attention_graph.py:111-128 pools per-head PageRank over causal matrices with no baseline correction. Repro with _power_iteration_pagerank on uniform causal attention (tril(ones)/rowlen): argmax=0, pr[0]/pr[last]=62x at T=16; baseline max_pr drifts 0.556 (T=32) -> 0.501 (T=64) -> 0.451 (T=128). Shipped v3 confirms near-saturation: bos_sink_ratio is 0.87-1.00 for 44 of 46 populated models (exceptions qwen2.5-7b 0.45, gemma4-e4b-it 0.64), so the column is mostly mask structure plus a thin behavioral signal.",
+     "proposed_fix": "Report sink centrality relative to the uniform-causal baseline at the same T (max_pr / max_pr_uniform or the difference), or replace PageRank with Xiao et al.'s direct definition \u2014 mean incoming attention mass on token 0 across rows t>=k \u2014 which has a flat baseline of ~mean(1/t) and is directly comparable.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_graph:2",
+     "severity": "HIGH",
+     "claim": "Non-finite attention (fp16 overflow) is unguarded: an all-NaN PageRank vector makes np.max(pr) poison mean/max_sink_pagerank (NaN in shipped v3 for pythia-6.9b and pythia-12b) while np.argmax(pr) silently returns 0 and counts the garbage graph as a BOS sink, contaminating the published bos_sink_ratio for those models.",
+     "evidence": "attention_graph.py:123-128 (no isfinite check on adj or pr). Repro: _power_iteration_pagerank(np.full((6,6),nan)) returns all-NaN; np.max=nan, np.argmax=0 -> sink_is_bos appended as 1; a single NaN entry in adj also yields all-NaN pr. Shipped results/study_v3/aggregated.csv: pythia-6.9b/12b (the only fp16 pythia checkpoints, model_zoo.py:68-73) have mean_sink_pagerank=NaN and max_sink_pagerank=NaN while bos_sink_ratio=0.9868/0.9899 and mean_edge_gini remain populated \u2014 exactly the signature of NaN graphs being skipped by the Gini guard (`total > 0` is False for NaN) but counted by the argmax path.",
+     "proposed_fix": "Skip any graph where ~np.isfinite(adj).all() or ~np.isfinite(pr).all(), and report a skipped_graph_fraction; use np.nanmean defensively for the aggregates.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_graph:3",
+     "severity": "MEDIUM",
+     "claim": "Edge Gini is computed over all T^2 entries including the ~T(T-1)/2 structurally-masked upper-triangle zeros, so perfectly uniform causal attention (true within-row concentration 0) scores 0.635-0.663 depending on T, compressing the metric into a narrow mask-dominated band (shipped values 0.886-0.967) and mixing causal-mask geometry with attention sharpness.",
+     "evidence": "attention_graph.py:135-141 flattens the full adj including masked zeros. Repro: uniform causal T=16 gives full-matrix Gini 0.6348 (T=32: 0.6509, T=128: 0.6628) while the mean per-row Gini over valid entries is exactly 0. The Gini formula itself is algebraically correct ((n+1-2*sum(cum)/total)/n equals the standard sorted-values form) and the #47 zero-total guard is present \u2014 only the entry population is wrong. Same defect class as the known-open positional_decay row-pooling item (Section B(a)), but in a different file and not previously recorded.",
+     "proposed_fix": "Compute Gini per query row over the t+1 valid (causal) entries for t>=2 and average across rows, or restrict the flattened entries to the lower triangle; report both if the mask-inclusive variant is wanted for continuity.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "attention_graph:4",
+     "severity": "LOW",
+     "claim": "Dead code: `layers = get_layers(model)` / `num_layers = len(layers)` (attention_graph.py:84-85) are computed but never used, and can raise on exotic architectures for no benefit.",
+     "evidence": "attention_graph.py:84-85; `num_layers` and `layers` appear nowhere else in the function.",
+     "proposed_fix": "Delete the two lines (and the now-unused get_layers import).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "No d_model/vocab dependence; max_length=128 on the shared corpus keeps T roughly aligned, but both headline metrics sit on T-dependent structural baselines (uniform-causal max_pr 0.556->0.451 and full-matrix Gini 0.651->0.663 over T=32->128), so residual tokenizer-length differences leak in. Pooling all heads x layers x samples weights every head equally, which is fair across architectures. bos_sink_ratio is near-saturated (0.87-1.0) for most of the zoo, leaving little discriminative range; mean_edge_gini is compressed into [0.886, 0.967]. fp16 models suffer the NaN pathway (issue 2).",
+   "degeneracy_notes": "seq_len<3 samples skipped; all-zero rows teleport uniformly in PageRank (np.divide with where= guard); fully-zero attention matrices skip the Gini via the #47 total>0 guard (regression-tested in test_round4_fixes.py:35). NaN attention: PageRank goes all-NaN, max poisons the means, argmax returns 0 and is wrongly counted as a BOS sink (issue 2, observed in shipped v3). T=1/T=2 excluded by the seq_len<3 guard. Deterministic \u2014 no RNG anywhere.",
+   "test_status": "smoke",
+   "proposed_golden_test": "2-node causal graph adj=[[1,0],[0.5,0.5]] with alpha=0.85: M=[[0.925,0.075],[0.5,0.5]], stationary v=(1/1.15, 0.15/1.15) => assert max_pr == pytest.approx(0.869565) and sink index 0; Gini of flattened [1,0,0.5,0.5]: sorted cumsum [0,0.5,1,2], n=4, total=2 => gini=(5-3.5)/4=0.375 exactly. Add a NaN-adj graph and assert it contributes to neither max_pageranks nor sink_is_bos after the fix.",
+   "recommended_action": "REDESIGN"
+  },
+  {
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py",
+   "paper_claimed": "Elhage et al. 2022 'Toy Models of Superposition'; Templeton et al. 2024 'Scaling Monosemanticity' (module docstring); Pfister et al. 2013 cited inline for the bimodality-coefficient threshold",
+   "paper_url": "https://arxiv.org/abs/2209.10652",
+   "paper_verified": "The statistic actually computed is the bimodality coefficient of Pfister, Schwarz, Janczyk, Dale & Freeman 2013, 'Good things peak in pairs: a note on the bimodality coefficient', Frontiers in Psychology 4:700 (BC = (m3^2+1)/(m4 + 3(n-1)^2/((n-2)(n-3))), m4 = excess kurtosis; >0.555 indicates bimodality). Elhage et al. 2022 'Toy Models of Superposition' (Transformer Circuits / arXiv:2209.10652) and Templeton et al. 2024 'Scaling Monosemanticity' (Transformer Circuits Thread) exist but define superposition via features-as-directions and interference in weight/activation geometry \u2014 neither proposes an activation-bimodality polysemanticity metric.",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "This task summarizes the marginal activation distribution of individual MLP-intermediate neurons with the bimodality coefficient, BC = (skew^2+1)/kurtosis, averaged over a 256-neuron subsample per layer. The motivating idea is that a neuron shared by several distinct features should fire in separated regimes, producing a multi-peaked activation marginal, whereas a neuron serving a single feature should show a unimodal profile; the per-layer mean BC is therefore read as a polysemanticity index. Because efficient capacity allocation under the superposition hypothesis is conjectured to trade interference against feature coverage, the distributional shape of neuron marginals could in principle co-vary with how much usable structure a model has learned. In practice the statistic tracks the non-Gaussianity of the activation function's marginal more than feature geometry, so its link to capability is indirect.",
+   "issues": [
+    {
+     "id": "superposition:1",
+     "severity": "HIGH",
+     "claim": "The bimodality coefficient does not measure polysemanticity and is plausibly direction-inverted: sparse, monosemantic-style firing yields the HIGHEST BC while dense superposed (CLT-Gaussian) mixing yields low BC.",
+     "evidence": "superposition.py:49,161-164 (mean BC reported as polysemanticity, 'Higher BC => more multimodal => more polysemantic'). Repro on canonical distributions: 95%-zeros ReLU-like sparse firing -> BC_code=0.908; Gaussian -> 0.333; Laplace -> 0.167; silu(Gaussian) baseline -> 0.623; observed model range in v3 is 0.245-0.667, consistent with marginal-shape/kurtosis differences. Elhage et al. 2022 abstract defines polysemanticity as 'Neural networks often pack many unrelated concepts into a single neuron' and quantifies superposition via feature/weight geometry (dimensions-per-feature, interference), never via activation bimodality. A neuron with a spike at 0 plus one active mode (the canonical monosemantic sparse-feature signature) is maximally bimodal, so high BC cannot be read as 'more superposition'.",
+     "proposed_fix": "Either rename to 'activation bimodality / non-Gaussianity index' and remove all superposition/polysemanticity claims from key names, docstring and docs, or redesign around an interference-based quantity from the cited framework (e.g., mean squared off-diagonal cosine between MLP input-weight columns, or ||W^T W||_F^2-based dimensions-per-feature on down_proj/up_proj).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "superposition:2",
+     "severity": "HIGH",
+     "claim": "Layers whose hooks captured no activations are zero-filled (BC=0.0, utilization=0.0) instead of NaN-filled, conflating 'no data' with an extreme metric value; this visibly corrupted pythia-6.9b and pythia-12b rows in the shipped v3 aggregation.",
+     "evidence": "superposition.py:134-137 appends 0.0 to both lists when l_idx is missing from activation_data; line 174 averages over the zero-filled list. v3 aggregated.csv: pythia-12b has neuron_utilization_rate=0.472 and polysemanticity_per_layer.q50=0.0 (over half its 36 layers zero-filled); pythia-6.9b util=0.625, poly_min=0.0. Sister task sparsity.py:155-157 correctly appends NaN and filters. The aggregator's mean/q50/min/slope summaries treat these 0.0s as real measurements.",
+     "proposed_fix": "Append float('nan') for layers with no captured data (mirroring sparsity.py), compute mean_polysemanticity_index and neuron_utilization_rate over non-NaN layers only, and emit n_layers_captured; investigate why pythia-6.9b/12b lost layer data and re-run those models.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "superposition:3",
+     "severity": "MEDIUM",
+     "claim": "Unseeded np.random.choice for the 256-neuron subsample makes the metric nondeterministic across reruns (triggers for every model since all intermediate widths exceed 256).",
+     "evidence": "superposition.py:146-147: `neuron_indices = np.random.choice(dim, max_neurons, replace=False)` uses the global NumPy RNG. Same defect class as ledger fixes #42 (lid), #50 (ablation), #52 (trajectories), #53 (attention_polysemanticity), none of which covered this file; ledger's unnumbered hygiene list seeded WAA's randperm but not superposition's choice.",
+     "proposed_fix": "Use np.random.default_rng(0) (or a config-seeded Generator) for the neuron subsample, as sparsity.py:110 already does for its kurtosis subsample.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "superposition:4",
+     "severity": "MEDIUM",
+     "claim": "The neuron-utilization gate std > 1e-6 is below the bf16/SwiGLU noise floor, so neuron_utilization_rate saturates at ~1.0 for nearly all models and is non-discriminative \u2014 the same trap the sparsity task fixed by raising 1e-5 to 1e-2.",
+     "evidence": "superposition.py:156 `if np.std(neuron_acts) > 1e-6`. v3 aggregated.csv: neuron_utilization_rate mean 0.980, median 1.0 across 46 models; the only sub-0.9 values (pythia 0.472/0.625) are the zero-fill artifact of superposition:2, not real utilization. sparsity.py docstring documents the analogous fix: 'The threshold is also raised from 1e-5 to 1e-2 so bf16/fp16 numerical noise doesn't count as active.'",
+     "proposed_fix": "Gate on activation magnitude with the same conservative absolute (or better, relative) threshold as sparsity.py (e.g., mean |a| > 1e-2 or std > 1e-2), or drop the utilization output as redundant with interpretability_sparsity.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "superposition:5",
+     "severity": "LOW",
+     "claim": "_multimodality_score deviates from its own documented formula: it omits Pfister's small-sample correction term 3(n-1)^2/((n-2)(n-3)) (using Pearson kurtosis = excess+3 instead), its docstring falsely says it returns 1-BC ('higher = more monosemantic') while it returns BC, the k==0 guard and the [0,1] clamp are dead code since Pearson kurtosis >= skew^2+1 guarantees BC in (0,1].",
+     "evidence": "superposition.py:31-35 (docstring formula with correction term and '1 - BC' claim) vs lines 42-52 (bc = (s**2+1)/k with fisher=False Pearson kurtosis, returns bc). Pfister et al. 2013: 'BC = (m3^2+1)/(m4 + 3*(n-1)^2/((n-2)*(n-3)))' with m4 = excess kurtosis. At n~640 tokens the denominator differs by ~0.014 (3.0 vs 3.014), a <0.5% effect, so values barely change.",
+     "proposed_fix": "Implement the exact Pfister denominator (excess kurtosis + 3(n-1)^2/((n-2)(n-3))), delete the stale '1 - BC' docstring sentence, and remove the unreachable k==0 guard and clamp (or keep clamp with a comment that it is a safety net).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "superposition:6",
+     "severity": "MEDIUM",
+     "claim": "CITATION: The headline attribution to Elhage et al. 2022 / Templeton et al. 2024 is wrong for the metric as implemented \u2014 neither paper defines a bimodality-coefficient polysemanticity measure; the statistic is Pfister et al. 2013, which should be promoted to the primary citation with Elhage/Templeton clearly marked as motivation only.",
+     "evidence": "superposition.py:12-14 lists Elhage 2022 and Templeton 2024 as 'References'; docs/tasks_interpretability.md \u00a712 says 'Citation/Paper: Elhage... and Templeton...'. arXiv:2209.10652 abstract defines polysemanticity ('pack many unrelated concepts into a single neuron') and studies superposition via toy-model weight geometry; no skewness/kurtosis activation statistic appears in either paper. Pfister et al. 2013 (Frontiers in Psychology 4:700) is the defining source of BC and the 0.555 threshold.",
+     "proposed_fix": "In the docstring, PAPERS.md row, and docs \u00a712: cite Pfister et al. 2013 as the metric definition; demote Elhage 2022/Templeton 2024 to 'motivation' with explicit language that they do not propose this measurement.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "BC is dimensionless and bounded in (0,1], and the fixed 256-neuron subsample removes direct d_model dependence, so the value is nominally comparable across the zoo. However, it depends strongly on the activation-function family (SwiGLU vs GELU vs ReLU produce different marginal shapes: silu(Gaussian) baseline ~0.62 vs Gaussian 0.33), so cross-family differences largely encode architecture choice rather than learned feature geometry. Token count n (~5 samples x <=128 tokens, tokenizer-dependent) affects BC estimator variance and the omitted small-sample correction, but at n~600 this is negligible. The zero-fill bug ties summary values to architecture attr-naming/hook success (pythia rows corrupted).",
+   "degeneracy_notes": "Constant neurons are excluded by the std>1e-6 gate, but that gate is below bf16 noise so almost nothing is excluded (utilization saturates at ~1.0). Sequences yielding <4 activations return BC=0.0 silently. Layers with no captured activations are zero-filled rather than NaN-filled (corrupts means/quantiles; see superposition:2). The k==0 guard is unreachable with Pearson kurtosis; scipy skew/kurtosis NaNs on pathological near-constant data would propagate unguarded into layer means.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Unit-test _multimodality_score directly: (a) an equal two-point mixture x = [0]*500 + [1]*500 has skew=0 and Pearson kurtosis exactly 1, so BC must equal (0+1)/1 = 1.0; (b) a large standard-normal sample must give BC ~= 1/3 (tolerance 0.02); (c) a uniform sample must give BC ~= 5/9 ~= 0.555. Then an end-to-end test with a stub down_proj fed a fixed activation tensor whose 4 neurons are [two-point, gaussian, constant, two-point], asserting layer polysemanticity = mean of the two computable BCs and utilization = 3/4 (constant excluded).",
+   "recommended_action": "REDESIGN"
+  },
+  {
+   "task": "interpretability_sae_features",
+   "file": "src/blme/tasks/interpretability/sae_features.py",
+   "paper_claimed": "none (no citation in module or class docstring); PAPERS.md row: Bricken et al. 2023 'Towards Monosemanticity'; docs/tasks_interpretability.md \u00a711: Cunningham et al. 2023, arXiv:2309.08600",
+   "paper_url": "https://transformer-circuits.pub/2023/monosemantic-features",
+   "paper_verified": "Bricken et al. 2023, 'Towards Monosemanticity: Decomposing Language Models With Dictionary Learning', Transformer Circuits Thread (Anthropic), 2023 \u2014 uses per-token L0 of SAE feature activations as its core sparsity statistic ('runs whose feature activations had an average L0 norm in the hundreds...'). Also matching: Cunningham, Ewart, Riggs, Huben, Sharkey 2023, 'Sparse Autoencoders Find Highly Interpretable Features in Language Models', arXiv:2309.08600 (ICLR 2024) \u2014 'using sparse autoencoders to reconstruct the internal activations of a language model... learn sets of sparsely activating features'; and Templeton et al. 2024 'Scaling Monosemanticity' reports 'the average number of features active on a given token was fewer than 300', exactly the L0-per-token quantity implemented.",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "BUG",
+   "intuition": "A sparse autoencoder re-expresses residual-stream states in an overcomplete dictionary of putative atomic features, and the per-token L0 \u2014 the number of simultaneously active dictionary features \u2014 estimates how many features the model superimposes at a given position. At fixed reconstruction quality, lower L0 indicates a more sparsely factored, disentangled representation, which the dictionary-learning literature links to monosemantic, reusable features. Models that compose a small number of well-separated features per token are hypothesized to perform cleaner feature binding and more systematic generalization, so SAE-measured sparsity should relate to capability per unit of representational capacity.",
+   "issues": [
+    {
+     "id": "sae_features:1",
+     "severity": "HIGH",
+     "claim": "Off-by-one hook point: for the default SAE trained on blocks.8.hook_resid_pre, the code applies it to out.hidden_states[target_layer + 1] = hidden_states[9], which is the residual stream AFTER block 8 (= blocks.9.hook_resid_pre), not hidden_states[8] (the input to block 8 the SAE was trained on) \u2014 fix #54 parsed the right layer index but still evaluates the SAE one layer downstream of its trained hook point.",
+     "evidence": "sae_features.py:89-94 parses 8 from 'blocks.8.hook_resid_pre'; line 110 `h = out.hidden_states[target_layer + 1][0]`. HookedTransformer semantics: blocks.k.hook_resid_pre is the residual stream entering block k; HF semantics: hidden_states[0] = embedding output, hidden_states[i] = output of block i-1 = input to block i, hence blocks.8.hook_resid_pre == hidden_states[8]. AUDIT_REPORT.md #54 fixed exactly this class of error ('the reported L0 counts therefore measured an un-trained-for hidden state') but only the layer parse, not the pre/post indexing.",
+     "proposed_fix": "Index by hook-point kind: use hidden_states[parsed] when sae_id contains 'resid_pre' (or 'resid_mid' equivalents need block internals \u2014 refuse those), and hidden_states[parsed + 1] for 'resid_post'; guard parsed+1 == len(hidden_states)-1 against the post-final-norm caveat established in #48. Re-run GPT-2 family.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#54"
+    },
+    {
+     "id": "sae_features:2",
+     "severity": "LOW",
+     "claim": "CITATION: Neither the module nor the class docstring cites any paper; PAPERS.md (line 127 and the 'add Bricken 2023' TODO at line 263) and docs \u00a711 (Cunningham 2023) carry the citations, but the source file itself is uncited despite the Round-9 'add missing paper citations to source docstrings' commit.",
+     "evidence": "sae_features.py:17-24 class docstring has no references; docs/PAPERS.md:127 'interpretability/sae_features.py | Bricken et al. 2023 *Towards Monosemanticity*' and :263 'interpretability_sae_features [pencil emoji] add Bricken 2023' (still-open TODO marker). Bricken et al. 2023 and Cunningham et al. 2023 (arXiv:2309.08600) both verified to exist and to use per-token L0 of SAE feature activations.",
+     "proposed_fix": "Add to the docstring: Bricken et al. 2023 (Transformer Circuits) and Cunningham et al. 2023 (arXiv:2309.08600) as the sources of the SAE-L0 sparsity measure; mark the PAPERS.md TODO done.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "sae_features:3",
+     "severity": "LOW",
+     "claim": "Degenerate-input fragility: a sample that tokenizes to zero tokens makes l0_per_token an empty tensor, so .max() raises RuntimeError inside the try block and the WHOLE task returns a misleading 'SAE dimension mismatch' error; similarly a bf16 model with the fp32 SAE can fail on dtype mismatch through the same path.",
+     "evidence": "sae_features.py:110,118-123: `l0_per_token.max().item()` on an empty (0,) tensor raises RuntimeError; the except at line 122 catches RuntimeError and returns {'error': f'SAE dimension mismatch applied to layer {target_layer}...'} aborting all samples. h is passed to sae.encode in the model's native dtype (line 110, no .float()/.to(sae.dtype)).",
+     "proposed_fix": "Skip samples with h.shape[0] == 0 with a continue; cast h via h.to(sae.W_enc.dtype) (or .float()) before encode; narrow the except message to the actual exception.",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "By design opt-in and GPT-2-only with the default config (non-GPT-2 models return skipped=True), so the column exists for at most the 4 gpt2 checkpoints; v3 aggregated.csv contains NO interpretability_sae_features columns at all, i.e. the task currently contributes nothing to the study (likely sae_lens absent or load failure in the run environment). Even with per-model SAEs, L0 depends on the SAE dictionary (size d_sae, L1 coefficient, training corpus, hook point) at least as much as on the model, so cross-model comparison is only valid with matched SAE training recipes \u2014 this caveat should be documented wherever the metric is reported. Sequence length capped at 128; L0-per-token is tokenizer-dependent only weakly.",
+   "degeneracy_notes": "Zero-token samples raise RuntimeError on empty .max() and abort the task with a misleading error message (sae_features:3). T=1 works (single-token L0). Missing sae_lens returns a clean error dict; non-GPT-2 models with the default SAE return skipped=True. No NaN paths in the happy path since (feature_acts > 0) counting cannot produce NaN unless the SAE itself emits NaN (unguarded).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Monkeypatch SAE.from_pretrained to return a stub whose encode(h) = h (identity, d_sae = d_model) and run on the tiny conftest GPT-2 with sae_id='blocks.1.hook_resid_pre': (a) assert the tensor passed to encode is exactly out.hidden_states[1][0] (trained hook point, pre-block-1), not hidden_states[2]; (b) feed a hand-built h = [[0.0, 1.0],[2.0, 0.0],[3.0, 4.0]] through the L0 logic and assert mean_active_features_l0 == (1+1+2)/3 and max_active_features_l0 == 2.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "interpretability_sparsity",
+   "file": "src/blme/tasks/interpretability/sparsity.py",
+   "paper_claimed": "none (docstring documents the 2026-04-15 hook fix but cites no paper); PAPERS.md row: 'Zhang et al. 2021 Moefication / standard L0'; docs \u00a78: Liu et al. 2023 'Deja Vu' (arXiv:2310.17157)",
+   "paper_url": "https://arxiv.org/abs/2210.06313",
+   "paper_verified": "Primary match: Li, You, Bhojanapalli, Li, Rawat, Reddi, Ye, Chern, Yu, Guo, Kumar 2022, 'The Lazy Neuron Phenomenon: On Emergence of Activation Sparsity in Transformers', ICLR 2023, arXiv:2210.06313 \u2014 defines activation sparsity exactly as the implemented quantity: 'very few entries (e.g., 3.0% for T5-Base and 6.3% for ViT-B16) are nonzero for each input to MLP'. Secondary: Zhang, Lin, Liu, Li, Sun, Zhou 2021, 'MoEfication: Transformer Feed-forward Layers are Mixtures of Experts', ACL Findings 2022, arXiv:2110.01786 \u2014 'we observe that most inputs only activate a tiny ratio of neurons of FFNs'. The docs' Deja Vu citation (Liu et al., ICML 2023, arXiv:2310.17157) defines contextual sparsity (input-dependent small subsets of heads/neurons preserving the output), which is a related but different quantity.",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "This task measures the fraction of MLP intermediate neurons whose post-activation magnitude exceeds a threshold (an L0 occupancy rate) and the kurtosis of the intermediate activation distribution, per layer. Trained transformers exhibit the 'lazy neuron' phenomenon: only a few percent of FFN units fire meaningfully for any given input, and the degree of this sparsity reflects how modular and specialized the network's feature detectors have become. Sparser, heavier-tailed activation regimes indicate dedicated, conditionally-activated circuitry rather than diffuse redundant computation, a property that emerges with scale and training maturity and is therefore hypothesized to track capability.",
+   "issues": [
+    {
+     "id": "sparsity:1",
+     "severity": "MEDIUM",
+     "claim": "The absolute L0 threshold (1e-2) is not scale-invariant: typical intermediate-activation magnitudes differ across architectures, norm schemes and dtypes, so the 'active fraction' partly measures each model's activation scale rather than its sparsity, and the in-code claim that the absolute threshold is 'architecture-independent' is unjustified.",
+     "evidence": "sparsity.py:72 `threshold = float(self.config.get('l0_threshold', 1e-2))`; line 102-104 comment 'relative threshold would be ideal but absolute 1e-2 is conservative and architecture-independent' followed by `(x.abs() > threshold)`. v3 layer_l0_rates.mean spans 0.327-0.970 across models \u2014 a 3x spread that is confounded with per-architecture activation RMS. Li et al. 2022 define sparsity via exact nonzeros post-ReLU (scale-free); for non-ReLU activations the sparsification literature (CETT in ProSparse and successors) uses output-relative thresholds precisely because absolute cutoffs are scale-dependent.",
+     "proposed_fix": "Use a per-layer relative threshold, e.g. active iff |x| > epsilon * RMS(x_layer) with epsilon ~ 0.1, or CETT-style (norm of zeroed-out contribution to down_proj output below a tolerance); keep the absolute variant as a secondary column for continuity and document the change. Requires re-running the zoo.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "sparsity:2",
+     "severity": "MEDIUM",
+     "claim": "Kurtosis is computed on the pooled flattened (tokens x neurons) tensor, conflating per-neuron sparsity with cross-neuron scale heterogeneity, and is dominated by 'massive activation' outliers, making it extremely heavy-tailed and unstable across models (v3 values span 151 to 1.07e5).",
+     "evidence": "sparsity.py:106-115: `flat = x.detach().float().cpu().numpy().flatten()` then kurtosis on the pooled vector (subsampled to 500k). v3 aggregated.csv: layer_kurtosis.mean ranges 151.5-1.07e5 with cross-model std (2.1e4) larger than the mean (1.6e4), and layer_kurtosis.max up to 4.8e5 \u2014 the signature of a few extreme outlier activations (cf. massive-activation phenomenon) dominating the 4th moment. Classical kurtosis-as-sparsity (Hurley & Rickard 2009, 'Comparing Measures of Sparsity') is defined per signal, not on a pooled mixture of differently-scaled neurons.",
+     "proposed_fix": "Report the median across neurons of per-neuron kurtosis (computed over tokens), and/or log1p-transform the pooled kurtosis before aggregation so the LASSO/PCA features aren't leverage-dominated by one or two models.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "sparsity:3",
+     "severity": "MEDIUM",
+     "claim": "CITATION: The source docstring has no citation, and the docs attribute the metric to Deja Vu (Liu et al. 2023), which defines contextual sparsity (input-dependent head/neuron subsets that preserve the output), not the implemented L0 active-fraction; the defining paper for the implemented quantity is Li et al. 2022 'The Lazy Neuron Phenomenon'.",
+     "evidence": "sparsity.py:56-68 docstring (fix notes only, no references); docs/tasks_interpretability.md \u00a78 cites 'Deja Vu: Contextual Sparsity...'; docs/PAPERS.md:128 lists 'Zhang et al. 2021 Moefication / standard L0' and :264 has the still-open 'add Zhang 2021' TODO. Li et al. 2022 (arXiv:2210.06313): 'very few entries (e.g., 3.0% for T5-Base and 6.3% for ViT-B16) are nonzero for each input to MLP' \u2014 exactly the percentage-of-active-entries measure implemented.",
+     "proposed_fix": "Cite Li et al. 2022 (Lazy Neuron, ICLR 2023) as the primary definition in the docstring, PAPERS.md and docs \u00a78, keeping Zhang et al. 2021 (MoEfication) as the earlier observation and demoting Deja Vu to related work on contextual sparsity.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "The L0 fraction is dimensionless (mean over the (B,T,D_int) boolean tensor) and per-layer lists are regrouped by aggregator fix #36, so no d_model/n_layers leakage \u2014 except through the absolute 1e-2 threshold, which couples the value to each architecture's activation scale (sparsity:1). Kurtosis is dimensionless but unbounded and outlier-dominated (sparsity:2), giving poor cross-model stability. Sample weighting is per-sample (not per-token), so tokenizer-driven length differences have only second-order effects. max_length=512 here vs 128 in the sibling tasks is a benign inconsistency.",
+   "degeneracy_notes": "Constant/zero input: scipy kurtosis of a constant vector returns NaN (with warning), which poisons that layer's np.mean and removes the layer from global_mean_kurtosis (silent but safe). Layers without a detectable MLP/down_proj are NaN-filled and filtered (correct pattern \u2014 contrast superposition's zero-fill). T=1 sequences are fine. If no down_proj is found in any layer the task returns a clean error dict. Hooks are removed in try/finally. The 500k kurtosis subsample uses a seeded default_rng(0) per call (deterministic).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Drive the pre-hook directly: build a Linear(4,2) as a stand-in down_proj, register get_pre_hook(0), and call it with x = [[[0.5, 0.001, 0.02, -0.5]]]; assert activation_stats[0]['l0_rates'] == [0.75] at threshold 1e-2 (3 of 4 entries exceed it) and that the recorded kurtosis equals scipy.stats.kurtosis([0.5, 0.001, 0.02, -0.5], fisher=True) exactly. Also assert _find_down_proj picks mlp.c_proj on a GPT2Block and mlp.down_proj on a LlamaDecoderLayer.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "interpretability_waa",
+   "file": "src/blme/tasks/interpretability/weight_activation_alignment.py",
+   "paper_claimed": "'Park, Choe, Wattenberg, Jegelka 2024 \u2014 The Linear Representation Hypothesis and the Geometry of Large Language Models, arXiv:2311.03658' plus Elhage et al. 2022 'Toy Models of Superposition' (module docstring); docs \u00a710 admits 'Broadly derived from general intrinsic dimensionality and capacity literature'",
+   "paper_url": "https://arxiv.org/abs/2311.03658",
+   "paper_verified": "arXiv:2311.03658 is actually by Kiho Park, Yo Joong Choe, Victor Veitch, 'The Linear Representation Hypothesis and the Geometry of Large Language Models', ICML 2024 \u2014 NOT 'Park, Choe, Wattenberg, Jegelka'. Its abstract: 'we use the language of counterfactuals to give two formalizations of linear representation, one in the output (word) representation space, and one in the input (sentence) space', developing a causal inner product between embedding/unembedding concept representations. It does not define or study alignment between weight singular vectors and activation principal components of MLP projections. No canonical paper defines the WAA metric as implemented; it is a BLME-invented diagnostic most closely related to PCA/SVD capacity-utilization analyses and to Elhage et al. 2022's features-as-directions framing (motivation only).",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "BUG",
+   "intuition": "For each transformer block, WAA compares the input-space direction of maximal gain through the MLP output projection (top left-singular vector of down_proj viewed as a map from intermediate space) with the direction of maximal empirical variance in the activations actually fed into that projection (top principal component of the captured intermediates). If the data the network routes through a layer concentrates along the directions its weights amplify most strongly, the layer's stored capacity is being exercised; chronic misalignment indicates parameter directions that the model's inference-time distribution never excites \u2014 wasted capacity. Capacity utilization of this kind is hypothesized to track capability per parameter, distinguishing models that exploit their width from those that merely possess it.",
+   "issues": [
+    {
+     "id": "waa:1",
+     "severity": "HIGH",
+     "claim": "torch.svd_lowrank(q=1, niter=2) draws its random range-finder from the GLOBAL torch RNG (unseeded \u2014 the hygiene fix seeded only the token-subsample randperm) and, with q=1 and no oversampling, does not converge when the top two singular values are close, so the reported alignment is both nondeterministic across reruns and inaccurate for slowly-decaying spectra; the docstring's '~1e-6 approximation error' claim is false in general.",
+     "evidence": "weight_activation_alignment.py:106-113 and 130-136 call torch.svd_lowrank(..., q=1, niter=2) with no generator argument (svd_lowrank internally uses torch.randn on the global RNG); lines 188-194 seed only the randperm Generator. CPU repro with a realistic decaying spectrum and sigma1/sigma2 = 100/99: |cos(estimated u1, true u1)| = {0.825, 0.978, 0.126, 0.135, 0.064} across global seeds 0-4, cross-run |cos| between two estimates = 0.688; with sigma1/sigma2 = 2.5 the estimate is accurate (>0.996). Weight matrices typically have near-power-law spectra with small top gaps, so the weight-side vector is exactly the unstable case. sklearn's randomized_svd, which the docstring invokes for the 'two extra iterations' claim, additionally uses n_oversamples=10 \u2014 the missing ingredient.",
+     "proposed_fix": "Compute with oversampling and a fixed seed: wrap both calls in torch.random.fork_rng() + torch.manual_seed(seed), use q=10, niter=7, and take column 0; or compute the weight side exactly via torch.linalg.eigh on the (in x in) Gram of W (rank-revealing and deterministic) and the activation side via exact SVD on the (<=4096, D) matrix. Re-run the zoo for this column.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "unnumbered hygiene item 'WAA seeded randperm' (incomplete \u2014 SVD init still unseeded)"
+    },
+    {
+     "id": "waa:2",
+     "severity": "HIGH",
+     "claim": "Raw |cos| between two D-dimensional unit vectors has a chance baseline E|cos| = sqrt(2/(pi*D)) that shrinks with intermediate width, so cross-model comparison is confounded with model width: observed v3 values (0.013-0.16) sit within ~2-8x of each model's null and mean_waa_alignment has Spearman -0.48 with d_model and -0.55 with n_params_M \u2014 a width artifact mislabeled as capacity utilization.",
+     "evidence": "weight_activation_alignment.py:263-265 reports raw |cos|. v3 aggregated.csv: mean_waa_alignment Spearman vs d_model = -0.483, vs n_params_M = -0.553, vs n_layers_analyzed = -0.604 (computed at audit time). Null baselines: D_int=3072 (gpt2-small) gives 0.0144 vs observed 0.112; D_int=28672 (llama3.1-70b) gives 0.0047 vs observed 0.0150 \u2014 the 70B value is only ~3x chance while the 124M value is ~8x chance, so the raw column conflates genuine alignment with the 1/sqrt(D) null scaling. Paper \u00a73.4 leaves 'already-dimensionless' metrics untouched, which misses that this cosine's null distribution is dimension-dependent.",
+     "proposed_fix": "Emit a null-normalized alignment, e.g. waa_norm = |cos| * sqrt(pi*D_int/2) (ratio to chance) or the z-score (|cos| - sqrt(2/(pi*D)))/sd_null, alongside the raw value; alternatively redesign as top-k subspace principal-angle overlap with an analytic chance correction. Update \u00a73.4 normalization table accordingly.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "waa:3",
+     "severity": "HIGH",
+     "claim": "CITATION: The docstring misattributes arXiv:2311.03658 to 'Park, Choe, Wattenberg, Jegelka 2024' (actual authors: Park, Choe, Veitch) and overstates its content \u2014 the paper formalizes counterfactual linear representations via a causal inner product between embedding/unembedding spaces, not the 'input-space / output-space duality this task measures'; no paper defines WAA, which the docs themselves concede ('Broadly derived from general... capacity literature').",
+     "evidence": "weight_activation_alignment.py:9-13 ('Park, Choe, Wattenberg, Jegelka 2024... formalises the input-space / output-space duality this task measures'); arXiv:2311.03658 verified authors Kiho Park, Yo Joong Choe, Victor Veitch (ICML 2024); abstract: 'we use the language of counterfactuals to give two formalizations of \"linear representation\", one in the output (word) representation space, and one in the input (sentence) space' \u2014 concept representations, not MLP weight/activation SVD alignment. docs/PAPERS.md:129 and :266 repeat the citation as the task's paper.",
+     "proposed_fix": "Correct the author list to Park, Choe, Veitch (ICML 2024) and demote both references to 'related work / motivation'; state explicitly in the docstring, PAPERS.md and docs \u00a710 that WAA is a BLME-novel diagnostic with no canonical literature definition.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "waa:4",
+     "severity": "LOW",
+     "claim": "No guard for degenerate (constant) activations: after centering, the activation matrix is all-zeros and svd_lowrank returns an arbitrary direction, yielding a noise cosine instead of skipping the layer.",
+     "evidence": "weight_activation_alignment.py:124-136: only guards numel()==0 and shape[0]<2; a zero centered matrix passes both and svd_lowrank's range finder on a zero matrix produces an arbitrary orthonormal V (or NaN depending on QR path), which then enters the dot product at lines 261-265 unfiltered.",
+     "proposed_fix": "After centering, skip the layer (return None) if acts.abs().max() < 1e-8 or if the top singular value S[0] is below a tolerance.",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Nominally dimensionless (|cos| in [0,1]) so the paper's \u00a73.4 scheme leaves it un-normalized, but the chance baseline scales as sqrt(2/(pi*D_intermediate)), creating a systematic width confound confirmed in the data (Spearman -0.48/-0.55 vs d_model/n_params); per-layer dict is correctly regrouped to depth-agnostic summaries by aggregator fix #36 (test_aggregate_results.py:131-144). Token budget (4096) and corpus (5 samples x 128 tokens ~ 640 tokens) are fixed across models, so sequence-length/tokenizer effects are second-order; activation-side PC stability does depend on token count relative to D_int (640 tokens estimating a PC in up to 28k dims is itself high-variance).",
+   "degeneracy_notes": "acts with <2 rows are skipped; weight/activation dimension mismatch is logged and skipped; empty collection returns an error dict; hooks removed in try/finally. Constant activations are NOT guarded (zero centered matrix -> arbitrary svd_lowrank direction, waa:4). The rank-1 randomized SVD silently degrades to near-random output when top singular values are tied (waa:1) \u2014 a degeneracy with no detection path; NaN from a failed QR inside svd_lowrank would propagate into mean_waa_alignment unguarded.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Hand-computable rank-1 fixture: build proj = nn.Linear(4, 2) with weight rows [3,0,0,0] and [0,1,0,0] (top input-space left-singular vector of W^T = e1 exactly, sigma1=3 >> sigma2=1); feed _activation_top_principal a centered point set {+(1,1,0,0), -(1,1,0,0)} repeated 50x with tiny fixed jitter (top PC = (e1+e2)/sqrt(2) exactly). Assert _weight_top_left_singular(proj) ~= +-e1 and the final |cos| == 1/sqrt(2) +- 1e-3; repeat the whole evaluate twice and assert bit-identical outputs (pins both the math and the seeding fix).",
+   "recommended_action": "FIX_NOW"
+  }
+ ],
+ "flagged": [
+  {
+   "id": "attention_entropy:1",
+   "severity": "HIGH",
+   "claim": "Non-finite per-head entropies are not filtered before scalar aggregation, so avg_entropy_total, min/max_entropy_head and all three normalized scalars are NaN in the shipped v3 results for pythia-6.9b and pythia-12b \u2014 the only fp16 pythia checkpoints \u2014 creating dtype/size-correlated missingness inside a scaling family.",
+   "evidence": "attention.py:109-136: `p = layer_att.float().clamp(min=1e-12)` does not handle NaN (clamp passes NaN through), then `np.mean(np.stack(entropies))`, `np.min`, `np.max` aggregate without nan-filtering. Shipped data: results/study_v3/aggregated.csv rows pythia-6.9b/pythia-12b have avg_entropy_total=NaN, avg_normalized_entropy_total=NaN while avg_entropy_per_layer.mean=1.62/1.66 survives only because the aggregator's _summarise_list \"Filters non-finite entries\" (scripts/aggregate_results.py:114). model_zoo.py:68-73 confirms these two are the only float16 pythia models (2.8b is float32 and is fully populated). This is the same missingness pathology fixes #17/#36 targeted.",
+   "proposed_fix": "Drop non-finite head entropies before aggregation (mask `np.isfinite`), use np.nanmean/np.nanmin/np.nanmax for the scalars, and emit a `nonfinite_head_fraction` diagnostic so fp16 attention overflow is visible instead of silently nulling columns.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_entropy",
+   "file": "src/blme/tasks/interpretability/attention.py"
+  },
+  {
+   "id": "attention_entropy:2",
+   "severity": "MEDIUM",
+   "claim": "Causal-mask entropy normalization is not position-aware: the entropy of query row t is capped at log(t+1), not log(T), so dividing the position-averaged entropy by log(median_T) leaves a sequence-length-dependent ceiling that varies across tokenizers.",
+   "evidence": "attention.py:110-112 computes entropy per query row and averages over all positions including t=0 (always entropy 0); attention.py:126-127,134-136 divide by log(median_T). Numerical repro: a maximally-uniform causal model scores normalized entropy 0.771 at T=64, 0.799 at T=128, 0.841 at T=512 (mean row entropy = log(T!)/T \u2248 log T \u2212 1), so the achievable ceiling drifts with T. Shipped median_seq_len spans 124 (gpt2/pythia/phi) to 149 (tinyllama) in study_v3/aggregated.csv, so part of the cross-model variance in avg_normalized_entropy_total is tokenizer geometry, not attention behavior. Clark et al. measured BERT (bidirectional, fixed max length) where every row has the same log(T) cap, so this is an unhandled adaptation gap for causal LMs.",
+   "proposed_fix": "Normalize per row: entropy_t / log(t+1) for t >= 1 (skip the deterministic t=0 row), then average; or report the ratio of mean entropy to the uniform-causal baseline log(T!)/T computed at the same T.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_entropy",
+   "file": "src/blme/tasks/interpretability/attention.py"
+  },
+  {
+   "id": "attention_entropy:3",
+   "severity": "LOW",
+   "claim": "The non-cache fallback path tokenizes with no truncation while the cache path truncates at 512 and sibling attention tasks at 128, so the same model can yield different entropy values depending on which path executes, with an O(T^2) memory hazard on long passages.",
+   "evidence": "attention.py:69 `inputs = tokenizer(text, return_tensors=\"pt\").to(model.device)` (no truncation/max_length) vs cache.py:352 `truncation=True, max_length=512`; attention_rank.py:87-88 and attention_graph.py:96 both use max_length=128. load_default_corpus (cache.py:455-459) only filters passages by >=50 characters, so raw WikiText paragraphs can exceed 512 tokens.",
+   "proposed_fix": "Add truncation=True, max_length=512 to the fallback tokenizer call to match the cache path exactly.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_entropy",
+   "file": "src/blme/tasks/interpretability/attention.py"
+  },
+  {
+   "id": "attention_rank:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the docstring asserts \"Dong et al. show that as transformer depth grows, attention matrices tend to converge toward rank-1 (token uniformity)\", but Dong et al.'s theorem is about token representations \u2014 the abstract states \"without skip connections or multi-layer perceptrons (MLPs), the output converges doubly exponentially to a rank-1 matrix\" (measured via the residual ||X - 1x^T||) \u2014 and the paper neither defines nor measures effective rank of attention probability matrices.",
+   "evidence": "attention_rank.py:4-7 (\"Dong et al. show that ... attention matrices tend to converge toward rank-1\"); arXiv:2103.03404 abstract (fetched 2026-06-13): \"the output converges doubly exponentially to a rank-1 matrix\" with \"a strong inductive bias towards 'token uniformity'\" \u2014 'output' = token representation matrix, not attention maps. The implemented estimator is Roy & Vetterli 2007 effective rank (verified: erank(I_8)=8.0, erank(rank-1 sink)=1.0 in repro), applied to a different object than Dong et al. study. PAPERS.md:42 lists Dong as the task's defining paper.",
+   "proposed_fix": "Make Roy & Vetterli 2007 the primary citation for the metric; demote Dong et al. 2021 to motivation and correct the docstring to say their result concerns token representations, with the attention-map effective rank as a related but distinct diagnostic. Update PAPERS.md row accordingly.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_rank",
+   "file": "src/blme/tasks/interpretability/attention_rank.py"
+  },
+  {
+   "id": "attention_effective_rank:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the docstring cites a paper title that does not exist (\"Lorsa: Disentangling Atomic Attention Units from Attention Superposition\"), and docs/tasks_interpretability.md \u00a73 misdescribes the method as SVD entropy of \"isolated value-projection outputs corresponding to specific heads\" under a class name (AttentionHeadPolysemanticityTask) that does not exist \u2014 the code computes entropy of the combined post-W_O output via class AttentionEffectiveRankTask.",
+   "evidence": "attention_polysemanticity.py:13-14 (wrong title, no arXiv id) vs the real arXiv:2504.20938 \"Towards Understanding the Nature of Attention with Low-Rank Sparse Decomposition\" (verified via web, which trains a sparse MHSA replacement rather than defining any SVD-entropy metric); docs/tasks_interpretability.md:23-29 (\"isolated value-projection outputs corresponding to specific heads\", \"AttentionHeadPolysemanticityTask\", citing Elhage 2022) vs attention_polysemanticity.py:9-11 (\"operates on the *combined* multi-head output (post-W_O), not individual head outputs\") and class at line 27.",
+   "proposed_fix": "Correct the docstring citation to arXiv:2504.20938 with the real title, marked as motivation only; cite Roy & Vetterli 2007 for the SVD-entropy estimator; rewrite docs \u00a73 to describe the combined post-W_O computation and the actual class/task names, or rename docs entry to 'Attention Output Effective Rank'.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_effective_rank",
+   "file": "src/blme/tasks/interpretability/attention_polysemanticity.py"
+  },
+  {
+   "id": "attention_effective_rank:2",
+   "severity": "MEDIUM",
+   "claim": "The seeded 4-layer sample lands at different normalized depths for different layer counts, so models are compared at incommensurate depth fractions, and the in-code comment claiming index-based cross-architecture comparability is incorrect \u2014 an incomplete follow-up to fix #53.",
+   "evidence": "attention_polysemanticity.py:63-69: `random.Random(0).sample(target_modules, 4)` with the comment \"index-based, so comparable across architectures\". Repro: sorted(Random(0).sample(range(n),4)) gives depth fractions {0.0,0.36,0.55,1.0} for n=12, {0.04,0.35,0.52,0.57} for n=24, {0.06,0.52,0.77,0.84} for n=32, {0.06,0.42,0.62,0.67} for n=80 \u2014 entirely different depth profiles, and attention-output rank varies strongly with depth.",
+   "proposed_fix": "Replace random sampling with fixed depth quantiles: pick layers at normalized depths {0.125, 0.375, 0.625, 0.875} via round(q*(L-1)), making the sampled depths architecture-invariant and deterministic without an RNG.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#53",
+   "task": "interpretability_attention_effective_rank",
+   "file": "src/blme/tasks/interpretability/attention_polysemanticity.py"
+  },
+  {
+   "id": "attention_effective_rank:4",
+   "severity": "LOW",
+   "claim": "The SVD entropy is reported unnormalized \u2014 its ceiling log(min(T, d_model)) depends on per-sample sequence length and on d_model \u2014 and the (T,D) matrix is not mean-centered, so the leading singular direction is dominated by the mean/anisotropy component; with num_samples defaulting to 3 the estimate is also high-variance.",
+   "evidence": "attention_polysemanticity.py:106-112 (raw -sum(S_norm*log S_norm), no division by log(min(mat.shape))); no centering before svdvals; defaults.yaml:161-162 num_samples: 3. Paper normalization scheme (\u00a73.4) requires dimension-sensitive metrics to be normalized (matrix entropy \u00f7 log d), which this output would bypass if added to a study.",
+   "proposed_fix": "Divide each matrix's entropy by log(min(T, D)) to get a [0,1] effective-rank ratio, optionally center rows first, and raise num_samples to >=10; alternatively report exp(H)/min(T,D).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_effective_rank",
+   "file": "src/blme/tasks/interpretability/attention_polysemanticity.py"
+  },
+  {
+   "id": "attention_graph:1",
+   "severity": "HIGH",
+   "claim": "PageRank on a causal attention graph is structurally confounded: token 0 is quasi-absorbing (row 0 can only self-attend), so even perfectly uniform attention with zero sink behavior yields argmax(PR)=0 with max_pr=0.62 at T=16 (0.45 at T=128) \u2014 bos_sink_ratio cannot distinguish sink from no-sink, and mean_sink_pagerank carries a large T-dependent structural baseline rather than measuring model behavior.",
+   "evidence": "attention_graph.py:111-128 pools per-head PageRank over causal matrices with no baseline correction. Repro with _power_iteration_pagerank on uniform causal attention (tril(ones)/rowlen): argmax=0, pr[0]/pr[last]=62x at T=16; baseline max_pr drifts 0.556 (T=32) -> 0.501 (T=64) -> 0.451 (T=128). Shipped v3 confirms near-saturation: bos_sink_ratio is 0.87-1.00 for 44 of 46 populated models (exceptions qwen2.5-7b 0.45, gemma4-e4b-it 0.64), so the column is mostly mask structure plus a thin behavioral signal.",
+   "proposed_fix": "Report sink centrality relative to the uniform-causal baseline at the same T (max_pr / max_pr_uniform or the difference), or replace PageRank with Xiao et al.'s direct definition \u2014 mean incoming attention mass on token 0 across rows t>=k \u2014 which has a flat baseline of ~mean(1/t) and is directly comparable.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_graph",
+   "file": "src/blme/tasks/interpretability/attention_graph.py"
+  },
+  {
+   "id": "attention_graph:2",
+   "severity": "HIGH",
+   "claim": "Non-finite attention (fp16 overflow) is unguarded: an all-NaN PageRank vector makes np.max(pr) poison mean/max_sink_pagerank (NaN in shipped v3 for pythia-6.9b and pythia-12b) while np.argmax(pr) silently returns 0 and counts the garbage graph as a BOS sink, contaminating the published bos_sink_ratio for those models.",
+   "evidence": "attention_graph.py:123-128 (no isfinite check on adj or pr). Repro: _power_iteration_pagerank(np.full((6,6),nan)) returns all-NaN; np.max=nan, np.argmax=0 -> sink_is_bos appended as 1; a single NaN entry in adj also yields all-NaN pr. Shipped results/study_v3/aggregated.csv: pythia-6.9b/12b (the only fp16 pythia checkpoints, model_zoo.py:68-73) have mean_sink_pagerank=NaN and max_sink_pagerank=NaN while bos_sink_ratio=0.9868/0.9899 and mean_edge_gini remain populated \u2014 exactly the signature of NaN graphs being skipped by the Gini guard (`total > 0` is False for NaN) but counted by the argmax path.",
+   "proposed_fix": "Skip any graph where ~np.isfinite(adj).all() or ~np.isfinite(pr).all(), and report a skipped_graph_fraction; use np.nanmean defensively for the aggregates.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_graph",
+   "file": "src/blme/tasks/interpretability/attention_graph.py"
+  },
+  {
+   "id": "attention_graph:3",
+   "severity": "MEDIUM",
+   "claim": "Edge Gini is computed over all T^2 entries including the ~T(T-1)/2 structurally-masked upper-triangle zeros, so perfectly uniform causal attention (true within-row concentration 0) scores 0.635-0.663 depending on T, compressing the metric into a narrow mask-dominated band (shipped values 0.886-0.967) and mixing causal-mask geometry with attention sharpness.",
+   "evidence": "attention_graph.py:135-141 flattens the full adj including masked zeros. Repro: uniform causal T=16 gives full-matrix Gini 0.6348 (T=32: 0.6509, T=128: 0.6628) while the mean per-row Gini over valid entries is exactly 0. The Gini formula itself is algebraically correct ((n+1-2*sum(cum)/total)/n equals the standard sorted-values form) and the #47 zero-total guard is present \u2014 only the entry population is wrong. Same defect class as the known-open positional_decay row-pooling item (Section B(a)), but in a different file and not previously recorded.",
+   "proposed_fix": "Compute Gini per query row over the t+1 valid (causal) entries for t>=2 and average across rows, or restrict the flattened entries to the lower triangle; report both if the mask-inclusive variant is wanted for continuity.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_attention_graph",
+   "file": "src/blme/tasks/interpretability/attention_graph.py"
+  },
+  {
+   "id": "superposition:1",
+   "severity": "HIGH",
+   "claim": "The bimodality coefficient does not measure polysemanticity and is plausibly direction-inverted: sparse, monosemantic-style firing yields the HIGHEST BC while dense superposed (CLT-Gaussian) mixing yields low BC.",
+   "evidence": "superposition.py:49,161-164 (mean BC reported as polysemanticity, 'Higher BC => more multimodal => more polysemantic'). Repro on canonical distributions: 95%-zeros ReLU-like sparse firing -> BC_code=0.908; Gaussian -> 0.333; Laplace -> 0.167; silu(Gaussian) baseline -> 0.623; observed model range in v3 is 0.245-0.667, consistent with marginal-shape/kurtosis differences. Elhage et al. 2022 abstract defines polysemanticity as 'Neural networks often pack many unrelated concepts into a single neuron' and quantifies superposition via feature/weight geometry (dimensions-per-feature, interference), never via activation bimodality. A neuron with a spike at 0 plus one active mode (the canonical monosemantic sparse-feature signature) is maximally bimodal, so high BC cannot be read as 'more superposition'.",
+   "proposed_fix": "Either rename to 'activation bimodality / non-Gaussianity index' and remove all superposition/polysemanticity claims from key names, docstring and docs, or redesign around an interference-based quantity from the cited framework (e.g., mean squared off-diagonal cosine between MLP input-weight columns, or ||W^T W||_F^2-based dimensions-per-feature on down_proj/up_proj).",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "superposition:2",
+   "severity": "HIGH",
+   "claim": "Layers whose hooks captured no activations are zero-filled (BC=0.0, utilization=0.0) instead of NaN-filled, conflating 'no data' with an extreme metric value; this visibly corrupted pythia-6.9b and pythia-12b rows in the shipped v3 aggregation.",
+   "evidence": "superposition.py:134-137 appends 0.0 to both lists when l_idx is missing from activation_data; line 174 averages over the zero-filled list. v3 aggregated.csv: pythia-12b has neuron_utilization_rate=0.472 and polysemanticity_per_layer.q50=0.0 (over half its 36 layers zero-filled); pythia-6.9b util=0.625, poly_min=0.0. Sister task sparsity.py:155-157 correctly appends NaN and filters. The aggregator's mean/q50/min/slope summaries treat these 0.0s as real measurements.",
+   "proposed_fix": "Append float('nan') for layers with no captured data (mirroring sparsity.py), compute mean_polysemanticity_index and neuron_utilization_rate over non-NaN layers only, and emit n_layers_captured; investigate why pythia-6.9b/12b lost layer data and re-run those models.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "superposition:3",
+   "severity": "MEDIUM",
+   "claim": "Unseeded np.random.choice for the 256-neuron subsample makes the metric nondeterministic across reruns (triggers for every model since all intermediate widths exceed 256).",
+   "evidence": "superposition.py:146-147: `neuron_indices = np.random.choice(dim, max_neurons, replace=False)` uses the global NumPy RNG. Same defect class as ledger fixes #42 (lid), #50 (ablation), #52 (trajectories), #53 (attention_polysemanticity), none of which covered this file; ledger's unnumbered hygiene list seeded WAA's randperm but not superposition's choice.",
+   "proposed_fix": "Use np.random.default_rng(0) (or a config-seeded Generator) for the neuron subsample, as sparsity.py:110 already does for its kurtosis subsample.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "superposition:4",
+   "severity": "MEDIUM",
+   "claim": "The neuron-utilization gate std > 1e-6 is below the bf16/SwiGLU noise floor, so neuron_utilization_rate saturates at ~1.0 for nearly all models and is non-discriminative \u2014 the same trap the sparsity task fixed by raising 1e-5 to 1e-2.",
+   "evidence": "superposition.py:156 `if np.std(neuron_acts) > 1e-6`. v3 aggregated.csv: neuron_utilization_rate mean 0.980, median 1.0 across 46 models; the only sub-0.9 values (pythia 0.472/0.625) are the zero-fill artifact of superposition:2, not real utilization. sparsity.py docstring documents the analogous fix: 'The threshold is also raised from 1e-5 to 1e-2 so bf16/fp16 numerical noise doesn't count as active.'",
+   "proposed_fix": "Gate on activation magnitude with the same conservative absolute (or better, relative) threshold as sparsity.py (e.g., mean |a| > 1e-2 or std > 1e-2), or drop the utilization output as redundant with interpretability_sparsity.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "superposition:5",
+   "severity": "LOW",
+   "claim": "_multimodality_score deviates from its own documented formula: it omits Pfister's small-sample correction term 3(n-1)^2/((n-2)(n-3)) (using Pearson kurtosis = excess+3 instead), its docstring falsely says it returns 1-BC ('higher = more monosemantic') while it returns BC, the k==0 guard and the [0,1] clamp are dead code since Pearson kurtosis >= skew^2+1 guarantees BC in (0,1].",
+   "evidence": "superposition.py:31-35 (docstring formula with correction term and '1 - BC' claim) vs lines 42-52 (bc = (s**2+1)/k with fisher=False Pearson kurtosis, returns bc). Pfister et al. 2013: 'BC = (m3^2+1)/(m4 + 3*(n-1)^2/((n-2)*(n-3)))' with m4 = excess kurtosis. At n~640 tokens the denominator differs by ~0.014 (3.0 vs 3.014), a <0.5% effect, so values barely change.",
+   "proposed_fix": "Implement the exact Pfister denominator (excess kurtosis + 3(n-1)^2/((n-2)(n-3))), delete the stale '1 - BC' docstring sentence, and remove the unreachable k==0 guard and clamp (or keep clamp with a comment that it is a safety net).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "superposition:6",
+   "severity": "MEDIUM",
+   "claim": "CITATION: The headline attribution to Elhage et al. 2022 / Templeton et al. 2024 is wrong for the metric as implemented \u2014 neither paper defines a bimodality-coefficient polysemanticity measure; the statistic is Pfister et al. 2013, which should be promoted to the primary citation with Elhage/Templeton clearly marked as motivation only.",
+   "evidence": "superposition.py:12-14 lists Elhage 2022 and Templeton 2024 as 'References'; docs/tasks_interpretability.md \u00a712 says 'Citation/Paper: Elhage... and Templeton...'. arXiv:2209.10652 abstract defines polysemanticity ('pack many unrelated concepts into a single neuron') and studies superposition via toy-model weight geometry; no skewness/kurtosis activation statistic appears in either paper. Pfister et al. 2013 (Frontiers in Psychology 4:700) is the defining source of BC and the 0.555 threshold.",
+   "proposed_fix": "In the docstring, PAPERS.md row, and docs \u00a712: cite Pfister et al. 2013 as the metric definition; demote Elhage 2022/Templeton 2024 to 'motivation' with explicit language that they do not propose this measurement.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_superposition",
+   "file": "src/blme/tasks/interpretability/superposition.py"
+  },
+  {
+   "id": "sae_features:1",
+   "severity": "HIGH",
+   "claim": "Off-by-one hook point: for the default SAE trained on blocks.8.hook_resid_pre, the code applies it to out.hidden_states[target_layer + 1] = hidden_states[9], which is the residual stream AFTER block 8 (= blocks.9.hook_resid_pre), not hidden_states[8] (the input to block 8 the SAE was trained on) \u2014 fix #54 parsed the right layer index but still evaluates the SAE one layer downstream of its trained hook point.",
+   "evidence": "sae_features.py:89-94 parses 8 from 'blocks.8.hook_resid_pre'; line 110 `h = out.hidden_states[target_layer + 1][0]`. HookedTransformer semantics: blocks.k.hook_resid_pre is the residual stream entering block k; HF semantics: hidden_states[0] = embedding output, hidden_states[i] = output of block i-1 = input to block i, hence blocks.8.hook_resid_pre == hidden_states[8]. AUDIT_REPORT.md #54 fixed exactly this class of error ('the reported L0 counts therefore measured an un-trained-for hidden state') but only the layer parse, not the pre/post indexing.",
+   "proposed_fix": "Index by hook-point kind: use hidden_states[parsed] when sae_id contains 'resid_pre' (or 'resid_mid' equivalents need block internals \u2014 refuse those), and hidden_states[parsed + 1] for 'resid_post'; guard parsed+1 == len(hidden_states)-1 against the post-final-norm caveat established in #48. Re-run GPT-2 family.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#54",
+   "task": "interpretability_sae_features",
+   "file": "src/blme/tasks/interpretability/sae_features.py"
+  },
+  {
+   "id": "sae_features:2",
+   "severity": "LOW",
+   "claim": "CITATION: Neither the module nor the class docstring cites any paper; PAPERS.md (line 127 and the 'add Bricken 2023' TODO at line 263) and docs \u00a711 (Cunningham 2023) carry the citations, but the source file itself is uncited despite the Round-9 'add missing paper citations to source docstrings' commit.",
+   "evidence": "sae_features.py:17-24 class docstring has no references; docs/PAPERS.md:127 'interpretability/sae_features.py | Bricken et al. 2023 *Towards Monosemanticity*' and :263 'interpretability_sae_features [pencil emoji] add Bricken 2023' (still-open TODO marker). Bricken et al. 2023 and Cunningham et al. 2023 (arXiv:2309.08600) both verified to exist and to use per-token L0 of SAE feature activations.",
+   "proposed_fix": "Add to the docstring: Bricken et al. 2023 (Transformer Circuits) and Cunningham et al. 2023 (arXiv:2309.08600) as the sources of the SAE-L0 sparsity measure; mark the PAPERS.md TODO done.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_sae_features",
+   "file": "src/blme/tasks/interpretability/sae_features.py"
+  },
+  {
+   "id": "sparsity:1",
+   "severity": "MEDIUM",
+   "claim": "The absolute L0 threshold (1e-2) is not scale-invariant: typical intermediate-activation magnitudes differ across architectures, norm schemes and dtypes, so the 'active fraction' partly measures each model's activation scale rather than its sparsity, and the in-code claim that the absolute threshold is 'architecture-independent' is unjustified.",
+   "evidence": "sparsity.py:72 `threshold = float(self.config.get('l0_threshold', 1e-2))`; line 102-104 comment 'relative threshold would be ideal but absolute 1e-2 is conservative and architecture-independent' followed by `(x.abs() > threshold)`. v3 layer_l0_rates.mean spans 0.327-0.970 across models \u2014 a 3x spread that is confounded with per-architecture activation RMS. Li et al. 2022 define sparsity via exact nonzeros post-ReLU (scale-free); for non-ReLU activations the sparsification literature (CETT in ProSparse and successors) uses output-relative thresholds precisely because absolute cutoffs are scale-dependent.",
+   "proposed_fix": "Use a per-layer relative threshold, e.g. active iff |x| > epsilon * RMS(x_layer) with epsilon ~ 0.1, or CETT-style (norm of zeroed-out contribution to down_proj output below a tolerance); keep the absolute variant as a secondary column for continuity and document the change. Requires re-running the zoo.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_sparsity",
+   "file": "src/blme/tasks/interpretability/sparsity.py"
+  },
+  {
+   "id": "sparsity:2",
+   "severity": "MEDIUM",
+   "claim": "Kurtosis is computed on the pooled flattened (tokens x neurons) tensor, conflating per-neuron sparsity with cross-neuron scale heterogeneity, and is dominated by 'massive activation' outliers, making it extremely heavy-tailed and unstable across models (v3 values span 151 to 1.07e5).",
+   "evidence": "sparsity.py:106-115: `flat = x.detach().float().cpu().numpy().flatten()` then kurtosis on the pooled vector (subsampled to 500k). v3 aggregated.csv: layer_kurtosis.mean ranges 151.5-1.07e5 with cross-model std (2.1e4) larger than the mean (1.6e4), and layer_kurtosis.max up to 4.8e5 \u2014 the signature of a few extreme outlier activations (cf. massive-activation phenomenon) dominating the 4th moment. Classical kurtosis-as-sparsity (Hurley & Rickard 2009, 'Comparing Measures of Sparsity') is defined per signal, not on a pooled mixture of differently-scaled neurons.",
+   "proposed_fix": "Report the median across neurons of per-neuron kurtosis (computed over tokens), and/or log1p-transform the pooled kurtosis before aggregation so the LASSO/PCA features aren't leverage-dominated by one or two models.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "interpretability_sparsity",
+   "file": "src/blme/tasks/interpretability/sparsity.py"
+  },
+  {
+   "id": "sparsity:3",
+   "severity": "MEDIUM",
+   "claim": "CITATION: The source docstring has no citation, and the docs attribute the metric to Deja Vu (Liu et al. 2023), which defines contextual sparsity (input-dependent head/neuron subsets that preserve the output), not the implemented L0 active-fraction; the defining paper for the implemented quantity is Li et al. 2022 'The Lazy Neuron Phenomenon'.",
+   "evidence": "sparsity.py:56-68 docstring (fix notes only, no references); docs/tasks_interpretability.md \u00a78 cites 'Deja Vu: Contextual Sparsity...'; docs/PAPERS.md:128 lists 'Zhang et al. 2021 Moefication / standard L0' and :264 has the still-open 'add Zhang 2021' TODO. Li et al. 2022 (arXiv:2210.06313): 'very few entries (e.g., 3.0% for T5-Base and 6.3% for ViT-B16) are nonzero for each input to MLP' \u2014 exactly the percentage-of-active-entries measure implemented.",
+   "proposed_fix": "Cite Li et al. 2022 (Lazy Neuron, ICLR 2023) as the primary definition in the docstring, PAPERS.md and docs \u00a78, keeping Zhang et al. 2021 (MoEfication) as the earlier observation and demoting Deja Vu to related work on contextual sparsity.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_sparsity",
+   "file": "src/blme/tasks/interpretability/sparsity.py"
+  },
+  {
+   "id": "waa:1",
+   "severity": "HIGH",
+   "claim": "torch.svd_lowrank(q=1, niter=2) draws its random range-finder from the GLOBAL torch RNG (unseeded \u2014 the hygiene fix seeded only the token-subsample randperm) and, with q=1 and no oversampling, does not converge when the top two singular values are close, so the reported alignment is both nondeterministic across reruns and inaccurate for slowly-decaying spectra; the docstring's '~1e-6 approximation error' claim is false in general.",
+   "evidence": "weight_activation_alignment.py:106-113 and 130-136 call torch.svd_lowrank(..., q=1, niter=2) with no generator argument (svd_lowrank internally uses torch.randn on the global RNG); lines 188-194 seed only the randperm Generator. CPU repro with a realistic decaying spectrum and sigma1/sigma2 = 100/99: |cos(estimated u1, true u1)| = {0.825, 0.978, 0.126, 0.135, 0.064} across global seeds 0-4, cross-run |cos| between two estimates = 0.688; with sigma1/sigma2 = 2.5 the estimate is accurate (>0.996). Weight matrices typically have near-power-law spectra with small top gaps, so the weight-side vector is exactly the unstable case. sklearn's randomized_svd, which the docstring invokes for the 'two extra iterations' claim, additionally uses n_oversamples=10 \u2014 the missing ingredient.",
+   "proposed_fix": "Compute with oversampling and a fixed seed: wrap both calls in torch.random.fork_rng() + torch.manual_seed(seed), use q=10, niter=7, and take column 0; or compute the weight side exactly via torch.linalg.eigh on the (in x in) Gram of W (rank-revealing and deterministic) and the activation side via exact SVD on the (<=4096, D) matrix. Re-run the zoo for this column.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "unnumbered hygiene item 'WAA seeded randperm' (incomplete \u2014 SVD init still unseeded)",
+   "task": "interpretability_waa",
+   "file": "src/blme/tasks/interpretability/weight_activation_alignment.py"
+  },
+  {
+   "id": "waa:2",
+   "severity": "HIGH",
+   "claim": "Raw |cos| between two D-dimensional unit vectors has a chance baseline E|cos| = sqrt(2/(pi*D)) that shrinks with intermediate width, so cross-model comparison is confounded with model width: observed v3 values (0.013-0.16) sit within ~2-8x of each model's null and mean_waa_alignment has Spearman -0.48 with d_model and -0.55 with n_params_M \u2014 a width artifact mislabeled as capacity utilization.",
+   "evidence": "weight_activation_alignment.py:263-265 reports raw |cos|. v3 aggregated.csv: mean_waa_alignment Spearman vs d_model = -0.483, vs n_params_M = -0.553, vs n_layers_analyzed = -0.604 (computed at audit time). Null baselines: D_int=3072 (gpt2-small) gives 0.0144 vs observed 0.112; D_int=28672 (llama3.1-70b) gives 0.0047 vs observed 0.0150 \u2014 the 70B value is only ~3x chance while the 124M value is ~8x chance, so the raw column conflates genuine alignment with the 1/sqrt(D) null scaling. Paper \u00a73.4 leaves 'already-dimensionless' metrics untouched, which misses that this cosine's null distribution is dimension-dependent.",
+   "proposed_fix": "Emit a null-normalized alignment, e.g. waa_norm = |cos| * sqrt(pi*D_int/2) (ratio to chance) or the z-score (|cos| - sqrt(2/(pi*D)))/sd_null, alongside the raw value; alternatively redesign as top-k subspace principal-angle overlap with an analytic chance correction. Update \u00a73.4 normalization table accordingly.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_waa",
+   "file": "src/blme/tasks/interpretability/weight_activation_alignment.py"
+  },
+  {
+   "id": "waa:3",
+   "severity": "HIGH",
+   "claim": "CITATION: The docstring misattributes arXiv:2311.03658 to 'Park, Choe, Wattenberg, Jegelka 2024' (actual authors: Park, Choe, Veitch) and overstates its content \u2014 the paper formalizes counterfactual linear representations via a causal inner product between embedding/unembedding spaces, not the 'input-space / output-space duality this task measures'; no paper defines WAA, which the docs themselves concede ('Broadly derived from general... capacity literature').",
+   "evidence": "weight_activation_alignment.py:9-13 ('Park, Choe, Wattenberg, Jegelka 2024... formalises the input-space / output-space duality this task measures'); arXiv:2311.03658 verified authors Kiho Park, Yo Joong Choe, Victor Veitch (ICML 2024); abstract: 'we use the language of counterfactuals to give two formalizations of \"linear representation\", one in the output (word) representation space, and one in the input (sentence) space' \u2014 concept representations, not MLP weight/activation SVD alignment. docs/PAPERS.md:129 and :266 repeat the citation as the task's paper.",
+   "proposed_fix": "Correct the author list to Park, Choe, Veitch (ICML 2024) and demote both references to 'related work / motivation'; state explicitly in the docstring, PAPERS.md and docs \u00a710 that WAA is a BLME-novel diagnostic with no canonical literature definition.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "interpretability_waa",
+   "file": "src/blme/tasks/interpretability/weight_activation_alignment.py"
+  }
+ ],
+ "skepticA": [],
+ "skepticB": [],
+ "adjudicated": []
+}

@@ -1,0 +1,136 @@
+{
+ "issues": [
+  {
+   "id": "infra:1",
+   "severity": "CRITICAL",
+   "claim": "v3 headline 'log(N_params) baseline collapses 0.43->0.06' and 'net gain +0.72' are artifacts of a data bug: 14 of the 46 analyzed v3 models (incl. all four 70B/72B anchors) have log_n_params silently set to log(1e6)=13.8155 because MANUAL_PARAM_COUNTS_M was never extended for v3 and missing counts are fillna(1).",
+   "evidence": "scripts/aggregate_results.py:434-435 `meta[\"n_params_M\"] = meta[\"model\"].map(MANUAL_PARAM_COUNTS_M)` then `np.log(meta[\"n_params_M\"].fillna(1) * 1e6)`; MANUAL_PARAM_COUNTS_M (lines 394-407) contains only the 32 v2 models. Verified in artifact results/study_v3/aggregated.csv: llama3.1-8b, llama3.1-70b, llama3.3-70b-it, qwen2-1.5b/7b/72b, qwen2.5-1.5b/7b/32b/72b, qwen3-1.7b/8b/14b/32b all have n_params_M=NaN, log_n_params=13.815511, and composite_benchmark present (e.g. qwen2.5-72b composite 0.968 with '1M params'). analyze_correlations.py:249-253 fits the baseline on agg['log_n_params'] and lines 157-161 use it as the partial-correlation covariate, so the entire v3 partial.csv and the baseline-collapse narrative (paper/main.tex:36 abstract, :571 conclusion; commit 67af48c 'key finding 2') are computed against a garbage covariate. The intrinsic-feature LASSO LOO/LOFO numbers themselves are unaffected (log_n_params is in exclude_exact, analyze_correlations.py:97-101), but every comparison TO the baseline and every partial-rho in v3 is wrong.",
+   "proposed_fix": "Add true parameter counts for all 26 v3 models to MANUAL_PARAM_COUNTS_M (or fall back to the already-computed n_params_est = 12*L*d^2, or HF safetensors metadata); replace fillna(1) with a hard assert that no analyzed model has NaN n_params_M; regenerate results/study_v3/analysis/* and the paper's abstract/S3/S7 baseline claims.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null
+  },
+  {
+   "id": "infra:2",
+   "severity": "HIGH",
+   "claim": "Architecture metadata leaks into the 'intrinsic feature' matrix under task-prefixed column names and is selected by the headline models: geometry_cka.n_layers is LASSO-selected feature #21 in v3, and raw depth/head/vocab counts survive as features in both studies.",
+   "evidence": "results/study_v3/aggregated.csv contains geometry_cka.n_layers (cka.py:149 emits it), causality_tracing.traced_layers.{mean,std,max,q25,q50,q75} (tracing.py emits traced_layers=list(range(L)), then _summarise_list turns it into pure depth proxies), causality_knowledge_neurons.n_layers, geometry_weight_norms.n_layers, dynamics_gradient_flow.n_layers, geometry_schatten.n_layers (schatten.py:284), interpretability_activation_sinks.n_layers (activation_sinks.py:361), interpretability_waa.n_layers_analyzed, causality_attention_knockout.{num_layers_analyzed,num_heads}, geometry_tokenizer_efficiency.vocab_size. results/study_v3/analysis/lasso_features.csv row 20: 'geometry_cka.n_layers, coef 0.0115'. results/study_v2/analysis/findings_report.md:90 lists geometry_tokenizer_efficiency.vocab_size at partial rho=+0.77 (a top predictor) and :157 causality_knowledge_neurons.n_layers (rho with log N = +0.75). analyze_correlations.py:97-101 excludes only the bare metadata columns (n_layers, vocab_size, ...), not their task-prefixed echoes. The paper's 'intrinsic metrics beyond scale' claim is partially carried by raw architecture constants.",
+   "proposed_fix": "Stop emitting count/config echoes into result dicts (or namespace them, e.g. _meta_n_layers) and add a deny-pattern in analyze_correlations.py feature selection: r'(^|\\.)(n_layers|num_layers|n_layers_analyzed|num_layers_analyzed|num_heads|vocab_size|sample_size|n_samples|traced_layers)(\\.|$)'. Re-run LASSO/partial analyses; report how many top-25 entries survive.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#36 (same column-leak class)"
+  },
+  {
+   "id": "infra:3",
+   "severity": "HIGH",
+   "claim": "Aggregator-level `.slope` summaries regress per-layer profiles on the raw layer index (np.arange) instead of normalized depth, so every *.slope feature is mechanically scaled by 1/(L-1) and confounded with layer count \u2014 the exact bug class fixed inside tasks by #45/#59 but still present in the aggregator, including LASSO-selected features.",
+   "evidence": "scripts/aggregate_results.py:126-127: `xs = np.arange(arr.size); slope, _ = np.polyfit(xs, arr, 1)`. Two models with identical depth-normalized profiles v(z) get slopes differing by factor (L_a-1)/(L_b-1) (12-layer GPT-2 vs 32-layer Llama -> ~2.8x). Paper/main.tex:246 claims beta_1 is the slope of a fit to the depth-NORMALIZED interpolated profile. results/study_v3/analysis/lasso_features.csv row 30 selects topology_homology.num_loops_h1.slope; dozens of other .slope columns enter the 730-feature matrix. Prior fixes #45 ('slope regressed on normalized depth l/(n_layers-1), not raw index') and #59 acknowledged this exact bias for task-internal slopes.",
+   "proposed_fix": "In _summarise_list use xs = np.linspace(0.0, 1.0, arr.size) (or l/(n-1)) for the polyfit; regenerate aggregated.csv and downstream analyses for v2-replication check and v3.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#45/#59 (same class)"
+  },
+  {
+   "id": "infra:4",
+   "severity": "HIGH",
+   "claim": "CITATION: Paper S3.4 (sec:normalization) describes a layer-profile normalization that is not implemented anywhere: 20-point linear interpolation over normalized depth and the 7-vector [v(.25), v(.5), v(.75), beta1, beta2(curvature), z_min, z_max] with z_min/z_max being the DEPTHS of the extrema \u2014 the code emits mean/std/min/max/slope/q25/q50/q75 with no interpolation, no quadratic curvature term anywhere, and min/max as VALUES not depths.",
+   "evidence": "paper/main.tex:236-247: 'linearly interpolate the profile to 20 evenly spaced depths', 'f = [v(0.25), v(0.5), v(0.75), beta1, beta2, z_min, z_max]', 'beta2 ... quadratic coefficients', 'z_min, z_max are the normalized depths of the minimum and maximum values'. Implementation scripts/aggregate_results.py:112-133 (_summarise_list): no interpolation (direct positional index int(q*(n-1)) into the unsorted per-layer array), emits .mean/.std/.min/.max/.slope/.q25/.q50/.q75; grep of aggregated.csv shows zero curvature/beta2/z_min-depth columns. The q25/q50/q75 positional indexing approximates v(z) for layer profiles, but the same function is applied to non-layer lists (per_head_impacts, degradation curves) where 'q25' is then an arbitrary positional value mislabeled as a quantile.",
+   "proposed_fix": "Either rewrite S3.4 to describe the actual 8-summary scheme (and rename qXX to v_at_depth_XX for layer groups), or implement the described interpolation + beta2 + extremum-depth features in _summarise_list and regenerate. State explicitly that min/max are values, not depths.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#36"
+  },
+  {
+   "id": "infra:5",
+   "severity": "HIGH",
+   "claim": "CITATION: Paper states the dependent variable is 'the mean of min-max normalized accuracies across all six benchmarks', but composite_benchmark is computed as the skipna mean over ALL 67-78 benchmark_* columns, 62 of which are MMLU (overall + 4 category aggregates + 57 subtasks, i.e. MMLU counted three times over) \u2014 the actual Y is ~92% MMLU-weighted; additionally in v3 per-model benchmark coverage differs (67 vs 76-78 columns), so different models' composites average different benchmark sets.",
+   "evidence": "paper/main.tex:351: 'composite benchmark score: the mean of min-max normalized accuracies across all six benchmarks.' scripts/aggregate_results.py:559-570: `bench_cols = [c for c in aggregated.columns if c.startswith(\"benchmark_\")] ... composite = bench_matrix.mean(axis=1, skipna=True)`. Column dump of results/study_v3/aggregated.csv: 78 benchmark columns of which 62 are benchmark_mmlu_* (mmlu_acc + humanities/stem/social/other aggregates + 57 subtasks). Coverage check: all v2 models + the four 70B anchors have 67 columns; llama3.1-8b and qwen2/2.5/3 small-mid models have 76-78 (extra boolq/copa/openbookqa/sciq/commonsense_qa/triviaqa/nq_open/gsm8k/drop/truthfulqa/lambada), so composite mixes different benchmark sets across the 46 analyzed models. analyze_correlations.py reads composite_benchmark directly (lines 119-120), so every headline R^2 targets this MMLU-dominated, coverage-inconsistent Y.",
+   "proposed_fix": "Compute the composite from a fixed declared benchmark list (the six group-level scores: arc_challenge, arc_easy or hellaswag, piqa, winogrande, mmlu_acc, lambada/...), excluding subtask and category duplicates; require identical coverage or document imputation; regenerate analyses; align paper text with whatever is implemented.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null
+  },
+  {
+   "id": "infra:6",
+   "severity": "MEDIUM",
+   "claim": "The force-eager attention switch in core.evaluate is unreachable when no cache-candidate task is in the run: it is nested inside `if cache_tasks:` and `if cache_num_samples > 0:`, so a selective run of only the 5 non-cache attention tasks (attention_graph/rank/head_roles/induction_heads/attention_polysemanticity) on SDPA-default models gets attentions=None and the tasks error out.",
+   "evidence": "core.py:192 `if cache_tasks:` -> :201 `if cache_num_samples and cache_num_samples > 0:` -> :211-219 force_eager computed over diagnostic_tasks and applied only inside both guards. cache_tasks is built only from cache_candidates (hidden/logits/attn-entropy sets, core.py:141-190); none of the other four force_eager_tasks are candidates, so `blme evaluate --tasks interpretability_attention_graph` alone leaves SDPA active; attention_graph.py:102-103 then returns {'error': \"Model does not return attention weights...\"}. Full study runs always include cache tasks, so published numbers are unaffected; this is a run-configuration trap contradicting the intent of fixes #7/#28 ('eager attn enforced for attention tasks').",
+   "proposed_fix": "Hoist the force_eager block (core.py:211-224) out of the cache branches so it runs whenever any force_eager_task is in diagnostic_tasks, regardless of caching.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#7/#28"
+  },
+  {
+   "id": "infra:7",
+   "severity": "MEDIUM",
+   "claim": "Verified the known signal-handler defect: core.py binds old_handler inside try and references it in finally, so when signal.signal raises (non-main thread) the first task records ValueError and the finally then raises UnboundLocalError that kills the entire evaluate() loop; additionally signal.alarm(timeout_sec) raises TypeError if a task config supplies a float timeout.",
+   "evidence": "core.py:240-263: `try: if hasattr(signal, \"SIGALRM\"): old_handler = signal.signal(...); signal.alarm(timeout_sec) ... finally: if hasattr(signal, \"SIGALRM\"): signal.alarm(0); signal.signal(signal.SIGALRM, old_handler)`. /tmp repro (CPython 3.x, thread target emulating the loop body) printed: \"task error recorded: ValueError signal only works in main thread of the main interpreter\" then \"LOOP-KILLING exception from finally: UnboundLocalError cannot access local variable 'old_handler'\"; also `signal.alarm(5.5)` -> \"TypeError 'float' object cannot be interpreted as an integer\" while signal.alarm(0) succeeds in non-main threads (so the finally reaches the broken signal.signal call).",
+   "proposed_fix": "Minimal: before the try, `old_handler = None; alarm_armed = False`; inside try set `old_handler = signal.signal(...); alarm_armed = True; signal.alarm(int(timeout_sec))`; in finally `if alarm_armed: signal.alarm(0); signal.signal(signal.SIGALRM, old_handler)`. (alarm_armed flag rather than `old_handler is not None` because the prior handler can legitimately be None.)",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "Section B item (b)"
+  },
+  {
+   "id": "infra:8",
+   "severity": "MEDIUM",
+   "claim": "Residual unseeded sampling sites of the exact class fixed in #42/#50-53 remain in four geometry paths, one of which also makes the no-cache fallback semantically different from the cache path (10 random tokens per sample vs all tokens).",
+   "evidence": "tasks/geometry/mutual_info.py:62 `shared_perm = torch.randperm(n_tokens)[:max_tokens]` (global RNG; draw depends on how many torch RNG calls preceded the task in the run order); tasks/geometry/intrinsic_dim.py:60 `indices = np.random.choice(len(X), 20000, replace=False)` (global numpy RNG, triggers whenever token count >20000, i.e. standard 100x512 cache); tasks/geometry/isotropy.py:41 `np.random.choice(len(X), size=(min(1000,len(X)),2))` for cosine-pair sampling; tasks/geometry/utils.py:129 `indices = torch.randperm(T)[:10]` in collect_hidden_states single-layer mode \u2014 unseeded AND inconsistent with the cache path which returns every token (cache.py:_slice_hidden_states), so geometry_svd/isoscore/lid produce different-distribution inputs depending on cache availability; collect_hidden_states also tokenizes without truncation/max_length (utils.py:90-93) unlike the cache's max_length=512 (cache.py:351-353).",
+   "proposed_fix": "Use torch.Generator().manual_seed(0) / np.random.default_rng(0) at all four sites; in collect_hidden_states drop the 10-token subsample (return all tokens, matching the cache) and add truncation=True, max_length=512.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#42/#50-53 (same class)"
+  },
+  {
+   "id": "infra:9",
+   "severity": "LOW",
+   "claim": "set_global_seed omits cuDNN/deterministic-algorithm flags (known-open (g)); assessment: cudnn.deterministic=True + cudnn.benchmark=False are safe to add unconditionally (perf-only cost), but torch.use_deterministic_algorithms(True) is NOT safe by default \u2014 it raises RuntimeError on nondeterministic CUDA kernels (scatter/index ops used by several tasks) and needs CUBLAS_WORKSPACE_CONFIG=:4096:8 \u2014 so it should be opt-in with warn_only=True.",
+   "evidence": "src/blme/utils.py:17-28 sets only random/np/torch.manual_seed/cuda.manual_seed_all. PyTorch docs: use_deterministic_algorithms(True) errors on ops without deterministic implementations and requires CUBLAS_WORKSPACE_CONFIG for cuBLAS >= 10.2; tasks use index_put/scatter-style ops (e.g. np.add.at analogues, ablation index assignment) on GPU in study runs. PYTHONHASHSEED is also unset but no result-bearing code depends on hash ordering.",
+   "proposed_fix": "Add to set_global_seed: torch.backends.cudnn.deterministic=True; torch.backends.cudnn.benchmark=False; and behind an opt-in env flag (e.g. BLME_DETERMINISTIC=1): os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8'); torch.use_deterministic_algorithms(True, warn_only=True).",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "Section B item (g)"
+  },
+  {
+   "id": "infra:10",
+   "severity": "LOW",
+   "claim": "wrapper.py passes the deprecated `torch_dtype` kwarg (transformers 5.2.0 keeps it only 'for BC'), `_resolve_dtype` is annotated Optional[torch.dtype] but returns the string 'auto', and quantization uses the legacy bare load_in_8bit/load_in_4bit kwargs instead of BitsAndBytesConfig; device placement and trust_remote_code handling are otherwise correct.",
+   "evidence": "src/blme/models/wrapper.py:146-148 sets model_kwargs['torch_dtype']; installed transformers 5.2.0 modeling_utils.from_pretrained: `dtype = kwargs.pop(\"dtype\", None); torch_dtype = kwargs.pop(\"torch_dtype\", None)  # kept for BC` \u2014 works today, removal candidate in v6. wrapper.py:50-66 _resolve_dtype returns 'auto' (string) under a torch.dtype annotation. wrapper.py:172-179 legacy load_in_8bit/4bit kwargs. Device handling verified sound: device_map takes priority (163-165, 187-188), .to(device) only when device_map unset, quantized loads force device_map='auto'. trust_remote_code applied symmetrically to tokenizer (122-123) and model (151-152), default false.",
+   "proposed_fix": "Pass `dtype=` instead of `torch_dtype=`; annotate _resolve_dtype -> Union[torch.dtype, str, None]; build a BitsAndBytesConfig for quantization; optionally warn when max_memory is supplied without device_map (transformers ignores/errors on it).",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "round-6 unnumbered (_resolve_dtype)"
+  },
+  {
+   "id": "infra:11",
+   "severity": "LOW",
+   "claim": "cache.get_hidden_states docstring still asserts per_sample=True 'is what CKA, RSA, LID and matrix-entropy need' while the shipped CKA/RSA/LID consumers deliberately use the flat token cloud (which is correct for CKA/HSIC and conventional for LID/TwoNN) \u2014 a stale doc from fix #1 that invites a future 'fix' silently changing locked v2 numbers; separately RSA's max_tokens=200 means its RDM is built from only the first ~1-2 wiki passages.",
+   "evidence": "cache.py:100-105 docstring vs cka.py:48, rsa.py:55, lid.py:124/143 all calling with per_sample default False; cka.py rows stay aligned across layers because populate() concatenates in sample order, so token-level linear CKA is valid; rsa.py:71-72 `n_tokens = min(min_tokens, max_tokens_per_layer=200)` takes the FIRST 200 tokens of the flat cloud \u2014 at 128-512 tokens/passage that is 1-2 documents, and the token span covered differs per tokenizer.",
+   "proposed_fix": "Update the docstring to name only the consumers that actually require per_sample (matrix_entropy, schatten, get_prediction_stats); for RSA either sample tokens uniformly across all cached samples (seeded) or raise max_tokens, and document the token-level (not stimulus-level) RSA departure from Kriegeskorte 2008 in the task docstring.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#1"
+  },
+  {
+   "id": "infra:12",
+   "severity": "LOW",
+   "claim": "Test matrix gaps: conftest's DummyTokenizer ignores the input text, returns unseeded random ids of fixed length 8, and does not implement return_offsets_mapping \u2014 so the offset-based code paths guaranteed by fixes #34 (score_continuation) and #49 (WEAT word positions) are never exercised (only their slow-tokenizer fallbacks), and tests are nondeterministic; the CI py3.9 leg cannot install transformers 5.x (study version) so it tests a different major version; blme.list_tasks() returns [] after `import blme` until evaluate()/CLI calls _register_all_tasks (API-only footgun \u2014 CLI and tests register correctly).",
+   "evidence": "tests/conftest.py:204-238 DummyTokenizer.__call__ ignores `text` content and **kwargs (no offset_mapping key, torch.randint with global RNG, length=8); tasks/common.py score_continuation's primary path requires offset_mapping, so tests cover only the prefix-length fallback; .github/workflows/test.yml:14 matrix includes 3.9 while pyproject pins transformers>=4.35 and the study ran on 5.2.0 (requires py>=3.10), so Qwen3Next/Qwen3.5 arch fixtures silently skip on that leg; registry: core.py:33-40 _register_all_tasks is called by evaluate(), cli._cmd_list_tasks (cli.py:128-131) and tests/test_completeness.py:10, but src/blme/__init__.py re-exports list_tasks without registering.",
+   "proposed_fix": "Give DummyTokenizer a deterministic hash-of-text id mapping, a seeded generator, and a minimal offset_mapping implementation (cumulative char spans); add one test using a real GPT-2 fast tokenizer (cached fixture) for score_continuation and _find_word_token_position; either drop py3.9 from the matrix or pin a transformers version per leg; call _register_all_tasks in blme/__init__ or document the lazy registration.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#34/#49 (untested paths)"
+  },
+  {
+   "id": "infra:13",
+   "severity": "LOW",
+   "claim": "results.py hygiene: save_results always writes a fixed 'results.json' (silent overwrite of prior runs in the same dir), json.dump emits non-RFC8259 NaN/Infinity literals (tolerated by the in-repo aggregator but brittle for external consumers), and print_results_table assumes every task result is a dict ('error' in result raises TypeError otherwise).",
+   "evidence": "src/blme/results.py:172-177 fixed filename + json.dump(..., default=str) with default allow_nan=True; :107-110 `if \"error\" in result` on arbitrary task return values. Aggregator side verified clean: 0 absolute-layer-index columns survive in results/study_v3/aggregated.csv (fix #36 holds), no all-NaN columns, no merge-collision suffixes; remaining naming oddity is float-keyed columns like consistency_position_sensitivity.nll_at_0.25 (harmless \u2014 feature_metadata's split('.')[0] still parses the task).",
+   "proposed_fix": "Timestamp or model-slug the results filename (or refuse to overwrite without --force); guard print_results_table with isinstance(result, dict); optionally json.dump(..., allow_nan=False) after converting NaN->None for strict JSON.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#36"
+  }
+ ],
+ "per_sample_callsite_table": "| # | Call site (src/blme/tasks/) | per_sample arg | What the consumer's math needs | Verdict |\n|---|---|---|---|---|\n| 1 | geometry/rsa.py:55 | False (default) | RDM over representation rows; rows must align across layers (they do \u2014 flat cloud is concatenated in sample order). Token-level RSA is a documented-nowhere departure from sample-level Kriegeskorte RSA; only the FIRST 200 tokens (~1-2 wiki passages, tokenizer-dependent span) feed the RDM | SUSPECT (valid alignment, but 200-token/2-document RDM + stale cache docstring claiming RSA needs per_sample=True \u2014 see infra:11) |\n| 2 | geometry/collapse.py:50 | False | Effective rank of the per-layer token cloud (Compression-Valley convention) \u2014 flat cloud is the intended object | OK |\n| 3 | geometry/lipschitz.py:60 | False | Per-token ratio ||h_{l+1}-h_l||/||h_l||; needs row alignment across layers, not per-sample chunks | OK |\n| 4 | geometry/lid.py:124 (layerwise) | False | Levina-Bickel MLE on a point cloud; token cloud is the LLM convention (neighbors mostly within-document deflates LID but is consistent cross-model) | OK (caveat: contradicts cache docstring; see infra:11) |\n| 5 | geometry/lid.py:143 (last layer) | False | Same as #4 | OK (same caveat) |\n| 6 | geometry/matrix_entropy.py:102 | True | Wei et al. 2024 per-sentence entropy averaged over sentences \u2014 requires per-sample (T_i,D) chunks | OK (correct use of per_sample) |\n| 7 | geometry/cka.py:48 | False | Linear CKA between layers of the SAME rows; flat cloud with preserved sample order is exactly right (per-sample chunks are NOT needed despite cache docstring) | OK |\n| 8 | geometry/mutual_info.py:46 (geometry_hsic) | False | HSIC/CKA-style Gram alignment on shared token subset across layers; row alignment preserved via shared_perm | OK (but shared_perm is unseeded global randperm \u2014 infra:8) |\n| 9 | geometry/intrinsic_dim.py:44 (layerwise) | False | TwoNN on pooled token cloud per layer (Ansuini-style) | OK (unseeded 20k np.random.choice subsample \u2014 infra:8) |\n| 10 | geometry/isotropy.py:150 (IsoScore) | False | Covariance isotropy of last-layer token distribution \u2014 token cloud is the intended object | OK |\n| 11 | geometry/isotropy.py:178 (geometry_svd layerwise) | False | Per-layer SVD spectrum metrics of token cloud | OK |\n| 12 | geometry/isotropy.py:202 (geometry_svd last layer) | False | Same as #11 | OK |\n| 13 | geometry/schatten.py:173 | True | Per-sentence Schatten-p/MNN/RankMe with centre+row-L2 preprocessing, mirroring matrix_entropy's per-sentence convention | OK (correct use of per_sample) |\n\nNon-get_hidden_states cache consumers checked for the same trap: cache.get_prediction_stats internally per-sample splits and shift-aligns (fix #5/#31 intact); get_attentions is inherently per-sample (lists, never concatenated). No call site mixes per-sample math with the flat cloud; the two per_sample=True users are exactly the two tasks whose papers demand per-sentence matrices.",
+ "hook_hygiene_table": "| Site | Hook type | Removal try/finally-guarded? | Notes |\n|---|---|---|---|\n| causality/edge_attribution.py:133 | forward_pre (capture+retain_grad) | YES (try at :136, finally :141-143 removes all handles) | registration loop itself outside try (negligible \u2014 register rarely raises) |\n| interpretability/attention_polysemanticity.py:80 | forward | YES (fixed in round 6, #58; finally at :114-116) | comment documents the leak fix |\n| interpretability/weight_activation_alignment.py:219 | forward_pre | YES (try :223, finally :231-233) | handles built in comprehension outside try |\n| interpretability/induction.py:250 | forward_pre (head ablation) | YES \u2014 registration happens INSIDE the try (:243-253), finally :274-276 | best-practice pattern; safest of all sites |\n| interpretability/superposition.py:117 | forward_pre | YES for the forward loop (try :119, finally :126-128) | registration loop (:110-117) outside try |\n| causality/knowledge_neurons.py:162 | forward_pre (capture+retain_grad) | YES (try :164, finally :169-171) | registration loop outside try |\n| causality/circuit_quality.py:124 | forward (mean ablation, single handle) | YES (try :127, finally :131-132) | |\n| causality/circuit_quality.py:160 | forward (non-circuit ablation, multi) | YES (try :165, finally :180-182) | registration loop (:154-163) outside try |\n| causality/attention_knockout.py:229 | forward_pre (per-head zeroing) | YES (try :232, finally :236-237) | one handle per head, removed per iteration |\n| representation_engineering.py:368 | forward (steering) | YES (try :371, finally :380-381) | steering vec cast to out dtype (#55 intact) |\n| causality/tracing.py:239 | forward (embed noise) | YES (outer try :245, finally :365-367 removes embed_hook_handle) | survives per-prompt failures |\n| causality/tracing.py:346 | forward (activation patch) | YES (inner try :349, finally :357-358) | nested inside the outer guard |\n| interpretability/sparsity.py:129 | forward_pre | YES (try :135, finally :142-144) | registration loop (:121-130) outside try |\n| dynamics/gradient_flow.py:92 | forward_pre (capture+retain_grad) | YES (try :94, finally :109-110) | outer finally additionally restores requires_grad flags and train/eval mode (#16) |\n| causality/ablation.py:130 | forward (dim ablation, multi) | YES (try :132, finally :135-137) | per-layer registration loop outside try; handle.remove() is idempotent so double removal is safe |\n\nVerdict: all 16 registration sites have try/finally-guarded removal around the forward/backward work; the only residual (very low) risk is hooks registered in loops/comprehensions placed just before the try \u2014 a failure during registration itself would leak the earlier handles. A SIGALRM TimeoutError fired mid-forward is caught by every site's finally, so the round-6 hook-leak class (#58) does not recur elsewhere. No register_full_backward_hook sites exist in the codebase."
+}

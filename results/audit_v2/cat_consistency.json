@@ -1,0 +1,602 @@
+{
+ "category": "consistency",
+ "tasks": [
+  {
+   "task": "consistency_paraphrase",
+   "file": "src/blme/tasks/consistency/paraphrase.py",
+   "paper_claimed": "none (docstring has no citation; docs/tasks_consistency.md \u00a71 cites Elazar et al. 2021 TACL arXiv:2102.01017; PAPERS.md line 294 labels it 'BLME-custom')",
+   "paper_url": "https://arxiv.org/abs/2102.01017",
+   "paper_verified": "No canonical paper defines this metric. Closest behavioral analogue: Elazar, Kassner, Ravfogel, Ravichander, Hovy, Sch\u00fctze, Goldberg (2021), 'Measuring and Improving Consistency in Pretrained Language Models', TACL 9, arXiv:2102.01017 (verified: defines consistency as 'the invariance of its behavior under meaning-preserving alternations in its input', measured via ParaRel cloze PREDICTIONS \u2014 not representation distances). Data source the fallback targets: Fierro & S\u00f8gaard (2022), 'Factual Consistency of Multilingual Pretrained Language Models', Findings of ACL 2022, arXiv:2203.11552 (mpararel).",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Paraphrase invariance probes whether the model's final-layer sentence representation encodes meaning rather than surface form: the last-token hidden states of two sentences expressing the same proposition should be closer, in L2 and cosine, than that of an unrelated sentence, and the isometry ratio quantifies this contrast. A capable LM must collapse surface variation onto shared semantic structure in order to generalize knowledge across phrasings, so a lower ratio indicates representations organized by meaning \u2014 a prerequisite for robust retrieval and reasoning \u2014 while a ratio near 1 indicates form-dominated encoding.",
+   "issues": [
+    {
+     "id": "paraphrase:1",
+     "severity": "MEDIUM",
+     "claim": "The mpararel fallback is dead code that can never load: config name and both field names are wrong, so the task always silently degrades to the 5 bundled triples.",
+     "evidence": "paraphrase.py:59 calls load_dataset(\"coastalcph/mpararel\", \"en\", split=\"train\") and lines 62-63 access item[\"relation_id\"]/item[\"text\"]. HF API (https://huggingface.co/api/datasets/coastalcph/mpararel, fetched 2026-06-13) shows the dataset has ONLY config 'default' and features [id, language, relation, template, template_id, query, sub_uri, obj_uri, obj_label, sub_label, lineid] \u2014 no 'en' config, no 'relation_id', no 'text'. load_dataset raises (BuilderConfig 'en' not found) \u2192 except at line 76 \u2192 bundled triples always. Even if the load succeeded, the loop at line 62 would iterate 5,023,568 multilingual rows in Python and the 'paraphrases' would be raw ParaRel templates containing literal '[X]'/'[Y]' placeholders (confirmed from dataset card/GitHub README).",
+     "proposed_fix": "Either delete the dead path (keep an expanded bundled set per TASK_FIXES #7) or fix it properly: load_dataset('coastalcph/mpararel', split='train', streaming=True), filter language=='en', take the first K rows, instantiate templates by substituting sub_label/obj_label for [X]/[Y], pair two templates of the same 'relation' as paraphrases and one from a different relation (length-matched) as unrelated, cap at 50 pairs.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "paraphrase:2",
+     "severity": "LOW",
+     "claim": "CITATION: common.py's score_continuation docstring still lists consistency_paraphrase as a consumer although the task no longer scores continuations, and docs/tasks_consistency.md \u00a71 attributes the metric to Elazar 2021, whose consistency is prediction-level invariance under ParaRel paraphrases, not representation-distance isometry.",
+     "evidence": "common.py:210-215 ('This function is used by every task that scores a string continuation (..., consistency_paraphrase, ...)') vs paraphrase.py which never imports score_continuation; docs/tasks_consistency.md:11 cites Elazar 2021; arXiv:2102.01017 abstract: consistency = 'the invariance of its behavior under meaning-preserving alternations in its input' measured on cloze predictions (ParaRel), not embedding L2/cosine.",
+     "proposed_fix": "Drop consistency_paraphrase from the common.py docstring list; in docs, demote Elazar 2021 to 'motivation' and state the metric is BLME-custom representation-level isometry (cite Fierro & S\u00f8gaard 2022 only if the mpararel path is fixed).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#34"
+    },
+    {
+     "id": "paraphrase:3",
+     "severity": "LOW",
+     "claim": "mean_paraphrase_l2_dist and mean_unrelated_l2_dist are raw hidden-state norms that scale with d_model and per-architecture residual-stream magnitude, and the task has no entry in the aggregator NORMALIZATIONS table, so only isometry_ratio_l2 and the cosine outputs are cross-model comparable.",
+     "evidence": "paraphrase.py:113-122 emit raw torch.norm(rep1-rep2) values; scripts/aggregate_results.py NORMALIZATIONS dict (lines ~88-100) contains no consistency_paraphrase keys; paper \u00a73.4 requires dimension-sensitive metrics be divided by d_model.",
+     "proposed_fix": "If the task is ever promoted into the study feature matrix, emit only the dimensionless quantities (isometry_ratio_l2, cos sims, and optionally a cosine-gap = paraphrase_cos \u2212 unrelated_cos) or register the L2 columns for d_model normalization; also note that last-layer rogue/massive-activation dimensions (Timkey & van Schijndel 2021; Sun et al. 2024) inflate all cosines \u2014 the paraphrase-minus-unrelated contrast only partially cancels this.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "TASK_FIXES #7"
+    }
+   ],
+   "comparability_notes": "Not in the v2/v3 study feature matrix (BLME_RESEARCH_TASKS excludes it), so no published numbers depend on it. Raw L2 outputs depend on d_model and residual-stream scale (Gemma-class norms are much larger than GPT-2-class) and are not aggregator-normalized; isometry_ratio_l2 and cosine outputs are dimensionless and comparable. Cosine values are uniformly inflated by anisotropy/massive activations in last-layer states, so cross-model comparison should rely on the paraphrase-vs-unrelated contrast, not absolute similarities. With the dead mpararel path, all models see the identical 5 bundled triples \u2014 comparable but statistically very weak (n=5).",
+   "degeneracy_notes": "text1==text2 gives L2=0/cos=1 without error. If mean_unrelated_l2_dist==0 the isometry_ratio_l2 key is silently absent (line 128 guard) \u2192 downstream column missingness rather than inf. F.cosine_similarity has an internal eps so zero vectors yield 0, not NaN. T=1 inputs are fine (last token = only token). Empty usable set returns an error dict. No unseeded randomness; fully deterministic.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub a model whose hidden_states[-1] last-token vectors are fixed 2-D: rep1=(1,0), rep2=(0.6,0.8), rep3=(-1,0) for the single triple. Assert mean_paraphrase_l2_dist == sqrt(0.4^2+0.8^2) = 0.8944272, mean_unrelated_l2_dist == 2.0, isometry_ratio_l2 == 0.4472136, mean_paraphrase_cos_sim == 0.6, mean_unrelated_cos_sim == -1.0 (atol 1e-6). Add a second test asserting the mpararel loader (if fixed) produces placeholder-free strings: assert '[X]' not in any text.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "consistency_format_robustness",
+   "file": "src/blme/tasks/consistency/format_robustness.py",
+   "paper_claimed": "Sclar et al. 2023, arXiv:2310.11324 (docstring line 2 and class docstring; PAPERS.md line 76)",
+   "paper_url": "https://arxiv.org/abs/2310.11324",
+   "paper_verified": "Melanie Sclar, Yejin Choi, Yulia Tsvetkov, Alane Suhr (2023), 'Quantifying Language Models' Sensitivity to Spurious Features in Prompt Design or: How I learned to start worrying about prompt formatting', ICLR 2024, arXiv:2310.11324. Verified via arXiv: abstract defines 'FormatSpread, an algorithm that rapidly evaluates a sampled set of plausible prompt formats for a given task, and reports the interval of expected performance', with 'performance differences of up to 76 accuracy points' across formats. This is the correct citation for the format-sensitivity phenomenon; Mizrahi et al. 2024 (arXiv:2401.00595, TACL) covers instruction paraphrases, not the separator/casing perturbations used here, so Sclar is the right primary cite.",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "DEVIATES_DOCUMENTED",
+   "intuition": "Format robustness measures how much the log-likelihood the model assigns to a known correct answer fluctuates when only the semantically irrelevant surface rendering of the prompt \u2014 separators, casing, labels \u2014 changes. Sclar et al. showed such spurious formatting choices can swing task accuracy by tens of points, so a model whose answer probabilities are stable across formats has abstracted the task from its template; this invariance distinguishes genuine knowledge from prompt-template pattern matching and tracks instruction-following capability. The NLL spread and cross-format top-1 agreement operationalize this invariance in a label-light, fully intrinsic way.",
+   "issues": [
+    {
+     "id": "format_robustness:1",
+     "severity": "LOW",
+     "claim": "CITATION: the implemented quantities (answer-NLL std/CV and top-1 agreement over 8 hand-written formats) are not Sclar et al.'s FormatSpread (the max-min interval of task ACCURACY over a grammar-sampled space of ~hundreds of formats with bandit search); the docstring describes the two signals honestly but never states the departure from the cited algorithm.",
+     "evidence": "format_robustness.py:60-72 define 8 fixed format callables and lines 124-150 compute nanstd/CV of mean answer NLL and argmax agreement; arXiv:2310.11324 abstract: 'FormatSpread ... reports the interval of expected performance' (accuracy spread), with formats sampled from a grammar \u2014 neither NLL spread nor top-1 agreement appears as the paper's metric.",
+     "proposed_fix": "Add one docstring sentence: 'Unlike FormatSpread we do not search a format grammar or measure accuracy intervals; we measure log-likelihood dispersion and argmax agreement of a fixed answer across 8 fixed formats.' Optionally also cite Mizrahi et al. 2024 (arXiv:2401.00595) for multi-prompt evaluation variance.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "format_robustness:2",
+     "severity": "MEDIUM",
+     "claim": "The 12-item QA bundle gives top1_agreement_rate only 13 possible values and makes mean_nll_std a noisy 12-question average, limiting the resolution of a feature that IS in the published v2/v3 study matrix.",
+     "evidence": "format_robustness.py:41-54 (_QA_BUNDLE has 12 items); results/study_v3/aggregated.csv contains consistency_format_robustness.mean_nll_std_across_formats, .mean_nll_cv_across_formats, .max_nll_std_across_formats, .top1_agreement_rate, .mean_nll_overall; scripts/run_study.py:67 includes the task in BLME_RESEARCH_TASKS.",
+     "proposed_fix": "Expand the bundle to 50+ QA pairs (still bundled, fixed) and/or add 4-8 more format templates from Sclar's grammar dimensions (separator, spacing, casing of field labels); report a bootstrap CI over questions. Keep current keys so v2/v3 columns remain; add new keys for the expanded variant rather than mutating locked v2 values.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "format_robustness:3",
+     "severity": "LOW",
+     "claim": "Each (question, format) cell runs a second full forward pass on the prompt solely to get the post-prompt argmax, doubling compute (96 extra forwards) when the same logit row is already computed inside score_continuation's forward at index prompt_len-1.",
+     "evidence": "format_robustness.py:107 calls score_continuation (one forward on prompt+answer) and lines 118-121 immediately run model(**enc_prompt) again for next_logits = out.logits[0, -1].",
+     "proposed_fix": "Extend score_continuation to optionally return the logits row at the boundary position (logits[prompt_len-1]) and take its argmax, or accept a return_boundary_logits flag; eliminates the second forward exactly.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "In the v2/v3 study (only task of this unit that is). NLL values are per-answer-token in nats; answers were chosen to be single tokens in most modern vocabularies (' Paris', ' Tokyo'), but 'H2O' and '300' tokenize differently across the zoo, so mean_nll_overall has mild tokenizer dependence; the headline dispersion metrics (std across formats within a question, then averaged) difference out question content and are comparable. mean_nll_cv additionally controls for the overall NLL scale of weaker models. top1_agreement compares argmax token ids within model only \u2014 no cross-tokenizer id comparison \u2014 correct. No dependence on d_model/n_layers; no normalization needed per paper \u00a73.4. Fully deterministic (no sampling).",
+   "degeneracy_notes": "If score_continuation returns None for every format of a question, the all-NaN row makes np.nanstd emit a RuntimeWarning and a NaN that np.nanmean then skips \u2014 outputs degrade gracefully to NaN only if ALL questions fail. Questions with <2 valid argmax entries are excluded from agreement (mask.sum()<2 guard); valid_q==0 yields NaN, not a crash. per_q_cv guards mean<=1e-6 by emitting 0.0. No T=1 or rank-deficiency paths.",
+   "test_status": "none",
+   "proposed_golden_test": "Build a stub causal LM over a 3-token vocab whose logits are constant [log 0.7, log 0.2, log 0.1] at every position, with an identity tokenizer mapping each character class to a fixed id and offset map. For any QA pair and all 8 formats the answer-token NLL is identical, so assert mean_nll_std_across_formats == 0.0, mean_nll_cv_across_formats == 0.0, and top1_agreement_rate == 1.0 exactly; with one format forced to fail (score_continuation None) assert the NaN row is excluded and values are unchanged.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "consistency_self_consistency",
+   "file": "src/blme/tasks/consistency/self_consistency.py",
+   "paper_claimed": "Wang et al. 2022, arXiv:2203.11171 (docstring lines 1-3; PAPERS.md line 83)",
+   "paper_url": "https://arxiv.org/abs/2203.11171",
+   "paper_verified": "Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, Denny Zhou (2022), 'Self-Consistency Improves Chain of Thought Reasoning in Language Models', ICLR 2023, arXiv:2203.11171. Verified via arXiv: 'It first samples a diverse set of reasoning paths instead of only taking the greedy one, and then selects the most consistent answer by marginalizing out the sampled reasoning paths.' The paper defines a decoding strategy; the task repurposes sample-agreement as a capability signal, which the docstring states explicitly. (PAPERS.md's abbreviated author list omits Narang and Chowdhery \u2014 cosmetic.)",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "BUG",
+   "intuition": "Self-consistency measures how concentrated the model's sampling distribution is on a single continuation when the prompt has one clearly correct completion: agreement among temperature-0.7 samples is a Monte-Carlo probe of next-token distribution sharpness at positions where the ground truth is unambiguous. Capable models place most of their probability mass on the correct continuation (high agreement, low sample entropy), whereas weaker models spread mass over many plausible-sounding alternatives; Wang et al.'s majority-vote decoding exploits exactly this concentration property, motivating agreement as an intrinsic capability proxy.",
+   "issues": [
+    {
+     "id": "self_consistency:1",
+     "severity": "HIGH",
+     "claim": "model.generate() inherits each checkpoint's shipped generation_config for every knob not explicitly passed \u2014 only temperature/top_p/do_sample are overridden \u2014 so models like Qwen2/2.5 (which ship top_k=20 and repetition_penalty=1.05 in generation_config.json) are sampled from a truncated/penalized distribution while GPT-2/Pythia/Llama-base are not, making agreement/entropy values reflect shipped decoding defaults rather than model sharpness and breaking cross-model comparability across the 58-model zoo.",
+     "evidence": "self_consistency.py:84-91 passes only max_new_tokens, do_sample, temperature, top_p, pad_token_id; transformers 5.2.0 (verified in env) merges these kwargs onto model.generation_config, leaving per-checkpoint top_k/repetition_penalty/no_repeat_ngram_size active. Qwen2.5 checkpoints publicly ship generation_config.json with top_k=20, top_p=0.8, repetition_penalty=1.05 (top_p gets overridden here but top_k and repetition_penalty do not). Severity per house rule: 'not cross-model comparable' = HIGH; not CRITICAL because the task is absent from BLME_RESEARCH_TASKS and the v2/v3 CSVs (verified: no consistency_self_consistency columns in results/study_v3/aggregated.csv).",
+     "proposed_fix": "Construct an explicit, complete sampling spec: gen_cfg = GenerationConfig(do_sample=True, temperature=T, top_p=1.0, top_k=0, repetition_penalty=1.0, no_repeat_ngram_size=0, max_new_tokens=K, pad_token_id=...) and call model.generate(..., generation_config=gen_cfg). Better still, drop generation for the first-token metrics entirely and compute them analytically (see self_consistency:2).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "self_consistency:2",
+     "severity": "MEDIUM",
+     "claim": "Sampling consumes the global torch RNG, which is seeded once per run (core.py set_global_seed(42)), so the metric's values depend on how much RNG any previously executed task consumed \u2014 task order/skip changes silently change results; this is the same defect class as fixed items #50-#53 but self_consistency was missed.",
+     "evidence": "self_consistency.py:84-91 (no per-call seed, no generator); src/blme/core.py:84-86 seeds once globally before the task loop; ledger #50-#53 fixed identical unseeded/global-RNG defects in ablation, edge_attribution, trajectories, attention_polysemanticity.",
+     "proposed_fix": "Minimal: torch.manual_seed(hash(('selfc', prompt_idx)) % 2**31) immediately before each generate call. Better: replace the N=8 Monte-Carlo estimate with the exact first-token quantities from one forward pass \u2014 p = softmax(logits[0,-1]/T); agreement_expectation = max(p) (or collision probability sum(p^2) for pairwise agreement), entropy = -sum(p log p), uniqueness analogue = participation ratio 1/sum(p^2)/V \u2014 fully deterministic, noise-free, and removes both this issue and the generate-kwargs issue for the first-token metrics.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#50-#53 (same class)"
+    },
+    {
+     "id": "self_consistency:3",
+     "severity": "LOW",
+     "claim": "Docstring promises a 'softer common-prefix overlap measure' that is not implemented anywhere, and says agreement is on the 'first generated word' while the code uses the first generated token (gen_ids[:,0]) \u2014 a tokenizer-granularity distinction that matters for coarse-vocab models.",
+     "evidence": "self_consistency.py:12-13 ('exact-match agreement on the first generated word and a softer \"common-prefix overlap\" measure as well') vs lines 100-110 which only compute first-token statistics; no prefix-overlap code exists in the file.",
+     "proposed_fix": "Either implement the common-prefix overlap (mean pairwise longest-common-prefix length over the 8 decoded strings / max_new_tokens) or delete the sentence; change 'word' to 'token' in the docstring.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Not in the v2/v3 feature matrix, so no published numbers affected. Beyond issue 1 (per-checkpoint generation_config leakage), first-token agreement granularity depends on the tokenizer (' Paris' single token everywhere, but numeric/multiword continuations split differently), and instruct-tuned models receive no chat template, conflating base/instruct behavior. n=8 samples per prompt means the Monte-Carlo entropy estimate is biased low (plug-in estimator with N<<support); the analytic formulation in the proposed fix removes tokenizer-count and sampling-noise dependence except for the first-token granularity itself.",
+   "degeneracy_notes": "generate() failure skips the prompt; all-fail returns an error dict. A model that immediately emits EOS gives degenerate perfect agreement (EOS token id counted like any token). Single unique first token gives entropy exactly 0 (the +1e-12 guard is harmless). pad_token_id fallback chain ends at literal 0 \u2014 arbitrary but only used for padding after EOS. No attention_mask passed with the expanded batch (same-length rows, so correctness unaffected; emits a transformers warning).",
+   "test_status": "none",
+   "proposed_golden_test": "Monkeypatch model.generate to return prompt_len-prefixed sequences whose first generated tokens are [7,7,7,9] for prompt 1 and [3,3,3,3] for prompt 2. Assert mean_first_token_agreement == (0.75+1.0)/2 == 0.875, mean_first_token_uniqueness == (0.5+1.0)/2 == 0.75, and mean_first_token_entropy == ( -(0.75*ln0.75 + 0.25*ln0.25) + 0.0 )/2 == 0.2811288 (atol 1e-6). A second test pins determinism: two evaluate() calls in a fresh process must return identical dicts after the seeding fix.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "consistency_contrastive",
+   "file": "src/blme/tasks/consistency/contrastive.py",
+   "paper_claimed": "none (docstring has no citation; docs/tasks_consistency.md \u00a74 says 'Canonical evaluation methodology'; PAPERS.md line 288 says 'BLME-custom; add Elazar et al. 2021 Amnesic Probing if applicable')",
+   "paper_url": "https://arxiv.org/abs/2202.05262",
+   "paper_verified": "No canonical paper defines the exact rejection-ratio metric. Closest and recommended: Meng, Bau, Andonian, Belinkov (2022), 'Locating and Editing Factual Associations in GPT', NeurIPS 2022, arXiv:2202.05262 \u2014 the CounterFact benchmark whose evaluation compares P(target_true) vs P(target_false) after a shared prompt, and whose data the task's fallback literally loads (NeelNanda/counterfact-tracing, verified: fields prompt/target_true/target_false with 'Spaces are prepended to targets', adapted from the ROME paper's counterfact dataset). PAPERS.md's suggestion of Elazar et al. 2021 'Amnesic Probing' (arXiv:2006.00995) is a wrong pointer \u2014 that paper is about INLP-based property removal, unrelated to true/false target discrimination.",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Contrastive consistency tests whether the model's output distribution separates a true completion from a minimally different, mutually exclusive false one given the same prompt \u2014 the same true/false target comparison used to evaluate factual recall on CounterFact. The rejection ratio P(false)/P(true), computed from per-token geometric-mean probabilities of only the target tokens, directly reflects how sharply factual knowledge is encoded: capable models drive the ratio toward 0, while models that merely match surface plausibility leave the mutually exclusive alternative nearly equiprobable with the fact.",
+   "issues": [
+    {
+     "id": "contrastive:1",
+     "severity": "MEDIUM",
+     "claim": "The legacy {factual, exclusive} input path is broken: the character-level common-prefix split leaves the shared trailing space inside the prompt, so under \u0120-merging BPE tokenizers score_continuation classifies the first target word as a prompt token and scores ONLY the trailing punctuation for both targets, making the rejection ratio ~1 regardless of the model's knowledge.",
+     "evidence": "contrastive.py:33-37 (_triples_from_pair common-prefix loop yields prompt='The capital of France is ', targets 'Paris.'/'London.'); reproduced with the real GPT-2 tokenizer on 2026-06-13: scored tokens for both targets are ['.'] only (boundary token '\u0120Paris' spans chars (25,31), start 25 < len(prompt) 26, so it lands on the prompt side per common.py:236-238). The tests/tasks/test_consistency.py:29-41 dataset uses exactly this legacy form and passes only because it checks key presence.",
+     "proposed_fix": "After the common-prefix loop, back the split off to the preceding whitespace so targets carry the leading space: `if i > 0 and a[i-1].isspace(): i -= 1` (and additionally back off to the last whitespace boundary if the divergence falls mid-word, e.g. 'transported'/'transplanted'). Then prompt='The capital of France is', targets ' Paris.'/' London.' \u2014 the convention score_continuation was designed for (cf. bundled triples lines 41-49 and counterfact's prepended-space targets).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#34"
+    },
+    {
+     "id": "contrastive:2",
+     "severity": "LOW",
+     "claim": "Data source switches silently between NeelNanda/counterfact-tracing (when datasets+network available) and 3 bundled triples (otherwise), with default num_samples=3, so values are environment-dependent and statistically tiny \u2014 same silent-fallback class as ledger item (h) for cache.py.",
+     "evidence": "contrastive.py:19 (num_samples default 3), 67-86 (try download, except \u2192 bundled, logged only at INFO level); the two sources produce wholly different magnitudes (counterfact prompts are obscure facts; bundled are trivial facts).",
+     "proposed_fix": "Bundle a fixed, license-compatible subset of >=100 CounterFact records as a JSON asset (deterministic, no network), raise the default num_samples to 50, and emit a 'data_source' key in the result dict so aggregation can detect provenance.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "TASK_FIXES #8"
+    },
+    {
+     "id": "contrastive:3",
+     "severity": "LOW",
+     "claim": "mean_rejection_ratio is a mean of probability ratios, which is outlier-dominated (a single unknown fact with p_factual ~ 1e-4 and p_exclusive ~ 1e-2 contributes 100 to a 3-item mean); TASK_FIXES #8.3 already prescribes per-token log-prob differences; also, if score_continuation fails for all samples, np.mean([]) returns NaN with a RuntimeWarning instead of an error dict, and the p_factual==0 branch (line 121) is unreachable since exp(-mean_nll) > 0.",
+     "evidence": "contrastive.py:114-126; exp(-x)>0 for any finite x makes line 119's guard always true; no `if not factual_probs: return {\"error\": ...}` guard exists before line 124.",
+     "proposed_fix": "Report median_rejection_ratio and mean_nll_margin = mean(nll_false - nll_true) in nats/token (log-space, robust); add an empty-list guard returning an error dict; delete the dead p_factual==0 branch.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "TASK_FIXES #8"
+    }
+   ],
+   "comparability_notes": "Not in the v2/v3 feature matrix. Per-token geometric-mean probabilities partially normalize tokenizer differences, but vocab granularity still varies how ' 100 degrees Celsius.' splits, so absolute probs have mild tokenizer dependence; the rejection ratio is a within-model contrast and is the only safely comparable output. True/false targets in both bundled and CounterFact data are near-length-matched, limiting length confounds. No d_model/n_layers dependence. Deterministic given a fixed data source; the source itself is environment-dependent (issue 2).",
+   "degeneracy_notes": "All-samples-failed path emits NaN via np.mean([]) with a RuntimeWarning rather than the error dict used elsewhere (issue 3). T=1 prompts are impossible here (prompts multi-token). p_factual underflow to exactly 0 would require mean NLL > ~745 nats \u2014 unreachable. Legacy-path degeneracy (issue 1) reduces both targets to scoring a single '.' token. No randomness anywhere; dataset slice is a deterministic prefix.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub LM over vocab {a,b,.} whose next-token distribution after the shared prompt is P(a)=0.8, P(b)=0.1, and P(.)=1.0 after either; with triple {prompt:'X', target_true:' a.', target_false:' b.'} and an offset-mapped toy tokenizer, mean NLL_true = -(ln0.8 + ln1.0)/2 and NLL_false = -(ln0.1)/2, so assert mean_factual_prob == exp(ln0.8/2) == 0.8944272, mean_exclusive_prob == 0.3162278, mean_rejection_ratio == 0.3535534 (atol 1e-6). Add a legacy-path regression: feed {factual:'X a.', exclusive:'X b.'} and assert the scored token ids include the 'a'/'b' tokens (currently they do not).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "consistency_logical",
+   "file": "src/blme/tasks/consistency/logical.py",
+   "paper_claimed": "Elazar et al., 2021 \u2014 'Measuring and Improving Consistency in Pretrained Language Models' (docstring lines 19-20)",
+   "paper_url": "https://arxiv.org/abs/2102.01017",
+   "paper_verified": "Yanai Elazar, Nora Kassner, Shauli Ravfogel, Abhilasha Ravichander, Eduard Hovy, Hinrich Sch\u00fctze, Yoav Goldberg (2021), 'Measuring and Improving Consistency in Pretrained Language Models', TACL 9, arXiv:2102.01017. Verified via arXiv: the paper defines consistency as 'the invariance of its behavior under meaning-preserving alternations in its input', measured with ParaRel (328 cloze paraphrases over 38 relations); it never defines a P(conclusion|premise) vs P(conclusion) lift or a violation rate. PAPERS.md line 292 itself labels the task 'BLME-custom'. The implemented quantity is a per-token PMI-style lift, closest in spirit to PMI/DC-PMI scoring (Holtzman et al. 2021, 'Surface Form Competition', arXiv:2104.08315) \u2014 no canonical paper defines it as a logical-consistency metric, so the Elazar citation is the wrong attribution for what the code computes.",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "Logical consistency asks whether conditioning on a premise raises the probability of a proposition it entails \u2014 a minimal coherence requirement for any system whose probability judgments respect entailment: P(conclusion | premise) should not fall below P(conclusion). The violation rate and mean lift therefore probe whether world knowledge is stored as connected, inference-supporting structure rather than as independent surface strings, which is mechanistically tied to a model's ability to chain facts during reasoning. In the current form, however, the lift on lexically overlapping pairs is dominated by copying/induction behavior, which motivates the entailed-vs-contradicted contrast in the proposed redesign.",
+   "issues": [
+    {
+     "id": "logical:1",
+     "severity": "HIGH",
+     "claim": "Confirmed residual design flaw (TASK_FIXES #1, partially addressed): the LAMBADA-midpoint split described in TASK_FIXES is GONE at HEAD (replaced by 5 bundled premise/conclusion pairs scored via score_continuation, commit 94be955 wiring), but the implemented conditional-vs-marginal lift still does not measure logical consistency \u2014 every bundled pair shares content words with its premise ('John...', 'Paris...France', 'warm-blooded'), so the lift is dominated by local copying/induction rather than entailment; there is no contradicted-conclusion control, and with n=5 the violation rate is quantized to multiples of 0.2.",
+     "evidence": "logical.py:28-39 (5 bundled pairs, all with high premise-conclusion lexical overlap), 89-91 (violation = cond_lp < uncond_lp over n<=5 items); TASK_FIXES.md lines 9-23 ('The midpoint split creates no logical relationship... compare P(conclusion|premise) vs P(contradicted_conclusion|premise)'); git show 94be955 confirms the bundled-pair design predates rounds 3-5 and the entailed/contradicted contrast was never implemented; task absent from results/study_v3/aggregated.csv so no published numbers depend on it.",
+     "proposed_fix": "REDESIGN as `consistency_entailment` (Tier 3, 'Logical Entailment Sensitivity'). Probe format: {premise, entailed, contradicted} where entailed/contradicted are length-matched and differ only in the truth-bearing word(s), so the copying confound cancels in the contrast. Scoring: s_e = -mean_nll from score_continuation(model, tok, premise, ' ' + entailed) (leading space in the ANSWER, avoiding the boundary bug of logical:2); s_c likewise. Report (a) entailment_accuracy = fraction with s_e > s_c, (b) mean_margin = mean(s_e - s_c) nats/token, (c) DC-PMI-corrected variants d = s - s0 with s0 the conclusion's log-prob after the neutral prefix 'Therefore,' (Holtzman et al. 2021) to cancel each conclusion's prior; no margin hyperparameter; >=50 bundled probes balanced over rule types. Ten example probe triples: 1. P='All birds have feathers, and a sparrow is a bird.' E=' Therefore, a sparrow has feathers.' C=' Therefore, a sparrow has no feathers.' (universal instantiation); 2. P='Maria is taller than John, and John is taller than Pete.' E=' Therefore, Maria is taller than Pete.' C=' Therefore, Pete is taller than Maria.' (transitivity); 3. P='The box is empty.' E=' There is nothing inside the box.' C=' There is something inside the box.' (negation); 4. P='Every student in the class passed the exam, and Anna is a student in the class.' E=' Therefore, Anna passed the exam.' C=' Therefore, Anna failed the exam.' (universal instantiation); 5. P='If it rains, the match is cancelled. It is raining.' E=' Therefore, the match is cancelled.' C=' Therefore, the match is not cancelled.' (modus ponens); 6. P='No reptiles are warm-blooded, and a turtle is a reptile.' E=' Therefore, a turtle is not warm-blooded.' C=' Therefore, a turtle is warm-blooded.' (negative universal); 7. P='Tom finished the race before Sam, and Sam finished before Lee.' E=' Therefore, Tom finished before Lee.' C=' Therefore, Lee finished before Tom.' (temporal transitivity); 8. P='Either the lamp is on or it is off. The lamp is not on.' E=' Therefore, the lamp is off.' C=' Therefore, the lamp is on.' (disjunctive syllogism); 9. P='The glass is full of water.' E=' The glass is not empty.' C=' The glass is empty.' (lexical negation); 10. P='Only members may enter, and Carol entered.' E=' Therefore, Carol is a member.' C=' Therefore, Carol is not a member.' (only-if inference).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "TASK_FIXES #1"
+    },
+    {
+     "id": "logical:2",
+     "severity": "MEDIUM",
+     "claim": "The trailing-space prompt convention (premise + ' ' for the conditional, ' ' for the 'unconditional') makes score_continuation classify the first conclusion token as a prompt token under \u0120-merging BPE, so the computed quantity is P(rest-of-conclusion | premise + first-word) vs P(rest-of-conclusion | first-word) \u2014 not P(conclusion|premise) vs P(conclusion) as documented; the exclusion is symmetric (internally consistent) but the 'unconditional' baseline silently conditions on the conclusion's first word, single-word conclusions return None and are skipped, and the scored token set varies with tokenizer offset conventions across the zoo.",
+     "evidence": "logical.py:69 (score_continuation(model, tokenizer, premise + ' ', conclusion)) and :76 (prompt ' '); common.py:236-238 (first token with start offset >= len(prompt)); reproduced 2026-06-13 with the real GPT-2 tokenizer: for premise 'John is a bachelor. ' the token '\u0120John' spans (19,24), start 19 < 20, so scored tokens are ['\u0120is','\u0120unmarried','.'] in BOTH the conditional and the ' '-prompt unconditional call \u2014 the first conclusion word is never scored and leaks into the baseline's context.",
+     "proposed_fix": "Move the space into the answer: cond = score_continuation(model, tokenizer, premise, ' ' + conclusion); uncond = score_continuation with an empty/BOS-only context (e.g. prompt='' for BOS-adding tokenizers, or score the full ' ' + conclusion sequence from position 1 for GPT-2-class) so the entire conclusion including its first token is scored on both sides; document that for no-BOS tokenizers the first conclusion token is unscoreable in the unconditional term and drop it from BOTH terms explicitly.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#34"
+    },
+    {
+     "id": "logical:3",
+     "severity": "LOW",
+     "claim": "CITATION: the docstring cites Elazar et al. 2021, which defines paraphrase-prediction consistency via ParaRel and never defines the conditional-probability lift or violation rate the code computes; PAPERS.md line 292 already concedes the task is BLME-custom.",
+     "evidence": "logical.py:19-20 ('References: Measuring and Improving Consistency in Pretrained Language Models (Elazar et al., 2021)'); arXiv:2102.01017 abstract: consistency = 'the invariance of its behavior under meaning-preserving alternations in its input' (cloze predictions over 328 paraphrase patterns) \u2014 no conditional/unconditional probability comparison appears; docs/tasks_consistency.md \u00a73 describes yet another method ('probability matrices for mutually exclusive statements') matching neither paper nor code.",
+     "proposed_fix": "Replace the docstring reference with an honest note: 'BLME-custom PMI-style lift; cf. Holtzman et al. 2021 (arXiv:2104.08315) for conditional-vs-prior LM scoring; no canonical source defines this as a logical-consistency metric.' Update docs/tasks_consistency.md \u00a73 to describe the actual computation; after the consistency_entailment redesign, cite SNLI (Bowman et al. 2015) / RTE for probe provenance.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Not in the v2/v3 feature matrix. All models see the identical 5 bundled pairs, and per-token mean NLLs are used, so there is no length confound within a pair; however the scored token set itself depends on tokenizer offset conventions (first conclusion word excluded under \u0120-merging BPE \u2014 symmetric within model but meaning the metric covers slightly different substrings across tokenizer families), and the violation rate is quantized to {0, 0.2, ..., 1.0}, giving the feature almost no cross-model resolution. No d_model/n_layers dependence; fully deterministic.",
+   "degeneracy_notes": "If score_continuation returns None for both calls of every pair (e.g. single-word conclusions under \u0120-merging tokenizers), the task returns the error dict at line 94 \u2014 handled. Ties (cond_lp == uncond_lp, e.g. any context-insensitive model) are correctly not violations under the strict '<'. The 'unconditional' prompt ' ' contributes its space to the first conclusion token under BPE, so for no-BOS models the first scored position conditions on the conclusion's own first word (see logical:2). No randomness; no NaN paths beyond the guarded empty case.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Context-insensitivity invariant: stub a unigram LM whose logits are the same fixed vector at every position regardless of context. For any (premise, conclusion) pair, the symmetric token-set property implies cond_lp == uncond_lp exactly, so assert mean_lift == 0.0 and logical_violation_rate == 0.0 (strict inequality). Then bias the stub so tokens following the premise context get +ln(2) logit on the true continuation: assert mean_lift == ln(2) = 0.6931472 nats/token (atol 1e-6). This pins both the boundary symmetry and the per-token averaging.",
+   "recommended_action": "REDESIGN"
+  },
+  {
+   "task": "consistency_position_sensitivity",
+   "file": "src/blme/tasks/consistency/position_sensitivity.py",
+   "paper_claimed": "Liu et al. 2023, arXiv:2307.03172 (Lost in the Middle) \u2014 docstring line 2 and PAPERS.md line 61",
+   "paper_url": "https://arxiv.org/abs/2307.03172",
+   "paper_verified": "Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, Percy Liang. \"Lost in the Middle: How Language Models Use Long Contexts.\" TACL 12:157-173 (2024); arXiv:2307.03172 (2023). Paper exists; abstract: \"performance is often highest when relevant information occurs at the beginning or end of the input context, and significantly degrades when models must access relevant information in the middle of long contexts\" \u2014 measured as retrieval/QA ACCURACY in multi-document contexts of thousands of tokens (10-30 documents; 75-300 key-value pairs).",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "Positional robustness of context use \u2014 whether a model can exploit relevant information regardless of where it appears in its context window \u2014 is a capability dimension largely orthogonal to raw next-token accuracy. Primacy/recency biases arising from attention-sink formation and rotary-embedding distance decay cause mid-context information loss that directly degrades long-context QA, retrieval, and multi-document reasoning benchmarks. A flat NLL-vs-depth profile therefore indicates position-invariant information routing, which should correlate with benchmark performance on any task requiring whole-context integration.",
+   "issues": [
+    {
+     "id": "consistency_position_sensitivity:1",
+     "severity": "HIGH",
+     "claim": "CITATION: Confirmed open #19 \u2014 the task cites Liu et al. 2023 but measures short-context paraphrase NLL, not lost-in-the-middle retrieval: distractor passages are ~60-70 words (lines 39-149, full contexts ~100-160 tokens vs Liu's multi-thousand-token contexts), the score is NLL of a paraphrase of the inserted fact (lines 214-225, surface word overlap not retrieval), and at rel_pos=1.0 word_idx=len(words) makes suffix empty (lines 184-194) so the fact sits immediately adjacent to its paraphrase and NLL collapses via local copying rather than retrieval.",
+     "evidence": "position_sensitivity.py:39-149 (passages 60-70 words each), :184-194 (rel_pos=1.0 \u2192 suffix='' \u2192 full_context=prefix+' '+fact, fact abuts recall), :219-225 (mean NLL of paraphrase continuation). Liu et al. 2023 abstract: \"performance ... significantly degrades when models must access relevant information in the middle of long contexts, even for explicitly long-context models\" \u2014 their setup is multi-document QA and key-value retrieval with 10-30 documents / 75-300 KV pairs (thousands of tokens), scored by accuracy.",
+     "proposed_fix": "REDESIGN as consistency_position_retrieval (replace this task; values are not interpretable as lost-in-the-middle). Spec: (1) Needles: 10 synthetic key-value facts generated by random.Random(0) \u2014 KEY = 8-hex-digit string (e.g. '7f3a91c2'), VALUE = 4-digit number; needle sentence exactly 'The secret code for project {KEY} is {VALUE}.'. Random KV pairs cannot be guessed from priors, so NLL of VALUE is pure retrieval; adjacency at depth 1.0 is then the legitimate recency condition, not a paraphrase-copy artifact. (2) Filler: deterministic concatenation of the standard WikiText-103 validation passages already used as the eval corpus (cache._load_default_corpus fallback if download fails), filtered to exclude any passage containing the KEY/VALUE strings \u2014 fully offline and deterministic. (3) Context budget C = min(getattr(config,'max_position_embeddings',1024), 1024) tokens in the model's own tokenizer; build filler to C minus needle/question/answer token lengths. (4) Depth fractions {0, .25, .5, .75, 1.0}: insert the needle at the filler sentence boundary nearest token index round(f*C_filler). (5) Exact prompt template: '{filler_prefix} The secret code for project {KEY} is {VALUE}. {filler_suffix}\\nQuestion: What is the secret code for project {KEY}?\\nAnswer: The secret code for project {KEY} is' with scored continuation ' {VALUE}' via the shared score_continuation helper (mandatory). (6) Metrics: nll_at_depth_f (per-token NLL of VALUE tokens), rank_at_depth_f (rank of first VALUE token in the next-token distribution at the answer position), u_curve_depth = nll(0.5) - min(nll(0.0), nll(1.0)), position_spread. No generation; 10 needles x 5 depths = 50 forwards at <=1024 tokens; fully deterministic.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#19"
+    },
+    {
+     "id": "consistency_position_sensitivity:2",
+     "severity": "LOW",
+     "claim": "Docstring U-curve formula contradicts the code: line 12 says 'max(start, end) - middle (positive = lost in the middle)' but that expression is negative under lost-in-the-middle; the code computes middle - min(start, end) (lines 234-235), which is the correct sign convention.",
+     "evidence": "position_sensitivity.py:12 ('\"U-curve\" depth: max(start, end) - middle (positive = lost in the middle)') vs :234-235 ('start_end_min = min(nll_arr[0], nll_arr[-1]); u_curve_depth = float(nll_arr[mid_idx] - start_end_min)').",
+     "proposed_fix": "Fix the docstring to 'middle - min(start, end)'; code is correct.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "consistency_position_sensitivity:3",
+     "severity": "LOW",
+     "claim": "Continuation scoring bypasses the shared score_continuation helper: ctx_len comes from tokenizing full_context separately from full_text (lines 197-200), so a tokenizer that merges across the context/recall boundary would misalign the scored window \u2014 the exact failure class score_continuation was built to eliminate.",
+     "evidence": "position_sensitivity.py:195-200 ('full_text = full_context + recall; enc_full = tokenizer(full_text,...); enc_ctx = tokenizer(full_context,...); ctx_len = enc_ctx[\"input_ids\"].shape[1]'). Mitigated in practice because every recall string starts with a leading space (lines 49, 60, 71, ...) so GPT-2 BPE and SentencePiece both split at the boundary; house rule (pack section D) requires flagging any continuation scoring that bypasses score_continuation.",
+     "proposed_fix": "Route scoring through common.score_continuation(model, tokenizer, full_context, recall); mooted if the redesign in issue :1 lands (the redesign mandates score_continuation).",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": "#19"
+    }
+   ],
+   "comparability_notes": "NLL is per-token mean in nats, so tokenizer granularity is normalized; contexts are a fixed ~100-160 tokens for every model regardless of trained context length, so a 128k-context Llama-3.1 and a 1k-context GPT-2 see the same trivial probe \u2014 the metric cannot differentiate long-context ability (core of #19). u_curve_depth and position_spread are NLL differences in nats and scale with each model's overall NLL level (weaker models mechanically show larger spreads), so they are confounded with base perplexity unless normalized by mean_nll_across_positions. No d_model/n_layers dependence.",
+   "degeneracy_notes": "Fully deterministic (fixed bundle, no RNG, no generation). Passages with <4 words skipped (line 181). If full tokenization yields no continuation tokens the (passage,pos) cell is silently skipped (lines 202, 221); a position with zero surviving samples gives NaN mean, which correctly NaN-propagates u_curve_depth/spread/argmin via the any-isnan guard (line 231). Left-truncation path (>1024 tokens) never triggers with the bundled passages; if it did and ctx_len hit 0, logits[ctx_len-1:-1] becomes an empty slice and the shape-mismatch guard skips the sample rather than scoring garbage. Even-length positions list puts mid_idx right of center (n//2) \u2014 cosmetic.",
+   "test_status": "none",
+   "proposed_golden_test": "With a mock model emitting uniform logits over vocab V, every continuation token has NLL exactly log(V), so assert nll_at_p == log(V) for all five positions, u_curve_depth == 0.0, position_spread == 0.0, position_argmin == 0.0. Separately pin the insertion arithmetic: for an 8-word passage 'w0 ... w7' and fact 'F.', rel_pos=0.5 must produce full_context == 'w0 w1 w2 w3 F. w4 w5 w6 w7' and rel_pos=1.0 must produce 'w0 ... w7 F.'.",
+   "recommended_action": "REDESIGN"
+  },
+  {
+   "task": "consistency_icl_slope",
+   "file": "src/blme/tasks/consistency/icl_slope.py",
+   "paper_claimed": "Brown et al. 2020; Min et al. 2022 (docstring line 9, as motivation for 'strong predictor of downstream benchmark performance'); PAPERS.md line 131 lists both, line 290 flags '\ud83d\udcdd add Brown 2020; Min 2022 explicitly'",
+   "paper_url": "https://arxiv.org/abs/2005.14165",
+   "paper_verified": "Tom B. Brown et al., \"Language Models are Few-Shot Learners,\" NeurIPS 2020, arXiv:2005.14165 \u2014 exists; abstract: \"scaling up language models greatly improves task-agnostic, few-shot performance\"; plots performance vs number of in-context examples but defines no NLL-vs-k slope metric. Sewon Min, Xinxi Lyu, Ari Holtzman, Mikel Artetxe, Mike Lewis, Hannaneh Hajishirzi, Luke Zettlemoyer, \"Rethinking the Role of Demonstrations: What Makes In-Context Learning Work?\", EMNLP 2022, arXiv:2202.12837 \u2014 exists; defines no slope metric either. The NLL-vs-k regression slope is BLME-custom; closest formalized relative is Olsson et al. 2022's 'in-context learning score' (loss at 500th minus 50th token), which measures within-sequence loss decrease, not few-shot demo count scaling.",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "The rate at which the conditional NLL of a correct answer falls as in-context demonstrations accumulate quantifies in-context learning: the model's ability to infer and apply a latent input-output mapping from examples without weight updates. Mechanistically this capacity is carried by induction-head-like circuits whose strength co-emerges with general capability; behaviorally, few-shot adaptation is exactly the regime in which downstream benchmarks are administered (k-shot prompting), so a steeper negative NLL slope should predict composite benchmark scores almost by construction. The relative gain variant additionally normalizes away each model's baseline uncertainty, isolating the fraction of entropy removed by demonstrations.",
+   "issues": [
+    {
+     "id": "consistency_icl_slope:1",
+     "severity": "LOW",
+     "claim": "CITATION: docstring cites Brown 2020 and Min 2022, but neither defines the NLL-vs-k regression slope (BLME-custom metric), and Min et al. 2022's central finding \u2014 \"ground truth demonstrations are in fact not required -- randomly replacing labels in the demonstrations barely hurts performance\" \u2014 actually undercuts the docstring's framing of the slope as measuring 'ability to learn from context' rather than format/label-space conditioning.",
+     "evidence": "icl_slope.py:6-9 ('a strong predictor of downstream benchmark performance (Brown et al. 2020; Min et al. 2022)'); Min et al. 2022 abstract quote above; PAPERS.md:290 already flags the citation as not formalized ('\ud83d\udcdd add Brown 2020; Min 2022 explicitly').",
+     "proposed_fix": "Label the metric BLME-custom in the docstring and PAPERS.md; cite Brown et al. 2020 (NeurIPS 2020, arXiv:2005.14165) as motivation for few-shot scaling, Min et al. 2022 (EMNLP 2022, arXiv:2202.12837) as the caveat that demo-count gains partly reflect format learning, and optionally Olsson et al. 2022 (arXiv:2209.11895) for the related in-context learning score.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "consistency_icl_slope:2",
+     "severity": "MEDIUM",
+     "claim": "The slope is estimated from only 4 fixed items whose answers are memorized world knowledge (Spain->Madrid, eagle->bird, light->dark, 5+2->7), so capable models start near-zero 0-shot NLL and the metric measures remaining headroom (ceiling effect) rather than ICL ability \u2014 icl_gain/slope can shrink with capability for the wrong reason, and 4-item means at 4 shot counts make the per-family estimate high-variance.",
+     "evidence": "icl_slope.py:35-84 (_ICL_BUNDLE has exactly 4 items, all common-knowledge facts), :130-138 (slope fit on 4 means of <=4 items each). Brown et al. 2020 measure few-shot scaling on held-out task accuracy, not on facts directly retrievable 0-shot.",
+     "proposed_fix": "Expand the bundle to >=50 items and add synthetic mappings that cannot be solved 0-shot \u2014 nonce-word bijections ('A wug maps to a blicket') or permuted-label classification per Min et al. 2022 \u2014 so 0-shot NLL is uniformly high across the zoo and the slope isolates context learning; keep icl_relative_gain as the headline (dimensionless) feature.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "consistency_icl_slope:3",
+     "severity": "LOW",
+     "claim": "Per-k means may be computed over different item subsets: if score_continuation returns None for an item at one k but not others (lines 124-126), mean_nll at different shot counts averages mismatched populations, biasing the slope.",
+     "evidence": "icl_slope.py:120-131 \u2014 nll_by_k[k].append happens independently per (item,k); no requirement that an item survive at all k before contributing.",
+     "proposed_fix": "Collect per-item NLL vectors across all shot_counts first and drop any item with a missing entry before computing per-k means (paired design); also sort shot_counts so icl_gain's shot_counts[0]/shot_counts[-1] convention (lines 143-144) is robust to unsorted config overrides.",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Slope is in nats per demonstration on per-token mean NLL of answer tokens (score_continuation), so tokenizer granularity of multi-token answers is normalized; targets are mostly single tokens in all zoo tokenizers. No d_model/n_layers/vocab dependence. The dominant comparability threat is the ceiling effect of issue :2 \u2014 the metric is confounded with how well each model already knows the 4 facts, which itself correlates with scale, making the slope partly a re-measurement of knowledge rather than an independent ICL signal. icl_relative_gain (dimensionless fraction of baseline NLL removed) is the most comparable of the four outputs.",
+   "degeneracy_notes": "Fully deterministic: fixed 4-item bundle, no RNG, no generation; score_continuation is deterministic. score_continuation returns None on empty answers/zero surviving tokens \u2192 item silently skipped at that k; an all-empty shot count yields NaN mean, excluded from the polyfit; <2 valid shot counts \u2192 slope NaN (guard line 137). nll_0 == 0 exactly would NaN icl_relative_gain via the nll_0 > 0 guard (line 146). polyfit on collinear/duplicate k impossible with default config. No NaN/inf propagation beyond intended NaN sentinels.",
+   "test_status": "none",
+   "proposed_golden_test": "Monkeypatch blme.tasks.consistency.icl_slope's imported score_continuation to return (3.0 - 0.5*k, 1, [0]) for shot count k, so mean NLLs are exactly {0:3.0, 1:2.5, 2:2.0, 4:1.0}; then assert icl_slope == -0.5 exactly (hand-derivable: cov/var = -4.375/8.75 on k=(0,1,2,4)), icl_gain == 2.0, icl_relative_gain == 2/3, and mean_nll_{k}shot keys match.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "consistency_bias_weat",
+   "file": "src/blme/tasks/consistency/bias.py",
+   "paper_claimed": "Caliskan et al. 2017 (Science, WEAT) + May et al. 2019 (SEAT, arXiv:1903.10561) \u2014 docstring lines 1-5; PAPERS.md lines 37 and 65",
+   "paper_url": "https://arxiv.org/abs/1608.07187",
+   "paper_verified": "Aylin Caliskan, Joanna J. Bryson, Arvind Narayanan. \"Semantics derived automatically from language corpora contain human-like biases.\" Science 356(6334):183-186, 2017 (arXiv:1608.07187). Verified effect size: d = (mean_{x in X} s(x,A,B) - mean_{y in Y} s(y,A,B)) / std-dev_{w in X\u222aY} s(w,A,B), with s(w,A,B) = mean_a cos(w,a) - mean_b cos(w,b); original implementation uses R sd() (sample std, ddof=1) \u2014 exactly what _weat_effect_size computes. Word lists match Caliskan Table 1 tests 6 and 7. Secondary citation May et al. 2019 (NAACL 2019, arXiv:1903.10561) verified to define sentence-level SEAT: \"SEAT compares sets of sentences ... by applying WEAT to the vector representation of a sentence\" \u2014 which is NOT what the code does; the token-position protocol implemented matches Tan & Celis 2019, \"Assessing Social and Intersectional Biases in Contextualized Word Representations,\" NeurIPS 2019, arXiv:1911.01485 (\"we propose assessing bias at the contextual word level\").",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "BUG",
+   "intuition": "The WEAT effect size measures the standardized differential cosine association between two target concept sets and two attribute sets in the model's representation space, probing how faithfully the network has internalized human-like distributional regularities \u2014 including social biases \u2014 from its pretraining corpus. Caliskan et al. showed these associations replicate human IAT effects more strongly as embedding quality improves, so |d| acts as a (double-edged) proxy for representational richness: models that compress corpus statistics more faithfully encode both useful semantics and their correlated biases. Because d is standardized by the spread of association scores, it is scale- and dimension-invariant, making it one of the few behavioral probes that is intrinsically comparable across architectures.",
+   "issues": [
+    {
+     "id": "consistency_bias_weat:1",
+     "severity": "MEDIUM",
+     "claim": "_find_word_token_position uses substring text.find(word) without word boundaries, so for attribute word 'his' in template 'This is his.' it matches inside 'This' (char 1) and returns token position 0 \u2014 empirically reproduced on GPT-2: pos 0 = 'This' instead of pos 2 = ' his' \u2014 so one of eight male-attribute embeddings in gender_science is the position-0 sink-token state of 'This' for every model, biasing gender_science_d and mean_abs_d_across_tests zoo-wide.",
+     "evidence": "bias.py:83 ('char_start = text.find(word)') and :91-92 (first overlapping token returned). Repro (CPU, gpt2 tokenizer): _find_word_token_position(tok, 'This is his.', 'his') -> 0, token 'This', while tokens are ['This', '\u0120is', '\u0120his', '.'] (correct index 2); all other list words ('he','her','him','hers','she','man','son','art',...) resolve correctly. Word 'his' is in _WEAT_TESTS['gender_science']['attributes_a'] (line 55). Not covered by #49 (which fixed the standalone-id search); this is a residual defect of the offset-based replacement. Same substring flaw exists in the _embed_word fallback (line 107).",
+     "proposed_fix": "Find the word with a boundary-aware regex: m = re.search(r'(?<!\\w)' + re.escape(word) + r'(?!\\w)', text); char_start = m.start() if m else -1; apply the same in the _embed_word prefix fallback. Add the regression test below.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#49"
+    },
+    {
+     "id": "consistency_bias_weat:2",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the docstring and PAPERS.md attribute the contextualization protocol to May et al. 2019 (SEAT), but SEAT applies WEAT to \"the vector representation of a sentence\" (pooled sentence embedding), whereas the code extracts the hidden state at the target word's token position \u2014 the protocol of Tan & Celis 2019 (NeurIPS 2019), who explicitly contrast their contextual-word-level approach against SEAT's sentence level.",
+     "evidence": "bias.py:3-4 and :13-17 ('May et al. 2019 (SEAT extension...)' yet 'We extract the hidden state at the position of the target/attribute word'); :121 (h = out.hidden_states[-1][0, pos]). May et al. 2019: \"We slot each word into each of several semantically bleached sentence templates ... SEAT compares sets of sentences ... by applying WEAT to the vector representation of a sentence.\" Tan & Celis 2019 abstract: \"we propose assessing bias at the contextual word level ... avoids confounding effects that underestimate bias at the sentence encoding level.\" PAPERS.md:65 maps May 2019 -> consistency_bias_weat.",
+     "proposed_fix": "Replace/augment the May 2019 citation with Tan & Celis 2019, \"Assessing Social and Intersectional Biases in Contextualized Word Representations,\" NeurIPS 2019, arXiv:1911.01485, in the docstring, PAPERS.md row 65, and the paper's metric appendix; optionally keep May 2019 for the bleached-template idea ('This is {}.').",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "consistency_bias_weat:3",
+     "severity": "LOW",
+     "claim": "Minor estimator and documentation nits: the permutation p-value samples 500 random permutations (Caliskan enumerates all equal-size partitions; C(16,8)=12870 is enumerable) without the standard (count+1)/(n+1) correction so p can be exactly 0; docstring promises 'per-layer' results and a 'mean_d_across_tests' key but the code reports final-layer only and 'mean_abs_d_across_tests'; the test key 'gender_science' actually implements Caliskan test 7 (math vs arts), not test 8 (science vs arts); n_permutations default mismatch (signature 1000 vs config default 500).",
+     "evidence": "bias.py:155-168 (random permutations, count_ge/n, no +1 smoothing), :18-21 vs :214 (docstring 'per-layer'/'mean_d_across_tests' vs actual final-layer-only 'mean_abs_d_across_tests'), :50-57 (math/arts word lists labeled gender_science; Caliskan Table 1 test 7 is math-arts, test 8 is science-arts), :155 vs :178 (1000 vs 500).",
+     "proposed_fix": "Enumerate all 12870 equal partitions (itertools.combinations) for exact p, or keep sampling with p=(count+1)/(n+1); correct the docstring keys and drop the per-layer claim; rename the test key to 'gender_math_arts' (or swap in actual science terms and keep the name); align the n_permutations default.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "d is invariant to d_model, hidden-state scale, and anisotropy level (cosine similarity + standardization by std of s(w,A,B)), and bounded in [-2,2], so cross-model comparison is sound. Tokenizer dependence enters only through word-position lookup (fixed by #49, residual 'his' defect in issue :1) and through multi-token words, where only the FIRST subtoken's state is used \u2014 a defensible convention but worth documenting since tokenizers split 'executive'/'corporation' differently across families. p-values are deterministic (seeded rng 42) but Monte-Carlo-noisy at n=500 (\u00b1~0.02). Final-layer-only extraction means RMSNorm vs LayerNorm post-norm geometry differs across families, but standardization absorbs it.",
+   "degeneracy_notes": "Deterministic: rng seeded 42 (line 160), no other randomness. Zero-norm embedding \u2192 cosine 0.0 guard (lines 127-129). A degenerate model with identical states for all words gives all-equal s(w) \u2192 std < 1e-12 \u2192 d = 0.0 (lines 149-151), and p = 1.0 (all permuted stats >= observed). Fewer than 2 surviving embeddings per set \u2192 NaN d and p (lines 203-205). _embed_word's prefix fallback (offsets unavailable) clamps pos into range so no IndexError, but can land on the wrong token (trailing-space BPE artifact) \u2014 only reachable on slow tokenizers. final_norm is fetched and passed but intentionally unused after fix #57 (documented in-code).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Hand-computable d: with 2-D unit vectors X=[e1,e1], Y=[e2,e2], A=[e1], B=[e2]: s(x)=1-0=1, s(y)=0-1=-1; mean difference = 2; sample std (ddof=1) of [1,1,-1,-1] = 2/sqrt(3); assert _weat_effect_size(X,Y,A,B) == pytest.approx(sqrt(3)) \u2248 1.7320508 and _weat_statistic == 4.0. Plus the boundary-regex regression: _find_word_token_position(gpt2_tok, 'This is his.', 'his') must return the index of ' his' (2), not 0 (currently fails).",
+   "recommended_action": "FIX_NOW"
+  }
+ ],
+ "flagged": [
+  {
+   "id": "paraphrase:1",
+   "severity": "MEDIUM",
+   "claim": "The mpararel fallback is dead code that can never load: config name and both field names are wrong, so the task always silently degrades to the 5 bundled triples.",
+   "evidence": "paraphrase.py:59 calls load_dataset(\"coastalcph/mpararel\", \"en\", split=\"train\") and lines 62-63 access item[\"relation_id\"]/item[\"text\"]. HF API (https://huggingface.co/api/datasets/coastalcph/mpararel, fetched 2026-06-13) shows the dataset has ONLY config 'default' and features [id, language, relation, template, template_id, query, sub_uri, obj_uri, obj_label, sub_label, lineid] \u2014 no 'en' config, no 'relation_id', no 'text'. load_dataset raises (BuilderConfig 'en' not found) \u2192 except at line 76 \u2192 bundled triples always. Even if the load succeeded, the loop at line 62 would iterate 5,023,568 multilingual rows in Python and the 'paraphrases' would be raw ParaRel templates containing literal '[X]'/'[Y]' placeholders (confirmed from dataset card/GitHub README).",
+   "proposed_fix": "Either delete the dead path (keep an expanded bundled set per TASK_FIXES #7) or fix it properly: load_dataset('coastalcph/mpararel', split='train', streaming=True), filter language=='en', take the first K rows, instantiate templates by substituting sub_label/obj_label for [X]/[Y], pair two templates of the same 'relation' as paraphrases and one from a different relation (length-matched) as unrelated, cap at 50 pairs.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_paraphrase",
+   "file": "src/blme/tasks/consistency/paraphrase.py"
+  },
+  {
+   "id": "paraphrase:2",
+   "severity": "LOW",
+   "claim": "CITATION: common.py's score_continuation docstring still lists consistency_paraphrase as a consumer although the task no longer scores continuations, and docs/tasks_consistency.md \u00a71 attributes the metric to Elazar 2021, whose consistency is prediction-level invariance under ParaRel paraphrases, not representation-distance isometry.",
+   "evidence": "common.py:210-215 ('This function is used by every task that scores a string continuation (..., consistency_paraphrase, ...)') vs paraphrase.py which never imports score_continuation; docs/tasks_consistency.md:11 cites Elazar 2021; arXiv:2102.01017 abstract: consistency = 'the invariance of its behavior under meaning-preserving alternations in its input' measured on cloze predictions (ParaRel), not embedding L2/cosine.",
+   "proposed_fix": "Drop consistency_paraphrase from the common.py docstring list; in docs, demote Elazar 2021 to 'motivation' and state the metric is BLME-custom representation-level isometry (cite Fierro & S\u00f8gaard 2022 only if the mpararel path is fixed).",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": "#34",
+   "task": "consistency_paraphrase",
+   "file": "src/blme/tasks/consistency/paraphrase.py"
+  },
+  {
+   "id": "format_robustness:1",
+   "severity": "LOW",
+   "claim": "CITATION: the implemented quantities (answer-NLL std/CV and top-1 agreement over 8 hand-written formats) are not Sclar et al.'s FormatSpread (the max-min interval of task ACCURACY over a grammar-sampled space of ~hundreds of formats with bandit search); the docstring describes the two signals honestly but never states the departure from the cited algorithm.",
+   "evidence": "format_robustness.py:60-72 define 8 fixed format callables and lines 124-150 compute nanstd/CV of mean answer NLL and argmax agreement; arXiv:2310.11324 abstract: 'FormatSpread ... reports the interval of expected performance' (accuracy spread), with formats sampled from a grammar \u2014 neither NLL spread nor top-1 agreement appears as the paper's metric.",
+   "proposed_fix": "Add one docstring sentence: 'Unlike FormatSpread we do not search a format grammar or measure accuracy intervals; we measure log-likelihood dispersion and argmax agreement of a fixed answer across 8 fixed formats.' Optionally also cite Mizrahi et al. 2024 (arXiv:2401.00595) for multi-prompt evaluation variance.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_format_robustness",
+   "file": "src/blme/tasks/consistency/format_robustness.py"
+  },
+  {
+   "id": "format_robustness:2",
+   "severity": "MEDIUM",
+   "claim": "The 12-item QA bundle gives top1_agreement_rate only 13 possible values and makes mean_nll_std a noisy 12-question average, limiting the resolution of a feature that IS in the published v2/v3 study matrix.",
+   "evidence": "format_robustness.py:41-54 (_QA_BUNDLE has 12 items); results/study_v3/aggregated.csv contains consistency_format_robustness.mean_nll_std_across_formats, .mean_nll_cv_across_formats, .max_nll_std_across_formats, .top1_agreement_rate, .mean_nll_overall; scripts/run_study.py:67 includes the task in BLME_RESEARCH_TASKS.",
+   "proposed_fix": "Expand the bundle to 50+ QA pairs (still bundled, fixed) and/or add 4-8 more format templates from Sclar's grammar dimensions (separator, spacing, casing of field labels); report a bootstrap CI over questions. Keep current keys so v2/v3 columns remain; add new keys for the expanded variant rather than mutating locked v2 values.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "consistency_format_robustness",
+   "file": "src/blme/tasks/consistency/format_robustness.py"
+  },
+  {
+   "id": "self_consistency:1",
+   "severity": "HIGH",
+   "claim": "model.generate() inherits each checkpoint's shipped generation_config for every knob not explicitly passed \u2014 only temperature/top_p/do_sample are overridden \u2014 so models like Qwen2/2.5 (which ship top_k=20 and repetition_penalty=1.05 in generation_config.json) are sampled from a truncated/penalized distribution while GPT-2/Pythia/Llama-base are not, making agreement/entropy values reflect shipped decoding defaults rather than model sharpness and breaking cross-model comparability across the 58-model zoo.",
+   "evidence": "self_consistency.py:84-91 passes only max_new_tokens, do_sample, temperature, top_p, pad_token_id; transformers 5.2.0 (verified in env) merges these kwargs onto model.generation_config, leaving per-checkpoint top_k/repetition_penalty/no_repeat_ngram_size active. Qwen2.5 checkpoints publicly ship generation_config.json with top_k=20, top_p=0.8, repetition_penalty=1.05 (top_p gets overridden here but top_k and repetition_penalty do not). Severity per house rule: 'not cross-model comparable' = HIGH; not CRITICAL because the task is absent from BLME_RESEARCH_TASKS and the v2/v3 CSVs (verified: no consistency_self_consistency columns in results/study_v3/aggregated.csv).",
+   "proposed_fix": "Construct an explicit, complete sampling spec: gen_cfg = GenerationConfig(do_sample=True, temperature=T, top_p=1.0, top_k=0, repetition_penalty=1.0, no_repeat_ngram_size=0, max_new_tokens=K, pad_token_id=...) and call model.generate(..., generation_config=gen_cfg). Better still, drop generation for the first-token metrics entirely and compute them analytically (see self_consistency:2).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_self_consistency",
+   "file": "src/blme/tasks/consistency/self_consistency.py"
+  },
+  {
+   "id": "self_consistency:2",
+   "severity": "MEDIUM",
+   "claim": "Sampling consumes the global torch RNG, which is seeded once per run (core.py set_global_seed(42)), so the metric's values depend on how much RNG any previously executed task consumed \u2014 task order/skip changes silently change results; this is the same defect class as fixed items #50-#53 but self_consistency was missed.",
+   "evidence": "self_consistency.py:84-91 (no per-call seed, no generator); src/blme/core.py:84-86 seeds once globally before the task loop; ledger #50-#53 fixed identical unseeded/global-RNG defects in ablation, edge_attribution, trajectories, attention_polysemanticity.",
+   "proposed_fix": "Minimal: torch.manual_seed(hash(('selfc', prompt_idx)) % 2**31) immediately before each generate call. Better: replace the N=8 Monte-Carlo estimate with the exact first-token quantities from one forward pass \u2014 p = softmax(logits[0,-1]/T); agreement_expectation = max(p) (or collision probability sum(p^2) for pairwise agreement), entropy = -sum(p log p), uniqueness analogue = participation ratio 1/sum(p^2)/V \u2014 fully deterministic, noise-free, and removes both this issue and the generate-kwargs issue for the first-token metrics.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#50-#53 (same class)",
+   "task": "consistency_self_consistency",
+   "file": "src/blme/tasks/consistency/self_consistency.py"
+  },
+  {
+   "id": "contrastive:1",
+   "severity": "MEDIUM",
+   "claim": "The legacy {factual, exclusive} input path is broken: the character-level common-prefix split leaves the shared trailing space inside the prompt, so under \u0120-merging BPE tokenizers score_continuation classifies the first target word as a prompt token and scores ONLY the trailing punctuation for both targets, making the rejection ratio ~1 regardless of the model's knowledge.",
+   "evidence": "contrastive.py:33-37 (_triples_from_pair common-prefix loop yields prompt='The capital of France is ', targets 'Paris.'/'London.'); reproduced with the real GPT-2 tokenizer on 2026-06-13: scored tokens for both targets are ['.'] only (boundary token '\u0120Paris' spans chars (25,31), start 25 < len(prompt) 26, so it lands on the prompt side per common.py:236-238). The tests/tasks/test_consistency.py:29-41 dataset uses exactly this legacy form and passes only because it checks key presence.",
+   "proposed_fix": "After the common-prefix loop, back the split off to the preceding whitespace so targets carry the leading space: `if i > 0 and a[i-1].isspace(): i -= 1` (and additionally back off to the last whitespace boundary if the divergence falls mid-word, e.g. 'transported'/'transplanted'). Then prompt='The capital of France is', targets ' Paris.'/' London.' \u2014 the convention score_continuation was designed for (cf. bundled triples lines 41-49 and counterfact's prepended-space targets).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#34",
+   "task": "consistency_contrastive",
+   "file": "src/blme/tasks/consistency/contrastive.py"
+  },
+  {
+   "id": "contrastive:2",
+   "severity": "LOW",
+   "claim": "Data source switches silently between NeelNanda/counterfact-tracing (when datasets+network available) and 3 bundled triples (otherwise), with default num_samples=3, so values are environment-dependent and statistically tiny \u2014 same silent-fallback class as ledger item (h) for cache.py.",
+   "evidence": "contrastive.py:19 (num_samples default 3), 67-86 (try download, except \u2192 bundled, logged only at INFO level); the two sources produce wholly different magnitudes (counterfact prompts are obscure facts; bundled are trivial facts).",
+   "proposed_fix": "Bundle a fixed, license-compatible subset of >=100 CounterFact records as a JSON asset (deterministic, no network), raise the default num_samples to 50, and emit a 'data_source' key in the result dict so aggregation can detect provenance.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "TASK_FIXES #8",
+   "task": "consistency_contrastive",
+   "file": "src/blme/tasks/consistency/contrastive.py"
+  },
+  {
+   "id": "contrastive:3",
+   "severity": "LOW",
+   "claim": "mean_rejection_ratio is a mean of probability ratios, which is outlier-dominated (a single unknown fact with p_factual ~ 1e-4 and p_exclusive ~ 1e-2 contributes 100 to a 3-item mean); TASK_FIXES #8.3 already prescribes per-token log-prob differences; also, if score_continuation fails for all samples, np.mean([]) returns NaN with a RuntimeWarning instead of an error dict, and the p_factual==0 branch (line 121) is unreachable since exp(-mean_nll) > 0.",
+   "evidence": "contrastive.py:114-126; exp(-x)>0 for any finite x makes line 119's guard always true; no `if not factual_probs: return {\"error\": ...}` guard exists before line 124.",
+   "proposed_fix": "Report median_rejection_ratio and mean_nll_margin = mean(nll_false - nll_true) in nats/token (log-space, robust); add an empty-list guard returning an error dict; delete the dead p_factual==0 branch.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "TASK_FIXES #8",
+   "task": "consistency_contrastive",
+   "file": "src/blme/tasks/consistency/contrastive.py"
+  },
+  {
+   "id": "logical:1",
+   "severity": "HIGH",
+   "claim": "Confirmed residual design flaw (TASK_FIXES #1, partially addressed): the LAMBADA-midpoint split described in TASK_FIXES is GONE at HEAD (replaced by 5 bundled premise/conclusion pairs scored via score_continuation, commit 94be955 wiring), but the implemented conditional-vs-marginal lift still does not measure logical consistency \u2014 every bundled pair shares content words with its premise ('John...', 'Paris...France', 'warm-blooded'), so the lift is dominated by local copying/induction rather than entailment; there is no contradicted-conclusion control, and with n=5 the violation rate is quantized to multiples of 0.2.",
+   "evidence": "logical.py:28-39 (5 bundled pairs, all with high premise-conclusion lexical overlap), 89-91 (violation = cond_lp < uncond_lp over n<=5 items); TASK_FIXES.md lines 9-23 ('The midpoint split creates no logical relationship... compare P(conclusion|premise) vs P(contradicted_conclusion|premise)'); git show 94be955 confirms the bundled-pair design predates rounds 3-5 and the entailed/contradicted contrast was never implemented; task absent from results/study_v3/aggregated.csv so no published numbers depend on it.",
+   "proposed_fix": "REDESIGN as `consistency_entailment` (Tier 3, 'Logical Entailment Sensitivity'). Probe format: {premise, entailed, contradicted} where entailed/contradicted are length-matched and differ only in the truth-bearing word(s), so the copying confound cancels in the contrast. Scoring: s_e = -mean_nll from score_continuation(model, tok, premise, ' ' + entailed) (leading space in the ANSWER, avoiding the boundary bug of logical:2); s_c likewise. Report (a) entailment_accuracy = fraction with s_e > s_c, (b) mean_margin = mean(s_e - s_c) nats/token, (c) DC-PMI-corrected variants d = s - s0 with s0 the conclusion's log-prob after the neutral prefix 'Therefore,' (Holtzman et al. 2021) to cancel each conclusion's prior; no margin hyperparameter; >=50 bundled probes balanced over rule types. Ten example probe triples: 1. P='All birds have feathers, and a sparrow is a bird.' E=' Therefore, a sparrow has feathers.' C=' Therefore, a sparrow has no feathers.' (universal instantiation); 2. P='Maria is taller than John, and John is taller than Pete.' E=' Therefore, Maria is taller than Pete.' C=' Therefore, Pete is taller than Maria.' (transitivity); 3. P='The box is empty.' E=' There is nothing inside the box.' C=' There is something inside the box.' (negation); 4. P='Every student in the class passed the exam, and Anna is a student in the class.' E=' Therefore, Anna passed the exam.' C=' Therefore, Anna failed the exam.' (universal instantiation); 5. P='If it rains, the match is cancelled. It is raining.' E=' Therefore, the match is cancelled.' C=' Therefore, the match is not cancelled.' (modus ponens); 6. P='No reptiles are warm-blooded, and a turtle is a reptile.' E=' Therefore, a turtle is not warm-blooded.' C=' Therefore, a turtle is warm-blooded.' (negative universal); 7. P='Tom finished the race before Sam, and Sam finished before Lee.' E=' Therefore, Tom finished before Lee.' C=' Therefore, Lee finished before Tom.' (temporal transitivity); 8. P='Either the lamp is on or it is off. The lamp is not on.' E=' Therefore, the lamp is off.' C=' Therefore, the lamp is on.' (disjunctive syllogism); 9. P='The glass is full of water.' E=' The glass is not empty.' C=' The glass is empty.' (lexical negation); 10. P='Only members may enter, and Carol entered.' E=' Therefore, Carol is a member.' C=' Therefore, Carol is not a member.' (only-if inference).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "TASK_FIXES #1",
+   "task": "consistency_logical",
+   "file": "src/blme/tasks/consistency/logical.py"
+  },
+  {
+   "id": "logical:2",
+   "severity": "MEDIUM",
+   "claim": "The trailing-space prompt convention (premise + ' ' for the conditional, ' ' for the 'unconditional') makes score_continuation classify the first conclusion token as a prompt token under \u0120-merging BPE, so the computed quantity is P(rest-of-conclusion | premise + first-word) vs P(rest-of-conclusion | first-word) \u2014 not P(conclusion|premise) vs P(conclusion) as documented; the exclusion is symmetric (internally consistent) but the 'unconditional' baseline silently conditions on the conclusion's first word, single-word conclusions return None and are skipped, and the scored token set varies with tokenizer offset conventions across the zoo.",
+   "evidence": "logical.py:69 (score_continuation(model, tokenizer, premise + ' ', conclusion)) and :76 (prompt ' '); common.py:236-238 (first token with start offset >= len(prompt)); reproduced 2026-06-13 with the real GPT-2 tokenizer: for premise 'John is a bachelor. ' the token '\u0120John' spans (19,24), start 19 < 20, so scored tokens are ['\u0120is','\u0120unmarried','.'] in BOTH the conditional and the ' '-prompt unconditional call \u2014 the first conclusion word is never scored and leaks into the baseline's context.",
+   "proposed_fix": "Move the space into the answer: cond = score_continuation(model, tokenizer, premise, ' ' + conclusion); uncond = score_continuation with an empty/BOS-only context (e.g. prompt='' for BOS-adding tokenizers, or score the full ' ' + conclusion sequence from position 1 for GPT-2-class) so the entire conclusion including its first token is scored on both sides; document that for no-BOS tokenizers the first conclusion token is unscoreable in the unconditional term and drop it from BOTH terms explicitly.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#34",
+   "task": "consistency_logical",
+   "file": "src/blme/tasks/consistency/logical.py"
+  },
+  {
+   "id": "logical:3",
+   "severity": "LOW",
+   "claim": "CITATION: the docstring cites Elazar et al. 2021, which defines paraphrase-prediction consistency via ParaRel and never defines the conditional-probability lift or violation rate the code computes; PAPERS.md line 292 already concedes the task is BLME-custom.",
+   "evidence": "logical.py:19-20 ('References: Measuring and Improving Consistency in Pretrained Language Models (Elazar et al., 2021)'); arXiv:2102.01017 abstract: consistency = 'the invariance of its behavior under meaning-preserving alternations in its input' (cloze predictions over 328 paraphrase patterns) \u2014 no conditional/unconditional probability comparison appears; docs/tasks_consistency.md \u00a73 describes yet another method ('probability matrices for mutually exclusive statements') matching neither paper nor code.",
+   "proposed_fix": "Replace the docstring reference with an honest note: 'BLME-custom PMI-style lift; cf. Holtzman et al. 2021 (arXiv:2104.08315) for conditional-vs-prior LM scoring; no canonical source defines this as a logical-consistency metric.' Update docs/tasks_consistency.md \u00a73 to describe the actual computation; after the consistency_entailment redesign, cite SNLI (Bowman et al. 2015) / RTE for probe provenance.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_logical",
+   "file": "src/blme/tasks/consistency/logical.py"
+  },
+  {
+   "id": "consistency_position_sensitivity:1",
+   "severity": "HIGH",
+   "claim": "CITATION: Confirmed open #19 \u2014 the task cites Liu et al. 2023 but measures short-context paraphrase NLL, not lost-in-the-middle retrieval: distractor passages are ~60-70 words (lines 39-149, full contexts ~100-160 tokens vs Liu's multi-thousand-token contexts), the score is NLL of a paraphrase of the inserted fact (lines 214-225, surface word overlap not retrieval), and at rel_pos=1.0 word_idx=len(words) makes suffix empty (lines 184-194) so the fact sits immediately adjacent to its paraphrase and NLL collapses via local copying rather than retrieval.",
+   "evidence": "position_sensitivity.py:39-149 (passages 60-70 words each), :184-194 (rel_pos=1.0 \u2192 suffix='' \u2192 full_context=prefix+' '+fact, fact abuts recall), :219-225 (mean NLL of paraphrase continuation). Liu et al. 2023 abstract: \"performance ... significantly degrades when models must access relevant information in the middle of long contexts, even for explicitly long-context models\" \u2014 their setup is multi-document QA and key-value retrieval with 10-30 documents / 75-300 KV pairs (thousands of tokens), scored by accuracy.",
+   "proposed_fix": "REDESIGN as consistency_position_retrieval (replace this task; values are not interpretable as lost-in-the-middle). Spec: (1) Needles: 10 synthetic key-value facts generated by random.Random(0) \u2014 KEY = 8-hex-digit string (e.g. '7f3a91c2'), VALUE = 4-digit number; needle sentence exactly 'The secret code for project {KEY} is {VALUE}.'. Random KV pairs cannot be guessed from priors, so NLL of VALUE is pure retrieval; adjacency at depth 1.0 is then the legitimate recency condition, not a paraphrase-copy artifact. (2) Filler: deterministic concatenation of the standard WikiText-103 validation passages already used as the eval corpus (cache._load_default_corpus fallback if download fails), filtered to exclude any passage containing the KEY/VALUE strings \u2014 fully offline and deterministic. (3) Context budget C = min(getattr(config,'max_position_embeddings',1024), 1024) tokens in the model's own tokenizer; build filler to C minus needle/question/answer token lengths. (4) Depth fractions {0, .25, .5, .75, 1.0}: insert the needle at the filler sentence boundary nearest token index round(f*C_filler). (5) Exact prompt template: '{filler_prefix} The secret code for project {KEY} is {VALUE}. {filler_suffix}\\nQuestion: What is the secret code for project {KEY}?\\nAnswer: The secret code for project {KEY} is' with scored continuation ' {VALUE}' via the shared score_continuation helper (mandatory). (6) Metrics: nll_at_depth_f (per-token NLL of VALUE tokens), rank_at_depth_f (rank of first VALUE token in the next-token distribution at the answer position), u_curve_depth = nll(0.5) - min(nll(0.0), nll(1.0)), position_spread. No generation; 10 needles x 5 depths = 50 forwards at <=1024 tokens; fully deterministic.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#19",
+   "task": "consistency_position_sensitivity",
+   "file": "src/blme/tasks/consistency/position_sensitivity.py"
+  },
+  {
+   "id": "consistency_icl_slope:1",
+   "severity": "LOW",
+   "claim": "CITATION: docstring cites Brown 2020 and Min 2022, but neither defines the NLL-vs-k regression slope (BLME-custom metric), and Min et al. 2022's central finding \u2014 \"ground truth demonstrations are in fact not required -- randomly replacing labels in the demonstrations barely hurts performance\" \u2014 actually undercuts the docstring's framing of the slope as measuring 'ability to learn from context' rather than format/label-space conditioning.",
+   "evidence": "icl_slope.py:6-9 ('a strong predictor of downstream benchmark performance (Brown et al. 2020; Min et al. 2022)'); Min et al. 2022 abstract quote above; PAPERS.md:290 already flags the citation as not formalized ('\ud83d\udcdd add Brown 2020; Min 2022 explicitly').",
+   "proposed_fix": "Label the metric BLME-custom in the docstring and PAPERS.md; cite Brown et al. 2020 (NeurIPS 2020, arXiv:2005.14165) as motivation for few-shot scaling, Min et al. 2022 (EMNLP 2022, arXiv:2202.12837) as the caveat that demo-count gains partly reflect format learning, and optionally Olsson et al. 2022 (arXiv:2209.11895) for the related in-context learning score.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_icl_slope",
+   "file": "src/blme/tasks/consistency/icl_slope.py"
+  },
+  {
+   "id": "consistency_icl_slope:2",
+   "severity": "MEDIUM",
+   "claim": "The slope is estimated from only 4 fixed items whose answers are memorized world knowledge (Spain->Madrid, eagle->bird, light->dark, 5+2->7), so capable models start near-zero 0-shot NLL and the metric measures remaining headroom (ceiling effect) rather than ICL ability \u2014 icl_gain/slope can shrink with capability for the wrong reason, and 4-item means at 4 shot counts make the per-family estimate high-variance.",
+   "evidence": "icl_slope.py:35-84 (_ICL_BUNDLE has exactly 4 items, all common-knowledge facts), :130-138 (slope fit on 4 means of <=4 items each). Brown et al. 2020 measure few-shot scaling on held-out task accuracy, not on facts directly retrievable 0-shot.",
+   "proposed_fix": "Expand the bundle to >=50 items and add synthetic mappings that cannot be solved 0-shot \u2014 nonce-word bijections ('A wug maps to a blicket') or permuted-label classification per Min et al. 2022 \u2014 so 0-shot NLL is uniformly high across the zoo and the slope isolates context learning; keep icl_relative_gain as the headline (dimensionless) feature.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_icl_slope",
+   "file": "src/blme/tasks/consistency/icl_slope.py"
+  },
+  {
+   "id": "consistency_bias_weat:1",
+   "severity": "MEDIUM",
+   "claim": "_find_word_token_position uses substring text.find(word) without word boundaries, so for attribute word 'his' in template 'This is his.' it matches inside 'This' (char 1) and returns token position 0 \u2014 empirically reproduced on GPT-2: pos 0 = 'This' instead of pos 2 = ' his' \u2014 so one of eight male-attribute embeddings in gender_science is the position-0 sink-token state of 'This' for every model, biasing gender_science_d and mean_abs_d_across_tests zoo-wide.",
+   "evidence": "bias.py:83 ('char_start = text.find(word)') and :91-92 (first overlapping token returned). Repro (CPU, gpt2 tokenizer): _find_word_token_position(tok, 'This is his.', 'his') -> 0, token 'This', while tokens are ['This', '\u0120is', '\u0120his', '.'] (correct index 2); all other list words ('he','her','him','hers','she','man','son','art',...) resolve correctly. Word 'his' is in _WEAT_TESTS['gender_science']['attributes_a'] (line 55). Not covered by #49 (which fixed the standalone-id search); this is a residual defect of the offset-based replacement. Same substring flaw exists in the _embed_word fallback (line 107).",
+   "proposed_fix": "Find the word with a boundary-aware regex: m = re.search(r'(?<!\\w)' + re.escape(word) + r'(?!\\w)', text); char_start = m.start() if m else -1; apply the same in the _embed_word prefix fallback. Add the regression test below.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#49",
+   "task": "consistency_bias_weat",
+   "file": "src/blme/tasks/consistency/bias.py"
+  },
+  {
+   "id": "consistency_bias_weat:2",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the docstring and PAPERS.md attribute the contextualization protocol to May et al. 2019 (SEAT), but SEAT applies WEAT to \"the vector representation of a sentence\" (pooled sentence embedding), whereas the code extracts the hidden state at the target word's token position \u2014 the protocol of Tan & Celis 2019 (NeurIPS 2019), who explicitly contrast their contextual-word-level approach against SEAT's sentence level.",
+   "evidence": "bias.py:3-4 and :13-17 ('May et al. 2019 (SEAT extension...)' yet 'We extract the hidden state at the position of the target/attribute word'); :121 (h = out.hidden_states[-1][0, pos]). May et al. 2019: \"We slot each word into each of several semantically bleached sentence templates ... SEAT compares sets of sentences ... by applying WEAT to the vector representation of a sentence.\" Tan & Celis 2019 abstract: \"we propose assessing bias at the contextual word level ... avoids confounding effects that underestimate bias at the sentence encoding level.\" PAPERS.md:65 maps May 2019 -> consistency_bias_weat.",
+   "proposed_fix": "Replace/augment the May 2019 citation with Tan & Celis 2019, \"Assessing Social and Intersectional Biases in Contextualized Word Representations,\" NeurIPS 2019, arXiv:1911.01485, in the docstring, PAPERS.md row 65, and the paper's metric appendix; optionally keep May 2019 for the bleached-template idea ('This is {}.').",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_bias_weat",
+   "file": "src/blme/tasks/consistency/bias.py"
+  },
+  {
+   "id": "consistency_bias_weat:3",
+   "severity": "LOW",
+   "claim": "Minor estimator and documentation nits: the permutation p-value samples 500 random permutations (Caliskan enumerates all equal-size partitions; C(16,8)=12870 is enumerable) without the standard (count+1)/(n+1) correction so p can be exactly 0; docstring promises 'per-layer' results and a 'mean_d_across_tests' key but the code reports final-layer only and 'mean_abs_d_across_tests'; the test key 'gender_science' actually implements Caliskan test 7 (math vs arts), not test 8 (science vs arts); n_permutations default mismatch (signature 1000 vs config default 500).",
+   "evidence": "bias.py:155-168 (random permutations, count_ge/n, no +1 smoothing), :18-21 vs :214 (docstring 'per-layer'/'mean_d_across_tests' vs actual final-layer-only 'mean_abs_d_across_tests'), :50-57 (math/arts word lists labeled gender_science; Caliskan Table 1 test 7 is math-arts, test 8 is science-arts), :155 vs :178 (1000 vs 500).",
+   "proposed_fix": "Enumerate all 12870 equal partitions (itertools.combinations) for exact p, or keep sampling with p=(count+1)/(n+1); correct the docstring keys and drop the per-layer claim; rename the test key to 'gender_math_arts' (or swap in actual science terms and keep the name); align the n_permutations default.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "consistency_bias_weat",
+   "file": "src/blme/tasks/consistency/bias.py"
+  }
+ ],
+ "skepticA": [],
+ "skepticB": [],
+ "adjudicated": []
+}

@@ -1,0 +1,19 @@
+{
+ "baseline_corrected_LOO": 0.629,
+ "baseline_corrected_LOFO": 0.576,
+ "lasso_full": {
+  "nfeat": 737,
+  "LOO": 0.777,
+  "LOFO": 0.503
+ },
+ "lasso_no_size": {
+  "nfeat": 715,
+  "LOO": 0.784,
+  "LOFO": 0.497
+ },
+ "lasso_structural_only": {
+  "nfeat": 671,
+  "LOO": 0.788,
+  "LOFO": 0.552
+ }
+}

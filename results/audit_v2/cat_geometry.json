@@ -1,0 +1,1473 @@
+{
+ "category": "geometry",
+ "tasks": [
+  {
+   "task": "geometry_spectral",
+   "file": "src/blme/tasks/geometry/spectral.py",
+   "paper_claimed": "Martin & Mahoney 2019a/2019b/2021 (avg_alpha, power-law); Bartlett et al. 2020 (stable rank)",
+   "paper_url": "https://arxiv.org/abs/1901.08278",
+   "paper_verified": "Martin, Mahoney, 'Traditional and Heavy-Tailed Self Regularization in Neural Network Models', arXiv:1901.08276 (2019) and 'Heavy-Tailed Universality Predicts Trends in Test Accuracies', Nature Comms 12:4122 (2021), arXiv:1901.08278 \u2014 verified, defines the WeightWatcher power-law exponent alpha fit to the empirical spectral density (ESD) of eigenvalues lambda=sigma^2 of W^T W via the powerlaw MLE package with KS-optimal x_min. Stable rank ||W||_F^2/||W||_2^2 is Bartlett, Foster, Telgarsky, 'Spectrally-normalized margin bounds for neural networks', NeurIPS 2017, arXiv:1706.08498 (cited year '2020' is wrong; should be 2017).",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "DEVIATES_DOCUMENTED",
+   "intuition": "The power-law slope of a weight matrix's singular-value spectrum is a training-quality fingerprint: Martin & Mahoney's Heavy-Tailed Self-Regularization theory shows that well-optimized layers develop heavy-tailed spectra (small alpha) reflecting implicit self-regularization and feature specialization, and the layer-averaged exponent tracks generalization across hundreds of pretrained models without any data. Stable rank ||W||_F^2/||W||_2^2 complements this as a soft count of effective directions a weight matrix uses. Both should track LM capability because a model that has learned richly structured, well-conditioned transforms exhibits heavier-tailed, higher-stable-rank weight spectra than an under-trained one.",
+   "issues": [
+    {
+     "id": "geometry_spectral:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the reported 'alpha' is not Martin & Mahoney's WeightWatcher exponent. The code runs a Hill estimator over a fixed top-20% tail of the SINGULAR VALUES sigma, whereas M&M fit the power-law to the ESD of the EIGENVALUES lambda=sigma^2 of W^T W using the powerlaw-package MLE with a KS-optimal x_min. Because lambda=sigma^2, the code's estimate is approximately 2*alpha_MM - 1, on a different scale.",
+     "evidence": "spectral.py:59-80 computes `S = torch.linalg.svdvals(W)` then Hill `alpha = 1 + k/sum(log(top_k/x_min))` over `k=0.2*len(S)` singular values (no x_min/KS selection). M&M (arXiv:1901.08278) fit ESD of lambda=sigma^2. Repro: drawing lambda~Pareto(pdf~lambda^-alpha_MM), sigma=sqrt(lambda), the code's Hill-on-sigma gives 3.99/5.05/6.88 for alpha_MM=2.5/3.0/4.0 (i.e. ~2*alpha_MM-1). Production avg_alpha is 5.1-6.1 across the zoo (results/study_v3/aggregated.csv), consistent with the 2x-1 inflation; literature WW alpha is ~2-4.",
+     "proposed_fix": "Square the singular values before fitting (fit lambda=sigma^2), and replace the fixed-fraction Hill with the powerlaw MLE + KS-optimal x_min (or document the metric as a 'singular-value Hill index', not the M&M alpha). The cross-model monotone transform means ranking is roughly preserved, but reported values are not comparable to published WW alpha.",
+     "changes_values": true,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_spectral:2",
+     "severity": "LOW",
+     "claim": "Stable-rank citation year is wrong (docstring says 'Bartlett et al., 2020'); the stable-rank bound ||W||_F^2/||W||_2^2 is from Bartlett, Foster, Telgarsky NeurIPS 2017 (arXiv:1706.08498).",
+     "evidence": "spectral.py:21 docstring: 'Stable Rank: ||W||_F^2 / ||W||_2^2 (Bartlett et al., 2020)'. Web-verified: NeurIPS 2017, arXiv:1706.08498.",
+     "proposed_fix": "Correct the year to 2017.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_spectral:3",
+     "severity": "LOW",
+     "claim": "docs/tasks_geometry.md section 14 ('Spectral Decay') mis-describes this task: it says alpha is fit 'to the spectrum of eigenvalues from the hidden space covariance' and cites Stringer et al. 2019 (visual cortex), but the implementation is weight-only (Hill on weight-matrix singular values) and the operative citation is Martin & Mahoney.",
+     "evidence": "docs/tasks_geometry.md:111-118 vs spectral.py:52-84 (iterates `model.named_modules()` weight matrices, no hidden states). PAPERS.md:63-64 correctly cites Martin-Mahoney.",
+     "proposed_fix": "Rewrite the docs \u00a714 entry to describe a weight-spectrum metric and cite Martin & Mahoney instead of Stringer.",
+     "changes_values": false,
+     "confidence": "high"
+    }
+   ],
+   "comparability_notes": "alpha and stable_rank are intensive per-matrix quantities, dimensionless in principle, but: (1) the reported alpha is on the 2*alpha_MM-1 scale (see :1), a uniform monotone transform so ranking is preserved; (2) the fixed 20% tail (vs KS-optimal x_min) means the bias depends on per-matrix spectrum shape, which can vary with matrix aspect ratio across architectures; (3) the huge vocab-shaped lm_head (nn.Linear) is averaged in alongside transformer-block weights, so models with very different vocab/d ratios mix a qualitatively different matrix into avg_alpha/avg_stable_rank. GPT-2 Conv1D inclusion (fix #3) is correctly present (TARGET_MODULES line 36-39).",
+   "degeneracy_notes": "Guards present: empty S -> 0.0; rank-1/constant matrices where top_k[-1]<=1e-6 or log_sum<=0 -> alpha=0.0 (these zeros are then averaged into avg_alpha, mildly deflating it). W.dim()!=2 skipped. svdvals wrapped in try/except. No T/sequence dependence (weight-only, corpus-free).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Construct nn.Linear with weight set to diag([3,2,1]) padded into a 3x3 matrix: stable_rank = (9+4+1)/9 = 14/9 = 1.5556 exactly; assert avg_stable_rank == pytest.approx(1.5556). For alpha, build a matrix with singular values following a known Pareto tail and assert the Hill estimate matches 1 + k/sum(log(top_k/x_min)) recomputed by hand.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_schatten",
+   "file": "src/blme/tasks/geometry/schatten.py",
+   "paper_claimed": "Wei et al. 2025 \u2014 'From Internal Representations to Text Quality: A Geometric Approach to LLM Evaluation', arXiv:2509.25359 (Schatten-p); Li, Xia, Chang, Wu 2024 \u2014 arXiv:2410.10672 (Matrix Nuclear-Norm); Garrido et al. 2023 \u2014 RankMe, arXiv:2210.02885",
+   "paper_url": "https://arxiv.org/abs/2509.25359",
+   "paper_verified": "arXiv:2509.25359 is 'Geometric Metrics and LLMs: What They Measure and When They Work' (v1 title 'From Internal Representations to Text Quality') by Yusupov, Maksimov, Alaeva, Vasileva, Antipina, Zaitseva, Ermilova, Burnaev, Shvetsov \u2014 NO author named Wei. Its finding: 'some metrics (notably Schatten Norm and MOM) mainly reflect output length, and their apparent discriminative power collapses once length is controlled.' Li et al. 2024 MNN (arXiv:2410.10672, Yahan Li/Tingyu Xia/Yi Chang/Yuan Wu) verified: column L2 norms sorted descending, sum top D=min(N,d), after centering + row L2 normalization (reference repo MLGroupJLU/MatrixNuclearNorm confirmed). Garrido et al. RankMe (arXiv:2210.02885, ICML 2023) verified: RankMe(Z)=exp(-sum p_k log p_k), p_k=sigma_k/||sigma||_1+eps on RAW singular values, no centering/row-normalization, attributed to Roy & Vetterli 2007.",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "Schatten-p norms, the nuclear-norm approximation, and RankMe all summarize how the singular-value energy of a layer's token matrix is distributed: a representation that spreads energy across many directions (high effective rank, large nuclear/Schatten-1) is using its capacity richly, while one collapsed onto a few directions concentrates energy in the top singular values. The theory is that more capable models maintain higher-rank, less-collapsed intermediate representations that preserve more linearly-decodable information. These spectral summaries should therefore correlate with capability via the same anisotropy/effective-dimensionality mechanism that motivates matrix entropy and IsoScore.",
+   "issues": [
+    {
+     "id": "geometry_schatten:1",
+     "severity": "HIGH",
+     "claim": "CITATION: Schatten-p norms are attributed to 'Wei et al. 2025, arXiv:2509.25359' but that paper has no author named Wei (it is Yusupov, Maksimov, Alaeva et al.), and its actual conclusion is the OPPOSITE of the claim in the docstring \u2014 it finds Schatten Norm 'mainly reflect[s] output length' and loses discriminative power once length is controlled, rather than 'validating' it as a reference-free text-quality proxy.",
+     "evidence": "schatten.py:7-12 docstring 'validated as reference-free text-quality proxies by Wei et al. 2025 (\"From Internal Representations to Text Quality\", arXiv:2509.25359)'. PAPERS.md:86 same. WebFetch of arXiv:2509.25359: published title 'Geometric Metrics and LLMs: What They Measure and When They Work'; abstract: 'some metrics (notably Schatten Norm and MOM) mainly reflect output length, and their apparent discriminative power collapses once length is controlled.' Author list contains no 'Wei'.",
+     "proposed_fix": "Fix author/title to Yusupov et al. 2025, and reframe the docstring/paper text: the cited work cautions that Schatten norms are length-confounded, not that they are validated quality proxies.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_schatten:2",
+     "severity": "HIGH",
+     "claim": "schatten_2 (Frobenius) is a degenerate feature: after the code's row-L2 normalization every kept row has unit norm, so ||Z_norm||_F = sqrt(N_kept), and dividing by sqrt(d) makes schatten_2 == sqrt(N_kept/d) EXACTLY \u2014 a pure function of token count and d_model, carrying zero information about the representation content.",
+     "evidence": "schatten.py:146 `Z_norm=_normalise_matrix(Z)` (rows L2-normalized, lines 124-129) then line 160 `schatten_2 = _schatten_p_norm(S,p=2)/sqrt(d)`. Repro: for random Z of shape (T,d), schatten_2 is identical for different content of the same shape (0.883883 for T=50,d=64 == sqrt(50/64)); production per-layer std of schatten_2 is ~1e-7 and schatten_2_last tracks 1/sqrt(d) monotonically across all 44 models (results/study_v3/aggregated.csv).",
+     "proposed_fix": "Drop schatten_2 (it is mathematically trivial after row normalization), or compute Schatten norms on the raw (un-row-normalized) matrix as the Schatten-norm literature does. Note that row normalization was borrowed from the MNN preprocessing and is not part of the Schatten-norm definition.",
+     "changes_values": true,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_schatten:3",
+     "severity": "MEDIUM",
+     "claim": "CITATION/MATH: the d^(1/p) normalization is attributed to the Schatten paper ('Wei et al. 2025 reports ||X||_{S_p}/d^{1/p} as the comparable quantity'), but that paper applies no such normalization; the claim is fabricated. Combined with the borrowed row-L2 + centering preprocessing (from MNN, Li 2024), the Schatten/MNN/RankMe values are computed on a matrix the Schatten and RankMe papers never normalize that way.",
+     "evidence": "schatten.py:154-164 comment 'Wei et al. 2025 reports ||X||_{S_p}/d^{1/p}'. WebFetch arXiv:2509.25359: 'no explicit normalization by d^(1/p)'. Garrido RankMe is defined on raw Z (no centering/row-norm) but code feeds Z_norm to _rankme (line 153-164).",
+     "proposed_fix": "Remove the fabricated attribution; either justify d^(1/p) as a BLME design choice or normalize per \u00a73.4 (divide by d_model). Compute RankMe on the raw matrix to match Garrido.",
+     "changes_values": true,
+     "confidence": "high"
+    }
+   ],
+   "comparability_notes": "schatten_2 is pure sqrt(N/d) (issue :2) so it is 'comparable' only as a token-count/width ratio. schatten_1/d, schatten_4/d^0.25, MNN/d are normalized for width but still depend on the row-normalized spectrum shape; schatten_inf (max sigma of a row-normalized matrix) is bounded by sqrt(N) and depends on N. rankme is bounded by min(N,d) and, with only ~128 tokens, is rank-capped at N for wide models, biasing it downward for large d. Per-sample cache path uses per_sample=True correctly (line 173-178), so no cross-document token mixing (bug #1 avoided).",
+   "degeneracy_notes": "Guards: Z.shape[0]<2 or shape[1]<2 -> {} (skipped); rows with norm<=1e-12 dropped; if <2 rows survive normalization, returns un-normalized Z (then svdvals still runs \u2014 a subtle inconsistency but rare). NaN/inf filtered in _schatten_p_norm via isfinite mask. svdvals in try/except. Per-layer means skip non-finite. RankMe returns nan on all-zero/total<=0.",
+   "test_status": "golden",
+   "proposed_golden_test": "Existing test_schatten_norms_math_identities pins _schatten_p_norm and MNN exactly. ADD a degeneracy-exposing golden: assert that for two DIFFERENT random tensors of identical shape (T,d), _per_sentence_measurements(...)['schatten_2'] are equal and == sqrt(T/d) \u2014 codifying that schatten_2 is content-independent (so reviewers see the degeneracy is intended-or-removed).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_matrix_entropy",
+   "file": "src/blme/tasks/geometry/matrix_entropy.py",
+   "paper_claimed": "Wei, Tan, Li, Wang, Huang 2024 \u2014 'Large Language Model Evaluation via Matrix Entropy' (Diff-eRank), arXiv:2401.17139",
+   "paper_url": "https://arxiv.org/abs/2401.17139",
+   "paper_verified": "Lai Wei, Zhiquan Tan, Chenghai Li, Jindong Wang, Weiran Huang, 'Large Language Model Evaluation via Matrix Entropy' (v1 title; NeurIPS 2024 title 'Diff-eRank'), arXiv:2401.17139 \u2014 VERIFIED. Def 4.1: z\u0304_i=(z_i-z\u0304)/||z_i-z\u0304||_2 (center then row-L2), Sigma_S=(1/N)sum z\u0304_i z\u0304_i^T with tr(Sigma_S)=1. Eq 2: H=-sum_i lambda_i log lambda_i over eigenvalues. Def 4.3: H(D)=(sum_i H(Sigma_Si))/(n log d) \u2014 average per-sentence then divide by log d. Paper uses final-layer hidden states. Reference repo waltonfuture/Matrix-Entropy confirms eig_val = svd(A/trace(A)), eRank=exp(entropy).",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT",
+   "intuition": "Matrix entropy is the von Neumann entropy of a layer's centered, row-normalized token covariance: low entropy means the model has compressed its token representations onto a few shared directions (an information bottleneck), high entropy means it spreads them across many. Wei et al. show this falls during training as a model learns to discard redundant information, so a tighter last-layer bottleneck (lower normalized entropy) signals more effective representation learning. Dividing by log d makes the quantity comparable across model widths, and it should track capability because stronger models extract more compact, task-relevant codes from their inputs.",
+   "issues": [
+    {
+     "id": "geometry_matrix_entropy:1",
+     "severity": "LOW",
+     "claim": "The /log d normalization (paper Def 4.3) over-normalizes in the finite-token regime: with ~128 tokens and d_model up to 8192, the centered covariance has rank <= T-1 << d, so the achievable entropy ceiling is log(T-1)/log(d), which SHRINKS as d grows \u2014 injecting a width-dependent downward bias into matrix_entropy_normalized independent of representation quality. This is faithful to the paper (which divides by log d regardless), but is a cross-model comparability caveat.",
+     "evidence": "matrix_entropy.py:93 `H/math.log(max(d,2))`. Repro on random (128,d): H_normalized = 0.717/0.580/0.537 for d=768/4096/8192, matching the rank-limited ceiling log(127)/log(d) = 0.729/0.582/0.538 \u2014 a ~0.18 spread driven purely by d via rank deficiency, not content.",
+     "proposed_fix": "Document the caveat; optionally normalize by log(min(T-1,d)) or report raw entropy alongside, so width-driven ceiling effects are visible. No change required for paper-faithfulness.",
+     "changes_values": false,
+     "confidence": "high"
+    }
+   ],
+   "comparability_notes": "Matrix entropy is dimensionless after /log d (matches paper). Residual width bias from rank deficiency when T<d (issue :1). Per-sentence aggregation + last-layer headline match the paper (fix #26 faithful). Uses per_sample=True cache (line 102-107), so no cross-document token mixing (bug #1 avoided). The redundant /trace (line 85) is a harmless no-op since row-normalized rows already give tr=1.",
+   "degeneracy_notes": "Robust guards: <2 tokens or d<2 -> nan; <2 rows surviving row-norm -> nan; non-finite/<=0 trace -> nan; lambda clamped to 1e-30 before log (0 log 0 convention). All-non-finite layers -> error dict. float() upcast before svdvals (line 59) handles bf16/fp16. Headline uses max layer key. No determinism issues (no sampling).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Hand-computable case: Z = [[1,0],[ -1,0],[0,1],[0,-1]] (already centered). Row L2 norms = 1; normalized rows unchanged. Sigma = Z^T Z / 4 = diag(0.5,0.5); eigenvalues (0.5,0.5); H = -2*(0.5 log 0.5) = log 2 = 0.6931; H_normalized = log2/log2 = 1.0 exactly. Assert _matrix_entropy(Z)['entropy']==pytest.approx(0.6931) and ['entropy_normalized']==pytest.approx(1.0).",
+   "recommended_action": "NO_ACTION"
+  },
+  {
+   "task": "geometry_collapse",
+   "file": "src/blme/tasks/geometry/collapse.py",
+   "paper_claimed": "Jing, Vincent, LeCun, Tian 2021 (dimensional collapse, arXiv:2110.09348); Roy, Vetterli 2007 (effective rank, EUSIPCO); Pedrotti, Guo, Jaffe et al. 2025 \u2014 'The Compression Valley: A Depth-Dependent View of LLM Capability', arXiv:2505.xxxxx",
+   "paper_url": "https://arxiv.org/abs/2110.09348",
+   "paper_verified": "Jing, Vincent, LeCun, Tian, 'Understanding Dimensional Collapse in Contrastive Self-supervised Learning', ICLR 2022, arXiv:2110.09348 \u2014 VERIFIED. Roy & Vetterli, 'The Effective Rank: A Measure of Effective Dimensionality', EUSIPCO 2007 \u2014 VERIFIED: erank=exp(H(p)), p_k=sigma_k/sum|sigma_k| (note: the paper's own definition uses raw sigma, but BLME's utils.effective_rank deliberately uses sigma^2 per fix #35, citing the Gram-matrix/eigenvalue convention). The third reference is unverifiable: no arXiv paper 'The Compression Valley: A Depth-Dependent View of LLM Capability' by Pedrotti/Guo/Jaffe exists; the real compression-valley paper is arXiv:2510.06477 'Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin' by Queipo-de-Llano, Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv.",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Effective rank measures how many dimensions a layer's hidden-state cloud actually spans; tracking it across depth reveals whether the model preserves a high-dimensional representation or collapses it onto a low-dimensional subspace. Severe collapse (a sharp erank drop) destroys linearly-decodable information and is associated with over-smoothing in deep transformers, so the depth profile of effective rank and its largest single-layer drop are mechanistic proxies for how well a model maintains usable representational capacity. The U-shaped 'compression valley' motif links a mid-network erank dip to the model's information-routing efficiency, which the literature ties to capability.",
+   "issues": [
+    {
+     "id": "geometry_collapse:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the third reference is fabricated/misattributed \u2014 'Pedrotti, Guo, Jaffe et al. 2025, The Compression Valley: A Depth-Dependent View of LLM Capability, arXiv:2505.xxxxx' has a placeholder arXiv id and a title that does not match any existing paper. The genuine compression-valley paper is arXiv:2510.06477 by Queipo-de-Llano et al. (PAPERS.md:73 also misattributes 2510.06477 to 'Pedrotti, Guo').",
+     "evidence": "collapse.py:26-29 docstring cites 'arXiv:2505.xxxxx'. Web searches for the title and author set return no such paper; the only compression-valley LLM paper is arXiv:2510.06477 with a completely different author list.",
+     "proposed_fix": "Replace the bogus citation with arXiv:2510.06477 (Queipo-de-Llano et al. 2025) and correct PAPERS.md:73 authors. Core metric attribution (Jing 2021 + Roy-Vetterli 2007) is correct and unaffected.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_collapse:2",
+     "severity": "MEDIUM",
+     "claim": "max_drop_layer is emitted as an ABSOLUTE layer index, which is size-correlated (deeper models can place the drop at a larger index) and survives as a feature column in the aggregated study \u2014 same bug class as fixes #45/#59 (raw index vs normalized depth).",
+     "evidence": "collapse.py:95 `max_drop_layer = int(np.argmin(diffs)) + 1`. Confirmed present in results/study_v3/aggregated.csv as `geometry_collapse.max_drop_layer` with values 1,23,7,2,... and NaN for some models \u2014 an absolute index feature, not normalized to depth.",
+     "proposed_fix": "Emit max_drop_layer as normalized depth: (argmin(diffs)+1)/(n_layers-1). It is a scalar (not a per-layer list) so the aggregator's layer-regrouping (#36) does not catch it.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "45"
+    },
+    {
+     "id": "geometry_collapse:3",
+     "severity": "LOW",
+     "claim": "max_erank/min_erank are dimension-dependent (effective rank is bounded by min(N_tokens, d_model) and grows with width), so the raw magnitudes are not cross-model comparable without the \u00a73.4 /d_model normalization; only collapse_ratio (min/max) and the per-layer slope are dimensionless.",
+     "evidence": "collapse.py:99-100 emit raw max_erank/min_erank; aggregated.csv has a separate `geometry_collapse.max_erank_norm` (downstream /d_model) but the task itself emits unnormalized values.",
+     "proposed_fix": "Ensure the normalization pipeline divides max_erank/min_erank by d_model (per \u00a73.4); rely on collapse_ratio/slope as the comparable headline features.",
+     "changes_values": false,
+     "confidence": "med"
+    }
+   ],
+   "comparability_notes": "collapse_ratio = min_erank/max_erank is a dimensionless ratio and cross-model comparable. erank magnitudes and max_erank/min_erank scale with min(N,d), so need /d_model (issue :3). max_drop_layer is an absolute index needing depth normalization (issue :2). Effective rank correctly uses sigma^2 convention via utils.effective_rank (fix #35 verified at utils.py:16-41). Uses the POOLED token cloud (get_hidden_states without per_sample, line 50) \u2014 this is appropriate here (global dimensionality of the representation space) and collapse was NOT among bug #1's corrupted consumers.",
+   "degeneracy_notes": "Guards: <5 finite rows in a layer -> erank 0.0 appended (a zero erank then makes collapse_ratio=0; for the pooled ~12k-row cloud this never triggers). NaN/inf rows filtered (line 62-63). svd LinAlgError -> scipy fallback -> 0.0. diffs empty (single layer) -> max_drop 0.0, max_drop_layer -1. Centering before SVD. Some models (llama2) show NaN max_drop_layer in production \u2014 silent missingness worth tracing.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Feed a fake cache/layer_activations dict with layer 0 = 4 orthonormal directions repeated (rank 4, erank\u22484) and layer 1 = all rows equal (rank 1, erank=1): assert max_erank\u22484, min_erank\u22481, collapse_ratio\u22480.25, max_drop\u2248-3, and (after fix) max_drop_layer == 1/(n_layers-1).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_weight_norms",
+   "file": "src/blme/tasks/geometry/weight_norms.py",
+   "paper_claimed": "none (docstring has no citation; PAPERS.md:121/249 label it 'BLME diagnostic / Martin-Mahoney 2019 style per-layer diagnostic')",
+   "paper_url": "https://arxiv.org/abs/1706.08498",
+   "paper_verified": "Stable rank ||W||_F^2/||W||_2^2 originates in Bartlett, Foster, Telgarsky, 'Spectrally-normalized margin bounds for neural networks', NeurIPS 2017, arXiv:1706.08498 (verified). The per-layer Frobenius/spectral-norm profile is a generic diagnostic in the Martin & Mahoney HT-SR line; there is no single canonical paper for the composite metric.",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "The per-layer profile of weight magnitudes (Frobenius and spectral norm) and stable rank exposes how a model distributes representational work across depth: layers whose norms grow sharply with depth indicate exploding-gradient-prone, poorly conditioned transforms, while uniform, high-stable-rank weights signal well-regularized blocks that use many directions. Because well-trained networks tend toward balanced, well-conditioned layer norms (a corollary of heavy-tailed self-regularization), the uniformity and stable-rank profile should track training quality and hence capability.",
+   "issues": [
+    {
+     "id": "geometry_weight_norms:1",
+     "severity": "LOW",
+     "claim": "CITATION: docstring carries no citation despite computing stable rank (Bartlett et al. 2017) and a Martin-Mahoney-style per-layer norm profile.",
+     "evidence": "weight_norms.py:1-21 docstring has no reference; PAPERS.md:121 'Martin-Mahoney 2019 style per-layer diagnostic', :249 'BLME diagnostic'.",
+     "proposed_fix": "Add Bartlett, Foster, Telgarsky 2017 (arXiv:1706.08498) for stable rank and Martin & Mahoney 2019/2021 for the per-layer-norm-profile motivation.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_weight_norms:2",
+     "severity": "LOW",
+     "claim": "Frobenius/spectral norm per layer and mean_stable_rank are dimension-extensive (Frobenius grows ~sqrt(d_in*d_out); stable rank is bounded by min(W.shape) and grows with width), so raw magnitudes are not cross-model comparable without \u00a73.4 normalization; only norm_uniformity (1-CV) is dimensionless.",
+     "evidence": "weight_norms.py:67-94 compute raw frob/spectral and clip stable rank to min(W.shape) (line 85, a documented bf16-SVD-artifact guard). norm_uniformity (line 101-103) is a CV-based dimensionless ratio.",
+     "proposed_fix": "Ensure the normalization pipeline divides frobenius/spectral/stable-rank features by d_model (or the relevant dimension) per \u00a73.4; treat norm_uniformity as the directly-comparable headline.",
+     "changes_values": false,
+     "confidence": "med"
+    }
+   ],
+   "comparability_notes": "norm_uniformity = 1 - CV(frobenius_per_layer) is dimensionless and cross-model comparable. frobenius_norm_per_layer, spectral_norm_per_layer, mean_stable_rank scale with matrix dimensions and need /d_model downstream. The stable-rank clip to min(W.shape) (line 85) prevents bf16 SVD artifacts from inflating the per-layer mean (a deliberate, documented guard). Per-layer lists are regrouped by the aggregator (#36) into mean/std/slope/quantiles, avoiding absolute-layer-index columns.",
+   "degeneracy_notes": "Guards: params with ndim<2 skipped (biases/norms); empty val lists -> 0.0; spectral<=0 -> stable rank 0.0; svdvals exception -> fallback spec=frob, srank=1.0. norm_uniformity = nan if mean Frobenius is 0 (all-zero weights). max(0, 1-CV) floors uniformity at 0. Weight-only, corpus-free, deterministic (no sampling).",
+   "test_status": "none",
+   "proposed_golden_test": "Build a 1-layer module whose only 2D weight is diag([2,1,0...]) of shape (d,d): Frobenius = sqrt(5); spectral = 2; stable_rank = 5/4 = 1.25; with a single layer, norm_uniformity = 1.0 (CV=0). Assert mean_frobenius_norm==pytest.approx(sqrt(5)), mean_spectral_norm==2.0, mean_stable_rank==1.25, norm_uniformity==1.0.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_isoscore",
+   "file": "src/blme/tasks/geometry/isotropy.py",
+   "paper_claimed": "Rudman, Gillman, Rayne, Eickhoff 2022 \u2014 IsoScore: Measuring the Uniformity of Embedding Space Utilization, arXiv:2207.10341 (docstring lines 75, 130; PAPERS.md:75)",
+   "paper_verified": "William Rudman, Nate Gillman, Taylor Rayne, Carsten Eickhoff. 'IsoScore: Measuring the Uniformity of Embedding Space Utilization.' Findings of ACL 2022. Correct arXiv id is 2108.07344. (arXiv:2207.10341 is a DIFFERENT paper: 'UFO: Unified Feature Optimization', Xi et al., ECCV 2022.)",
+   "paper_url": "https://arxiv.org/abs/2108.07344",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "BUG",
+   "intuition": "IsoScore measures how uniformly variance is distributed across all dimensions of the representation space, i.e. how close the empirical covariance spectrum is to a scaled identity (a single scalar in [0,1], 1 = perfectly isotropic). It should track LM capability because anisotropic 'narrow-cone' representations waste embedding capacity, compress semantically distinct tokens into a small subspace, and degrade the linear separability of the residual stream; models that utilize their full dimensional budget can encode more distinguishable features per layer.",
+   "issues": [
+    {
+     "id": "geometry_isoscore:1",
+     "severity": "HIGH",
+     "claim": "CITATION: the cited arXiv id 2207.10341 resolves to an unrelated paper ('UFO: Unified Feature Optimization', ECCV 2022), not IsoScore; the correct IsoScore id is 2108.07344.",
+     "evidence": "isotropy.py:75 and :130 cite 'arXiv:2207.10341'; docs/PAPERS.md:75 repeats it. WebFetch of arxiv.org/abs/2207.10341 returns 'UFO: Unified Feature Optimization' (Xi et al., ECCV 2022). WebFetch of arxiv.org/abs/2108.07344 returns the actual IsoScore paper (Rudman et al., ACL Findings 2022). Note docs/REPOSITORIES.md:29 already uses the correct id 2108.07344 \u2014 internal inconsistency.",
+     "proposed_fix": "Replace 2207.10341 with 2108.07344 in the docstring and PAPERS.md:75.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_isoscore:2",
+     "severity": "CRITICAL",
+     "claim": "The implementation normalizes the eigenvalue vector so its SUM equals d (L1), but the paper's Algorithm 1 normalizes by the L2 norm (Sigma_hat = sqrt(n)*Sigma_D/||Sigma_D||); the resulting scalar is NOT the paper's IsoScore and diverges by up to ~10x on anisotropic spectra.",
+     "evidence": "isotropy.py:112-118: `s = full.sum(); full = full*(d/s)` (sum-normalisation) then `delta_iso_sq = d*(d-1)`. Paper Algorithm 1 (verified via ar5iv 2108.07344): Step4 'Sigma_hat_D := sqrt(n)*Sigma_D/||Sigma_D||' (L2 norm), Step5 'delta := ||Sigma_hat_D - 1||/sqrt(2(n-sqrt(n)))', Step6 'phi := (n - delta^2(n-sqrt(n)))^2/n^2', Step7 'iota := (n*phi-1)/(n-1)'. Numerical reproduction (CPU, 5000 pts): power-law 1.5^-i, d=64 \u2192 code=0.817 vs paper=0.064; d=768 \u2192 code=0.804 vs paper=0.005; spectrum (4,2,1,0.5) \u2192 code=0.872 vs paper=0.548; isotropic-Gaussian d=768 sample \u2192 code=0.9998 vs paper=0.866. On the actual (highly anisotropic) LLM hidden states the code reports near-isotropic (~0.8) where real IsoScore reports ~0.05, inverting the qualitative conclusion and making the published 'isoscore' column wrong relative to the cited metric.",
+     "proposed_fix": "Replace the sum-normalisation block with the paper's L2 normalisation and delta/phi/iota formulas: sigma_hat = sqrt(d)*lam/np.linalg.norm(lam); delta2 = sum((sigma_hat-1)**2)/(2*(d-sqrt(d))); phi = (d - delta2*(d-sqrt(d)))**2/d**2; iota = (d*phi-1)/(d-1). Validate against the official isoscore package (bcbi-edu/p_eickhoff_isoscore). Re-run affected models.",
+     "changes_values": true,
+     "confidence": "high"
+    }
+   ],
+   "comparability_notes": "The paper's IsoScore is designed to be dimension-aware and comparable in [0,1] across d_model, and is finite-sample sensitive (penalizes Marchenko-Pastur eigenvalue spread, so for fixed token count it falls as d_model grows). The code's sum-normalisation variant is far less sensitive (\u22481 at isotropic regardless of d) and has a d-dependent floor of 1/d, so its cross-model behavior differs from the paper's and from what the docstring claims. Already-dimensionless per paper \u00a73.4 (not divided by d_model).",
+   "degeneracy_notes": "Guards present: returns nan for n<2 or d<2 (line 100-101), nan if total variance s<=0 (constant input \u2192 all-zero spectrum, line 113), non-finite rows filtered before SVD (line 154-157), <10 finite rows \u2192 error. psi floored at 0 and xi clamped to [0,1]. T=1 is irrelevant because tokens are pooled across documents (cache get_hidden_states with per_sample=False is correct here \u2014 isotropy is a global property of the token cloud). No NaN propagation observed.",
+   "test_status": "none",
+   "proposed_golden_test": "Build X (N x 2) with empirical covariance diag(3,1) (e.g. standard normals scaled by sqrt(3),sqrt(1)). The true IsoScore of a (3,1) 2-D spectrum = 0.600 (hand-derived: Sigma_hat=(1.342,0.447), delta^2=0.360, phi=0.800, iota=2*0.800-1=0.600). The current code returns 0.875 for the same spectrum (sum=4 \u2192 full=(1.5,0.5), psi=0.75, xi=0.875), so the test pins the bug.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_svd",
+   "file": "src/blme/tasks/geometry/isotropy.py",
+   "paper_claimed": "Class SVDIsotropyTask has NO docstring citation. docs/tasks_geometry.md \u00a79 cites Ethayarajh 2019 (anisotropy). PAPERS.md:246 'standard SVD diagnostics'; PAPERS.md:74 attributes effective_rank to Roy, Vetterli 2007.",
+   "paper_verified": "Effective rank: Olivier Roy, Martin Vetterli, 'The Effective Rank: A Measure of Effective Dimensionality', EUSIPCO 2007 \u2014 p_k = sigma_k/||sigma||_1 (singular values, L1-normalized), erank = exp(-sum p_k ln p_k). Anisotropy baseline: Kawin Ethayarajh, 'How Contextual are Contextualized Word Representations?', EMNLP 2019, arXiv:1909.00512. Participation ratio / svd_auc are standard, no single canonical paper.",
+   "paper_url": "https://eurasip.org/Proceedings/Eusipco/Eusipco2007/Papers/a5p-h05.pdf",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "These SVD diagnostics summarize the singular-value spectrum of the pooled hidden-state cloud: effective rank and participation ratio count how many directions are actively used, condition number and explained-variance AUC measure spectral concentration, and average pairwise cosine measures directional crowding. Higher effective dimensionality indicates the model spreads information across many features rather than collapsing into a dominant subspace, which tends to correlate with richer representations and downstream capability.",
+   "issues": [
+    {
+     "id": "geometry_svd:1",
+     "severity": "MEDIUM",
+     "claim": "Unseeded np.random.choice makes avg_cosine_similarity non-deterministic across runs (same bug class as ledger #42, which seeded only geometry/lid).",
+     "evidence": "isotropy.py:41 `indices = np.random.choice(len(X), size=(min(1000,len(X)),2), replace=True)` uses the global NumPy RNG with no seed; the resulting `avg_cosine_similarity` feature column varies run-to-run. Ledger #42 fixed the identical pattern in geometry/lid via default_rng(0) but isotropy.py was not covered.",
+     "proposed_fix": "Use `rng = np.random.default_rng(0)` and `rng.integers`/`rng.choice` for the pair sampling, matching the #42 fix.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "42"
+    },
+    {
+     "id": "geometry_svd:2",
+     "severity": "MEDIUM",
+     "claim": "The shared effective_rank helper computes p = sigma^2/sum(sigma^2) and the docstring claims this is 'the canonical Roy-Vetterli convention', but Roy & Vetterli 2007 define p_k = sigma_k/||sigma||_1 (singular values, NOT squared); fix #35 unified on the squared convention while mislabeling its attribution.",
+     "evidence": "geometry/utils.py:32-41 `sq = S*S; p = sq/total` with docstring 'pi = sigma_i^2/sum sigma_j^2 ... canonical Roy-Vetterli ... legacy sigma version is not the paper convention'. Three independent sources confirm Roy-Vetterli use singular values: p_k = sigma_k/||sigma||_1, erank=exp(H). PAPERS.md:74 cites Roy-Vetterli 2007 for geometry_svd.effective_rank. The sigma^2 form is effective rank of the Gram/covariance matrix, a legitimate but DIFFERENT quantity (sharper spectrum \u2192 lower erank); the docstring's claim about which convention is 'the paper convention' is inverted.",
+     "proposed_fix": "Either switch to p_k = sigma/sum(sigma) to match the cited Roy-Vetterli definition, or keep sigma^2 but correct the docstring/PAPERS.md to state it is the effective rank of the covariance (eigenvalues), not the literal Roy-Vetterli singular-value definition.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "35"
+    },
+    {
+     "id": "geometry_svd:3",
+     "severity": "LOW",
+     "claim": "avg_cosine_similarity is computed on MEAN-CENTERED vectors, so it is not the Ethayarajh anisotropy (which is the average cosine of uncentered representations) that docs/tasks_geometry.md \u00a79 cites for this task.",
+     "evidence": "isotropy.py:16 `X = X - np.mean(X, axis=0)` centers X before the pair-cosine loop at lines 41-49; for a roughly mean-zero centered cloud random-pair cosine collapses toward 0, unlike Ethayarajh's uncentered anisotropy (typically 0.2-0.8 for LLMs). The field is a valid residual-directional diagnostic but is mislabeled relative to the Ethayarajh citation.",
+     "proposed_fix": "Either compute avg cosine on uncentered hidden states to match Ethayarajh, or rename the field and drop the Ethayarajh attribution for it.",
+     "changes_values": false,
+     "confidence": "med"
+    }
+   ],
+   "comparability_notes": "effective_rank, numerical_rank and participation_ratio are bounded by min(N_tokens, d_model) and grow with d_model; per paper \u00a73.4 these dimension-sensitive metrics must be divided by d_model before cross-model comparison (done at the aggregator/normalization layer, not in this file). svd_auc, cond_number and avg_cosine_similarity are dimensionless. Pooling tokens across documents (per_sample=False) is correct for global isotropy. The single-layer cache path uses layer_idx=-1; the layerwise path is regrouped into depth summaries by aggregator #36.",
+   "degeneracy_notes": "Guards: <10 finite rows \u2192 None/error; non-finite rows masked (line 12-13); cond_number denominator capped at numerical-rank threshold (#39, line 57-62) preventing 1e8 spurious values; effective_rank returns 0 for zero/non-finite spectra (utils.py:34-39); participation_ratio has +1e-12 denominator guard. Constant input \u2192 S\u22480 \u2192 effective_rank 0, participation_ratio ~ (0)^2/(0+eps); handled without NaN. SVD LinAlgError falls back to scipy then None.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Feed a hand-built (50 x 4) matrix with orthogonal columns scaled to singular values [4,2,1,0.5]; assert participation_ratio == (sum lam)^2/sum(lam^2) with lam=[16,4,1,0.25] \u2192 21.25^2/293.0625 = 1.541, and effective_rank == exp(H) for the chosen convention (sigma^2: p=[0.7655,0.1914,0.0478,0.0120], erank\u22481.78). Pins both PR and the erank convention.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_unembedding",
+   "file": "src/blme/tasks/geometry/unembedding.py",
+   "paper_claimed": "Class docstring (lines 44-49) has NO citation. PAPERS.md:248 and :120 propose 'Lan et al. 2024 (Unembedding Dark Matter)' for purity (marked as a TODO); docs/tasks_geometry.md \u00a717 says '[No specific conference paper]'. effective_rank funnels through Roy-Vetterli helper.",
+   "paper_verified": "No canonical paper for the composite task; it is a BLME-custom diagnostic (the alignment field is explicitly declared 'novel'). The 'Lan et al. 2024 Unembedding Dark Matter' reference proposed in PAPERS.md could NOT be located via web search (multiple targeted queries returned no such paper). The kNN category-purity notion is most closely related to Park, Choe, Veitch 2024 'The Geometry of Categorical and Hierarchical Concepts in LLMs' (arXiv:2406.01506). effective_rank component = Roy-Vetterli 2007 (verified, EUSIPCO 2007).",
+   "paper_url": "https://arxiv.org/abs/2406.01506",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "The unembedding (LM-head) geometry governs how the residual stream is decoded into token logits: effective rank measures how much of the output space the head spans, category purity measures whether semantically related tokens occupy neighboring unembedding directions, and final-norm alignment measures how the layer norm reshapes representations into the head's space. A high-rank, semantically clustered, well-aligned unembedding supports sharper next-token discrimination, so these properties plausibly track model quality.",
+   "issues": [
+    {
+     "id": "geometry_unembedding:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the in-code task has no citation and the PAPERS.md-proposed source 'Lan et al. 2024 Unembedding Dark Matter' could not be verified to exist; the purity metric is BLME-custom and should be attributed to a verifiable paper or declared custom.",
+     "evidence": "unembedding.py:44-49 class docstring lists no reference. docs/PAPERS.md:248 '\ud83d\udcdd add Lan et al. 2024 (Unembedding Dark Matter)' and :120 'Lan et al. 2024 Unembedding Dark Matter for purity'. Web searches for 'Lan 2024 unembedding dark matter' returned only unrelated papers (e.g. Engels et al. 2024 'Decomposing the Dark Matter of Sparse Autoencoders', arXiv:2410.14670). The closest real categorical-geometry paper is Park et al. 2024 (arXiv:2406.01506).",
+     "proposed_fix": "Either cite a verifiable paper (e.g. Park et al. 2024 for categorical concept geometry) or explicitly mark purity/alignment as BLME-custom diagnostics; correct or remove the unverifiable 'Lan et al. 2024' entry in PAPERS.md.",
+     "changes_values": false,
+     "confidence": "med"
+    },
+    {
+     "id": "geometry_unembedding:2",
+     "severity": "MEDIUM",
+     "claim": "unembedding_eff_rank inherits the sigma^2 vs sigma effective-rank convention issue: the shared helper labels p=sigma^2/sum(sigma^2) as 'canonical Roy-Vetterli' but the paper uses singular values sigma.",
+     "evidence": "unembedding.py:87-90 calls torch.linalg.svdvals then geometry/utils.effective_rank which squares S (utils.py:32). Same mislabeling as geometry_svd:2; PAPERS.md:74 cites Roy-Vetterli for both. See geometry_svd:2 for the verified Roy-Vetterli definition (p_k = sigma_k/||sigma||_1).",
+     "proposed_fix": "Same as geometry_svd:2 \u2014 align the helper convention to Roy-Vetterli's singular-value form or correct the attribution claim.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "35"
+    }
+   ],
+   "comparability_notes": "unembedding_eff_rank is bounded by d_model (the centered (V,D) SVD has min(V,D)=D directions) and so is dimension-sensitive \u2014 needs \u00f7d_model per \u00a73.4. unembedding_purity_mean is tokenizer-dependent: which category words resolve to single tokens differs across BPE/SentencePiece vocabularies, so the labelled-token set (n_category_tokens, which is reported) and hence purity is computed over different supports per model; cross-model comparison should condition on n_category_tokens. embedding_alignment depends on final-norm type (RMSNorm vs LayerNorm) and is undefined when weights are untied/shapes differ (returns nan). is_tied is a clean boolean.",
+   "degeneracy_notes": "Robust: missing lm_head falls back to input embeddings (line 60-64); SVD failure logs and returns nan eff_rank (not silent 0, per the documented historic fix); purity skips ids >= W rows (line 144), guards empty cat_labels, +1e-10 norm denominators; alignment uses safe_e/safe_w where-guards for zero-norm rows and try/excepts. query_ids subsample is seeded default_rng(42) (deterministic). No NaN propagation into other fields.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Construct a tiny tied model where W_out has 6 rows in 2 clean categories of 3 collinear-ish directions each; assert unembedding_purity_mean == 1.0 (each token's top-k=2 neighbors are its category-mates) and unembedding_is_tied is True. Add an effective_rank golden on a fixed (10x4) W with known singular values matching geometry_svd's convention.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_neural_collapse",
+   "file": "src/blme/tasks/geometry/neural_collapse.py",
+   "paper_claimed": "Papyan, Han & Donoho 2020, arXiv:2008.03465 (module docstring line 2; PAPERS.md:71)",
+   "paper_verified": "Vardan Papyan, X. Y. Han, David L. Donoho. 'Prevalence of neural collapse during the terminal phase of deep learning training.' PNAS 117(40):24652-24663, 2020. Correct arXiv id is 2008.08186 (NOT 2008.03465, which is 'Automated Claustrum Segmentation in Human Brain MRI Using Deep Learning', a different paper). Operational NC1 = (1/C) tr(Sigma_W Sigma_B^dagger), Sigma_W averaged over all samples, Sigma_B averaged over C classes; equiangularity target cos = -1/(C-1).",
+   "paper_url": "https://arxiv.org/abs/2008.08186",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Neural collapse quantifies how last-layer representations of same-class inputs converge to their class mean (NC1, within-class variability collapse) and how the class means arrange into a maximally separated simplex equiangular tight frame (NC2, equinorm + equiangularity). Although LMs are unsupervised, the degree to which topic-coherent inputs cluster tightly and separate cleanly in the final, post-norm representation reflects the linear decodability and abstraction quality of that layer, which plausibly tracks model capability.",
+   "issues": [
+    {
+     "id": "geometry_neural_collapse:1",
+     "severity": "HIGH",
+     "claim": "CITATION: the cited arXiv id 2008.03465 resolves to an unrelated brain-MRI segmentation paper; the correct Neural Collapse id is 2008.08186.",
+     "evidence": "neural_collapse.py:2 'Papyan, Han & Donoho 2020 (arXiv:2008.03465)'; PAPERS.md:71 repeats arXiv:2008.03465. WebFetch of arxiv.org/abs/2008.03465 returns 'Automated Claustrum Segmentation in Human Brain MRI Using Deep Learning' (Li et al.). WebSearch confirms the real paper is arXiv:2008.08186, 'Prevalence of Neural Collapse...', Papyan/Han/Donoho, PNAS 117.",
+     "proposed_fix": "Replace 2008.03465 with 2008.08186 in the docstring and PAPERS.md:71.",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_neural_collapse:2",
+     "severity": "LOW",
+     "claim": "Docstring describes NC2-equiangularity as the 'standard deviation of cosine similarities', but the code computes the mean absolute deviation from the ETF target -1/(K-1), not a standard deviation.",
+     "evidence": "Docstring lines 16-17 say 'standard deviation of cosine similarities ... vs. the ETF target of -1/(K-1)'. Code line 170-171: `target = -1.0/(K-1); nc2_equiangularity_dev = np.mean(np.abs(pair_cos - target))`. This is mean-abs-deviation from target, a valid combined measure but not the std the docstring claims.",
+     "proposed_fix": "Update the docstring to 'mean absolute deviation of pairwise cosines from the ETF target -1/(K-1)', or additionally emit the std of cosines (Papyan's separate equiangularity statistic).",
+     "changes_values": false,
+     "confidence": "high"
+    },
+    {
+     "id": "geometry_neural_collapse:3",
+     "severity": "LOW",
+     "claim": "Dead import: get_final_norm is imported but never used after the #57 double-norm removal.",
+     "evidence": "neural_collapse.py:34 `from ..common import get_final_norm`; grep shows it appears only in comments (lines 203,216,218) and is never called. Harmless leftover from the #57 fix.",
+     "proposed_fix": "Remove the unused import.",
+     "changes_values": false,
+     "confidence": "high"
+    }
+   ],
+   "comparability_notes": "NC1 = tr(Sigma_W Sigma_B^dagger)/K is a scale-invariant variance ratio (dimensionless), good for cross-model comparison; nc2_equinorm_cv and nc2_equiangularity_dev are also dimensionless and the ETF target -1/(K-1) is constant because the bundled dataset fixes K=5. The features depend on d_model only through estimation noise (40 mean-pooled vectors in D dims). Same fixed labeled corpus across all models ensures comparability. The metric is computed via direct forward passes (not the unlabeled WikiText cache), which is correct since NC needs class labels.",
+   "degeneracy_notes": "NC1 subspace-projection fix #33 verified present and correct: eigendecompose Sigma_B, keep top K-1 eigvecs above top*1e-6 relative threshold, project Sigma_W and divide by the restricted Sigma_B eigenvalues \u2014 np.trace(sigma_w_proj/lam[:,None])/K equals tr(Sigma_W Sigma_B^dagger)/K on the kept subspace (verified algebraically). Round-6 double-norm fix #57 verified present: no final_norm re-applied to the already-post-norm hidden_states[-1]. Guards: K<2 \u2192 error, n<K+1 \u2192 error, top<=0 (constant/degenerate Sigma_B) \u2192 nc1=nan & subspace_rank=0, <4 samples \u2192 error, <1-token texts skipped, +1e-12 norm guard for equiangularity. Estimation caveat: 8 samples/class in D\u22484096 makes Sigma_W heavily under-sampled, though NC1 only probes the <=K-1=4-dim Sigma_B subspace which mitigates this; values can still be noisy with only 40 mean-pooled sentence vectors.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Two classes (K=2) in D=3: class A points {(1,0,0)+eps} centered at (1,0,0), class B at (-1,0,0), with isotropic intra-class variance v along all axes. Then Sigma_B has one nonzero eigenvalue lambda=1 along e1 (after /K), Sigma_W=v*I, so NC1 = (1/2)*tr(Sigma_W restricted to e1)/lambda = (1/2)*(v/1) = v/2. Pick v=0.04 \u2192 assert NC1 \u2248 0.02 and nc1_subspace_rank == 1.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_cka",
+   "file": "src/blme/tasks/geometry/cka.py",
+   "paper_claimed": "Kornblith, Norouzi, Lee, Hinton 2019 \u2014 Similarity of Neural Network Representations Revisited, ICML 2019, arXiv:1905.00414 (linear CKA, Section 3); Cortes, Mohri, Rostamizadeh 2012 \u2014 Algorithms for Learning Kernels Based on Centered Alignment, arXiv:1203.0550",
+   "paper_url": "https://arxiv.org/abs/1905.00414",
+   "paper_verified": "Simon Kornblith, Mohammad Norouzi, Honglak Lee, Geoffrey Hinton, 'Similarity of Neural Network Representations Revisited', ICML 2019, arXiv:1905.00414. Defines linear CKA as ||Y^T X||_F^2/(||X^T X||_F ||Y^T Y||_F) with the biased HSIC estimator HSIC(K,L)=tr(KHLH)/(n-1)^2 and the explicit assumption 'these matrices have been preprocessed to center the columns'.",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Linear CKA measures the degree to which two layers encode the same representational geometry, invariant to orthogonal rotation and isotropic scaling, by comparing the alignment of their token-by-token dot-product similarity structures. Low off-diagonal CKA means successive layers reorganize the representation into distinct computational stages rather than re-expressing the same features, so min/std of off-diagonal CKA index how much non-redundant transformation a network performs across depth. More capable models tend to use their depth to progressively restructure representations, which is the mechanistic reason min_offdiag_cka tracks downstream accuracy.",
+   "issues": [
+    {
+     "id": "geometry_cka:1",
+     "severity": "MEDIUM",
+     "claim": "The task emits a raw integer n_layers as a result key (line 149); because the aggregator's exclude list matches only the bare column 'n_layers', the namespaced feature 'geometry_cka.n_layers' survives into the feature matrix, is LASSO-selected (coef 0.0115), and is a near-perfect architecture/depth proxy (Spearman 0.95 with metadata n_layers).",
+     "evidence": "cka.py:149 `\"n_layers\": int(n)`; scripts/aggregate_results.py:487-489 exclude_exact set = {... \"n_layers\" ...} uses exact-match, not endswith; results/study_v3/analysis/lasso_features.csv contains row `geometry_cka.n_layers,0.01152599...`; verified column present in results/study_v3/aggregated.csv with values {6,12,16,...,64} and Spearman 0.947 vs metadata n_layers. The paper's central claim (\u00a7E v2/v3) is that intrinsic geometry predicts capability *beyond* size; a raw depth count leaking into the predictor set undermines that control.",
+     "proposed_fix": "Drop architecture/echo scalars like '*.n_layers' from the feature matrix (extend the aggregator exclude rule to a suffix/regex match, or stop emitting n_layers from the task since it duplicates metadata).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#36"
+    },
+    {
+     "id": "geometry_cka:2",
+     "severity": "LOW",
+     "claim": "CKA is computed over the full token cloud with no token subsampling, materializing X^T X and Y^T Y of shape (D,D) per layer and Y^T X per layer-pair; for D up to 14336 and up to ~80 layers this is O(L^2 D^2) work and ~0.8GB per (D,D) matrix, a performance/memory hazard but not a correctness bug.",
+     "evidence": "cka.py:78 `xtx = X.t() @ X`; cka.py:98 `ytx = Y.t() @ X`; no subsampling of the (\u03a3T,D) flat cloud (cf. HSIC which caps at 2000 tokens). Rows stay aligned across layers via the cache concatenation order, so correctness is fine.",
+     "proposed_fix": "Optionally subsample a fixed shared token set (as HSIC does) to bound cost; not required for correctness.",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Linear CKA is dimensionless and bounded in [0,1], invariant to orthogonal transforms and isotropic scaling, so the CKA scalars themselves are cross-model comparable and need no d_model normalization (consistent with \u00a73.4 leaving ratios untouched). The flat-cloud rows are correctly aligned across layers (cache _sample_lengths order), so per_sample=True is NOT needed here unlike matrix_entropy/schatten. The one comparability defect is the emitted n_layers scalar (issue 1), which is pure architecture metadata.",
+   "degeneracy_notes": "Constant/rank-deficient layer \u2192 centered X=0 \u2192 denom 0 \u2192 guarded to cka=0.0 (line 102 `denom > 1e-12`). n_layers<2 \u2192 adjacent array empty \u2192 avg_adjacent_cka falls back to 0.0 and min/max/std to NaN; early_late/first_middle NaN-guarded by n>=2/n>=3 checks. No NaN/inf propagation observed. fp32 upcast via .float() at line 67 before centering/SVD-free matmuls.",
+   "test_status": "smoke",
+   "proposed_golden_test": "In tests, build X=randn(50,8); assert CKA(X,X)==1.0 and CKA(X, X@Q)==1.0 for a random orthogonal Q (rotation invariance), and pin CKA of a hand pair e.g. A=[[1,0],[-1,0],[0,1],[0,-1]], B=2*col0,3*col1 scaling \u2192 0.93335 (verified numerically). Current test_cka only checks key presence and 0<=avg<=1.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_hsic",
+   "file": "src/blme/tasks/geometry/mutual_info.py",
+   "paper_claimed": "Gretton, Bousquet, Smola, Sch\u00f6lkopf 2005 \u2014 Measuring Statistical Dependence with Hilbert-Schmidt Norms, ALT 2005; Kornblith et al. 2019 \u2014 arXiv:1905.00414 (HSIC\u2192CKA normalization)",
+   "paper_url": "https://arxiv.org/abs/1905.00414",
+   "paper_verified": "Gretton, Bousquet, Smola, Sch\u00f6lkopf, 'Measuring Statistical Dependence with Hilbert-Schmidt Norms', ALT 2005 (biased empirical HSIC = (1/(n-1)^2) tr(KHLH)); Kornblith et al. 2019 normalizes to CKA(K,L)=HSIC(K,L)/sqrt(HSIC(K,K)HSIC(L,L)). The code's linear-kernel normalized HSIC is exactly this and is mathematically identical to linear CKA, as the docstring states.",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Normalized linear-kernel HSIC is identical to linear CKA and quantifies statistical dependence between two layers' representations; the task's distinctive output is input-to-layer HSIC, which measures how strongly each layer's activations still depend on the raw embedding. A capable model nonlinearly decorrelates deep representations from surface token identity (low input-to-layer HSIC at depth, high compression), so the rate at which dependence on the input decays across layers reflects how much abstraction the network performs.",
+   "issues": [
+    {
+     "id": "geometry_hsic:1",
+     "severity": "LOW",
+     "claim": "Token subsampling to 2000 uses torch.randperm with no task-local seed, so the chosen token subset depends on the global RNG state at call time (task execution order), inconsistent with the project's own hardening of analogous subsamples (#42 lid, #50 ablation, #52 trajectories, #53 polysemanticity) to local seeded generators.",
+     "evidence": "mutual_info.py:62 `shared_perm = torch.randperm(n_tokens)[:max_tokens]` (unseeded local). core.py:85-86 calls set_global_seed(seed) once at run start, so a fixed full-pipeline run is reproducible, but the subsample is order-dependent and differs if HSIC is run in isolation or after a task list change. The shared_perm is applied identically across layers (line 71-72), so layer alignment is preserved.",
+     "proposed_fix": "Draw the permutation from a task-local torch.Generator().manual_seed(0) (as #50 did) so the token subset is order-independent.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#42"
+    }
+   ],
+   "comparability_notes": "Normalized HSIC equals CKA: dimensionless, bounded [0,1], invariant to rotation/isotropic scaling, so cross-model comparable without d_model normalization. Flat-cloud rows are aligned across layers (per_sample not needed). hsic_compression_ratio is a ratio of two normalized quantities so also tokenizer/dimension-independent. The 2000-token cap is uniform across models. No size-leaking scalar is emitted (no n_layers key, unlike CKA).",
+   "degeneracy_notes": "n_layers<2 \u2192 returns {'error':...}. Constant layer \u2192 centered Gram=0 \u2192 self_hsic=0 \u2192 norm 0, guarded by +1e-12 so nhsic=0 (no div-by-zero). Double-centering K - K.mean(0) - K.mean(1,keepdim) + K.mean() is the correct HKH. Self-pair exclusion in input_to_layer loop (starts at i=1) fixed historically. fp32 upcast via .float() at line 70.",
+   "test_status": "smoke",
+   "proposed_golden_test": "With X (n,d) and Y=X (identical), assert normalized HSIC==1.0; with Y a random orthogonal rotation of X assert ==1.0; pin a 4-point hand case equal to the linear-CKA value to confirm HSIC and CKA agree numerically. Current test_mutual_info only asserts 'avg_adjacent_hsic' key presence.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_rsa",
+   "file": "src/blme/tasks/geometry/rsa.py",
+   "paper_claimed": "Kriegeskorte, Mur, Bandettini 2008 \u2014 Representational Similarity Analysis - Connecting the Branches of Systems Neuroscience, Frontiers in Systems Neuroscience 2; secondary Morcos et al. 2018",
+   "paper_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2605405/",
+   "paper_verified": "Kriegeskorte, Mur, Bandettini 2008, Front. Syst. Neurosci. 2:4. Verified the paper recommends correlation distance for the RDM ('We suggest using correlation distance (1-correlation) as the dissimilarity measure') and Spearman rank correlation to compare two RDMs ('We therefore use the Spearman rank correlation coefficient to compare them').",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "DEVIATES_DOCUMENTED",
+   "intuition": "RSA compares the second-order structure of representations: it builds a representational dissimilarity matrix (RDM) of pairwise distances among inputs at each layer, then correlates RDMs across layers to measure whether layers preserve the same relative similarity geometry even with different feature bases. High adjacent-layer RSA indicates smooth, gradual transformation of the representational manifold; abrupt drops mark layers that reorganize structure. The depth profile of representational continuity reflects how a model distributes its computation and is expected to relate to capability.",
+   "issues": [
+    {
+     "id": "geometry_rsa:1",
+     "severity": "MEDIUM",
+     "claim": "rsa_min_continuity_layer is an absolute layer index (argmin over adjacent RSA), which is the exact class of size/depth-proxy column #36 was meant to eliminate; it equals ~n_layers-2 for most models and leaks depth into the analysis (Spearman 0.68 with metadata n_layers, -0.49 with log_n_params), surfacing as a spurious univariate 'predictor' (\u03c1\u22480.66 with benchmarks across 79 rows).",
+     "evidence": "rsa.py:118 `\"rsa_min_continuity_layer\": int(np.argmin(adj_arr))`; results/study_v3/aggregated.csv shows e.g. gpt2-small n_layers=12 \u2192 10, gpt2-medium 24 \u2192 22 (i.e. n_layers-2); results/study_v3/analysis/univariate.csv has 79 rows for geometry_rsa.rsa_min_continuity_layer with \u03c1 up to 0.677. #36 de-indexed per-layer *profiles* but this scalar argmin slipped through because it is a single int, not a layer-indexed vector.",
+     "proposed_fix": "Replace the absolute argmin index with a normalized-depth location z=argmin/(n_layers-1) (per \u00a73.4 z_min convention) or drop it from the feature set; alternatively exclude '*_layer' integer-index scalars in the aggregator.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#36"
+    },
+    {
+     "id": "geometry_rsa:2",
+     "severity": "MEDIUM",
+     "claim": "The RDM uses Euclidean distance (pdist metric='euclidean'), but Kriegeskorte 2008 recommends correlation distance (1-correlation); Euclidean RDMs are dominated by overall activation magnitude, and hidden-state norms grow systematically with depth and differ across model families, biasing cross-layer/cross-model RSA comparisons that the deeper-norm geometry inflates.",
+     "evidence": "rsa.py:82 `rdm = pdist(X, metric=\"euclidean\")`; paper quote: 'We suggest using correlation distance (1-correlation) as the dissimilarity measure ... normalizes for both the overall activation and the variability of activity across space.' Docstring documents Euclidean (so it is DEVIATES_DOCUMENTED) but deviates from the cited method.",
+     "proposed_fix": "Use correlation distance (pdist metric='correlation') for the RDM to match Kriegeskorte 2008 and remove the depth-dependent magnitude bias; or document the deviation and demonstrate robustness.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_rsa:3",
+     "severity": "LOW",
+     "claim": "RSA takes the first min(min_tokens,200) rows of the flat (\u03a3T,D) token cloud (per_sample not used), so the 'conditions' are the first ~1.5 sentences' adjacent tokens \u2014 non-representative and highly autocorrelated \u2014 rather than a diverse set of stimuli/sentences as in canonical RSA.",
+     "evidence": "rsa.py:55 `cache.get_hidden_states(layer_idx=\"all\", num_samples=num_samples)` (no per_sample=True); rsa.py:71-80 `n_tokens=min(min_tokens, max_tokens_per_layer=200)`, `X = all_layers[li][:n_tokens]`. With num_samples=20 \u00d7 ~128 tok the first 200 rows come from the opening 1-2 passages. The comparison is consistent across layers (same tokens) so it is not 'corrupted' in the #1 sense, but the sample is biased to early-corpus content.",
+     "proposed_fix": "Draw a shared random/even token subset across the whole cloud, or use per_sample mean-pooled sentence vectors as RSA 'conditions' for a more faithful (and less autocorrelated) RDM.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": "#1"
+    }
+   ],
+   "comparability_notes": "Spearman-based RSA outputs are rank correlations (bounded [-1,1], dimensionless) so the rsa_* correlation scalars are cross-model comparable. Two leakage/comparability hazards: rsa_min_continuity_layer is an absolute layer index \u2248 n_layers (issue 1), and the Euclidean RDM injects depth/family-dependent magnitude scaling (issue 2). Token sampling uses each model's first 200 tokens of the same corpus, so corpus content is matched, but tokenization differences mean models see slightly different first-200-token windows.",
+   "degeneracy_notes": "n_layers<2 or n_tokens<3 \u2192 {'error':...}. Constant representations \u2192 pdist all-zero \u2192 spearmanr returns NaN \u2192 replaced with 0.0 (lines 91-94, 100-101, 107-108). spearmanr on a degenerate constant vector emits a runtime warning but is isfinite-guarded. argmin over adjacent array is defined whenever n_layers>=2.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Construct 3 layers from a known transformation chain (e.g. layer2 = monotone-scaled layer1, layer3 = permuted), pin rsa_adjacent_mean to the exact Spearman of the condensed pdist vectors for a 4-point toy set so the RDM metric and comparison are locked. Current test_rsa only asserts some key contains 'rsa'.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_mahalanobis",
+   "file": "src/blme/tasks/geometry/mahalanobis.py",
+   "paper_claimed": "Lee, Lee, Lee, Shin 2018 \u2014 A Simple Unified Framework for Detecting Out-of-Distribution Samples and Adversarial Attacks, NeurIPS 2018, arXiv:1807.03888",
+   "paper_url": "https://arxiv.org/abs/1807.03888",
+   "paper_verified": "Kimin Lee, Kibok Lee, Honglak Lee, Jinwoo Shin, NeurIPS 2018, arXiv:1807.03888. Defines the score M(x)=max_c \u2212(f(x)\u2212\u03bc\u0302_c)^T \u03a3\u0302^{-1}(f(x)\u2212\u03bc\u0302_c) with class-conditional means \u03bc\u0302_c and a TIED empirical covariance \u03a3\u0302 estimated on training samples ('C class-conditional Gaussian distributions with a tied covariance \u03a3', 'empirical class means and tied empirical covariance of training samples').",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Mahalanobis OOD distance measures how far a sample lies from the in-distribution centroid after normalizing by the covariance of the representation manifold, so it captures anomaly in an anisotropic space where raw Euclidean distance is misleading. Syntax-destroyed (token-shuffled) text should land in low-density regions of a well-organized representation geometry, so a larger ID/OOD separation gap and higher AUROC indicate the model has carved a more structured semantic manifold \u2014 a property expected to co-vary with linguistic capability.",
+   "issues": [
+    {
+     "id": "geometry_mahalanobis:1",
+     "severity": "MEDIUM",
+     "claim": "The inline comment claims 'mean-pooled over sequence', but collect_hidden_states with the default layer_idx=-1 does NOT mean-pool: it randomly subsamples up to 10 tokens per sentence and flattens, so X_id/X_ood are per-token vectors (n_id \u2248 10\u00d7n_sentences), not per-example pooled vectors as the docstring/typical OOD setup implies.",
+     "evidence": "mahalanobis.py:134 comment '# Collect representations from the last layer, mean-pooled over sequence'; mahalanobis.py:135 `X_id = collect_hidden_states(model, tokenizer, dataset_id, num_samples=len(dataset_id))`; utils.py:127-132 single-layer branch `if T>10: indices=torch.randperm(T)[:10]; h=h[:,indices,:]` then reshape(-1,D) \u2014 token-level, no pooling. The 50/50 held-out split (#41) therefore splits token rows, not examples.",
+     "proposed_fix": "Either mean-pool each sequence to one vector to match the comment and standard OOD practice, or correct the comment to state per-token subsampling; document which is intended for the published numbers.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#41"
+    },
+    {
+     "id": "geometry_mahalanobis:2",
+     "severity": "LOW",
+     "claim": "The per-sentence 10-token subsample in collect_hidden_states uses an unseeded global torch.randperm, so which tokens form the ID/OOD distributions depends on the global RNG state (task order); inconsistent with the project's local-seed standard and means isolated reruns of Mahalanobis differ.",
+     "evidence": "utils.py:129 `indices = torch.randperm(T)[:10]` (no local Generator). The OOD text shuffle is seeded (mahalanobis.py:95 RandomState(42)) but the token subsample is not. core.py:85 set_global_seed makes a fixed full-pipeline run reproducible, so locked v2/v3 numbers are stable, but the subsample is order-dependent.",
+     "proposed_fix": "Pass a task-local seeded torch.Generator into collect_hidden_states for the T>10 subsample, mirroring #42/#50.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": "#42"
+    },
+    {
+     "id": "geometry_mahalanobis:3",
+     "severity": "LOW",
+     "claim": "Implementation departs from Lee 2018 in two documented-but-unflagged ways: it fits a single unsupervised Gaussian (no class labels, ID-vs-shuffled) rather than C class-conditional Gaussians with max-over-class scoring, and uses Ledoit-Wolf shrinkage precision rather than the paper's plain tied empirical covariance.",
+     "evidence": "mahalanobis.py:46-59 fits one LedoitWolf().precision_ on X_train and scores `mahalanobis(x, mu, inv_cov)`; paper uses M(x)=max_c with tied empirical \u03a3\u0302. The single-Gaussian unsupervised variant is a standard OOD baseline and Ledoit-Wolf is a reasonable D>>n robustification (docstring \u00a737 motivates regularization), so the deviation is defensible but should be stated as an adaptation, not the exact Lee 2018 score.",
+     "proposed_fix": "Note in the docstring that this is the unsupervised single-Gaussian Mahalanobis OOD adaptation of Lee 2018 (no class-conditional max), with Ledoit-Wolf shrinkage substituting the plain tied covariance.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Mahalanobis distance scales as ~sqrt(d_model) in expectation (E[dist]\u2248sqrt(d) for whitened Gaussian features), so mean_mahalanobis_id/ood are NOT dimension-free and the raw distances are not directly comparable across models of different d_model (empirically Spearman -0.31 with d_model). The dimensionless summaries \u2014 ood_separation_ratio and auroc \u2014 are the cross-model-comparable outputs and should be preferred; ood_separation_gap (a raw distance difference) inherits the d_model scale. The held-out split (#41) correctly de-biases the ID baseline so the gap/ratio compare like with like.",
+   "degeneracy_notes": "<5 ID or OOD samples \u2192 {'error':...}; X_id_score<2 after split \u2192 tiny-n fallback reuses all of X_id (flagged via n_id_fit/n_id_score). Singular/rank-deficient covariance handled by Ledoit-Wolf precision (or pinv fallback). Empty distance lists \u2192 error return. T=1 sentences give 1 token each (no subsample). ood_separation_ratio guards denom with max(mean_id,1e-10). roc_auc_score wrapped in try/except \u2192 auroc omitted on failure rather than crashing.",
+   "test_status": "smoke",
+   "proposed_golden_test": "_compute_mahalanobis_distances has a behavioral regression test (in-sample < held-out) but no exact golden. Add: identity covariance, mu=0, x=(3,4) in 2D \u2192 distance exactly 5.0 (verified); and a 2D anisotropic cov [[4,0],[0,1]], x=(2,0) \u2192 distance 1.0, to pin the inverse-covariance scaling.",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_lipschitz",
+   "file": "src/blme/tasks/geometry/lipschitz.py",
+   "paper_claimed": "Docstring 'References': Miyato et al., ICLR 2018 (Spectral Normalization for GANs) and Virmaux & Scaman 2018 (Lipschitz Regularity of Deep Neural Networks). docs/tasks_geometry.md additionally lists Anil, Lucas & Grosse 2019 'Sorting out Lipschitz function approximation' [ICML 2019, arXiv:1811.05381] as the Citation/Paper. PAPERS.md:235 recommends 'add Virmaux-Scaman 2018'.",
+   "paper_url": "https://arxiv.org/abs/1805.10965",
+   "paper_verified": "All three referenced papers exist and were verified: Anil, Lucas, Grosse, 'Sorting out Lipschitz function approximation', ICML 2019, arXiv:1811.05381; Miyato, Kataoka, Koyama, Yoshida, 'Spectral Normalization for Generative Adversarial Networks', ICLR 2018, arXiv:1802.05957; Scaman & Virmaux, 'Lipschitz regularity of deep neural networks: analysis and efficient estimation', NeurIPS 2018, arXiv:1805.10965. None defines the implemented metric. Closest published relative for the per-layer residual-update ratio is Jastrzebski, Arpit, Ballas, Verma, Che, Bengio, 'Residual Connections Encourage Iterative Inference', ICLR 2018, arXiv:1710.04773 (iterative-refinement view of residual blocks).",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Each transformer layer applies a residual update h^{(l+1)} = h^{(l)} + f_l(h^{(l)}); this metric reports the per-token update magnitude relative to the residual-stream norm, ||h^{(l+1)} - h^{(l)}|| / ||h^{(l)}||, averaged and maximized over tokens and layer transitions. Small, uniform ratios correspond to the iterative-refinement regime in which each layer makes incremental, stable adjustments to a shared representation, a regime associated with trainability and smooth feature reuse; spikes mark layers that violently restructure the stream, indicating potential instability or unevenly allocated depth. Because the ratio is dimensionless it is directly comparable across model widths, and its profile summarizes how a model amortizes computation over depth.",
+   "issues": [
+    {
+     "id": "geometry_lipschitz:1",
+     "severity": "MEDIUM",
+     "claim": "lipschitz_max_layer / relative_change_max_layer are emitted as raw absolute layer indices and survive into the v3 feature matrix, leaking n_layers (a model-size proxy) into the 'intrinsic' feature pool, contrary to the paper's normalized-depth scheme.",
+     "evidence": "lipschitz.py:119 (max_layer = int(np.argmax(lip_arr))), :125, :129; results/study_v3/aggregated.csv header columns 55 ('geometry_lipschitz.lipschitz_max_layer') and 59 ('...relative_change_max_layer'). Paper \u00a73.4 mandates normalized depth z_l = l/(L-1) for layer positions; ledger items #45/#59 fixed exactly this class (slope on normalized depth) in gradient_flow and betti_curve but this scalar index was missed. Aggregator #36 only regroups layer-indexed KEY NAMES, not scalar index values.",
+     "proposed_fix": "Emit max_layer/(n_transitions-1) as a normalized depth in [0,1] (keep the raw index under a clearly non-feature name if needed for debugging).",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "#45"
+    },
+    {
+     "id": "geometry_lipschitz:2",
+     "severity": "MEDIUM",
+     "claim": "Paper appendix misdescribes the contraction-rate output: it claims 'the contraction rate (fraction of transitions where L_l < 1)' but the code computes the mean per-token output/input norm ratio ||h^{(l+1)}||/||h^{(l)}|| averaged over transitions \u2014 a norm-growth ratio typically > 1, not a fraction in [0,1], and not a function of L_l at all.",
+     "evidence": "paper/main.tex:758: 'We report the mean ($\\bar{L}$) and maximum ($L_{\\max}$) across all layer transitions, and the contraction rate (fraction of transitions where $L_l < 1$).' vs lipschitz.py:105-108 ('cr = output_norms[valid] / input_norms[valid]; contraction_rates.append(float(np.mean(cr)))') and :130 ('mean_contraction_rate': float(np.mean(contraction_rates))).",
+     "proposed_fix": "Correct the paper sentence to 'the mean output/input norm-growth ratio ||h^{(l+1)}||/||h^{(l)}||' (preferred, no value changes), or change the code to compute the documented fraction.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_lipschitz:3",
+     "severity": "MEDIUM",
+     "claim": "CITATION: docs/tasks_geometry.md \u00a72 describes a different estimator ('ratio of the distance between output representations to the distance between input representations for closely neighbored points') and lists Anil et al. 2019 as the Citation/Paper, and PAPERS.md:235 recommends attaching Virmaux-Scaman 2018 \u2014 but none of the cited papers defines the implemented inter-layer relative-change ratio, and the code performs no perturbation or neighbor-pair comparison.",
+     "evidence": "docs/tasks_geometry.md:16-21 vs lipschitz.py:89-100 (same-token consecutive-layer difference, no neighbor pairs). Scaman & Virmaux abstract (arXiv:1805.10965): 'providing AutoLip, the first generic algorithm for upper bounding the Lipschitz constant of any automatically differentiable function' \u2014 an operator-norm upper bound, not an activation-ratio. Anil et al. (arXiv:1811.05381) concerns 'Training neural networks under a strict Lipschitz constraint' (GroupSort architectures), not measurement. The in-file docstring (lipschitz.py:37-40) honestly disclaims the difference; the docs file and registry do not. The paper appendix (main.tex app:lipschitz) defines the metric without citation, which is the honest framing.",
+     "proposed_fix": "Rewrite docs/tasks_geometry.md \u00a72 to match the implemented relative-change ratio; relabel the citations as background on Lipschitz constraints (clearly 'related, not defining'); cite Jastrzebski et al. 2018 (arXiv:1710.04773) as the closest published relative; update PAPERS.md:235 from 'add Virmaux-Scaman 2018' to 'BLME-custom relative-change ratio; background refs only'.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_lipschitz:4",
+     "severity": "LOW",
+     "claim": "The backward-compatibility alias duplicates four feature columns byte-for-byte (lipschitz_* == relative_change_*), inflating the candidate-feature count in the LASSO/partial-correlation analyses and splitting any selection arbitrarily between identical predictors.",
+     "evidence": "lipschitz.py:121-129 emits both key sets from the same mean_v/max_v/std_v/max_layer; results/study_v3/aggregated.csv columns 52-59; results/study_v3/analysis/base_vs_instruct.csv rows 469/470 and 544/545 are identical pairs.",
+     "proposed_fix": "Have the aggregator drop the legacy lipschitz_* aliases (or stop emitting them from the task), keeping only relative_change_* plus contraction keys.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "The headline ratios are dimensionless and invariant to d_model and to any global rescaling of the residual stream, so they compare well across widths. Depth dependence is intrinsic: deeper models tend to smaller per-layer updates, so lipschitz_mean partially encodes 1/L; acceptable as a feature but worth noting. The *_max_layer keys are raw absolute layer indices (issue 1) and are NOT comparable across the 32-58 model zoo. Token/sequence-length effects are mild (per-token ratios averaged over the shared corpus). Cache and non-cache paths are consistent: both skip the embedding output hs[0] and key layers 0..L-1 (cache.py per \u00a7C; geometry/utils.py collect_hidden_states lines 100-105), and the flat (\u03a3T,D) cache tensor is positionally aligned across layers, so the per_sample=False accessor is correct for this token-wise metric (no #1-style trap).",
+   "degeneracy_notes": "Zero-norm input tokens are masked (input_norms > 1e-8); if an entire layer is zero the code appends (0.0, 0.0, 1.0) and continues. Fewer than 2 layers returns an error dict. T=1 sequences are fine (token-level). NaN in hidden states would propagate to the means unguarded, but the cache stores fp32 so half-precision overflow is not introduced here. If cache.populate left layer gaps, sorted(all_layers.keys()) would silently treat non-adjacent surviving layers as adjacent transitions (cosmetic risk only; populate normally fills all layers). Fully deterministic (no RNG).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Monkeypatch collect_hidden_states (or feed a stub cache) returning two layers: L0 = [[3,4],[0,2]] (row norms 5, 2) and L1 = [[6,8],[0,4]]. Then diff = [[3,4],[0,2]] with norms [5,2], ratios = [1.0, 1.0], so assert lipschitz_mean == lipschitz_max == 1.0, lipschitz_std == 0.0, lipschitz_max_layer == 0; output norms are [10,4] so contraction ratios are [2.0,2.0] and mean_contraction_rate == 2.0, contraction_std == 0.0.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_representation_sensitivity",
+   "file": "src/blme/tasks/geometry/information_geometry.py",
+   "paper_claimed": "Docstring: '\"Information Geometry of Neural Networks\" (Amari, 1998)'. paper/main.tex:1346 cites \\citet{amari1998natural} (= 'Natural Gradient Works Efficiently in Learning', references.bib:278) as the primary citation in the task-catalogue table. PAPERS.md:242: 'add Amari 2016 Information Geometry and its Applications'.",
+   "paper_url": "https://direct.mit.edu/neco/article/10/2/251/6143/Natural-Gradient-Works-Efficiently-in-Learning",
+   "paper_verified": "Amari, 'Natural Gradient Works Efficiently in Learning', Neural Computation 10(2):251-276, 1998 \u2014 exists, but defines the Fisher information matrix and natural gradient over the PARAMETER space of learning machines ('Information geometry is used for calculating the natural gradients in the parameter space of perceptrons'), not a representation-space gradient-norm metric. No Amari work (including the 2016 Springer book 'Information Geometry and Its Applications') defines mean ||grad_h log P(y|h)||^2 over final hidden states as an LM diagnostic; the docstring's exact title matches at best an obscure 1998 Amari tech report on Bayesian duality theory, also unrelated. Nearest real relatives: Kunstner, Hennig, Balles, 'Limitations of the Empirical Fisher Approximation for Natural Gradient Descent', NeurIPS 2019, arXiv:1905.12558 (empirical Fisher = outer products of data-label gradients; the metric equals tr of this in representation space); Novak et al., 'Sensitivity and Generalization in Neural Networks: an Empirical Study', ICLR 2018, arXiv:1802.08760 (Jacobian-norm sensitivity vs generalization).",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "The metric is the mean squared norm of the gradient of the next-token log-likelihood with respect to the final hidden state, computed in closed form for a linear LM head as grad_h log P(y|h) = W_y - E_p[W]. Because the expectation of grad grad^T over observed labels is the empirical Fisher information of the output distribution in representation space, the reported value is exactly the trace of that empirical Fisher: it quantifies how sharply the model's log-likelihood responds to infinitesimal displacements of the last-layer state. Flat (low) values suggest predictions robust to representation noise, while large values indicate a brittle decision geometry near the unembedding; the hypothesized link to capability transplants sharpness/flatness-generalization intuitions from parameter space into representation space.",
+   "issues": [
+    {
+     "id": "geometry_representation_sensitivity:1",
+     "severity": "HIGH",
+     "claim": "The paper's task-catalogue caption claims this task 'contributes features to the LASSO and partial-correlation analyses', but the task is absent from run_study.py's BLME_RESEARCH_TASKS, absent from the aggregator's task map, and has zero columns in aggregated.csv \u2014 the published claim about study composition is false for this row.",
+     "evidence": "paper/main.tex:1320 ('The tasks below contribute features to the LASSO and partial-correlation analyses in \\S\\ref{sec:experiments}') and :1346 (the geometry_representation_sensitivity row); scripts/run_study.py:44-88 (task not listed); scripts/aggregate_results.py task map (grep 'sensitivity' matches only consistency_position_sensitivity, line 75); grep -rn representation_sensitivity results/ returns nothing.",
+     "proposed_fix": "Either remove the row from the catalogue table (and the count '38') or actually wire the task into run_study.py + aggregate_results.py \u2014 but only after fixing issue 2, since the raw value is not cross-model comparable.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_representation_sensitivity:2",
+     "severity": "HIGH",
+     "claim": "The metric is not invariant to the model's arbitrary representation/unembedding scale convention, so cross-model values conflate sensitivity with norm conventions: under the function-preserving reparameterization W -> cW, h -> h/c the model's logits and distribution are unchanged but the metric scales by c^2.",
+     "evidence": "information_geometry.py:95-103 (grad = W_target - W_expected; squared L2 norm summed over D). Verified numerically (fp64, V=7, D=5): closed form matches autograd to 1e-16, and rescaling by c=10 with identical logits multiplies ||grad||^2 from 7.505 to 750.5 (exactly x100). The value also grows ~linearly with d_model and with unembedding row-norm scale, which differs systematically across families (e.g. Gemma's sqrt(d)-scaled tied embeddings, per-model final-norm gains). No \u00a73.4 normalization is applied because the task is not aggregated at all.",
+     "proposed_fix": "Report a scale-invariant quantity: per-token ||grad_h log p|| * ||h|| (dimensionless directional sensitivity, invariant under the c-rescaling since grad scales 1/c and h scales c), or normalize by mean centered unembedding row norm and d_model; document the chosen invariance.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_representation_sensitivity:3",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the docstring title 'Information Geometry of Neural Networks (Amari, 1998)' is not the title of Amari's 1998 Neural Computation article, the bib entry amari1998natural is a malformed @book carrying a journal field (venue will not render), and no cited Amari work defines the implemented representation-space empirical-Fisher trace \u2014 Amari's FIM is over parameter space.",
+     "evidence": "information_geometry.py:18-19; paper/references.bib:278-286 ('@book{amari1998natural, title={Natural Gradient Works Efficiently in Learning}, ... journal={Neural Computation}'); web verification: Amari 1998 is 'Natural Gradient Works Efficiently in Learning', Neural Computation 10(2):251-276 \u2014 'Information geometry is used for calculating the natural gradients in the parameter space of perceptrons' (parameter space, not representations). PAPERS.md:242's Amari 2016 book is likewise general background.",
+     "proposed_fix": "Fix the docstring to cite Amari 1998 by its real title explicitly as BACKGROUND for Fisher information/natural gradient; state the metric is BLME-custom (empirical Fisher trace w.r.t. final hidden states); add Kunstner et al. 2019 (arXiv:1905.12558) for the empirical-Fisher construction and Novak et al. 2018 (arXiv:1802.08760) for sensitivity-generalization; change @book to @article in references.bib.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_representation_sensitivity:4",
+     "severity": "MEDIUM",
+     "claim": "The closed-form gradient assumes logits = Wh + b exactly; for architectures with a nonlinear final logit transformation (Gemma-2-style final_logit_softcapping = cap*tanh(Wh/cap)) both the probabilities and the gradient are silently wrong, because the code recomputes logits as h @ W.T instead of using out.logits.",
+     "evidence": "information_geometry.py:87-91 (logits = h @ W.T; probs = softmax(logits)) while out = model(...) already produced the true logits at :77. Gemma-2 checkpoints (final_logit_softcapping=30.0) are in the v3 generation axis ('Gemma-1/2/3/4', pack \u00a7E). Currently latent because the task is not run in the study, but it ships in the library.",
+     "proposed_fix": "Compare h @ W.T against out.logits once per model and warn/abort on mismatch; for softcapped heads apply the chain rule (multiply each row contribution by sech^2(z/cap)) or fall back to autograd for a few tokens.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_representation_sensitivity:5",
+     "severity": "LOW",
+     "claim": "Infra/doc hygiene: the task ignores the cache (re-runs up to 20 forward passes although cache.get_prediction_stats already provides shifted hidden+labels), moves the full fp32 unembedding to next(model.parameters()).device (fragile under device_map sharding; apply_lm_head exists for this), and docs/tasks_geometry.md \u00a75 names a stale class 'FisherInformationTraceTask' for the actual 'RepresentationSensitivityTask'.",
+     "evidence": "information_geometry.py:39-77 (no cache parameter use despite signature accepting cache=None; W.to(device) at :63); docs/tasks_geometry.md:39-44 vs information_geometry.py:33. The doc's math description (FIM trace of representations) does match the implementation, only the class name is stale.",
+     "proposed_fix": "Use cache.get_prediction_stats when populated (hidden is fp32 (T-1,D), labels (T-1,) \u2014 exactly what's needed); route the projection through common.apply_lm_head-style device handling; update the doc class name.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Not cross-model comparable as implemented: the value scales as c^2 under the function-preserving reparameterization (W,h)->(cW,h/c) (verified numerically, x100 for c=10), grows ~linearly with d_model, and inherits each family's unembedding row-norm and final-norm gain conventions. The paper's \u00a73.4 d_model division would only partially mitigate this and is moot anyway since the task is wired into neither run_study.py nor the aggregator \u2014 no columns exist in results/study_v3/aggregated.csv. Mild estimator nuance: the headline is the unweighted mean of per-sample token-means (samples with fewer tokens weighted equally), which differs from a token-pooled mean; harmless on the fixed 128-token corpus but worth documenting.",
+   "degeneracy_notes": "Sequences with T<2 are skipped; if every sample is skipped an error dict is returned (no NaN). Softmax is computed in fp32 (W and hidden upcast via .float()), so half-precision overflow is avoided; a constant input still yields finite probabilities and a finite gradient norm. No randomness anywhere (deterministic). NaN in hidden states would propagate to the mean unguarded. Vocabulary mismatch (tokenizer ids beyond W rows) would raise on W[targets], but cannot occur for ids the model itself embedded.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub a model with D=2, V=2, identity hidden state output and lm_head W = [[1,0],[0,1]], b=0, and a single sequence whose pre-target hidden state is h = [0,0]: logits are [0,0], p = [0.5,0.5]; for target y=0 the closed-form gradient is [1,0] - [0.5,0.5] = [0.5,-0.5], so ||grad||^2 = 0.5 exactly. Assert representation_sensitivity == 0.5 and that it equals the autograd value of d/dh log_softmax(Wh)[y]; additionally assert invariance failure is documented: with W' = 10W and h' = h/10 the stub returns 50.0 (or, after the proposed fix, the invariant form returns the same value).",
+   "recommended_action": "REDESIGN"
+  },
+  {
+   "task": "geometry_prediction_alignment",
+   "file": "src/blme/tasks/geometry/consistency.py",
+   "paper_claimed": "none (docstring has no citation; docs/PAPERS.md:241 explicitly says 'BLME-custom; no canonical paper'; docs/tasks_geometry.md \u00a712 says 'Derived from general geometric alignment literature [No specific conference paper]')",
+   "paper_url": "https://www.alignmentforum.org/posts/AcKRB8wDpdaN6v6ru/interpreting-gpt-the-logit-lens",
+   "paper_verified": "No canonical paper exists, and none is claimed \u2014 the registry is honest. Closest relatives: nostalgebraist, 'interpreting GPT: the logit lens' (2020) \u2014 decoding hidden states through the unembedding; Geva, Caciularu, Wang, Goldberg, 'Transformer Feed-Forward Layers Build Predictions by Promoting Concepts in the Vocabulary Space', EMNLP 2022, arXiv:2203.14680. The metric is the cosine (norm-free) version of the correct-token logit, since logit_y = ||h||*||W_y||*cos(h, W_y).",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Prediction alignment is the cosine similarity between the final (post-norm) hidden state at position t and the unembedding row of the true token at t+1 \u2014 i.e., the correct-token logit stripped of both the hidden-state and weight-row magnitudes. It measures how directly the residual stream has rotated to point at the correct output direction by the last layer: since the correct-token logit factorizes as ||h||\u00b7||W_y||\u00b7cos(h, W_y), this cosine isolates the directional share of the model's predictive confidence from magnitude effects. Models that resolve their prediction cleanly in direction \u2014 rather than relying on large but poorly-aimed components \u2014 should achieve lower next-token loss at matched norm budgets, which is the mechanistic reason alignment should track capability.",
+   "issues": [
+    {
+     "id": "geometry_prediction_alignment:1",
+     "severity": "HIGH",
+     "claim": "The paper's only definition of this feature is wrong: the catalogue row describes it as 'Agreement of weight-only vs hidden-state predictions', which corresponds to nothing in the code (actual metric: cosine between the final hidden state and the lm_head row of the true next token) \u2014 and prediction_alignment_std is a LASSO-selected feature in the v3 analysis, so the published interpretation of a selected predictor is incorrect.",
+     "evidence": "paper/main.tex:1345 ('Geometry & \\texttt{geometry\\_prediction\\_alignment} & Agreement of weight-only vs hidden-state predictions. & BLME diagnostic & 2') vs consistency.py:69-89 (cosine of F.normalize(h) with F.normalize(W[labels])); results/study_v3/analysis/lasso_features.csv:36 ('geometry_prediction_alignment.prediction_alignment_std,-0.0027...'). docs/PAPER_SURVEY.md:59-60 has the correct description ('cosine alignment between the final hidden state and the lm-head row for the target token').",
+     "proposed_fix": "Replace the catalogue one-liner with the PAPER_SURVEY.md wording: 'Cosine alignment between the final hidden state and the lm-head row of the true next token (norm-free correct-token logit).'",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_prediction_alignment:2",
+     "severity": "MEDIUM",
+     "claim": "The mean cosine carries a model-specific anisotropy baseline (Ethayarajh 2019 showed raw cosines between contextual representations are dominated by a common dominant direction), so cross-model differences partly reflect global anisotropy of h and of the unembedding rows rather than target-specific alignment; no baseline correction is applied.",
+     "evidence": "consistency.py:82-89 computes raw cosines only. Expected cos(h, W_rand) differs across models due to anisotropy and concentrates as ~1/sqrt(d_model) only in the isotropic limit; geometry/contextualization elsewhere in BLME applies an anisotropy baseline correction (pack \u00a7B item d) but this task does not.",
+     "proposed_fix": "Additionally report a baseline-corrected value: prediction_alignment_mean minus the mean cosine between the same hidden states and unembedding rows of random (or frequency-matched) tokens, computed per model; document the raw value's anisotropy dependence.",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "geometry_prediction_alignment:3",
+     "severity": "LOW",
+     "claim": "No empty-input guard: if all samples are skipped (e.g., every sequence has T<2) cosine_sims is empty and np.mean([]) returns NaN with a RuntimeWarning instead of the error dict other tasks return.",
+     "evidence": "consistency.py:91-94 (np.mean(cosine_sims) with no emptiness check); cache.get_prediction_stats skips whole samples with T<2 (pack \u00a7C), so an all-short corpus yields empty stats lists.",
+     "proposed_fix": "Return {'error': 'No prediction stats collected'} when cosine_sims is empty, matching the convention in lipschitz.py and information_geometry.py.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Cosine similarity is dimensionless and invariant to d_model scaling and to the (W,h)->(cW,h/c) reparameterization that breaks representation_sensitivity, so it is among the better-behaved cross-model features; \u00a73.4 correctly leaves it unnormalized. Residual dependences: (a) a model-specific anisotropy baseline (issue 2); (b) random-cosine concentration ~1/sqrt(d) makes small-d models noisier near zero; (c) tokenizer granularity changes target difficulty (more aggressive BPE merges produce rarer, harder targets), partially mitigated by the shared corpus. Uses the correct projection for untied heads (lm_head.weight, ledger's unnumbered 'prediction_alignment uses lm_head.weight' fix verified at consistency.py:12-30) and the correct shifted accessor on both paths (cache.get_prediction_stats per \u00a7C; geometry/utils.py collect_prediction_stats lines 227-237 slices logits[:, :-1], labels[:, 1:], h[:, :-1] consistently), so h[i] is paired with the true next token \u2014 no #5-style regression.",
+   "degeneracy_notes": "Zero-norm hidden states yield cos = 0 via F.normalize's eps=1e-12 (no NaN). Lock-step zip of stats['hidden'] and stats['labels'] is guaranteed by fix #31. Empty stats produce NaN (issue 3). T=1 sequences are skipped upstream. bf16 weights are upcast via .float() before normalization (consistency.py:82-83), so no half-precision cosine error. F.embedding would raise on a label id >= V, but ids the model embedded cannot exceed its head rows. Fully deterministic.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub stats with hidden = [[[3,4],[6,8]]] (one sample, two positions) and labels = [[0,1]], and a stub lm_head with weight = [[1,0],[0,1]]: normalized hidden rows are [0.6,0.8]; cos with W_0=[1,0] is 0.6 and with W_1=[0,1] is 0.8, so assert prediction_alignment_mean == 0.7 exactly and prediction_alignment_std == 0.1 (population std of [0.6, 0.8]).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_contextualization",
+   "file": "src/blme/tasks/geometry/contextualization.py",
+   "paper_claimed": "Ethayarajh 2019 \u2014 \"How Contextual are Contextualized Word Representations?\", arXiv:1909.00512 (docstring lines 1-3; PAPERS.md:44)",
+   "paper_url": "https://arxiv.org/abs/1909.00512",
+   "paper_verified": "Kawin Ethayarajh, \"How Contextual are Contextualized Word Representations? Comparing the Geometry of BERT, ELMo, and GPT-2 Embeddings\", EMNLP-IJCNLP 2019, arXiv:1909.00512. Verified via arXiv abstract and full text (ar5iv).",
+   "attribution_verdict": "VERIFIED",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Ethayarajh's three measures quantify how much a model re-encodes a word as a function of its context: self-similarity (cosine similarity of the same word across contexts), intra-sentence similarity (homogeneity of token representations within a sentence), and maximum explainable variance (how much of a word's contextual variation a single static direction captures), each baselined against the random-pair anisotropy of the layer. Capable language models are expected to spend upper-layer capacity on context-specific composition rather than recycling static type-level vectors, so low anisotropy-adjusted self-similarity and MEV in deep layers indicate genuine context integration \u2014 empirically the property that separates contextual encoders from static embeddings. The per-layer profile of these quantities therefore probes whether depth is being used for contextualization at all.",
+   "issues": [
+    {
+     "id": "contextualization:1",
+     "severity": "MEDIUM",
+     "claim": "Intra-sentence similarity is computed as mean pairwise cosine among all tokens in a sentence, but Ethayarajh Definition 2 is the mean cosine between each word vector and the sentence MEAN vector \u2014 a numerically different quantity.",
+     "evidence": "contextualization.py:197-203 calls _cosine_pairwise_mean(h_np) over token pairs. Paper (ar5iv 1909.00512, Def 2): \"The intra-sentence similarity of s in layer l is\" the average cosine similarity between word representations and their sentence mean vector. For unit vectors mean-cos-to-mean \u2248 sqrt(1/n + (n-1)/n \u00b7 meanpair), so values differ and the mapping depends on sentence length n, which varies by tokenizer.",
+     "proposed_fix": "Compute s_vec = mean of token vectors per sentence, then average cos(token_i, s_vec) over tokens, per Def 2; keep the pairwise version under a distinct key if desired.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "contextualization:2",
+     "severity": "MEDIUM",
+     "claim": "MEV is reported raw only; the paper anisotropy-adjusts all three measures, including MEV, with a dedicated baseline (variance explained by the first PC of uniformly random word representations).",
+     "evidence": "contextualization.py:190-193,210 emit only raw `mev`; no MEV baseline exists. Paper: \"For MEV ... the baseline is the proportion of variance in uniformly randomly sampled word representations that is explained by their first principal component\" and \"We then subtract from each measure its respective baseline to get the anisotropy-adjusted contextuality measure.\" The omitted correction is model-dependent: v3 mean_anisotropy_baseline spans 0.17 (llama3.1-70b) to 0.50 (pythia-70m), so raw mean_mev partially measures anisotropy, not static explainability.",
+     "proposed_fix": "Compute a per-layer MEV baseline as the first-PC variance fraction of ~1000 uniformly sampled token vectors and emit mev_corrected = mev \u2212 baseline_mev alongside the raw value.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "contextualization:3",
+     "severity": "MEDIUM",
+     "claim": "Special tokens are included: tokenizer() defaults to add_special_tokens=True, so BOS (Llama/Gemma/Qwen) appears in every sample at position 0 with a bit-identical hidden state (causal attention), contributing an exact 1.0 self-similarity entry and an attention-sink vector to the anisotropy baseline and intra-sentence sims, while GPT-2/Pythia (no BOS) are unaffected \u2014 a systematic cross-family asymmetry.",
+     "evidence": "contextualization.py:141-142 `tokenizer(text, return_tensors=\"pt\", truncation=True, max_length=128)` (no add_special_tokens=False); 148 collects all token_ids; 157-159 track every position including position 0. BOS state at position 0 of a causal LM depends only on the BOS embedding, hence identical across all 200 samples \u2192 _cosine_pairwise_mean = 1.0 exactly (MEV becomes NaN via the total<=0 guard at line 73-74 and is silently dropped from the mean).",
+     "proposed_fix": "Tokenize with add_special_tokens=False, or filter token ids in tokenizer.all_special_ids out of token_states, all_states_per_layer, and intra_per_layer.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "contextualization:4",
+     "severity": "MEDIUM",
+     "claim": "Memory: every token vector at every layer is retained in fp32 RAM (intra_per_layer keeps full (T,D) arrays per layer per sample) before the ~5 reported layers are selected \u2014 \u2248\u03a3T\u00b7L\u00b7D\u00b74 bytes \u2248 67 GB for an 80-layer/8192-d model at 200\u00d7128 tokens, risking OOM/timeout on the v3 70B anchors.",
+     "evidence": "contextualization.py:126-159 collect for all `per_layer = hidden[1:]` layers; layers_to_report is only computed afterwards at 164-172. For llama3.1-70b: 25,600 tokens \u00d7 80 layers \u00d7 8192 \u00d7 4 B \u2248 67 GB host RAM, plus an extra ~840 MB transient per reported layer at np.asarray (line 179).",
+     "proposed_fix": "Compute layers_to_report from model config (or after the first sample) and store states only for those layers; optionally fp16 storage for the baseline pool.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Cosine-based, so independent of d_model; default 5 evenly spaced layers including first/last gives depth-comparable sampling and the aggregator regroups per_layer.layerN keys into mean/std/slope/quantiles (#36 \u2014 confirmed in study_v3/aggregated.csv). Tokenizer dependence is real: words are tracked at token-id level (subwords, punctuation, function words dominate the \u22655-occurrence filter), and n_words_tracked is effectively a tokenizer/vocab statistic (TOP_PREDICTORS.md flags it as tokenizer-linked, partial \u03c1 \u22120.81). BOS asymmetry (issue 3) splits the zoo by family. Raw mean_mev is not comparable while anisotropy baselines vary 0.17\u20130.50 across models (issue 2). Known-open Section B item (d) \u2014 same-sentence token repeats counted as separate contexts vs the paper's across-context design \u2014 remains open and is mitigated, not eliminated, by min_word_occurrences=5 and the baseline subtraction; not re-reported here.",
+   "degeneracy_notes": "T<4 samples skipped (line 143); constant/identical word vectors give self-sim 1.0 and MEV NaN (SVD total<=0 guard) which nanmean silently drops; zero-norm vectors guarded via safe_norms; empty layers yield NaN aggregates; no samples \u2192 error dict. All sampling RNGs are seeded (default_rng(0)/(1)) \u2014 deterministic. No NaN/inf propagation into aggregates beyond documented nanmean skips.",
+   "test_status": "none",
+   "proposed_golden_test": "Stub model returning 1 layer of hand-set 2-D states; 3 'sentences' each containing token id 7 with vectors [1,0],[0,1],[1,0] across sentences \u2192 self_sim_raw(id 7) = mean of pairwise cosines = (0+1+0)/3 = 1/3 exactly; with 6 total tokens whose random-pair baseline is hand-computable, assert self_similarity_raw == 1/3 \u00b1 1e-6 and corrected == raw \u2212 baseline; intra-sentence for a 2-token sentence with orthogonal vectors == 0.",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_positional_decay",
+   "file": "src/blme/tasks/geometry/positional_decay.py",
+   "paper_claimed": "Docstring: \"References: 2024-2025 Long-Context Extrapolation and RoPE literature\" (no concrete citation). PAPERS.md:122/240: Press et al. 2021 ALiBi (\"positional bias concept\"). docs/tasks_geometry.md:67: Su et al. 2021 RoFormer + \"Chen, Q., et al. (2023)\" Position Interpolation.",
+   "paper_url": "https://arxiv.org/abs/2108.12409",
+   "paper_verified": "No canonical paper defines this metric (pooled Spearman of token distance vs attention weight) \u2014 it is BLME-custom. Motivation references verified: Ofir Press, Noah A. Smith, Mike Lewis, \"Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation\", ICLR 2022, arXiv:2108.12409 (ALiBi \"biases query-key attention scores with a penalty that is proportional to their distance\"); Jianlin Su et al., \"RoFormer\", arXiv:2104.09864; Shouyuan Chen, Sherman Wong, Liangjian Chen, Yuandong Tian, \"Extending Context Window of Large Language Models via Positional Interpolation\", arXiv:2306.15595 (docs misname first author as \"Chen, Q.\").",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "Healthy autoregressive transformers exhibit a smooth distance-dependent decay of attention imposed by their positional geometry (RoPE rotations, ALiBi-style biases, learned locality): nearer keys systematically receive more mass in positional/local heads. The metric uses the rank correlation between query-key distance and attention weight as a proxy for the structural integrity of that positional geometry; a collapse toward zero would indicate degraded positional encoding and poor context-window utilization, which should track long-context and, more weakly, general LM capability. As implemented, however, the pooled estimator confounds genuine decay with the mechanical 1/row-length shrinkage of softmax rows under the causal mask.",
+   "issues": [
+    {
+     "id": "positional_decay:1",
+     "severity": "MEDIUM",
+     "claim": "CONFIRMED (known-open Section B item (a)): pooling all (i\u2212j, attention) pairs across causal-mask rows before one Spearman produces a large spurious negative correlation from row normalization alone, and the published values sit near that artifact level.",
+     "evidence": "positional_decay.py:73-82 pools pairs across rows. Repro simulation (this audit): uniform attention 1/(i+1) per row \u2014 zero positional preference \u2014 gives pooled Spearman = \u22120.467 at T=64; with genuine decay+noise, pooled = \u22120.838 vs per-row mean = \u22120.583. study_v3/aggregated.csv mean_positional_decay_correlation spans [\u22120.644, \u22120.311] (mean \u22120.475), i.e. the observed cross-model spread straddles the structural \u22120.47 offset, so a large share of the reported signal is mask geometry, not positional decay.",
+     "proposed_fix": "Compute Spearman per query row i (distance 1..i vs attention over j<i) for rows with \u22653 entries, then average over rows (optionally length-weighted); emit both per-row mean and the legacy pooled value during one transition release.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": "Section B open MEDIUM (a)"
+    },
+    {
+     "id": "positional_decay:2",
+     "severity": "MEDIUM",
+     "claim": "geometry_positional_decay is missing from core.py's force_eager_tasks, so a standalone run on SDPA-default models (Llama-3, Qwen-3.5) gets outputs.attentions=None and the task errors; in the study it only works because interpretability attention tasks co-run and flip the model to eager first \u2014 the #7/#28 eager-enforcement fix is incomplete for this task.",
+     "evidence": "core.py:168-177: force_eager_tasks = {interpretability_attention_entropy, attention_graph, attention_rank, head_roles, induction_heads, attention_polysemanticity} \u2014 no geometry task. positional_decay.py:62-64 returns {\"error\": \"Model did not return attentions...\"} when attentions is None. core.py:213-221 only switches to eager when a force_eager_tasks member is in diagnostic_tasks.",
+     "proposed_fix": "Add \"geometry_positional_decay\" to force_eager_tasks in core.py (no cache memory cost \u2014 it never consumes cache.get_attentions()).",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#7/#28"
+    },
+    {
+     "id": "positional_decay:3",
+     "severity": "LOW",
+     "claim": "CITATION: docstring carries no concrete citation (\"2024-2025 Long-Context Extrapolation and RoPE literature\"), and docs/tasks_geometry.md:67 misattributes arXiv:2306.15595 to \"Chen, Q.\" (actual first author Shouyuan Chen).",
+     "evidence": "positional_decay.py:13-14; docs/tasks_geometry.md:67. arXiv:2306.15595 listing: authors Shouyuan Chen, Sherman Wong, Liangjian Chen, Yuandong Tian. PAPERS.md:240 itself marks this task \"\ud83d\udcdd add Press et al. 2021 (ALiBi)\".",
+     "proposed_fix": "Cite Press, Smith, Lewis (ICLR 2022, arXiv:2108.12409) and Su et al. (arXiv:2104.09864) explicitly as motivation, correct the Chen author name, and state in the docstring that the Spearman metric itself is BLME-custom.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "positional_decay:4",
+     "severity": "LOW",
+     "claim": "Averaging attention over heads (mean(dim=0)) before correlating mixes local/positional heads with global/content heads, diluting exactly the signal the docstring attributes to \"positional/local heads\"; the O(T\u00b2) per-element Python loop is also needlessly slow.",
+     "evidence": "positional_decay.py:71 `attn_matrix.mean(dim=0)`; docstring lines 9-11 frame the hypothesis in terms of positional/local heads; lines 75-78 build pair lists element-by-element instead of np.tril_indices.",
+     "proposed_fix": "Compute the correlation per head and report mean plus quantiles (or the most-negative head per layer) alongside the head-averaged value; vectorize pair extraction with np.tril_indices(seq_len, k=-1).",
+     "changes_values": true,
+     "confidence": "med",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Dimensionless (rank correlation), independent of d_model/vocab. The structural pooled-Spearman offset depends on the sequence-length distribution; the eval corpus is pre-truncated to 128 tokens per model tokenizer so T is roughly matched across the zoo, keeping the artifact comparable but compressing real dynamic range (observed v3 spread is only 0.33 wide around the \u22120.47 artifact). layer_positional_decay.layer_{li} keys are regrouped to mean/std/slope/quantile summaries by the aggregator (#36, confirmed in aggregated.csv). Only num_samples=5 passages by default \u2014 high variance per model.",
+   "degeneracy_notes": "seq_len<4 samples skipped; pairs<=5 rows skipped; NaN Spearman (e.g. exactly uniform attention rows) silently dropped \u2014 a survivor bias toward rows/layers with variation; attentions None returns an error dict (and WILL be None on SDPA models if the task runs without the interpretability attention tasks \u2014 issue 2); assumes batch dim 1 (attn_entry[0]). No RNG anywhere \u2014 deterministic.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub model emitting one layer/one head, T=4, with rows strictly decaying in distance, e.g. row i has attention proportional to [.., 0.2, 0.3, 0.5] toward nearer keys: per-row Spearman = \u22121 for every row with \u22653 entries, so mean_positional_decay_correlation must equal \u22121.0 exactly under the per-row fix (and the pooled legacy value can be hand-computed from the 6 pairs for the transition assert).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_tokenizer_efficiency",
+   "file": "src/blme/tasks/geometry/tokenizer_efficiency.py",
+   "paper_claimed": "Docstring lines 20-26: Rust, Pfeiffer, Vuli\u0107, Ruder, Gurevych 2021, ACL 2021, arXiv:2012.15613 (fertility); \"Rajput, Chamberlain, Reese et al. 2024 \u2014 Tokenizer Choice For LLM Training: Negligible or Crucial?, arXiv:2310.08754\".",
+   "paper_url": "https://arxiv.org/abs/2310.08754",
+   "paper_verified": "Rust et al. verified correct: Phillip Rust, Jonas Pfeiffer, Ivan Vuli\u0107, Sebastian Ruder, Iryna Gurevych, \"How Good is Your Tokenizer? On the Monolingual Performance of Multilingual Language Models\", ACL 2021, arXiv:2012.15613 (uses fertility \u2014 average subwords per tokenized word \u2014 following \u00c1cs 2019). arXiv:2310.08754 \"Tokenizer Choice For LLM Training: Negligible or Crucial?\" EXISTS but its authors are Mehdi Ali, Michael Fromm, Klaudia Thellmann, Richard Rutmann, Max L\u00fcbbering, et al. (Findings of NAACL 2024) \u2014 NOT \"Rajput, Chamberlain, Reese\".",
+   "attribution_verdict": "WRONG_ATTRIBUTION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Fertility and compression ratio measure how many subword symbols a tokenizer spends per word and per character of text: an efficient tokenizer packs more content into a fixed context window, reduces the number of autoregressive composition steps per fact, and lets model capacity attend to semantics rather than orthographic reassembly. Because newer, better-trained model families also ship larger, better-fitted vocabularies, tokenizer efficiency is simultaneously a genuine contributor to capability and a generation/family confound \u2014 which is exactly why BLME tracks fertility, compression, and vocab statistics as explicit confound features (~+0.71 partial \u03c1, TOP_PREDICTORS \u00a72) rather than as causal capability metrics.",
+   "issues": [
+    {
+     "id": "tokenizer_efficiency:1",
+     "severity": "MEDIUM",
+     "claim": "CITATION: the docstring attributes arXiv:2310.08754 to a fabricated author list \"Rajput, Chamberlain, Reese et al. 2024\"; the real authors are Mehdi Ali, Michael Fromm, Klaudia Thellmann, et al. (Findings of NAACL 2024).",
+     "evidence": "tokenizer_efficiency.py:24-26. arXiv listing for 2310.08754 and Semantic Scholar (\"...Negligible-or-Ali-Fromm...\") confirm Ali/Fromm/Thellmann et al.; no author named Rajput, Chamberlain, or Reese. Same hazard class as the fake \"2026\" citations already purged from knockout/tracing.",
+     "proposed_fix": "Replace with \"Ali, Fromm, Thellmann, et al. 2024 \u2014 Tokenizer Choice For LLM Training: Negligible or Crucial?, Findings of NAACL 2024, arXiv:2310.08754\" in the docstring and any PAPERS.md mirror.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "tokenizer_efficiency:2",
+     "severity": "MEDIUM",
+     "claim": "token_entropy and vocab_utilization are computed on only ~1,700 tokens (default num_samples=20 of the 200 available passages), so the plug-in entropy is severely downward-biased and vocab_utilization (0.004\u20130.012 in v3) is essentially an inverse-vocab-size proxy rather than a usage measure.",
+     "evidence": "tokenizer_efficiency.py:75 `num_samples = self.config.get(\"num_samples\", len(_EFFICIENCY_CORPUS))` \u2192 20; run_study.py passes no num_samples override. study_v3/aggregated.csv: total_tokens 1702 (gpt2), 1724 (llama3.1-70b), 1763 (qwen2); vocab_util 0.0123 (50k vocab) vs 0.0039 (152k vocab) \u2248 ratio of vocab sizes, i.e. type count saturates and 1/V dominates.",
+     "proposed_fix": "Default num_samples to the full eval corpus (200 passages, Tier-1 cost is tokenizer-only) and document that entropy/utilization remain corpus-size-dependent plug-in estimates; optionally add a Miller-Madow or coverage-adjusted entropy estimate.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "tokenizer_efficiency:3",
+     "severity": "LOW",
+     "claim": "CITATION: docstring claims Rust et al. 2021 \"Introduces fertility as a cross-tokenizer comparison metric\"; Rust et al. adopt subword fertility from \u00c1cs (2019), so the wording overstates priority.",
+     "evidence": "tokenizer_efficiency.py:22-23. Rust et al. (arXiv:2012.15613) measure fertility following \u00c1cs 2019 (\"Exploring BERT's vocabulary\" blog/technical note); the fertility concept itself predates both (IBM translation models).",
+     "proposed_fix": "Reword to \"uses fertility (following \u00c1cs 2019) as a cross-tokenizer comparison metric\" and add the \u00c1cs reference.",
+     "changes_values": false,
+     "confidence": "med",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "tokenizer_efficiency:4",
+     "severity": "LOW",
+     "claim": "vocab_size prefers tokenizer.vocab_size (base BPE vocab, excludes added special tokens: Llama-3 128000 vs len(tokenizer)=128256), inconsistent with the max-of-both convention used in cache.py/collect_prediction_stats, slightly skewing normalised_token_entropy and vocab_utilization.",
+     "evidence": "tokenizer_efficiency.py:115 `vocab_size = tokenizer.vocab_size if hasattr(...) else len(tokenizer)`; contrast geometry/utils.py:191-196 which takes max(len(tokenizer), vocab_size) precisely because of the Llama-3 discrepancy.",
+     "proposed_fix": "Use max(len(tokenizer), getattr(tokenizer, 'vocab_size', 0)) for the normalization denominator, matching the library convention.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "By construction comparable across the zoo: identical input texts for every model, fertility denominator (whitespace word count) is model-independent, and the numerator isolates the tokenizer. fertility/compression_ratio/total_tokens are deliberately tokenizer-confound features per TOP_PREDICTORS \u00a72. vocab-dependent outputs (vocab_size, vocab_utilization, normalised_token_entropy) intentionally encode vocabulary scale; at the current 1.7k-token sample, utilization and normalized entropy are nearly deterministic functions of vocab size (issue 2). Identical values within tokenizer-sharing families in v3 (all gpt2 sizes = 1.2157) confirm determinism. Tier 1, no forward pass, no d_model/n_layers dependence.",
+   "degeneracy_notes": "Empty dataset \u2192 falls back to packaged 20-sentence corpus; total_tokens==0 guarded with error dict; single repeated token gives entropy exactly 0 (p log p with p=1); empty strings contribute 0 tokens/0 words harmlessly; max(1, total_words) guard prevents division by zero; counts chars as Python code points (docstring says UTF-8 chars \u2014 equivalent for the English corpus). No RNG, fully deterministic.",
+   "test_status": "none",
+   "proposed_golden_test": "Stub tokenizer that splits every whitespace word into exactly 2 ids drawn from 8 distinct ids: corpus [\"aa bb\", \"cc dd\"] \u2192 total_words=4, total_tokens=8 \u2192 fertility==2.0 exactly; total_chars=10 \u2192 compression_ratio==0.8; uniform 8-type distribution \u2192 token_entropy==ln(8) and normalised_token_entropy==ln(8)/ln(max(2,vocab_size)).",
+   "recommended_action": "FIX_NOW"
+  },
+  {
+   "task": "geometry_perplexity",
+   "file": "src/blme/tasks/geometry/perplexity.py",
+   "paper_claimed": "none (docstring has no citation; docs/tasks_geometry.md \u00a718 says \"Canonical language modeling metric\"; PAPERS.md:118 says \"Shannon 1948 (bits-per-character); standard cross-entropy\")",
+   "paper_url": "https://onlinelibrary.wiley.com/doi/abs/10.1002/j.1538-7305.1951.tb01366.x",
+   "paper_verified": "C. E. Shannon, \"A Mathematical Theory of Communication\", Bell System Technical Journal 27, 1948 (entropy/cross-entropy in bits); for bits-per-character of English specifically: C. E. Shannon, \"Prediction and Entropy of Printed English\", Bell System Technical Journal 30:50-64, 1951 (verified: bounds entropy of printed English to 0.6-1.3 bits per letter). Token-level perplexity = exp(mean NLL) is the standard LM evaluation quantity; no further canonical paper needed.",
+   "attribution_verdict": "MISSING_CITATION",
+   "implementation_verdict": "CORRECT_WITH_CAVEATS",
+   "intuition": "Held-out cross-entropy is the language-modeling training objective itself, so corpus perplexity and bits-per-character are the most direct intrinsic measures of LM capability, serving in BLME as Y-variables rather than predictors. BPC divides the model's total code length by a tokenizer-independent unit (characters), making it the cleanest single number for cross-architecture comparison, while the rare/frequent stratification separates fit on the high-frequency head of the token distribution from generalization on the tail, where capability differences between models concentrate.",
+   "issues": [
+    {
+     "id": "perplexity:1",
+     "severity": "LOW",
+     "claim": "BPC numerator and denominator use mismatched tokenizations: the NLL comes from cache tokenization (add_special_tokens=True default, truncation at 512) while the chars-side token count re-tokenizes with add_special_tokens=False/truncation=False, so on BOS-adding families BPC is biased low by ~1/T (\u22480.8% at T=128) relative to GPT-2-family models, and the two sides diverge for any document longer than 512 tokens outside the study corpus.",
+     "evidence": "perplexity.py:92 `tokenizer(text, truncation=False, add_special_tokens=False)` and 94-96 count (n_tok\u22121) tokens; cache.py:351-353 tokenizes with defaults (BOS included) so scored tokens per doc = n_tok (the BOS-conditioned first real token is scored), i.e. numerator covers n_tok tokens but tokens_per_char uses n_tok\u22121. Study corpus is pre-truncated to 128 tokens so the 512 divergence is latent only.",
+     "proposed_fix": "Reuse the cached per-sample token counts (cache._sample_lengths \u2212 1, minus special tokens) for total_tokens_for_chars instead of re-tokenizing, or re-tokenize with the same add_special_tokens/truncation settings as the scoring path.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "perplexity:2",
+     "severity": "LOW",
+     "claim": "CITATION: docstring lacks any citation; PAPERS.md cites \"Shannon 1948\" for bits-per-character, but the per-character entropy of English is Shannon 1951 (BSTJ 30:50-64).",
+     "evidence": "perplexity.py:11-21 (no References section); PAPERS.md:118. Verified: Shannon 1951 \"Prediction and Entropy of Printed English\" is the BPC source (0.6-1.3 bits/letter bounds); Shannon 1948 defines entropy/bits.",
+     "proposed_fix": "Add a References block citing Shannon 1948 (cross-entropy) and Shannon 1951 (bits-per-character), and update PAPERS.md:118 accordingly.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "perplexity:3",
+     "severity": "LOW",
+     "claim": "Bucket-edge asymmetry on tiny corpora: with n_observed=2 the rare bucket gets max(1,\u00b7)=1 id but freq_thresh=max(1, 2\u22120)=2 leaves freq empty (ppl_freq=+inf while ppl_rare is finite); and within the dominant count-1 tie plateau the rare/freq boundary is decided by token-id lexsort \u2014 deterministic but arbitrary inside ties.",
+     "evidence": "perplexity.py:53-56: rare_thresh=max(1, round(n*0.2)) but freq_thresh subtracts the un-maxed round(n*0.2); line 46 `np.lexsort((observed_ids, observed_counts))` breaks count ties by raw id, which correlates with BPE merge order. Irrelevant at study scale (thousands of observed ids; all 45 present v3 models have finite ppl_rare in [6.6, 225.1], confirming fix #40 works).",
+     "proposed_fix": "Mirror the max(1,\u00b7) guard on the frequent bucket (freq_thresh = min(n\u22121, n\u2212max(1, round(n*0.2)))) and document the tie-break convention in the docstring.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": "#40"
+    }
+   ],
+   "comparability_notes": "Token-level ppl_overall/mean_nll_nats are tokenizer-dependent (finer tokenizers get lower per-token NLL) \u2014 acknowledged by design, with bits_per_char provided as the tokenizer-neutral variant (v3 range 0.566-1.351, plausible). ppl_rare/ppl_freq stratify by each model's OWN tokenizer-specific frequency ranking, so the rare sets are different token populations across models \u2014 the metric compares 'each model on its own tail', not a shared tail; worth one sentence in the paper appendix. n_tokens_scored differs per model (tokenizer granularity). gemma4-e4b-it perplexity is nulled in the aggregator per fix #38 (confirmed missing in v3 CSV).",
+   "degeneracy_notes": "cnt_total=0 \u2192 ppl_overall=inf, mean_nll=NaN, BPC=NaN; n_observed=0 \u2192 both buckets empty \u2192 ppl_rare/ppl_freq=+inf; n_observed=2 edge gives ppl_freq=+inf (issue 3); BPC wrapped in try/except returning NaN on failure; cache path skips T<2 samples with logits/labels/hidden in lock-step (#31); fully deterministic (lexsort tie-break, no RNG); logits are fp32 on both cache (\u00a7C contract) and non-cache (collect_prediction_stats .float()) paths before cross_entropy.",
+   "test_status": "smoke",
+   "proposed_golden_test": "Single sample, vocab=2: logits=[[ln3, 0],[0, ln3]], labels=[0,1], token_counts=[1,1] \u2192 per-token CE = \u2212ln(3/4) = ln(4/3) \u2248 0.28768 nats; assert ppl_overall == 4/3 and mean_nll_nats == ln(4/3) to 1e-6; with dataset=[{'text': 'ab'}] and a stub tokenizer producing 2 tokens/2 chars, bits_per_char == ln(4/3)/ln(2) \u00d7 (1/2).",
+   "recommended_action": "DOCUMENT_LIMITATION"
+  },
+  {
+   "task": "geometry_categories",
+   "file": "src/blme/tasks/geometry/categories.py",
+   "paper_claimed": "none (no docstring; docs/tasks_geometry.md \u00a711: \"Derived from general geometric alignment literature [No specific conference paper]\"; PAPERS.md:225: \"no canonical paper; BLME-custom category coherence\")",
+   "paper_url": "https://aclanthology.org/N13-1090/",
+   "paper_verified": "No canonical paper exists for the composite task \u2014 verdict NO_CANONICAL_PAPER is consistent with PAPERS.md's own assessment. Closest verified antecedents: the relation-consistency and analogy sub-metrics implement the vector-offset / 3CosAdd method of Mikolov, Yih, Zweig, \"Linguistic Regularities in Continuous Space Word Representations\", NAACL-HLT 2013, pp. 746-751 (\"each relationship is characterized by a relation-specific vector offset\"; king \u2212 man + woman \u2248 queen); the hub-skew sub-metric follows Radovanovi\u0107, Nanopoulos, Ivanovi\u0107, \"Hubs in Space: Popular Nearest Neighbors in High-Dimensional Data\", JMLR 11, 2010; kNN purity is standard clustering-evaluation practice.",
+   "attribution_verdict": "NO_CANONICAL_PAPER",
+   "implementation_verdict": "DESIGN_FLAW",
+   "intuition": "The task asks whether hand-curated semantic categories (months, colors, units, punctuation, ...) form coherent, well-separated clusters in the static token-embedding matrix, and whether relational structure (singular/plural, present/past) is encoded as consistent linear offsets that support analogy arithmetic. The premise, inherited from the word-embedding literature, is that a linearly organized lexical geometry at the input layer reflects a well-trained lexical foundation on which contextual computation builds. Because it probes only the embedding matrix (not contextual states), its link to downstream capability is indirect \u2014 closest to a lexical-quality prior \u2014 which is consistent with its exclusion from the study's X-variable set.",
+   "issues": [
+    {
+     "id": "categories:1",
+     "severity": "HIGH",
+     "claim": "Cross-model comparability is broken by tokenizer-dependent category membership: only words surviving single-token encoding enter each category, so category composition and size differ across the zoo's 8+ tokenizers, and purity has a model-varying hard ceiling min(|cat|\u22121, k)/k with fixed k=20 (e.g. seasons has only 14 words \u2192 ceiling \u22640.65 before any tokenizer attrition) \u2014 while per-category n is never emitted, so nothing downstream can correct for it.",
+     "evidence": "categories.py:120-129 (single-token filter), 177-196 (purity with fixed k=20, denominator k regardless of category size); assets/categories.json: seasons=14, digits=10, currencies=23 entries. Mitigating context: geometry_categories is absent from BLME_RESEARCH_TASKS and BLME_Y_TASKS (run_study.py:44-94) and from study_v3/aggregated.csv (0 matching columns), so v2/v3 results are not contaminated \u2014 but the task ships in the library as a 72-task cross-model diagnostic.",
+     "proposed_fix": "Emit {cat}_n_tokens for every category and normalize purity by its achievable ceiling (same_cat / min(n_cat\u22121, k)); longer-term, use a fixed cross-tokenizer word list with mean-of-subword-embedding fallback so membership is constant across models.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "categories:2",
+     "severity": "MEDIUM",
+     "claim": "Both the no-space and leading-space token variants of a word are added to a category when each is a single token, inflating intra-category coherence with orthographic near-duplicates; relation pairs mix variants across pairs so offset vectors carry a leading-space component, and the analogy search counts the alternate variant of the correct answer as an error.",
+     "evidence": "categories.py:122-129: `for w in [word, ' ' + word]: ... if tid not in cat_labels: cat_tokens[cat_name].append(tid)` adds BOTH when both encode to one id \u2014 verified on GPT-2: \"red\"\u2192[445] AND \" red\"\u2192[2266] (both single tokens, both appended). Relation branch (96-111) keeps one variant per word but the choice differs per word: \"feet\"\u219239690 (no-space) vs \"mice\"\u2192only \" mice\"=10693, so the (foot,feet) and (mouse,mice) difference vectors differ by a space-prefix feature; analogy top-1 (321-327) fails when the nearest neighbor is the other-variant token of the correct word.",
+     "proposed_fix": "Pick exactly one canonical variant per word (prefer the leading-space form, which is the in-context token for BPE vocabularies; the bare form for SentencePiece), and exclude the unused variant id from the analogy candidate set.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "categories:3",
+     "severity": "LOW",
+     "claim": "np.random.seed(42) is called twice on the process-global NumPy RNG (separation sampling, analogy quartet sampling), leaking RNG state into any later global-RNG consumer in the same run \u2014 the same hygiene class as fixes #42/#50-53 which moved tasks to local seeded Generators.",
+     "evidence": "categories.py:138 and 276 `np.random.seed(42)` followed by np.random.choice; also 360 in _compute_projection. Deterministic for this task, but mutates global state mid-suite.",
+     "proposed_fix": "Replace with a local rng = np.random.default_rng(42) and rng.choice throughout.",
+     "changes_values": true,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "categories:4",
+     "severity": "LOW",
+     "claim": "The \"inter\" distance is category-vs-random-vocab (and only the first 10 of 100 sampled random tokens), not inter-CATEGORY distance as the docs describe, so {cat}_separation measures separation from background vocabulary, not between concepts.",
+     "evidence": "categories.py:146-169: random_tids sampled from non-category vocab, inner loop uses `random_tids[:10]`; docs/tasks_geometry.md:89: \"Comparing the average intra-category distance vs inter-category distance\".",
+     "proposed_fix": "Either rename keys to {cat}_vs_background and fix the docs, or additionally compute true inter-category distances between category centroids; use all 100 sampled background tokens instead of 10.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    },
+    {
+     "id": "categories:5",
+     "severity": "LOW",
+     "claim": "CITATION: the relation-consistency and analogy sub-metrics are uncredited implementations of Mikolov, Yih, Zweig (NAACL 2013) vector-offset/3CosAdd, and hub skew follows Radovanovi\u0107 et al. (JMLR 2010); neither is cited in the file, docs, or PAPERS.md row.",
+     "evidence": "categories.py:222-336 (b \u2212 a + c target, cosine search, top-1/top-5 \u2014 exactly 3CosAdd); 198-220 (k-occurrence skew = hubness N_k skewness). PAPERS.md:225 lists the task as needing a citation. Mikolov et al. 2013 verified at aclanthology.org/N13-1090 (\"vector-oriented reasoning based on the offsets between words\").",
+     "proposed_fix": "Add a References docstring citing Mikolov, Yih, Zweig 2013 (analogy/offset consistency) and Radovanovi\u0107, Nanopoulos, Ivanovi\u0107 2010 (hubness), and update the PAPERS.md row.",
+     "changes_values": false,
+     "confidence": "high",
+     "prior_audit_ref": null
+    }
+   ],
+   "comparability_notes": "Operates purely on the input embedding matrix E = get_embeddings(model) (fp32-cast), so no n_layers/seq-len dependence, but heavy tokenizer dependence: category membership, size, purity ceiling, hub-skew sample size, and the surviving relation pairs all vary with the tokenizer (issues 1-2); for tied-embedding models it doubles as unembedding geometry. d_model enters only through cosine geometry (scale-free). Not run in study v2/v3 (absent from run_study.py task lists and aggregated.csv), so it is library-only \u2014 its comparability flaws do not affect published headline numbers but must be fixed or documented before recommending it for cross-model use.",
+   "degeneracy_notes": "Per-metric size gates (len(tids)<3/<2/<5 skip); tiny-vocab test mode falls back to full-range replacement candidates; embeddings None \u2192 error dict. scipy.stats.skew of constant occurrence counts returns NaN with a catastrophic-cancellation warning (verified) \u2192 {cat}_hub_max stays valid but {cat}_hub_skew can be NaN when within-category kNN counts tie exactly. Analogy candidate exclusion zeroes a,b,c but not other in-category duplicates; if d_id coincides with an excluded id (shared word across pairs) the analogy is unwinnable. All randomness seeded (np.random.seed(42)) \u2014 deterministic but global-state-mutating (issue 3).",
+   "test_status": "smoke",
+   "proposed_golden_test": "Stub tokenizer mapping A\u21920, B\u21921, C\u21922, D\u21923 (single ids, no space variants) over a 6-token vocab with hand-set 2-D embeddings: t0=(1,0), t1=(0.8,0.6), t2=(0.6,0.8) as category 'test', t3=(\u22121,0), t4=(0,\u22121), t5=(0.7,\u22120.7) as background; intra = mean cosine distance over the 3 pairs = 1 \u2212 (0.8+0.6+0.96)/3 \u2248 0.2133, inter computable over the fixed random tids; assert test_separation to 1e-6 and test_purity (k=2) == 1.0 exactly.",
+   "recommended_action": "REDESIGN"
+  }
+ ],
+ "flagged": [
+  {
+   "id": "geometry_spectral:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the reported 'alpha' is not Martin & Mahoney's WeightWatcher exponent. The code runs a Hill estimator over a fixed top-20% tail of the SINGULAR VALUES sigma, whereas M&M fit the power-law to the ESD of the EIGENVALUES lambda=sigma^2 of W^T W using the powerlaw-package MLE with a KS-optimal x_min. Because lambda=sigma^2, the code's estimate is approximately 2*alpha_MM - 1, on a different scale.",
+   "evidence": "spectral.py:59-80 computes `S = torch.linalg.svdvals(W)` then Hill `alpha = 1 + k/sum(log(top_k/x_min))` over `k=0.2*len(S)` singular values (no x_min/KS selection). M&M (arXiv:1901.08278) fit ESD of lambda=sigma^2. Repro: drawing lambda~Pareto(pdf~lambda^-alpha_MM), sigma=sqrt(lambda), the code's Hill-on-sigma gives 3.99/5.05/6.88 for alpha_MM=2.5/3.0/4.0 (i.e. ~2*alpha_MM-1). Production avg_alpha is 5.1-6.1 across the zoo (results/study_v3/aggregated.csv), consistent with the 2x-1 inflation; literature WW alpha is ~2-4.",
+   "proposed_fix": "Square the singular values before fitting (fit lambda=sigma^2), and replace the fixed-fraction Hill with the powerlaw MLE + KS-optimal x_min (or document the metric as a 'singular-value Hill index', not the M&M alpha). The cross-model monotone transform means ranking is roughly preserved, but reported values are not comparable to published WW alpha.",
+   "changes_values": true,
+   "confidence": "high",
+   "task": "geometry_spectral",
+   "file": "src/blme/tasks/geometry/spectral.py"
+  },
+  {
+   "id": "geometry_schatten:1",
+   "severity": "HIGH",
+   "claim": "CITATION: Schatten-p norms are attributed to 'Wei et al. 2025, arXiv:2509.25359' but that paper has no author named Wei (it is Yusupov, Maksimov, Alaeva et al.), and its actual conclusion is the OPPOSITE of the claim in the docstring \u2014 it finds Schatten Norm 'mainly reflect[s] output length' and loses discriminative power once length is controlled, rather than 'validating' it as a reference-free text-quality proxy.",
+   "evidence": "schatten.py:7-12 docstring 'validated as reference-free text-quality proxies by Wei et al. 2025 (\"From Internal Representations to Text Quality\", arXiv:2509.25359)'. PAPERS.md:86 same. WebFetch of arXiv:2509.25359: published title 'Geometric Metrics and LLMs: What They Measure and When They Work'; abstract: 'some metrics (notably Schatten Norm and MOM) mainly reflect output length, and their apparent discriminative power collapses once length is controlled.' Author list contains no 'Wei'.",
+   "proposed_fix": "Fix author/title to Yusupov et al. 2025, and reframe the docstring/paper text: the cited work cautions that Schatten norms are length-confounded, not that they are validated quality proxies.",
+   "changes_values": false,
+   "confidence": "high",
+   "task": "geometry_schatten",
+   "file": "src/blme/tasks/geometry/schatten.py"
+  },
+  {
+   "id": "geometry_schatten:2",
+   "severity": "HIGH",
+   "claim": "schatten_2 (Frobenius) is a degenerate feature: after the code's row-L2 normalization every kept row has unit norm, so ||Z_norm||_F = sqrt(N_kept), and dividing by sqrt(d) makes schatten_2 == sqrt(N_kept/d) EXACTLY \u2014 a pure function of token count and d_model, carrying zero information about the representation content.",
+   "evidence": "schatten.py:146 `Z_norm=_normalise_matrix(Z)` (rows L2-normalized, lines 124-129) then line 160 `schatten_2 = _schatten_p_norm(S,p=2)/sqrt(d)`. Repro: for random Z of shape (T,d), schatten_2 is identical for different content of the same shape (0.883883 for T=50,d=64 == sqrt(50/64)); production per-layer std of schatten_2 is ~1e-7 and schatten_2_last tracks 1/sqrt(d) monotonically across all 44 models (results/study_v3/aggregated.csv).",
+   "proposed_fix": "Drop schatten_2 (it is mathematically trivial after row normalization), or compute Schatten norms on the raw (un-row-normalized) matrix as the Schatten-norm literature does. Note that row normalization was borrowed from the MNN preprocessing and is not part of the Schatten-norm definition.",
+   "changes_values": true,
+   "confidence": "high",
+   "task": "geometry_schatten",
+   "file": "src/blme/tasks/geometry/schatten.py"
+  },
+  {
+   "id": "geometry_schatten:3",
+   "severity": "MEDIUM",
+   "claim": "CITATION/MATH: the d^(1/p) normalization is attributed to the Schatten paper ('Wei et al. 2025 reports ||X||_{S_p}/d^{1/p} as the comparable quantity'), but that paper applies no such normalization; the claim is fabricated. Combined with the borrowed row-L2 + centering preprocessing (from MNN, Li 2024), the Schatten/MNN/RankMe values are computed on a matrix the Schatten and RankMe papers never normalize that way.",
+   "evidence": "schatten.py:154-164 comment 'Wei et al. 2025 reports ||X||_{S_p}/d^{1/p}'. WebFetch arXiv:2509.25359: 'no explicit normalization by d^(1/p)'. Garrido RankMe is defined on raw Z (no centering/row-norm) but code feeds Z_norm to _rankme (line 153-164).",
+   "proposed_fix": "Remove the fabricated attribution; either justify d^(1/p) as a BLME design choice or normalize per \u00a73.4 (divide by d_model). Compute RankMe on the raw matrix to match Garrido.",
+   "changes_values": true,
+   "confidence": "high",
+   "task": "geometry_schatten",
+   "file": "src/blme/tasks/geometry/schatten.py"
+  },
+  {
+   "id": "geometry_collapse:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the third reference is fabricated/misattributed \u2014 'Pedrotti, Guo, Jaffe et al. 2025, The Compression Valley: A Depth-Dependent View of LLM Capability, arXiv:2505.xxxxx' has a placeholder arXiv id and a title that does not match any existing paper. The genuine compression-valley paper is arXiv:2510.06477 by Queipo-de-Llano et al. (PAPERS.md:73 also misattributes 2510.06477 to 'Pedrotti, Guo').",
+   "evidence": "collapse.py:26-29 docstring cites 'arXiv:2505.xxxxx'. Web searches for the title and author set return no such paper; the only compression-valley LLM paper is arXiv:2510.06477 with a completely different author list.",
+   "proposed_fix": "Replace the bogus citation with arXiv:2510.06477 (Queipo-de-Llano et al. 2025) and correct PAPERS.md:73 authors. Core metric attribution (Jing 2021 + Roy-Vetterli 2007) is correct and unaffected.",
+   "changes_values": false,
+   "confidence": "high",
+   "task": "geometry_collapse",
+   "file": "src/blme/tasks/geometry/collapse.py"
+  },
+  {
+   "id": "geometry_collapse:2",
+   "severity": "MEDIUM",
+   "claim": "max_drop_layer is emitted as an ABSOLUTE layer index, which is size-correlated (deeper models can place the drop at a larger index) and survives as a feature column in the aggregated study \u2014 same bug class as fixes #45/#59 (raw index vs normalized depth).",
+   "evidence": "collapse.py:95 `max_drop_layer = int(np.argmin(diffs)) + 1`. Confirmed present in results/study_v3/aggregated.csv as `geometry_collapse.max_drop_layer` with values 1,23,7,2,... and NaN for some models \u2014 an absolute index feature, not normalized to depth.",
+   "proposed_fix": "Emit max_drop_layer as normalized depth: (argmin(diffs)+1)/(n_layers-1). It is a scalar (not a per-layer list) so the aggregator's layer-regrouping (#36) does not catch it.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "45",
+   "task": "geometry_collapse",
+   "file": "src/blme/tasks/geometry/collapse.py"
+  },
+  {
+   "id": "geometry_weight_norms:1",
+   "severity": "LOW",
+   "claim": "CITATION: docstring carries no citation despite computing stable rank (Bartlett et al. 2017) and a Martin-Mahoney-style per-layer norm profile.",
+   "evidence": "weight_norms.py:1-21 docstring has no reference; PAPERS.md:121 'Martin-Mahoney 2019 style per-layer diagnostic', :249 'BLME diagnostic'.",
+   "proposed_fix": "Add Bartlett, Foster, Telgarsky 2017 (arXiv:1706.08498) for stable rank and Martin & Mahoney 2019/2021 for the per-layer-norm-profile motivation.",
+   "changes_values": false,
+   "confidence": "high",
+   "task": "geometry_weight_norms",
+   "file": "src/blme/tasks/geometry/weight_norms.py"
+  },
+  {
+   "id": "geometry_isoscore:1",
+   "severity": "HIGH",
+   "claim": "CITATION: the cited arXiv id 2207.10341 resolves to an unrelated paper ('UFO: Unified Feature Optimization', ECCV 2022), not IsoScore; the correct IsoScore id is 2108.07344.",
+   "evidence": "isotropy.py:75 and :130 cite 'arXiv:2207.10341'; docs/PAPERS.md:75 repeats it. WebFetch of arxiv.org/abs/2207.10341 returns 'UFO: Unified Feature Optimization' (Xi et al., ECCV 2022). WebFetch of arxiv.org/abs/2108.07344 returns the actual IsoScore paper (Rudman et al., ACL Findings 2022). Note docs/REPOSITORIES.md:29 already uses the correct id 2108.07344 \u2014 internal inconsistency.",
+   "proposed_fix": "Replace 2207.10341 with 2108.07344 in the docstring and PAPERS.md:75.",
+   "changes_values": false,
+   "confidence": "high",
+   "task": "geometry_isoscore",
+   "file": "src/blme/tasks/geometry/isotropy.py"
+  },
+  {
+   "id": "geometry_isoscore:2",
+   "severity": "CRITICAL",
+   "claim": "The implementation normalizes the eigenvalue vector so its SUM equals d (L1), but the paper's Algorithm 1 normalizes by the L2 norm (Sigma_hat = sqrt(n)*Sigma_D/||Sigma_D||); the resulting scalar is NOT the paper's IsoScore and diverges by up to ~10x on anisotropic spectra.",
+   "evidence": "isotropy.py:112-118: `s = full.sum(); full = full*(d/s)` (sum-normalisation) then `delta_iso_sq = d*(d-1)`. Paper Algorithm 1 (verified via ar5iv 2108.07344): Step4 'Sigma_hat_D := sqrt(n)*Sigma_D/||Sigma_D||' (L2 norm), Step5 'delta := ||Sigma_hat_D - 1||/sqrt(2(n-sqrt(n)))', Step6 'phi := (n - delta^2(n-sqrt(n)))^2/n^2', Step7 'iota := (n*phi-1)/(n-1)'. Numerical reproduction (CPU, 5000 pts): power-law 1.5^-i, d=64 \u2192 code=0.817 vs paper=0.064; d=768 \u2192 code=0.804 vs paper=0.005; spectrum (4,2,1,0.5) \u2192 code=0.872 vs paper=0.548; isotropic-Gaussian d=768 sample \u2192 code=0.9998 vs paper=0.866. On the actual (highly anisotropic) LLM hidden states the code reports near-isotropic (~0.8) where real IsoScore reports ~0.05, inverting the qualitative conclusion and making the published 'isoscore' column wrong relative to the cited metric.",
+   "proposed_fix": "Replace the sum-normalisation block with the paper's L2 normalisation and delta/phi/iota formulas: sigma_hat = sqrt(d)*lam/np.linalg.norm(lam); delta2 = sum((sigma_hat-1)**2)/(2*(d-sqrt(d))); phi = (d - delta2*(d-sqrt(d)))**2/d**2; iota = (d*phi-1)/(d-1). Validate against the official isoscore package (bcbi-edu/p_eickhoff_isoscore). Re-run affected models.",
+   "changes_values": true,
+   "confidence": "high",
+   "task": "geometry_isoscore",
+   "file": "src/blme/tasks/geometry/isotropy.py"
+  },
+  {
+   "id": "geometry_svd:1",
+   "severity": "MEDIUM",
+   "claim": "Unseeded np.random.choice makes avg_cosine_similarity non-deterministic across runs (same bug class as ledger #42, which seeded only geometry/lid).",
+   "evidence": "isotropy.py:41 `indices = np.random.choice(len(X), size=(min(1000,len(X)),2), replace=True)` uses the global NumPy RNG with no seed; the resulting `avg_cosine_similarity` feature column varies run-to-run. Ledger #42 fixed the identical pattern in geometry/lid via default_rng(0) but isotropy.py was not covered.",
+   "proposed_fix": "Use `rng = np.random.default_rng(0)` and `rng.integers`/`rng.choice` for the pair sampling, matching the #42 fix.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "42",
+   "task": "geometry_svd",
+   "file": "src/blme/tasks/geometry/isotropy.py"
+  },
+  {
+   "id": "geometry_svd:2",
+   "severity": "MEDIUM",
+   "claim": "The shared effective_rank helper computes p = sigma^2/sum(sigma^2) and the docstring claims this is 'the canonical Roy-Vetterli convention', but Roy & Vetterli 2007 define p_k = sigma_k/||sigma||_1 (singular values, NOT squared); fix #35 unified on the squared convention while mislabeling its attribution.",
+   "evidence": "geometry/utils.py:32-41 `sq = S*S; p = sq/total` with docstring 'pi = sigma_i^2/sum sigma_j^2 ... canonical Roy-Vetterli ... legacy sigma version is not the paper convention'. Three independent sources confirm Roy-Vetterli use singular values: p_k = sigma_k/||sigma||_1, erank=exp(H). PAPERS.md:74 cites Roy-Vetterli 2007 for geometry_svd.effective_rank. The sigma^2 form is effective rank of the Gram/covariance matrix, a legitimate but DIFFERENT quantity (sharper spectrum \u2192 lower erank); the docstring's claim about which convention is 'the paper convention' is inverted.",
+   "proposed_fix": "Either switch to p_k = sigma/sum(sigma) to match the cited Roy-Vetterli definition, or keep sigma^2 but correct the docstring/PAPERS.md to state it is the effective rank of the covariance (eigenvalues), not the literal Roy-Vetterli singular-value definition.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "35",
+   "task": "geometry_svd",
+   "file": "src/blme/tasks/geometry/isotropy.py"
+  },
+  {
+   "id": "geometry_unembedding:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the in-code task has no citation and the PAPERS.md-proposed source 'Lan et al. 2024 Unembedding Dark Matter' could not be verified to exist; the purity metric is BLME-custom and should be attributed to a verifiable paper or declared custom.",
+   "evidence": "unembedding.py:44-49 class docstring lists no reference. docs/PAPERS.md:248 '\ud83d\udcdd add Lan et al. 2024 (Unembedding Dark Matter)' and :120 'Lan et al. 2024 Unembedding Dark Matter for purity'. Web searches for 'Lan 2024 unembedding dark matter' returned only unrelated papers (e.g. Engels et al. 2024 'Decomposing the Dark Matter of Sparse Autoencoders', arXiv:2410.14670). The closest real categorical-geometry paper is Park et al. 2024 (arXiv:2406.01506).",
+   "proposed_fix": "Either cite a verifiable paper (e.g. Park et al. 2024 for categorical concept geometry) or explicitly mark purity/alignment as BLME-custom diagnostics; correct or remove the unverifiable 'Lan et al. 2024' entry in PAPERS.md.",
+   "changes_values": false,
+   "confidence": "med",
+   "task": "geometry_unembedding",
+   "file": "src/blme/tasks/geometry/unembedding.py"
+  },
+  {
+   "id": "geometry_unembedding:2",
+   "severity": "MEDIUM",
+   "claim": "unembedding_eff_rank inherits the sigma^2 vs sigma effective-rank convention issue: the shared helper labels p=sigma^2/sum(sigma^2) as 'canonical Roy-Vetterli' but the paper uses singular values sigma.",
+   "evidence": "unembedding.py:87-90 calls torch.linalg.svdvals then geometry/utils.effective_rank which squares S (utils.py:32). Same mislabeling as geometry_svd:2; PAPERS.md:74 cites Roy-Vetterli for both. See geometry_svd:2 for the verified Roy-Vetterli definition (p_k = sigma_k/||sigma||_1).",
+   "proposed_fix": "Same as geometry_svd:2 \u2014 align the helper convention to Roy-Vetterli's singular-value form or correct the attribution claim.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "35",
+   "task": "geometry_unembedding",
+   "file": "src/blme/tasks/geometry/unembedding.py"
+  },
+  {
+   "id": "geometry_neural_collapse:1",
+   "severity": "HIGH",
+   "claim": "CITATION: the cited arXiv id 2008.03465 resolves to an unrelated brain-MRI segmentation paper; the correct Neural Collapse id is 2008.08186.",
+   "evidence": "neural_collapse.py:2 'Papyan, Han & Donoho 2020 (arXiv:2008.03465)'; PAPERS.md:71 repeats arXiv:2008.03465. WebFetch of arxiv.org/abs/2008.03465 returns 'Automated Claustrum Segmentation in Human Brain MRI Using Deep Learning' (Li et al.). WebSearch confirms the real paper is arXiv:2008.08186, 'Prevalence of Neural Collapse...', Papyan/Han/Donoho, PNAS 117.",
+   "proposed_fix": "Replace 2008.03465 with 2008.08186 in the docstring and PAPERS.md:71.",
+   "changes_values": false,
+   "confidence": "high",
+   "task": "geometry_neural_collapse",
+   "file": "src/blme/tasks/geometry/neural_collapse.py"
+  },
+  {
+   "id": "geometry_hsic:1",
+   "severity": "LOW",
+   "claim": "Token subsampling to 2000 uses torch.randperm with no task-local seed, so the chosen token subset depends on the global RNG state at call time (task execution order), inconsistent with the project's own hardening of analogous subsamples (#42 lid, #50 ablation, #52 trajectories, #53 polysemanticity) to local seeded generators.",
+   "evidence": "mutual_info.py:62 `shared_perm = torch.randperm(n_tokens)[:max_tokens]` (unseeded local). core.py:85-86 calls set_global_seed(seed) once at run start, so a fixed full-pipeline run is reproducible, but the subsample is order-dependent and differs if HSIC is run in isolation or after a task list change. The shared_perm is applied identically across layers (line 71-72), so layer alignment is preserved.",
+   "proposed_fix": "Draw the permutation from a task-local torch.Generator().manual_seed(0) (as #50 did) so the token subset is order-independent.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#42",
+   "task": "geometry_hsic",
+   "file": "src/blme/tasks/geometry/mutual_info.py"
+  },
+  {
+   "id": "geometry_rsa:1",
+   "severity": "MEDIUM",
+   "claim": "rsa_min_continuity_layer is an absolute layer index (argmin over adjacent RSA), which is the exact class of size/depth-proxy column #36 was meant to eliminate; it equals ~n_layers-2 for most models and leaks depth into the analysis (Spearman 0.68 with metadata n_layers, -0.49 with log_n_params), surfacing as a spurious univariate 'predictor' (\u03c1\u22480.66 with benchmarks across 79 rows).",
+   "evidence": "rsa.py:118 `\"rsa_min_continuity_layer\": int(np.argmin(adj_arr))`; results/study_v3/aggregated.csv shows e.g. gpt2-small n_layers=12 \u2192 10, gpt2-medium 24 \u2192 22 (i.e. n_layers-2); results/study_v3/analysis/univariate.csv has 79 rows for geometry_rsa.rsa_min_continuity_layer with \u03c1 up to 0.677. #36 de-indexed per-layer *profiles* but this scalar argmin slipped through because it is a single int, not a layer-indexed vector.",
+   "proposed_fix": "Replace the absolute argmin index with a normalized-depth location z=argmin/(n_layers-1) (per \u00a73.4 z_min convention) or drop it from the feature set; alternatively exclude '*_layer' integer-index scalars in the aggregator.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#36",
+   "task": "geometry_rsa",
+   "file": "src/blme/tasks/geometry/rsa.py"
+  },
+  {
+   "id": "geometry_rsa:2",
+   "severity": "MEDIUM",
+   "claim": "The RDM uses Euclidean distance (pdist metric='euclidean'), but Kriegeskorte 2008 recommends correlation distance (1-correlation); Euclidean RDMs are dominated by overall activation magnitude, and hidden-state norms grow systematically with depth and differ across model families, biasing cross-layer/cross-model RSA comparisons that the deeper-norm geometry inflates.",
+   "evidence": "rsa.py:82 `rdm = pdist(X, metric=\"euclidean\")`; paper quote: 'We suggest using correlation distance (1-correlation) as the dissimilarity measure ... normalizes for both the overall activation and the variability of activity across space.' Docstring documents Euclidean (so it is DEVIATES_DOCUMENTED) but deviates from the cited method.",
+   "proposed_fix": "Use correlation distance (pdist metric='correlation') for the RDM to match Kriegeskorte 2008 and remove the depth-dependent magnitude bias; or document the deviation and demonstrate robustness.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_rsa",
+   "file": "src/blme/tasks/geometry/rsa.py"
+  },
+  {
+   "id": "geometry_rsa:3",
+   "severity": "LOW",
+   "claim": "RSA takes the first min(min_tokens,200) rows of the flat (\u03a3T,D) token cloud (per_sample not used), so the 'conditions' are the first ~1.5 sentences' adjacent tokens \u2014 non-representative and highly autocorrelated \u2014 rather than a diverse set of stimuli/sentences as in canonical RSA.",
+   "evidence": "rsa.py:55 `cache.get_hidden_states(layer_idx=\"all\", num_samples=num_samples)` (no per_sample=True); rsa.py:71-80 `n_tokens=min(min_tokens, max_tokens_per_layer=200)`, `X = all_layers[li][:n_tokens]`. With num_samples=20 \u00d7 ~128 tok the first 200 rows come from the opening 1-2 passages. The comparison is consistent across layers (same tokens) so it is not 'corrupted' in the #1 sense, but the sample is biased to early-corpus content.",
+   "proposed_fix": "Draw a shared random/even token subset across the whole cloud, or use per_sample mean-pooled sentence vectors as RSA 'conditions' for a more faithful (and less autocorrelated) RDM.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": "#1",
+   "task": "geometry_rsa",
+   "file": "src/blme/tasks/geometry/rsa.py"
+  },
+  {
+   "id": "geometry_mahalanobis:2",
+   "severity": "LOW",
+   "claim": "The per-sentence 10-token subsample in collect_hidden_states uses an unseeded global torch.randperm, so which tokens form the ID/OOD distributions depends on the global RNG state (task order); inconsistent with the project's local-seed standard and means isolated reruns of Mahalanobis differ.",
+   "evidence": "utils.py:129 `indices = torch.randperm(T)[:10]` (no local Generator). The OOD text shuffle is seeded (mahalanobis.py:95 RandomState(42)) but the token subsample is not. core.py:85 set_global_seed makes a fixed full-pipeline run reproducible, so locked v2/v3 numbers are stable, but the subsample is order-dependent.",
+   "proposed_fix": "Pass a task-local seeded torch.Generator into collect_hidden_states for the T>10 subsample, mirroring #42/#50.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": "#42",
+   "task": "geometry_mahalanobis",
+   "file": "src/blme/tasks/geometry/mahalanobis.py"
+  },
+  {
+   "id": "geometry_lipschitz:1",
+   "severity": "MEDIUM",
+   "claim": "lipschitz_max_layer / relative_change_max_layer are emitted as raw absolute layer indices and survive into the v3 feature matrix, leaking n_layers (a model-size proxy) into the 'intrinsic' feature pool, contrary to the paper's normalized-depth scheme.",
+   "evidence": "lipschitz.py:119 (max_layer = int(np.argmax(lip_arr))), :125, :129; results/study_v3/aggregated.csv header columns 55 ('geometry_lipschitz.lipschitz_max_layer') and 59 ('...relative_change_max_layer'). Paper \u00a73.4 mandates normalized depth z_l = l/(L-1) for layer positions; ledger items #45/#59 fixed exactly this class (slope on normalized depth) in gradient_flow and betti_curve but this scalar index was missed. Aggregator #36 only regroups layer-indexed KEY NAMES, not scalar index values.",
+   "proposed_fix": "Emit max_layer/(n_transitions-1) as a normalized depth in [0,1] (keep the raw index under a clearly non-feature name if needed for debugging).",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "#45",
+   "task": "geometry_lipschitz",
+   "file": "src/blme/tasks/geometry/lipschitz.py"
+  },
+  {
+   "id": "geometry_lipschitz:3",
+   "severity": "MEDIUM",
+   "claim": "CITATION: docs/tasks_geometry.md \u00a72 describes a different estimator ('ratio of the distance between output representations to the distance between input representations for closely neighbored points') and lists Anil et al. 2019 as the Citation/Paper, and PAPERS.md:235 recommends attaching Virmaux-Scaman 2018 \u2014 but none of the cited papers defines the implemented inter-layer relative-change ratio, and the code performs no perturbation or neighbor-pair comparison.",
+   "evidence": "docs/tasks_geometry.md:16-21 vs lipschitz.py:89-100 (same-token consecutive-layer difference, no neighbor pairs). Scaman & Virmaux abstract (arXiv:1805.10965): 'providing AutoLip, the first generic algorithm for upper bounding the Lipschitz constant of any automatically differentiable function' \u2014 an operator-norm upper bound, not an activation-ratio. Anil et al. (arXiv:1811.05381) concerns 'Training neural networks under a strict Lipschitz constraint' (GroupSort architectures), not measurement. The in-file docstring (lipschitz.py:37-40) honestly disclaims the difference; the docs file and registry do not. The paper appendix (main.tex app:lipschitz) defines the metric without citation, which is the honest framing.",
+   "proposed_fix": "Rewrite docs/tasks_geometry.md \u00a72 to match the implemented relative-change ratio; relabel the citations as background on Lipschitz constraints (clearly 'related, not defining'); cite Jastrzebski et al. 2018 (arXiv:1710.04773) as the closest published relative; update PAPERS.md:235 from 'add Virmaux-Scaman 2018' to 'BLME-custom relative-change ratio; background refs only'.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_lipschitz",
+   "file": "src/blme/tasks/geometry/lipschitz.py"
+  },
+  {
+   "id": "geometry_representation_sensitivity:1",
+   "severity": "HIGH",
+   "claim": "The paper's task-catalogue caption claims this task 'contributes features to the LASSO and partial-correlation analyses', but the task is absent from run_study.py's BLME_RESEARCH_TASKS, absent from the aggregator's task map, and has zero columns in aggregated.csv \u2014 the published claim about study composition is false for this row.",
+   "evidence": "paper/main.tex:1320 ('The tasks below contribute features to the LASSO and partial-correlation analyses in \\S\\ref{sec:experiments}') and :1346 (the geometry_representation_sensitivity row); scripts/run_study.py:44-88 (task not listed); scripts/aggregate_results.py task map (grep 'sensitivity' matches only consistency_position_sensitivity, line 75); grep -rn representation_sensitivity results/ returns nothing.",
+   "proposed_fix": "Either remove the row from the catalogue table (and the count '38') or actually wire the task into run_study.py + aggregate_results.py \u2014 but only after fixing issue 2, since the raw value is not cross-model comparable.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_representation_sensitivity",
+   "file": "src/blme/tasks/geometry/information_geometry.py"
+  },
+  {
+   "id": "geometry_representation_sensitivity:2",
+   "severity": "HIGH",
+   "claim": "The metric is not invariant to the model's arbitrary representation/unembedding scale convention, so cross-model values conflate sensitivity with norm conventions: under the function-preserving reparameterization W -> cW, h -> h/c the model's logits and distribution are unchanged but the metric scales by c^2.",
+   "evidence": "information_geometry.py:95-103 (grad = W_target - W_expected; squared L2 norm summed over D). Verified numerically (fp64, V=7, D=5): closed form matches autograd to 1e-16, and rescaling by c=10 with identical logits multiplies ||grad||^2 from 7.505 to 750.5 (exactly x100). The value also grows ~linearly with d_model and with unembedding row-norm scale, which differs systematically across families (e.g. Gemma's sqrt(d)-scaled tied embeddings, per-model final-norm gains). No \u00a73.4 normalization is applied because the task is not aggregated at all.",
+   "proposed_fix": "Report a scale-invariant quantity: per-token ||grad_h log p|| * ||h|| (dimensionless directional sensitivity, invariant under the c-rescaling since grad scales 1/c and h scales c), or normalize by mean centered unembedding row norm and d_model; document the chosen invariance.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_representation_sensitivity",
+   "file": "src/blme/tasks/geometry/information_geometry.py"
+  },
+  {
+   "id": "geometry_representation_sensitivity:3",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the docstring title 'Information Geometry of Neural Networks (Amari, 1998)' is not the title of Amari's 1998 Neural Computation article, the bib entry amari1998natural is a malformed @book carrying a journal field (venue will not render), and no cited Amari work defines the implemented representation-space empirical-Fisher trace \u2014 Amari's FIM is over parameter space.",
+   "evidence": "information_geometry.py:18-19; paper/references.bib:278-286 ('@book{amari1998natural, title={Natural Gradient Works Efficiently in Learning}, ... journal={Neural Computation}'); web verification: Amari 1998 is 'Natural Gradient Works Efficiently in Learning', Neural Computation 10(2):251-276 \u2014 'Information geometry is used for calculating the natural gradients in the parameter space of perceptrons' (parameter space, not representations). PAPERS.md:242's Amari 2016 book is likewise general background.",
+   "proposed_fix": "Fix the docstring to cite Amari 1998 by its real title explicitly as BACKGROUND for Fisher information/natural gradient; state the metric is BLME-custom (empirical Fisher trace w.r.t. final hidden states); add Kunstner et al. 2019 (arXiv:1905.12558) for the empirical-Fisher construction and Novak et al. 2018 (arXiv:1802.08760) for sensitivity-generalization; change @book to @article in references.bib.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_representation_sensitivity",
+   "file": "src/blme/tasks/geometry/information_geometry.py"
+  },
+  {
+   "id": "geometry_representation_sensitivity:4",
+   "severity": "MEDIUM",
+   "claim": "The closed-form gradient assumes logits = Wh + b exactly; for architectures with a nonlinear final logit transformation (Gemma-2-style final_logit_softcapping = cap*tanh(Wh/cap)) both the probabilities and the gradient are silently wrong, because the code recomputes logits as h @ W.T instead of using out.logits.",
+   "evidence": "information_geometry.py:87-91 (logits = h @ W.T; probs = softmax(logits)) while out = model(...) already produced the true logits at :77. Gemma-2 checkpoints (final_logit_softcapping=30.0) are in the v3 generation axis ('Gemma-1/2/3/4', pack \u00a7E). Currently latent because the task is not run in the study, but it ships in the library.",
+   "proposed_fix": "Compare h @ W.T against out.logits once per model and warn/abort on mismatch; for softcapped heads apply the chain rule (multiply each row contribution by sech^2(z/cap)) or fall back to autograd for a few tokens.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "geometry_representation_sensitivity",
+   "file": "src/blme/tasks/geometry/information_geometry.py"
+  },
+  {
+   "id": "geometry_prediction_alignment:1",
+   "severity": "HIGH",
+   "claim": "The paper's only definition of this feature is wrong: the catalogue row describes it as 'Agreement of weight-only vs hidden-state predictions', which corresponds to nothing in the code (actual metric: cosine between the final hidden state and the lm_head row of the true next token) \u2014 and prediction_alignment_std is a LASSO-selected feature in the v3 analysis, so the published interpretation of a selected predictor is incorrect.",
+   "evidence": "paper/main.tex:1345 ('Geometry & \\texttt{geometry\\_prediction\\_alignment} & Agreement of weight-only vs hidden-state predictions. & BLME diagnostic & 2') vs consistency.py:69-89 (cosine of F.normalize(h) with F.normalize(W[labels])); results/study_v3/analysis/lasso_features.csv:36 ('geometry_prediction_alignment.prediction_alignment_std,-0.0027...'). docs/PAPER_SURVEY.md:59-60 has the correct description ('cosine alignment between the final hidden state and the lm-head row for the target token').",
+   "proposed_fix": "Replace the catalogue one-liner with the PAPER_SURVEY.md wording: 'Cosine alignment between the final hidden state and the lm-head row of the true next token (norm-free correct-token logit).'",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_prediction_alignment",
+   "file": "src/blme/tasks/geometry/consistency.py"
+  },
+  {
+   "id": "geometry_prediction_alignment:2",
+   "severity": "MEDIUM",
+   "claim": "The mean cosine carries a model-specific anisotropy baseline (Ethayarajh 2019 showed raw cosines between contextual representations are dominated by a common dominant direction), so cross-model differences partly reflect global anisotropy of h and of the unembedding rows rather than target-specific alignment; no baseline correction is applied.",
+   "evidence": "consistency.py:82-89 computes raw cosines only. Expected cos(h, W_rand) differs across models due to anisotropy and concentrates as ~1/sqrt(d_model) only in the isotropic limit; geometry/contextualization elsewhere in BLME applies an anisotropy baseline correction (pack \u00a7B item d) but this task does not.",
+   "proposed_fix": "Additionally report a baseline-corrected value: prediction_alignment_mean minus the mean cosine between the same hidden states and unembedding rows of random (or frequency-matched) tokens, computed per model; document the raw value's anisotropy dependence.",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "geometry_prediction_alignment",
+   "file": "src/blme/tasks/geometry/consistency.py"
+  },
+  {
+   "id": "contextualization:1",
+   "severity": "MEDIUM",
+   "claim": "Intra-sentence similarity is computed as mean pairwise cosine among all tokens in a sentence, but Ethayarajh Definition 2 is the mean cosine between each word vector and the sentence MEAN vector \u2014 a numerically different quantity.",
+   "evidence": "contextualization.py:197-203 calls _cosine_pairwise_mean(h_np) over token pairs. Paper (ar5iv 1909.00512, Def 2): \"The intra-sentence similarity of s in layer l is\" the average cosine similarity between word representations and their sentence mean vector. For unit vectors mean-cos-to-mean \u2248 sqrt(1/n + (n-1)/n \u00b7 meanpair), so values differ and the mapping depends on sentence length n, which varies by tokenizer.",
+   "proposed_fix": "Compute s_vec = mean of token vectors per sentence, then average cos(token_i, s_vec) over tokens, per Def 2; keep the pairwise version under a distinct key if desired.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_contextualization",
+   "file": "src/blme/tasks/geometry/contextualization.py"
+  },
+  {
+   "id": "contextualization:3",
+   "severity": "MEDIUM",
+   "claim": "Special tokens are included: tokenizer() defaults to add_special_tokens=True, so BOS (Llama/Gemma/Qwen) appears in every sample at position 0 with a bit-identical hidden state (causal attention), contributing an exact 1.0 self-similarity entry and an attention-sink vector to the anisotropy baseline and intra-sentence sims, while GPT-2/Pythia (no BOS) are unaffected \u2014 a systematic cross-family asymmetry.",
+   "evidence": "contextualization.py:141-142 `tokenizer(text, return_tensors=\"pt\", truncation=True, max_length=128)` (no add_special_tokens=False); 148 collects all token_ids; 157-159 track every position including position 0. BOS state at position 0 of a causal LM depends only on the BOS embedding, hence identical across all 200 samples \u2192 _cosine_pairwise_mean = 1.0 exactly (MEV becomes NaN via the total<=0 guard at line 73-74 and is silently dropped from the mean).",
+   "proposed_fix": "Tokenize with add_special_tokens=False, or filter token ids in tokenizer.all_special_ids out of token_states, all_states_per_layer, and intra_per_layer.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_contextualization",
+   "file": "src/blme/tasks/geometry/contextualization.py"
+  },
+  {
+   "id": "positional_decay:1",
+   "severity": "MEDIUM",
+   "claim": "CONFIRMED (known-open Section B item (a)): pooling all (i\u2212j, attention) pairs across causal-mask rows before one Spearman produces a large spurious negative correlation from row normalization alone, and the published values sit near that artifact level.",
+   "evidence": "positional_decay.py:73-82 pools pairs across rows. Repro simulation (this audit): uniform attention 1/(i+1) per row \u2014 zero positional preference \u2014 gives pooled Spearman = \u22120.467 at T=64; with genuine decay+noise, pooled = \u22120.838 vs per-row mean = \u22120.583. study_v3/aggregated.csv mean_positional_decay_correlation spans [\u22120.644, \u22120.311] (mean \u22120.475), i.e. the observed cross-model spread straddles the structural \u22120.47 offset, so a large share of the reported signal is mask geometry, not positional decay.",
+   "proposed_fix": "Compute Spearman per query row i (distance 1..i vs attention over j<i) for rows with \u22653 entries, then average over rows (optionally length-weighted); emit both per-row mean and the legacy pooled value during one transition release.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": "Section B open MEDIUM (a)",
+   "task": "geometry_positional_decay",
+   "file": "src/blme/tasks/geometry/positional_decay.py"
+  },
+  {
+   "id": "positional_decay:3",
+   "severity": "LOW",
+   "claim": "CITATION: docstring carries no concrete citation (\"2024-2025 Long-Context Extrapolation and RoPE literature\"), and docs/tasks_geometry.md:67 misattributes arXiv:2306.15595 to \"Chen, Q.\" (actual first author Shouyuan Chen).",
+   "evidence": "positional_decay.py:13-14; docs/tasks_geometry.md:67. arXiv:2306.15595 listing: authors Shouyuan Chen, Sherman Wong, Liangjian Chen, Yuandong Tian. PAPERS.md:240 itself marks this task \"\ud83d\udcdd add Press et al. 2021 (ALiBi)\".",
+   "proposed_fix": "Cite Press, Smith, Lewis (ICLR 2022, arXiv:2108.12409) and Su et al. (arXiv:2104.09864) explicitly as motivation, correct the Chen author name, and state in the docstring that the Spearman metric itself is BLME-custom.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_positional_decay",
+   "file": "src/blme/tasks/geometry/positional_decay.py"
+  },
+  {
+   "id": "positional_decay:4",
+   "severity": "LOW",
+   "claim": "Averaging attention over heads (mean(dim=0)) before correlating mixes local/positional heads with global/content heads, diluting exactly the signal the docstring attributes to \"positional/local heads\"; the O(T\u00b2) per-element Python loop is also needlessly slow.",
+   "evidence": "positional_decay.py:71 `attn_matrix.mean(dim=0)`; docstring lines 9-11 frame the hypothesis in terms of positional/local heads; lines 75-78 build pair lists element-by-element instead of np.tril_indices.",
+   "proposed_fix": "Compute the correlation per head and report mean plus quantiles (or the most-negative head per layer) alongside the head-averaged value; vectorize pair extraction with np.tril_indices(seq_len, k=-1).",
+   "changes_values": true,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "geometry_positional_decay",
+   "file": "src/blme/tasks/geometry/positional_decay.py"
+  },
+  {
+   "id": "tokenizer_efficiency:1",
+   "severity": "MEDIUM",
+   "claim": "CITATION: the docstring attributes arXiv:2310.08754 to a fabricated author list \"Rajput, Chamberlain, Reese et al. 2024\"; the real authors are Mehdi Ali, Michael Fromm, Klaudia Thellmann, et al. (Findings of NAACL 2024).",
+   "evidence": "tokenizer_efficiency.py:24-26. arXiv listing for 2310.08754 and Semantic Scholar (\"...Negligible-or-Ali-Fromm...\") confirm Ali/Fromm/Thellmann et al.; no author named Rajput, Chamberlain, or Reese. Same hazard class as the fake \"2026\" citations already purged from knockout/tracing.",
+   "proposed_fix": "Replace with \"Ali, Fromm, Thellmann, et al. 2024 \u2014 Tokenizer Choice For LLM Training: Negligible or Crucial?, Findings of NAACL 2024, arXiv:2310.08754\" in the docstring and any PAPERS.md mirror.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_tokenizer_efficiency",
+   "file": "src/blme/tasks/geometry/tokenizer_efficiency.py"
+  },
+  {
+   "id": "tokenizer_efficiency:2",
+   "severity": "MEDIUM",
+   "claim": "token_entropy and vocab_utilization are computed on only ~1,700 tokens (default num_samples=20 of the 200 available passages), so the plug-in entropy is severely downward-biased and vocab_utilization (0.004\u20130.012 in v3) is essentially an inverse-vocab-size proxy rather than a usage measure.",
+   "evidence": "tokenizer_efficiency.py:75 `num_samples = self.config.get(\"num_samples\", len(_EFFICIENCY_CORPUS))` \u2192 20; run_study.py passes no num_samples override. study_v3/aggregated.csv: total_tokens 1702 (gpt2), 1724 (llama3.1-70b), 1763 (qwen2); vocab_util 0.0123 (50k vocab) vs 0.0039 (152k vocab) \u2248 ratio of vocab sizes, i.e. type count saturates and 1/V dominates.",
+   "proposed_fix": "Default num_samples to the full eval corpus (200 passages, Tier-1 cost is tokenizer-only) and document that entropy/utilization remain corpus-size-dependent plug-in estimates; optionally add a Miller-Madow or coverage-adjusted entropy estimate.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_tokenizer_efficiency",
+   "file": "src/blme/tasks/geometry/tokenizer_efficiency.py"
+  },
+  {
+   "id": "tokenizer_efficiency:3",
+   "severity": "LOW",
+   "claim": "CITATION: docstring claims Rust et al. 2021 \"Introduces fertility as a cross-tokenizer comparison metric\"; Rust et al. adopt subword fertility from \u00c1cs (2019), so the wording overstates priority.",
+   "evidence": "tokenizer_efficiency.py:22-23. Rust et al. (arXiv:2012.15613) measure fertility following \u00c1cs 2019 (\"Exploring BERT's vocabulary\" blog/technical note); the fertility concept itself predates both (IBM translation models).",
+   "proposed_fix": "Reword to \"uses fertility (following \u00c1cs 2019) as a cross-tokenizer comparison metric\" and add the \u00c1cs reference.",
+   "changes_values": false,
+   "confidence": "med",
+   "prior_audit_ref": null,
+   "task": "geometry_tokenizer_efficiency",
+   "file": "src/blme/tasks/geometry/tokenizer_efficiency.py"
+  },
+  {
+   "id": "tokenizer_efficiency:4",
+   "severity": "LOW",
+   "claim": "vocab_size prefers tokenizer.vocab_size (base BPE vocab, excludes added special tokens: Llama-3 128000 vs len(tokenizer)=128256), inconsistent with the max-of-both convention used in cache.py/collect_prediction_stats, slightly skewing normalised_token_entropy and vocab_utilization.",
+   "evidence": "tokenizer_efficiency.py:115 `vocab_size = tokenizer.vocab_size if hasattr(...) else len(tokenizer)`; contrast geometry/utils.py:191-196 which takes max(len(tokenizer), vocab_size) precisely because of the Llama-3 discrepancy.",
+   "proposed_fix": "Use max(len(tokenizer), getattr(tokenizer, 'vocab_size', 0)) for the normalization denominator, matching the library convention.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_tokenizer_efficiency",
+   "file": "src/blme/tasks/geometry/tokenizer_efficiency.py"
+  },
+  {
+   "id": "perplexity:1",
+   "severity": "LOW",
+   "claim": "BPC numerator and denominator use mismatched tokenizations: the NLL comes from cache tokenization (add_special_tokens=True default, truncation at 512) while the chars-side token count re-tokenizes with add_special_tokens=False/truncation=False, so on BOS-adding families BPC is biased low by ~1/T (\u22480.8% at T=128) relative to GPT-2-family models, and the two sides diverge for any document longer than 512 tokens outside the study corpus.",
+   "evidence": "perplexity.py:92 `tokenizer(text, truncation=False, add_special_tokens=False)` and 94-96 count (n_tok\u22121) tokens; cache.py:351-353 tokenizes with defaults (BOS included) so scored tokens per doc = n_tok (the BOS-conditioned first real token is scored), i.e. numerator covers n_tok tokens but tokens_per_char uses n_tok\u22121. Study corpus is pre-truncated to 128 tokens so the 512 divergence is latent only.",
+   "proposed_fix": "Reuse the cached per-sample token counts (cache._sample_lengths \u2212 1, minus special tokens) for total_tokens_for_chars instead of re-tokenizing, or re-tokenize with the same add_special_tokens/truncation settings as the scoring path.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_perplexity",
+   "file": "src/blme/tasks/geometry/perplexity.py"
+  },
+  {
+   "id": "perplexity:2",
+   "severity": "LOW",
+   "claim": "CITATION: docstring lacks any citation; PAPERS.md cites \"Shannon 1948\" for bits-per-character, but the per-character entropy of English is Shannon 1951 (BSTJ 30:50-64).",
+   "evidence": "perplexity.py:11-21 (no References section); PAPERS.md:118. Verified: Shannon 1951 \"Prediction and Entropy of Printed English\" is the BPC source (0.6-1.3 bits/letter bounds); Shannon 1948 defines entropy/bits.",
+   "proposed_fix": "Add a References block citing Shannon 1948 (cross-entropy) and Shannon 1951 (bits-per-character), and update PAPERS.md:118 accordingly.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_perplexity",
+   "file": "src/blme/tasks/geometry/perplexity.py"
+  },
+  {
+   "id": "categories:1",
+   "severity": "HIGH",
+   "claim": "Cross-model comparability is broken by tokenizer-dependent category membership: only words surviving single-token encoding enter each category, so category composition and size differ across the zoo's 8+ tokenizers, and purity has a model-varying hard ceiling min(|cat|\u22121, k)/k with fixed k=20 (e.g. seasons has only 14 words \u2192 ceiling \u22640.65 before any tokenizer attrition) \u2014 while per-category n is never emitted, so nothing downstream can correct for it.",
+   "evidence": "categories.py:120-129 (single-token filter), 177-196 (purity with fixed k=20, denominator k regardless of category size); assets/categories.json: seasons=14, digits=10, currencies=23 entries. Mitigating context: geometry_categories is absent from BLME_RESEARCH_TASKS and BLME_Y_TASKS (run_study.py:44-94) and from study_v3/aggregated.csv (0 matching columns), so v2/v3 results are not contaminated \u2014 but the task ships in the library as a 72-task cross-model diagnostic.",
+   "proposed_fix": "Emit {cat}_n_tokens for every category and normalize purity by its achievable ceiling (same_cat / min(n_cat\u22121, k)); longer-term, use a fixed cross-tokenizer word list with mean-of-subword-embedding fallback so membership is constant across models.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_categories",
+   "file": "src/blme/tasks/geometry/categories.py"
+  },
+  {
+   "id": "categories:2",
+   "severity": "MEDIUM",
+   "claim": "Both the no-space and leading-space token variants of a word are added to a category when each is a single token, inflating intra-category coherence with orthographic near-duplicates; relation pairs mix variants across pairs so offset vectors carry a leading-space component, and the analogy search counts the alternate variant of the correct answer as an error.",
+   "evidence": "categories.py:122-129: `for w in [word, ' ' + word]: ... if tid not in cat_labels: cat_tokens[cat_name].append(tid)` adds BOTH when both encode to one id \u2014 verified on GPT-2: \"red\"\u2192[445] AND \" red\"\u2192[2266] (both single tokens, both appended). Relation branch (96-111) keeps one variant per word but the choice differs per word: \"feet\"\u219239690 (no-space) vs \"mice\"\u2192only \" mice\"=10693, so the (foot,feet) and (mouse,mice) difference vectors differ by a space-prefix feature; analogy top-1 (321-327) fails when the nearest neighbor is the other-variant token of the correct word.",
+   "proposed_fix": "Pick exactly one canonical variant per word (prefer the leading-space form, which is the in-context token for BPE vocabularies; the bare form for SentencePiece), and exclude the unused variant id from the analogy candidate set.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_categories",
+   "file": "src/blme/tasks/geometry/categories.py"
+  },
+  {
+   "id": "categories:3",
+   "severity": "LOW",
+   "claim": "np.random.seed(42) is called twice on the process-global NumPy RNG (separation sampling, analogy quartet sampling), leaking RNG state into any later global-RNG consumer in the same run \u2014 the same hygiene class as fixes #42/#50-53 which moved tasks to local seeded Generators.",
+   "evidence": "categories.py:138 and 276 `np.random.seed(42)` followed by np.random.choice; also 360 in _compute_projection. Deterministic for this task, but mutates global state mid-suite.",
+   "proposed_fix": "Replace with a local rng = np.random.default_rng(42) and rng.choice throughout.",
+   "changes_values": true,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_categories",
+   "file": "src/blme/tasks/geometry/categories.py"
+  },
+  {
+   "id": "categories:5",
+   "severity": "LOW",
+   "claim": "CITATION: the relation-consistency and analogy sub-metrics are uncredited implementations of Mikolov, Yih, Zweig (NAACL 2013) vector-offset/3CosAdd, and hub skew follows Radovanovi\u0107 et al. (JMLR 2010); neither is cited in the file, docs, or PAPERS.md row.",
+   "evidence": "categories.py:222-336 (b \u2212 a + c target, cosine search, top-1/top-5 \u2014 exactly 3CosAdd); 198-220 (k-occurrence skew = hubness N_k skewness). PAPERS.md:225 lists the task as needing a citation. Mikolov et al. 2013 verified at aclanthology.org/N13-1090 (\"vector-oriented reasoning based on the offsets between words\").",
+   "proposed_fix": "Add a References docstring citing Mikolov, Yih, Zweig 2013 (analogy/offset consistency) and Radovanovi\u0107, Nanopoulos, Ivanovi\u0107 2010 (hubness), and update the PAPERS.md row.",
+   "changes_values": false,
+   "confidence": "high",
+   "prior_audit_ref": null,
+   "task": "geometry_categories",
+   "file": "src/blme/tasks/geometry/categories.py"
+  }
+ ],
+ "skepticA": [],
+ "skepticB": [],
+ "adjudicated": []
+}
