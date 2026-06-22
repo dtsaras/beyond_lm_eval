@@ -20,6 +20,28 @@ For each task: (1) locate BLME's core numeric helper; (2) web-verify the origina
 | DISCREPANCY | 7 | number-changing divergence from reference — **all fixed this session** |
 | BUG | 2 | degenerate/non-deterministic shipped output — **both fixed this session** |
 
+## Comprehensive test coverage (2026-06-22)
+
+**Every one of the 74 tasks now has at least one independent-reference parity or behavioral
+test that has been executed in-repo** (not an agent prose claim). Two test modules:
+
+- `tests/tasks/test_reference_parity_formulas.py` — 26 closed-form numeric-parity tests (helpers vs pip pkg / analytic / transcribed reference).
+- `tests/tasks/test_comprehensive_parity.py` — 53 tests covering the other 52 tasks + a full-pipeline `geometry_perplexity` anchor. Authored via fan-out, then **re-run and reviewed by hand**: 43 strong independent-numeric, 7 analytic, 2 behavioral-invariant; 0 self-rated weak.
+
+Coverage character by task type:
+- **Closed-form** (most tasks) → exact numeric parity vs an *independent* reference (e.g. `representation_sensitivity` checked vs torch.autograd; `positional_decay` vs Spearman-via-Pearson-of-ranks; `contrastive`/`logical`/`knowledge_capacity` vs independent teacher-forcing NLL).
+- **Full-pipeline** (run the actual task on a real model) → `geometry_perplexity` (gpt2 vs textbook ppl, exact token count), `causality_ablation` (mean-ablation reconstruction), `causality_circuit_quality`, etc.
+- **Behavioral-invariant** (pipeline tasks needing trained weights) → `causality_tracing` reproduces ROME Fig.2 early-site localization on real gpt2 (peak AIE early/mid ≫ final layer) with an independent corruption re-implementation; + full-pipeline determinism.
+
+**Adversarial line-audit of all 52 authored tests (2026-06-22):** a skeptic-per-test workflow rated independence + substance, then findings were acted on by hand. Result: 35 STRONG, 15 ACCEPTABLE, 2 WEAK.
+- **2 WEAK fixed:** `interpretability_probing` (reference cloned BLME's exact SGD — and probe accuracy is provably OPTIMIZER-dependent, so no exact independent reference exists; rewritten to structural-exactness + Alain-Bengio decodability-above-chance behavioral check) and `geometry_categories` (separation reused scipy's cosine + mirrored seed-42; rewritten with a hand-written cosine distance + a sampling-independent constructed ground truth).
+- **File hygiene:** ~18 workflow agents had self-appended their tests to the file (duplicate shadows); regenerated the file from records → exactly 53 unique tests, all green.
+- **Two ACCEPTABLE tasks strengthened to exact-numeric (DONE):** `causality_circuit_quality` faithfulness is now pinned by an INDEPENDENT `1 − scipy.jensenshannon(p_circuit, p_base, base=2)²` with our own non-circuit mean-ablation hooks (different code path than BLME's `F.kl_div` JSD). `causality_tracing` now pins EVERY per-layer AIE via an independent ROME reimplementation (own embedding-noise + patch hooks; matched protocol/seed) to <1e-4, plus the early-site invariant. Both upgraded from behavioral/partial → exact-numeric.
+- Verification principle adopted (per user): **prove every analytic shortcut equals autograd/ground truth.** Done for `geometry_representation_sensitivity` — its closed-form gradient `= torch.autograd` to 2.7e-7 on real gpt2 (exact, not an approximation: HF returns the post-`ln_f` state, so `W·h+b` is genuinely linear).
+- **float32 robustness tested:** study-dtype float32 vs float64 agree to ≤1e-9 rel on representative metrics.
+
+**Honest caveats (residual doubt):** (1) `causality_circuit_quality`'s reference is an analytic re-derivation of its own proxy definition — there is no external numeric reference for a proxy, so it pins the formula + end-to-end invariants but is the weakest. (2) Behavioral tests verify the paper's *qualitative* defining property, not exact numeric parity (exact parity for ROME/knowledge-neurons/SAE needs running the heavy reference repo on the same model — not feasible here). (3) Proxy tasks verify they compute their stated definition + are honestly labeled, not that they reproduce a paper number (they don't claim to). (4) Parity is CPU/float64; the real study runs GPU/float32. (5) I deeply reviewed 2 of the 52 authored sources line-by-line plus all 52 reference descriptions; the references are independent, but I did not line-audit all 52 bodies.
+
 ## Fixes applied this session (verified + locked with parity tests)
 
 All value-changing fixes were approved (fix-to-match-reference + flag for regeneration). Each was verified against the reference before/after and pinned by a regression test.
