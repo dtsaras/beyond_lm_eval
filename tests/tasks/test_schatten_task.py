@@ -1,6 +1,6 @@
 """Tests for geometry_schatten (new round-7 task).
 
-Implements the Schatten-p norm family (Wei et al. 2025 — "From Internal
+Implements the Schatten-p norm family (Yusupov et al. 2025 — "From Internal
 Representations to Text Quality", arXiv:2509.25359) plus the L1,2-based
 Matrix Nuclear-Norm fast approximation (Li et al. 2024 — arXiv:2410.10672,
 reference code https://github.com/MLGroupJLU/MatrixNuclearNorm).
@@ -60,8 +60,8 @@ def test_matrix_nuclear_norm_fast_formula_identities():
 
 def test_rankme_matches_garrido_definition():
     """RankMe (Garrido 2023) normalises *raw* singular values:
-    ``p_i = σ_i / Σ σ_j`` then ``exp(H(p))``. Different from our
-    Roy-Vetterli ``effective_rank`` which uses σ² / Σσ²."""
+    ``p_i = σ_i / Σ σ_j`` then ``exp(H(p))``. This is the same
+    raw-singular-value convention used by Roy-Vetterli effective rank."""
     from blme.tasks.geometry.schatten import _rankme
 
     # For a rank-1 matrix (only one non-zero sigma), RankMe = 1.
@@ -70,12 +70,12 @@ def test_rankme_matches_garrido_definition():
     # For a uniform spectrum (all equal σ), RankMe = N.
     S = np.array([2.0, 2.0, 2.0, 2.0])
     assert _rankme(S) == pytest.approx(4.0)
-    # Must differ from Roy-Vetterli effective_rank for non-uniform σ.
+    # Must match the shared Roy-Vetterli effective_rank helper.
     from blme.tasks.geometry.utils import effective_rank
     S = np.array([3.0, 2.0, 1.0])
     rm = _rankme(S)
     er = effective_rank(S)
-    assert rm != pytest.approx(er, rel=1e-3)  # they're different formulas
+    assert rm == pytest.approx(er, rel=1e-12)
     # Both should be in (1, 3].
     assert 1.0 < rm <= 3.0
     assert 1.0 < er <= 3.0
@@ -125,12 +125,33 @@ def test_schatten_task_registers_and_returns_expected_fields():
     dataset = [{"text": "x"}] * 4
     result = task.evaluate(model=StubModel(), tokenizer=StubTok(),
                            dataset=dataset, cache=None)
-    # Headline keys
-    assert "schatten_1_last" in result
-    assert "schatten_2_last" in result
-    assert "schatten_inf_last" in result
-    assert "matrix_nuclear_norm_last" in result
+    # Headline keys (Schatten-2 omitted — content-free under row-L2 norm)
+    assert "row_normalized_schatten_1_last" in result
+    assert "row_normalized_schatten_4_last" in result
+    assert "row_normalized_schatten_inf_last" in result
+    assert "row_normalized_matrix_nuclear_norm_last" in result
     assert "rankme_last" in result
+    assert "schatten_2_last" not in result
+    assert result.get("preprocessing") == "center_columns_then_row_l2_normalize"
     # Per-layer lists
-    assert "schatten_1_per_layer" in result
-    assert len(result["schatten_1_per_layer"]) == 3  # 3 blocks after embedding
+    assert "row_normalized_schatten_1_per_layer" in result
+    assert len(result["row_normalized_schatten_1_per_layer"]) == 3  # 3 blocks after embedding
+
+
+def test_schatten_2_not_exposed_after_row_l2_normalization():
+    """Schatten-2 is sqrt(T/d) under row-L2 norm and must not appear."""
+    from blme.tasks.geometry.schatten import _normalise_matrix, _per_sentence_measurements
+    import torch
+
+    torch.manual_seed(0)
+    Z = torch.randn(16, 32)
+    Z_norm = _normalise_matrix(Z)
+    out = _per_sentence_measurements(Z_norm)
+    assert "schatten_2" not in out
+    assert "row_normalized_schatten_1" in out
+    # Content-free Frobenius value for reference (not exported).
+    expected_fro = float(np.sqrt(Z_norm.shape[0] / Z_norm.shape[1]))
+    from blme.tasks.geometry.schatten import _schatten_p_norm
+    S = torch.linalg.svdvals(Z_norm).detach().cpu().numpy()
+    got = _schatten_p_norm(S, p=2) / np.sqrt(Z_norm.shape[1])
+    assert got == pytest.approx(expected_fro, rel=1e-4)

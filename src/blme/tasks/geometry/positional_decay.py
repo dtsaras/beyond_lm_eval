@@ -24,6 +24,23 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _row_distance_correlation(attn_row: np.ndarray) -> float | None:
+    """Spearman correlation for one causal query row.
+
+    Constant rows have no distance preference; treat them as the null
+    correlation instead of letting pooled row lengths manufacture decay.
+    """
+    if attn_row.size < 2:
+        return None
+    if np.allclose(attn_row, attn_row[0]):
+        return 0.0
+    distances = np.arange(attn_row.size, 0, -1, dtype=np.float64)
+    corr, _ = spearmanr(distances, attn_row)
+    if np.isnan(corr):
+        return None
+    return float(corr)
+
+
 @register_task("geometry_positional_decay")
 class PositionalAttentionDecayTask(DiagnosticTask):
     """
@@ -67,20 +84,18 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                     if attn_entry is None:
                         continue
                     attn_matrix = attn_entry[0]  # (num_heads, seq_len, seq_len)
-                    # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
-                    mean_attn = attn_matrix.mean(dim=0).float().cpu().numpy()  # (seq_len, seq_len)
-
-                    distances = []
-                    attentions = []
-                    for i in range(1, seq_len):
-                        for j in range(i):
-                            distances.append(i - j)
-                            attentions.append(mean_attn[i, j])
-
-                    if len(distances) > 5:
-                        corr, _ = spearmanr(distances, attentions)
-                        if not np.isnan(corr):
-                             layer_correlations[li].append(corr)
+                    # Compute each query-row/head separately. Pooling
+                    # triangular causal entries first confounds distance
+                    # with row normalisation (uniform rows shrink as
+                    # context grows) and invents decay under the null.
+                    a = attn_matrix.float().cpu().numpy()
+                    for head_idx in range(a.shape[0]):
+                        for query_idx in range(2, seq_len):
+                            corr = _row_distance_correlation(
+                                a[head_idx, query_idx, :query_idx],
+                            )
+                            if corr is not None:
+                                layer_correlations[li].append(corr)
 
         if not layer_correlations:
              return {"error": "Could not compute positional correlations (sequences too short or nan)."}

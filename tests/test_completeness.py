@@ -12,7 +12,7 @@ _register_all_tasks()
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (26) ---
+    # --- Geometry (27) ---
     "geometry_svd",
     "geometry_isoscore",
     "geometry_categories",
@@ -37,13 +37,15 @@ EXPECTED_TASKS = [
     "geometry_unembedding",
     "geometry_weight_norms",
     "geometry_tokenizer_efficiency",
+    "geometry_schatten",
     "geometry_trajectory_curvature",
     "geometry_mp_bulk_deviation",
-    # --- Interpretability (14) ---
+    # --- Interpretability (15) ---
     "interpretability_attention_effective_rank",
     "interpretability_attention_entropy",
     "interpretability_attention_graph",
     "interpretability_attention_rank",
+    "interpretability_activation_sinks",
     "interpretability_attribution",
     "interpretability_head_roles",
     "interpretability_induction_heads",
@@ -54,7 +56,7 @@ EXPECTED_TASKS = [
     "interpretability_sparsity",
     "interpretability_superposition",
     "interpretability_waa",
-    # --- Consistency (11) ---
+    # --- Consistency (12) ---
     "consistency_bias_weat",
     "consistency_calibration",
     "consistency_contamination",
@@ -67,7 +69,7 @@ EXPECTED_TASKS = [
     "consistency_position_sensitivity",
     "consistency_self_consistency",
     "consistency_icl_slope",
-    # --- Dynamics (7) ---
+    # --- Dynamics (6) ---
     "dynamics_coe",
     "dynamics_generation_diversity",
     "dynamics_interpolation",
@@ -131,9 +133,19 @@ def test_task_instantiable(task_name):
 
 
 def test_task_count():
-    """Minimum expected task count as a guardrail against accidental deletion."""
+    """Registry must expose the current 74-task catalog."""
     registered = list_tasks()
+    assert len(registered) == 74, (
+        f"Expected exactly 74 registered tasks, got {len(registered)}"
+    )
     assert len(registered) >= len(EXPECTED_TASKS), (
         f"Expected at least {len(EXPECTED_TASKS)} tasks, "
         f"got {len(registered)}"
     )
+
+
+def test_getting_started_docs_task_count():
+    """Docs drift guard: getting_started must mention the current task total."""
+    from pathlib import Path
+    text = Path("docs/getting_started.md").read_text(encoding="utf-8")
+    assert "74 diagnostic tasks" in text

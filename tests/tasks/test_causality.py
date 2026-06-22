@@ -78,6 +78,30 @@ def test_causal_tracing_exposes_int_layer_index():
     assert 0 <= int(idx) < cfg.n_layer
 
 
+def test_causal_tracing_prompt_seed_is_hashseed_stable():
+    """Prompt-level tracing noise must not depend on Python's randomized hash()."""
+    import os
+    import subprocess
+    import sys
+
+    from blme.tasks.causality.tracing import _stable_prompt_seed
+
+    prompt = "France capital is"
+    assert _stable_prompt_seed(prompt, base_seed=7) == _stable_prompt_seed(prompt, base_seed=7)
+    assert _stable_prompt_seed(prompt, base_seed=7) != _stable_prompt_seed("Germany capital is", base_seed=7)
+
+    code = (
+        "from blme.tasks.causality.tracing import _stable_prompt_seed; "
+        "print(_stable_prompt_seed('France capital is', base_seed=7))"
+    )
+    env0 = {**os.environ, "PYTHONHASHSEED": "0"}
+    env1 = {**os.environ, "PYTHONHASHSEED": "1"}
+    seed0 = subprocess.check_output([sys.executable, "-c", code], text=True, env=env0).strip()
+    seed1 = subprocess.check_output([sys.executable, "-c", code], text=True, env=env1).strip()
+
+    assert seed0 == seed1
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA for device-mismatch test")
 def test_causal_tracing_runs_on_cuda():
     """The real-hardware smoke test caught a device mismatch: my fix
@@ -205,7 +229,7 @@ def test_causal_tracing_auto_noise_scales_with_embedding_std():
 
 
 def test_ablation_robustness(mock_model, mock_tokenizer):
-    """Ablation robustness — degradation curve from mean-ablating neurons."""
+    """Ablation robustness — degradation curve from residual-feature ablation."""
     from blme.tasks.causality.ablation import AblationRobustnessTask
 
     task = AblationRobustnessTask(
@@ -221,11 +245,20 @@ def test_ablation_robustness(mock_model, mock_tokenizer):
     if "error" not in results:
         assert "baseline_loss" in results
         assert "area_under_degradation_curve" in results
+        assert results["ablation_unit"] == "residual_stream_features"
         assert results["baseline_loss"] >= 0
 
 
+def test_circuit_quality_observed_minimality_weights_importance():
+    """Layer-proxy minimality should use observed layer effects, not only top_k_pct."""
+    from blme.tasks.causality.circuit_quality import _observed_layer_minimality
+
+    assert _observed_layer_minimality([9.0, 1.0, 0.0, 0.0], {0}) == pytest.approx(0.75 * 0.9)
+    assert _observed_layer_minimality([0.0, 0.0, 0.0, 0.0], {0}) == 0.0
+
+
 def test_circuit_quality(mock_model, mock_tokenizer):
-    """Circuit quality — faithfulness and minimality of identified circuits."""
+    """Circuit quality — faithfulness and minimality of layer-ablation proxy circuits."""
     from blme.tasks.causality.circuit_quality import CircuitQualityTask
 
     task = CircuitQualityTask(config={"num_samples": 2, "top_k_pct": 50})
@@ -236,8 +269,69 @@ def test_circuit_quality(mock_model, mock_tokenizer):
         assert "circuit_faithfulness" in results
         assert "circuit_minimality" in results
         assert "circuit_quality_score" in results
+        assert results["diagnostic_method"] == "layer_mean_ablation_circuit_proxy"
+        assert "selected_layer_importance_share" in results
         assert 0 <= results["circuit_faithfulness"] <= 1.0
         assert 0 <= results["circuit_minimality"] <= 1.0
+
+
+def test_edge_attribution_reports_layer_proxy_contract():
+    """The compatibility task name should report a layer proxy, not true EAP."""
+    pytest.importorskip("transformers")
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.causality.edge_attribution import EdgeAttributionTask
+
+    cfg = GPT2Config(vocab_size=200, n_positions=16, n_embd=16, n_layer=2, n_head=2)
+    model = GPT2LMHeadModel(cfg).eval()
+
+    class Tok:
+        def __call__(self, text, return_tensors="pt", truncation=True, max_length=128):
+            ids = torch.arange(2, 10).unsqueeze(0)
+            class BatchDict(dict):
+                def to(self, dev): return self
+                def __getattr__(self, name): return self[name]
+            return BatchDict({"input_ids": ids})
+
+    results = EdgeAttributionTask(config={"num_samples": 1}).evaluate(
+        model, Tok(), dataset=["The capital of France is Paris"]
+    )
+
+    assert "error" not in results, results
+    assert results["diagnostic_method"] == "residual_layer_gradient_patch_proxy"
+    assert results["attribution_unit"] == "transformer_layer"
+    assert "mean_layer_attribution_profile" in results
+
+
+def test_knowledge_neuron_task_reports_saliency_proxy_contract():
+    """The compatibility task name should report gradient-activation saliency."""
+    pytest.importorskip("transformers")
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.causality.knowledge_neurons import KnowledgeNeuronsTask
+
+    cfg = GPT2Config(vocab_size=200, n_positions=16, n_embd=16, n_layer=2, n_head=2)
+    model = GPT2LMHeadModel(cfg).eval()
+
+    class Tok:
+        def __call__(self, text, return_tensors=None, **kwargs):
+            ids = torch.arange(2, 10).unsqueeze(0)
+            if return_tensors is None:
+                return {"input_ids": ids[0].tolist()}
+            class BatchDict(dict):
+                def to(self, dev): return self
+                def __getattr__(self, name): return self[name]
+            return BatchDict({"input_ids": ids})
+        def encode(self, text, return_tensors=None, add_special_tokens=True, **kwargs):
+            ids = torch.arange(2, 10).unsqueeze(0)
+            return ids if return_tensors == "pt" else ids[0].tolist()
+
+    results = KnowledgeNeuronsTask(config={}).evaluate(
+        model, Tok(), dataset=[{"prompt": "The capital of France is", "target": " Paris"}]
+    )
+
+    assert "error" not in results, results
+    assert results["diagnostic_method"] == "ffn_gradient_activation_saliency"
+    assert results["saliency_unit"] == "ffn_intermediate_neuron"
+    assert "mean_saliency_gini" in results
 
 
 def test_attention_knockout(mock_model, mock_tokenizer):

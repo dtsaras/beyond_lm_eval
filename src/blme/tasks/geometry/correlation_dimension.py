@@ -1,17 +1,15 @@
 """
-Correlation Dimension (Fractal Geometry) Task
+Correlation Dimension (Hidden-State Geometry) Task
 ──────────────────────────────────────────────────────────────────────
-Evaluates the underlying fractal complexity and robust topological self-similarity
-of the generated language manifold by computing the Grassberger-Procaccia 
-Correlation Dimension on the internal hidden states.
+Evaluates hidden-state point-cloud complexity by computing the
+Grassberger-Procaccia correlation dimension on final-layer representations.
 
 A standard "intrinsic dimension" assumes a locally smooth Euclidean manifold.
-Recent 2024-2025 research proves that semantic space is fundamentally a fractal;
-its epistemological complexity is best quantified by its fractional Correlation 
-Dimension.
+This task is explicitly a hidden-state GP estimator, not a log-probability
+trajectory diagnostic.
 
 References:
-- "Correlation Dimension as a Metric for Large Language Models" (2024/2025).
+- Grassberger & Procaccia 1983 correlation integral estimator.
 """
 
 import torch
@@ -30,7 +28,7 @@ class CorrelationDimensionTask(DiagnosticTask):
     on the final representation space to evaluate fractal complexity.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Correlation Dimension (Fractal Geometry) Analysis...")
+        logger.info("Running Hidden-State Correlation Dimension Analysis...")
         num_samples = self.config.get("num_samples", 100)
         max_length = self.config.get("max_length", 128)
         num_radii = self.config.get("num_radii", 30)
@@ -39,6 +37,7 @@ class CorrelationDimensionTask(DiagnosticTask):
         pooling = self.config.get("pooling", "mean")
         # Cap total points for pairwise distance computation
         max_points = self.config.get("max_points", 2000)
+        seed = int(self.config.get("seed", 42))
 
         if dataset is None:
              from ...cache import load_default_corpus
@@ -76,7 +75,8 @@ class CorrelationDimensionTask(DiagnosticTask):
 
         # Subsample if too many points (pairwise distances are O(N^2))
         if N > max_points:
-            indices = np.random.choice(N, max_points, replace=False)
+            rng = np.random.default_rng(seed)
+            indices = rng.choice(N, max_points, replace=False)
             H = H[indices]
             N = max_points
 
@@ -124,8 +124,18 @@ class CorrelationDimensionTask(DiagnosticTask):
         ss_tot = np.sum((log_Cr - np.mean(log_Cr)) ** 2)
         r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
+        if pooling == "all_tokens":
+            point_space = "token_hidden_states"
+        elif pooling == "last":
+            point_space = "last_token_hidden_states"
+        else:
+            point_space = "mean_pooled_hidden_states"
+
         return {
             "correlation_dimension": float(slope),
+            "hidden_state_correlation_dimension": float(slope),
+            "correlation_dimension_method": "hidden_state_grassberger_procaccia",
+            "correlation_dimension_point_space": point_space,
             "num_points": N,
             "fit_r_squared": float(r_squared),
         }

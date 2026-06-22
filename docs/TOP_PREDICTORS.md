@@ -68,16 +68,16 @@ This is the headline table for the paper: what predicts capability
 | 3 | `geometry_lid.lid_min` | — | +0.804 | Levina-Bickel 2004 |
 | 4 | `interpretability_waa.layer_waa_alignments` | `.mean` | −0.781 | Park et al. 2024 |
 | 5 | `causality_ablation.loss_ablate_5pct` | — | −0.772 | BLME diagnostic |
-| 6 | `geometry_tokenizer_efficiency.vocab_size` | — | +0.769 | tokenizer confound |
+| 6 | `geometry_tokenizer_efficiency.vocab_size` | — | +0.769 | tokenizer-efficiency confound; Rust 2021 / Ali 2024 |
 | 7 | `geometry_hubness.hubness_k10_gini` | — | +0.744 | Tomašev 2014 |
 | 8 | `geometry_cka.min_offdiag_cka` | — | +0.739 | Kornblith 2019 |
-| 9 | **`geometry_schatten.matrix_nuclear_norm_per_layer`** (round-7) | `.q50` | +0.739 | Li 2024 MNN |
+| 9 | **`geometry_schatten.row_normalized_matrix_nuclear_norm_per_layer`** (round-7) | `.q50` | +0.739 | Li 2024 MNN |
 | 10 | `geometry_cka.std_offdiag_cka` | — | −0.738 | Kornblith 2019 |
 | 11 | `causality_ablation.loss_ablate_1pct` | — | −0.725 | BLME diagnostic |
 | 12 | `interpretability_waa.mean_waa_alignment` | — | −0.712 | Park et al. 2024 |
-| 13 | `geometry_tokenizer_efficiency.fertility` | — | +0.712 | tokenizer confound |
-| 14 | `geometry_tokenizer_efficiency.compression_ratio` | — | +0.712 | tokenizer confound |
-| 15 | `geometry_tokenizer_efficiency.total_tokens` | — | +0.712 | tokenizer confound |
+| 13 | `geometry_tokenizer_efficiency.fertility` | — | +0.712 | Rust 2021 fertility; Ali 2024 cautions it is an imperfect downstream proxy |
+| 14 | `geometry_tokenizer_efficiency.compression_ratio` | — | +0.712 | tokenizer-efficiency confound |
+| 15 | `geometry_tokenizer_efficiency.total_tokens` | — | +0.712 | tokenizer-efficiency confound |
 | 16 | `geometry_intrinsic_dim.sample_size` | — | +0.712 | vocab-size proxy |
 | 17 | `geometry_collapse.erank_per_layer` | `.q75` | +0.711 | Roy-Vetterli |
 | 18 | **`interpretability_activation_sinks.massive_activation_max_ratio_per_layer`** (round-8) | — | −0.705 | Sun 2024 |
@@ -95,7 +95,7 @@ All *** (FDR q < 0.001).
 
 - **RepE task-vector diversity dominates** (#1, |ρ| = 0.824) — the
   single strongest predictor beyond scale.
-- **Round-7 addition `geometry_schatten.matrix_nuclear_norm`
+- **Round-7 addition `geometry_schatten.row_normalized_matrix_nuclear_norm`
   lands at #9** — validates Li 2024's claim that MNN is an
   independent capability proxy.
 - **Round-8 addition `massive_activation_max_ratio` at #18** —
@@ -104,7 +104,9 @@ All *** (FDR q < 0.001).
 - **Tokenizer-family signals crowd positions 6, 13-16**
   (vocab_size, fertility, compression_ratio, total_tokens) — a
   real confound: more mature tokenizers correlate with more
-  training data, which correlates with capability.
+  training data, which correlates with capability. Treat fertility
+  and compression as tokenizer-efficiency diagnostics, not standalone
+  proof of downstream quality.
 - **15 of 25 families are geometry-derived** (incl. tokenizer, CKA,
   Schatten, hubness, collapse, HSIC, LID, intrinsic-dim);
   5 interpretability (WAA, activation-sinks, attention-entropy,

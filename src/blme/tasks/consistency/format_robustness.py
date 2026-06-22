@@ -1,5 +1,5 @@
 """
-Prompt-format robustness — Sclar et al. 2023, arXiv:2310.11324.
+Prompt-format sensitivity proxy.
 
 For each (question, expected_answer) pair we render the prompt in N
 different surface formats (different separators, casing, punctuation,
@@ -74,7 +74,7 @@ _FORMATS: List[Callable[[str, str], Tuple[str, str]]] = [
 
 @register_task("consistency_format_robustness")
 class FormatRobustnessTask(DiagnosticTask):
-    """Prompt-format robustness diagnostic (Sclar et al. 2023)."""
+    """Prompt-format sensitivity diagnostic."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Prompt-Format Robustness Analysis...")
@@ -139,13 +139,26 @@ class FormatRobustnessTask(DiagnosticTask):
             if len(set(row[mask].tolist())) == 1:
                 agreement_count += 1
         top1_agreement_rate = (agreement_count / valid_q) if valid_q else float("nan")
+        top1_disagreement_rate = (
+            float("nan") if np.isnan(top1_agreement_rate) else 1.0 - top1_agreement_rate
+        )
+        mean_nll_std = float(np.nanmean(per_q_std))
+        mean_nll_cv = float(np.nanmean(per_q_cv))
+        max_nll_std = float(np.nanmax(per_q_std))
+        mean_nll_overall = float(np.nanmean(nll_matrix))
 
         return {
+            "diagnostic_semantics": "prompt_format_sensitivity_proxy",
             "n_questions": len(qa),
             "n_formats": n_formats,
-            "mean_nll_std_across_formats": float(np.nanmean(per_q_std)),
-            "mean_nll_cv_across_formats": float(np.nanmean(per_q_cv)),
-            "max_nll_std_across_formats": float(np.nanmax(per_q_std)),
+            "format_nll_sensitivity": mean_nll_std,
+            "format_nll_cv_sensitivity": mean_nll_cv,
+            "max_format_nll_sensitivity": max_nll_std,
+            "format_top1_disagreement_rate": float(top1_disagreement_rate),
+            # Legacy aliases retained for downstream compatibility.
+            "mean_nll_std_across_formats": mean_nll_std,
+            "mean_nll_cv_across_formats": mean_nll_cv,
+            "max_nll_std_across_formats": max_nll_std,
             "top1_agreement_rate": float(top1_agreement_rate),
-            "mean_nll_overall": float(np.nanmean(nll_matrix)),
+            "mean_nll_overall": mean_nll_overall,
         }

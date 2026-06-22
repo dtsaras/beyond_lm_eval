@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "generated_by": "BLME reference-parity audit",
+  "reference_sources": {
+    "matrix_nuclear_norm": {
+      "paper": "Li et al. 2024, Large Language Model Evaluation via Matrix Nuclear-Norm, arXiv:2410.10672",
+      "repo": "https://github.com/MLGroupJLU/MatrixNuclearNorm",
+      "head": "e7a9188eb30c146896e8cbc043caa7eb71a460ee"
+    },
+    "attention_sink": {
+      "paper": "Gu et al. 2025, When Attention Sink Emerges in Language Models, arXiv:2410.10781",
+      "repo": "https://github.com/sail-sg/Attention-Sink",
+      "head": "cd141064cc96d6a1e078783042339e38de5a37ba"
+    },
+    "chain_of_embedding": {
+      "paper": "Wang et al. 2025, Latent Space Chain-of-Embedding Enables Output-free LLM Self-Evaluation, arXiv:2410.13640",
+      "repo": "https://github.com/Alsace08/Chain-of-Embedding",
+      "head": "eef2d8f1910f0b7c5acfa550b3cb8fcaa5130aa0"
+    },
+    "min_k": {
+      "paper": "Shi et al. 2023, Detecting Pretraining Data from Large Language Models, arXiv:2310.16789",
+      "repo": "https://github.com/swj0419/detect-pretrain-code",
+      "head": "a5048f93c4fa6491aab0638bb3e6fd5a662d7698"
+    },
+    "calibration": {
+      "paper": "Guo et al. 2017, On Calibration of Modern Neural Networks, arXiv:1706.04599",
+      "repo": "https://github.com/gpleiss/temperature_scaling",
+      "head": "ce1154ec7d5235eee046f28875c3dd8421f11d45"
+    },
+    "cka": {
+      "paper": "Kornblith et al. 2019, Similarity of Neural Network Representations Revisited, arXiv:1905.00414",
+      "repo": "https://github.com/google-research/google-research/tree/master/representation_similarity",
+      "head": "4fde028f6017e16aefcbc2b6d3f77f70b9f6b421"
+    },
+    "rankme": {
+      "paper": "Garrido et al. 2023, RankMe, arXiv:2210.02885",
+      "repo": "paper formula"
+    },
+    "distinct_self_bleu": {
+      "paper": "Li et al. 2016 Distinct-n; Zhu et al. 2018 Texygen",
+      "repo": "https://github.com/geek-ai/Texygen"
+    },
+    "topology": {
+      "paper": "Rucco et al. 2016 persistence entropy; Bubenik 2015 persistence landscapes",
+      "repo": "https://github.com/scikit-tda/persim"
+    },
+    "isoscore": {
+      "paper": "Rudman et al. 2022, IsoScore, Findings of ACL 2022, arXiv:2108.07344",
+      "repo": "https://github.com/bcbi-edu/p_eickhoff_isoscore",
+      "reference_package": "IsoScore==2.0.1 (PyPI, official authors)",
+      "note": "Verified 2026-06-21: BLME geometry.isotropy._isoscore matches IsoScore.IsoScore to <3e-8 across isotropic/anisotropic/near-1D/N>d clouds. The reference normalizes the covariance spectrum with L2 (torch.linalg.vector_norm), identical to BLME's np.linalg.norm; the AUDIT_V2 'L1-normalizes' lead is refuted by the reference source."
+    }
+  },
+  "cases": {
+    "matrix_nuclear_norm_diagonal": {
+      "source": "matrix_nuclear_norm",
+      "matrix": [[3.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]],
+      "expected": 6.0
+    },
+    "schatten_singular_values": {
+      "source": "rankme",
+      "singular_values": [3.0, 2.0, 1.0],
+      "expected_schatten_1": 6.0,
+      "expected_schatten_2": 3.7416573867739413,
+      "expected_schatten_4": 3.1463462836457885,
+      "expected_schatten_inf": 3.0,
+      "expected_rankme": 2.7494592739972052
+    },
+    "attention_sink_all_queries_to_bos": {
+      "source": "attention_sink",
+      "layers": 1,
+      "heads": 2,
+      "tokens": 4,
+      "epsilon": 0.3,
+      "pattern": "all_queries_attend_to_key_0_under_causal_mask",
+      "expected": 1.0,
+      "note": "Gu et al. Sink_1: first-token sink fraction over (layer,head). When all queries attend to BOS, every (layer,head) has a first-token sink -> 1.0. Was 0.25 under the old mean-over-all-key-positions reduction; corrected 2026-06-22."
+    },
+    "chain_of_embedding_three_points": {
+      "source": "chain_of_embedding",
+      "chain": [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "expected_magnitudes": [1.4142135623730951, 1.0],
+      "expected_angles": [1.5707963267948966, 0.7853981633974484],
+      "expected_coe_r": -0.29289321881345254,
+      "expected_coe_c": 1.0639790525992932,
+      "expected_normalized_coe_c": 1.0639790525992932,
+      "tol": 1e-06,
+      "note": "CoE-C uses NORMALIZED magnitude AND NORMALIZED angle, matching reference score.py compute_CoE_C (Alsace08/Chain-of-Embedding). Was 1.118034 (raw/raw) before the 2026-06-22 fix; BLME runs float32 so tol=1e-6."
+    },
+    "min_k_logprob": {
+      "source": "min_k",
+      "token_logprobs": [-0.1, -2.0, -1.0, -0.4, -3.0],
+      "k_pct": 40,
+      "expected": -2.5
+    },
+    "calibration_two_bins": {
+      "source": "calibration",
+      "confidences": [0.1, 0.4, 0.8, 0.9],
+      "correct": [false, true, true, false],
+      "n_bins": 2,
+      "expected_ece": 0.3,
+      "expected_brier": 0.305
+    },
+    "weat_axis_aligned": {
+      "source": "calibration",
+      "expected_effect_size": 1.7320508075688774
+    },
+    "distinct_n_tokens": {
+      "source": "distinct_self_bleu",
+      "tokens": [1, 2, 1, 2, 3],
+      "expected_distinct_1": 0.6,
+      "expected_distinct_2": 0.6,
+      "note": "Distinct-n = distinct n-grams / total tokens (Li 2016). distinct_2 was 0.75 under the old n-gram-count denominator; corrected to 3/5=0.6 on 2026-06-22. distinct_1 unchanged (n=1 identity)."
+    },
+    "self_bleu_identical": {
+      "source": "distinct_self_bleu",
+      "hypothesis": [1, 2, 3, 4],
+      "references": [[1, 2, 3, 4], [1, 2, 5, 6]],
+      "expected": 1.0
+    },
+    "self_bleu_partial_overlap": {
+      "source": "distinct_self_bleu",
+      "hypothesis": [1, 2, 3, 9],
+      "references": [[1, 2, 3, 4], [1, 2, 5, 6]],
+      "max_n": 4,
+      "expected": 0.3976353643835253,
+      "note": "Texygen/NLTK sentence_bleu + SmoothingFunction().method1, weights (1/4,)*4. The old hand-rolled estimator hard-zeroed this (4-gram precision 0). Verified == NLTK 2026-06-22."
+    },
+    "persistence_entropy_lifespans": {
+      "source": "topology",
+      "lifespans": [1.0, 1.0, 2.0],
+      "expected": 1.5,
+      "note": "Base-2 (matches giotto-tda scipy.stats.entropy base=2 and Atienza Def 3.1). Was 1.0397 under the old natural-log convention; changed by the np.log->np.log2 fix 2026-06-22."
+    },
+    "persistence_landscape_single_bar": {
+      "source": "topology",
+      "diagram": [[0.0, 2.0]],
+      "n_landscapes": 2,
+      "n_points": 5,
+      "expected_first_landscape": [0.0, 0.5, 1.0, 0.5, 0.0],
+      "expected_second_landscape": [0.0, 0.0, 0.0, 0.0, 0.0]
+    },
+    "linear_cka_fixed_pair": {
+      "source": "cka",
+      "X": [[1.0, 2.0, 0.0], [3.0, 4.0, 1.0], [5.0, 6.0, 0.0], [7.0, 8.0, 2.0]],
+      "Y": [[1.0, 0.0, 1.0], [0.0, 1.0, 2.0], [1.0, 1.0, 0.0], [2.0, 1.0, 1.0]],
+      "expected": 0.450953881199808,
+      "note": "Reference = official google-research cka.feature_space_linear_cka (Kornblith 2019). BLME HSIC form matches to 3e-15; _linear_cka to 1.8e-8 (runs in float32)."
+    },
+    "isoscore_symmetric_3d": {
+      "source": "isoscore",
+      "points": [[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-2.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+      "covariance_eigenvalues": [1.6, 0.4, 0.4],
+      "expected": 0.5,
+      "tol": 1e-09,
+      "derivation": "cov eigenvalues [1.6,0.4,0.4]; L2-normalize to sqrt(3): [1.63299,0.40825,0.40825]; defect=||.-1||/sqrt(2(3-sqrt3))=0.65893; score=((3-defect^2*(3-sqrt3))^2-3)/6=0.5"
+    }
+  }
+}

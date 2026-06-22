@@ -22,13 +22,9 @@ layer:
 
 3. **RankMe** — Garrido et al. 2023 (arXiv:2210.02885) — effective
    rank via ``exp(H(p))`` with ``p_i = σ_i / Σ σ_j`` (i.e.,
-   normalising the *raw* singular values). Distinct from the
-   Roy-Vetterli effective rank in ``geometry.utils.effective_rank``
-   which normalises ``σ_i² / Σ σ_j²``; the two are not equivalent on
-   non-uniform spectra and both are cited in the recent literature
-   (Tracing Representation Geometry, Li et al. 2025,
-   arXiv:2509.23024). We expose both so the paper can discuss the
-   difference.
+   normalising the *raw* singular values). This matches the shared
+   Roy-Vetterli effective rank convention in
+   ``geometry.utils.effective_rank``.
 
 Reports the per-layer profile and a "last-layer" headline (Yusupov et al.
 convention for the MLP-output representation) for each metric, as well
@@ -153,16 +149,23 @@ def _per_sentence_measurements(Z: torch.Tensor) -> Dict[str, float]:
         return {}
 
     mnn = _matrix_nuclear_norm_fast(Z_norm)
-    # Normalise the MNN / Schatten norms by sqrt(D) — scale-invariance
-    # across d_model. Wei et al. 2025 reports ``‖X‖_{S_p} / d^{1/p}``
-    # as the comparable quantity across models of different widths.
+    # The Schatten-p norms are normalised by sqrt(D) — a BLME width-
+    # comparability convention (‖X‖_{S_p} / d^{1/p}) so the values are
+    # comparable across models of different d_model.
     d = float(max(Z_norm.shape[1], 2))
+    # The Matrix Nuclear Norm follows Li et al. 2024 (arXiv:2410.10672)
+    # and the reference MLGroupJLU/MatrixNuclearNorm exactly: normalise by
+    # L_input = the token/row count T (``mnn / len(token_ids[0])``), NOT by
+    # d_model. (Fixed 2026-06-22: was ``mnn / d``, wrong by a factor T/d.)
+    T = float(max(Z_norm.shape[0], 1))
+    # Schatten-2 / Frobenius norm is content-free under row-L2
+    # normalization: ‖X‖_F = sqrt(T) for T unit-norm rows, so we do
+    # not expose it as a representation-geometry metric.
     return {
-        "schatten_1": _schatten_p_norm(S, p=1) / d,
-        "schatten_2": _schatten_p_norm(S, p=2) / math.sqrt(d),
-        "schatten_4": _schatten_p_norm(S, p=4) / (d ** 0.25),
-        "schatten_inf": _schatten_p_norm(S, p=float("inf")),
-        "matrix_nuclear_norm": mnn / d,
+        "row_normalized_schatten_1": _schatten_p_norm(S, p=1) / d,
+        "row_normalized_schatten_4": _schatten_p_norm(S, p=4) / (d ** 0.25),
+        "row_normalized_schatten_inf": _schatten_p_norm(S, p=float("inf")),
+        "row_normalized_matrix_nuclear_norm": mnn / T,
         "rankme": _rankme(S),
     }
 
@@ -214,17 +217,20 @@ class SchattenNormTask(DiagnosticTask):
     """Per-layer Schatten-p norms + Matrix Nuclear-Norm + RankMe.
 
     Reports:
-      - ``schatten_1_last``, ``schatten_2_last``, ``schatten_4_last``,
-        ``schatten_inf_last`` — last-layer values of each norm,
+      - ``row_normalized_schatten_1_last``, ``row_normalized_schatten_4_last``,
+        ``row_normalized_schatten_inf_last`` — last-layer values of each norm,
         normalised by ``d^{1/p}`` so they're comparable across
-        d_model (Wei et al. 2025 convention).
-      - ``matrix_nuclear_norm_last`` — fast L1,2 approximation, also
-        normalised by ``d``.
+        d_model (Yusupov et al. 2025 convention). Schatten-2 is omitted
+        because it is content-free under row-L2 preprocessing
+        (``‖X‖_F = sqrt(T)`` for ``T`` unit-norm rows).
+      - ``row_normalized_matrix_nuclear_norm_last`` — fast L1,2 approximation,
+        also normalised by ``d``.
       - ``rankme_last`` — raw-singular-value effective rank (Garrido
-        2023), complement to our Roy-Vetterli ``effective_rank`` in
-        ``geometry_svd``.
+        2023), matching our Roy-Vetterli ``effective_rank`` convention
+        in ``geometry_svd``.
       - Per-layer lists (``*_per_layer``) so the aggregator can emit
         mean/std/slope/q25/q50/q75 cross-model summaries.
+      - ``preprocessing`` metadata describing centre + row-L2 normalisation.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -249,11 +255,10 @@ class SchattenNormTask(DiagnosticTask):
             return {"error": "Could not collect hidden states"}
 
         per_layer_profiles: Dict[str, List[float]] = {
-            "schatten_1": [],
-            "schatten_2": [],
-            "schatten_4": [],
-            "schatten_inf": [],
-            "matrix_nuclear_norm": [],
+            "row_normalized_schatten_1": [],
+            "row_normalized_schatten_4": [],
+            "row_normalized_schatten_inf": [],
+            "row_normalized_matrix_nuclear_norm": [],
             "rankme": [],
         }
 
@@ -278,10 +283,13 @@ class SchattenNormTask(DiagnosticTask):
                 result[f"{k}_last"] = float("nan")
                 result[f"{k}_per_layer"] = profile
                 continue
-            # Headline = last layer (Wei et al. 2025 convention).
+            # Headline = last layer (Yusupov et al. 2025 convention).
             last_val = profile[sorted(per_layer.keys()).index(headline_idx)]
             result[f"{k}_last"] = float(last_val) if np.isfinite(last_val) else float("nan")
             result[f"{k}_per_layer"] = profile
 
-        result["n_layers"] = len(per_layer_profiles["schatten_1"])
+        result["preprocessing"] = "center_columns_then_row_l2_normalize"
+        result["schatten_2_excluded_reason"] = (
+            "content_free_under_row_l2_normalization"
+        )
         return result

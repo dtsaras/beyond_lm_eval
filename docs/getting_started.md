@@ -79,23 +79,22 @@ print(results["results"]["geometry_svd"]["effective_rank"])
 
 ## Module Overview
 
-BLME organizes 51 diagnostic tasks across 7 categories:
+BLME organizes **74 diagnostic tasks** across 7 categories:
 
-- **[Geometry](tasks_geometry.md)** (20 tasks): Manifold structure — isotropy, intrinsic dimension, CKA, collapse, Lipschitz constants, layer change ratio
-- **[Interpretability](tasks_interpretability.md)** (12 tasks): Internal mechanisms — logit lens, attention entropy, probing, sparsity, superposition index
-- **[Topology](tasks_topology.md)** (3 tasks): Manifold shape — persistent homology, Betti curves, persistence entropy
-- **[Causality](tasks_causality.md)** (4 tasks): Information flow — causal tracing, ablation robustness, attention knockout, circuit quality
-- **[Consistency](tasks_consistency.md)** (6 tasks): Output reliability — calibration, paraphrase invariance, logical consistency, contamination detection, knowledge capacity
-- **[Dynamics](tasks_dynamics.md)** (3 tasks): Temporal behavior — stability, interpolation, chain-of-embedding drift
-- **[Representation Engineering](tasks_representation_engineering.md)** (3 tasks): Concept encoding — task vectors, concept separability, steering effectiveness
+- **[Geometry](tasks_geometry.md)** (27 tasks): Manifold structure — isotropy, intrinsic dimension, CKA, Schatten/MNN spectra, collapse, Lipschitz constants, trajectory curvature
+- **[Interpretability](tasks_interpretability.md)** (15 tasks): Internal mechanisms — logit lens, attention entropy, activation sinks, probing, sparsity, superposition index
+- **[Topology](tasks_topology.md)** (4 tasks): Manifold shape — persistent homology, Betti curves, persistence entropy/landscapes
+- **[Causality](tasks_causality.md)** (6 tasks): Information flow — causal tracing, ablation robustness, attention knockout, circuit quality
+- **[Consistency](tasks_consistency.md)** (12 tasks): Output reliability — calibration, paraphrase invariance, logical consistency, contamination detection, ICL slope
+- **[Dynamics](tasks_dynamics.md)** (6 tasks): Temporal behavior — stability, interpolation, chain-of-embedding, generation diversity
+- **[Representation Engineering](tasks_representation_engineering.md)** (4 tasks): Concept encoding — task vectors, concept separability, steering effectiveness, refusal direction
 
 ## Shared Cache
 
-When running multiple tasks, BLME automatically creates a shared cache that runs **one forward pass** and serves hidden states to all tasks. This eliminates redundant computation:
+When running multiple cache-aware tasks, BLME precomputes a shared cache of hidden states/logits/attentions and serves it to tasks that can consume cached tensors. Tasks with custom datasets, generation, gradients, or interventions may still run their own forwards.
 
 ```bash
-# Without cache: 14 separate forward passes
-# With cache (automatic): 1 forward pass → shared across all 14 tasks
+# Cache-aware tasks share cached tensors where possible.
 blme evaluate --model-args pretrained=gpt2 --task-group geometry
 ```
 

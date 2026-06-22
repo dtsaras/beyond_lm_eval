@@ -57,6 +57,8 @@ def evaluate(
     seed: int = 42,
     task_timeout: int = 600,
     dataset: Optional[Any] = None,
+    fail_on_task_error: bool = False,
+    strict_task_validation: bool = False,
 ) -> dict:
     """
     Unified evaluation entry point.
@@ -91,17 +93,14 @@ def evaluate(
     # 1. Ensure all tasks are registered
     _register_all_tasks()
 
-    # 2. Load Model
-    logger.info("Loading model...")
-    model, tokenizer = load_model_and_tokenizer(model_args, device=device)
-
-    # 3. Resolve tasks
+    # 2. Resolve task names before model load so typos fail fast.
     if tasks is None:
         tasks = []
 
     diagnostic_tasks = []
     lm_eval_tasks = []
 
+    unknown_tasks = []
     for task_name in tasks:
         if get_task(task_name):
             diagnostic_tasks.append(task_name)
@@ -114,12 +113,33 @@ def evaluate(
                     continue
             except Exception:
                 pass
-            logger.warning(f"Task '{task_name}' not found in registry or lm_eval. Skipping.")
+            unknown_tasks.append(task_name)
+
+    if unknown_tasks:
+        msg = (
+            "Unknown task(s): "
+            + ", ".join(unknown_tasks)
+            + ". Use `blme list-tasks --json` to inspect registered tasks."
+        )
+        if strict_task_validation:
+            raise ValueError(msg)
+        logger.warning(msg + " Skipping.")
+
+    # 3. Load Model
+    logger.info("Loading model...")
+    model, tokenizer = load_model_and_tokenizer(model_args, device=device)
 
     # 4. Run diagnostic tasks with error isolation + shared cache
     task_results: Dict[str, Any] = {}
     task_errors: Dict[str, str] = {}
     task_timings: Dict[str, float] = {}
+    resolved_task_configs: Dict[str, dict] = {}
+    cache_settings: Dict[str, Any] = {
+        "cache_num_samples_requested": cache_num_samples,
+        "cache_tasks": [],
+        "need_hidden": False,
+        "need_attentions": False,
+    }
 
     if diagnostic_tasks:
         # Load a shared evaluation corpus if none was provided
@@ -129,7 +149,6 @@ def evaluate(
 
         # Resolve configs once (defaults + user overrides)
         from .tasks.config_loader import resolve_task_config
-        resolved_task_configs: Dict[str, dict] = {}
         for task_name in diagnostic_tasks:
             user_override = task_configs.get(task_name, {}) if task_configs else {}
             resolved_task_configs[task_name] = resolve_task_config(task_name, user_override)
@@ -173,7 +192,7 @@ def evaluate(
             "interpretability_attention_rank",
             "interpretability_head_roles",
             "interpretability_induction_heads",
-            "interpretability_attention_polysemanticity",
+            "interpretability_activation_sinks",
         }
         cache_candidates = (
             set(cache_hidden_tasks)
@@ -191,6 +210,23 @@ def evaluate(
                 continue
             cache_tasks.append(task_name)
 
+        # Force eager attention for any task that needs raw attention weights,
+        # whether or not that task consumes the shared attention cache.
+        force_eager = any(
+            t in force_eager_tasks for t in diagnostic_tasks
+        )
+        if force_eager:
+            try:
+                if hasattr(model, "config"):
+                    model.config._attn_implementation = "eager"
+                if hasattr(model, "set_attn_implementation"):
+                    model.set_attn_implementation("eager")
+            except Exception as e:
+                logger.info(
+                    f"Could not switch to eager attention: {e}. "
+                    "Attention-consuming tasks may fail."
+                )
+
         if cache_tasks:
             if cache_num_samples is None:
                 sample_counts = [
@@ -203,27 +239,12 @@ def evaluate(
             if cache_num_samples and cache_num_samples > 0:
                 need_hidden = any(t in cache_hidden_tasks for t in cache_tasks)
                 need_attn = any(t in cache_attn_tasks for t in cache_tasks)
-
-                # If any attention-consuming task is in the run, force
-                # the eager attention implementation *before* we
-                # populate the cache or invoke the task. On modern
-                # transformers the default is SDPA (or FA2) and those
-                # paths return ``None`` for ``outputs.attentions``
-                # regardless of ``output_attentions=True``.
-                force_eager = any(
-                    t in force_eager_tasks for t in diagnostic_tasks
-                )
-                if force_eager:
-                    try:
-                        if hasattr(model, "config"):
-                            model.config._attn_implementation = "eager"
-                        if hasattr(model, "set_attn_implementation"):
-                            model.set_attn_implementation("eager")
-                    except Exception as e:
-                        logger.info(
-                            f"Could not switch to eager attention: {e}. "
-                            "Attention-consuming tasks may fail."
-                        )
+                cache_settings.update({
+                    "cache_num_samples_resolved": cache_num_samples,
+                    "cache_tasks": list(cache_tasks),
+                    "need_hidden": bool(need_hidden),
+                    "need_attentions": bool(need_attn),
+                })
 
                 from .cache import ModelOutputCache
                 cache = ModelOutputCache(model, tokenizer, dataset=dataset, num_samples=cache_num_samples)
@@ -298,6 +319,9 @@ def evaluate(
             logger.error(f"lm_eval tasks failed: {e}")
             task_errors["_lm_eval"] = str(e)
 
+    if fail_on_task_error and task_errors:
+        raise RuntimeError(f"BLME task errors under strict mode: {task_errors}")
+
     # 6. Build results envelope
     envelope = build_results_envelope(
         model_args=model_args,
@@ -307,6 +331,9 @@ def evaluate(
         task_timings=task_timings,
         device=device,
         seed=seed,
+        task_configs_resolved=resolved_task_configs,
+        cache_settings=cache_settings,
+        unknown_tasks=unknown_tasks,
     )
 
     # 7. Print summary table

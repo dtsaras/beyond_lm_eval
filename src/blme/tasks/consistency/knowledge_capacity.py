@@ -1,5 +1,5 @@
 """
-Knowledge Capacity — Memorization vs Generalization
+Memorization-vs-Paraphrase Likelihood Proxy
 ──────────────────────────────────────────────────────────────────────
 Compares token-level probability of exact factual completions versus
 semantically equivalent rephrasings. A model that assigns similar
@@ -24,15 +24,15 @@ logger = logging.getLogger("blme")
 @register_task("consistency_knowledge_capacity")
 class KnowledgeCapacityTask(DiagnosticTask):
     """
-    Compares token-level probability of exact factual completions vs
-    semantically equivalent rephrasings to distinguish memorization
-    from generalization.
+    Compares token-level likelihood of exact factual completions vs
+    semantically equivalent rephrasings.
 
-    Returns memorization_score, generalization_score, and
-    generalization_ratio.
+    This registered task name is retained for compatibility, but the
+    metric is not a defensible model capacity estimate. It reports a
+    memorization-vs-paraphrase likelihood proxy.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Knowledge Capacity (Memorization vs Generalization)...")
+        logger.info("Running Memorization-vs-Paraphrase Likelihood Proxy...")
         num_samples = self.config.get("num_samples", 5)
 
         device = next(model.parameters()).device
@@ -100,22 +100,26 @@ class KnowledgeCapacityTask(DiagnosticTask):
         # Higher = more memorized (exact form strongly preferred)
         memorization_score = float(mean_exact - mean_rephrased)
 
-        # Generalization score: average of rephrased log probs
-        # Higher (less negative) = better generalization
-        generalization_score = mean_rephrased
-
-        # Ratio: closer to 1.0 = better generalization
-        if mean_exact != 0:
-            gen_ratio = float(mean_rephrased / mean_exact)
-        else:
-            gen_ratio = 0.0
+        # Probability-space ratio of geometric mean token likelihoods.
+        # The legacy implementation divided negative log-probabilities,
+        # which inverted the meaning for many common cases.
+        paraphrase_probability_ratio = float(np.exp(mean_rephrased - mean_exact))
 
         return {
-            "memorization_score": memorization_score,
-            "generalization_score": generalization_score,
-            "generalization_ratio": gen_ratio,
+            "diagnostic_semantics": "memorization_vs_paraphrase_likelihood",
+            "diagnostic_warning": (
+                "This diagnostic is not a knowledge capacity estimate; it "
+                "compares likelihood of exact completions against supplied "
+                "paraphrased completions."
+            ),
+            "memorization_likelihood_delta": memorization_score,
+            "paraphrase_probability_ratio": paraphrase_probability_ratio,
             "mean_exact_logprob": mean_exact,
             "mean_rephrased_logprob": mean_rephrased,
+            # Legacy aliases retained for downstream compatibility.
+            "memorization_score": memorization_score,
+            "generalization_score": mean_rephrased,
+            "generalization_ratio": paraphrase_probability_ratio,
         }
 
     @staticmethod

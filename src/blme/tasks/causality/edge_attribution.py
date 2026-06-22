@@ -1,7 +1,10 @@
 """
-Edge attribution patching — simplified from Syed et al. 2023 (arXiv:2310.10348).
+Layer attribution proxy inspired by attribution patching.
 
-For each layer, approximate the causal contribution to the model's
+For compatibility the registered task name remains
+``causality_edge_attribution``, but this implementation does not perform
+true edge attribution patching over an activation graph. Instead, for
+each transformer layer it approximates the contribution to the model's
 prediction by:
 
     attr(layer l) = (h_l_clean - h_l_corrupted) · grad(logit | h_l_clean)
@@ -21,8 +24,9 @@ Summary metrics:
   - **attribution_entropy**: Shannon entropy of the per-layer attribution
     distribution.
 
-Implementation note: this only requires one clean forward + backward and
-one corrupted forward. Total cost: ~3x a single forward pass.
+Implementation note: this HF-generic proxy only requires one clean
+forward + backward and one corrupted forward. Total cost: ~3x a single
+forward pass.
 """
 
 import logging
@@ -54,10 +58,10 @@ _EAP_PROMPTS: List[str] = [
 
 @register_task("causality_edge_attribution")
 class EdgeAttributionTask(DiagnosticTask):
-    """Per-layer edge attribution patching (Syed et al. 2023)."""
+    """Per-layer residual-stream attribution proxy."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Edge Attribution Patching...")
+        logger.info("Running layer attribution proxy...")
 
         if dataset is not None and isinstance(dataset, list) and dataset and (
             isinstance(dataset[0], dict) and "text" in dataset[0]
@@ -210,6 +214,8 @@ class EdgeAttributionTask(DiagnosticTask):
         mean_profile = np.mean(np.stack(all_layer_attr_normed), axis=0)
 
         return {
+            "diagnostic_method": "residual_layer_gradient_patch_proxy",
+            "attribution_unit": "transformer_layer",
             "n_prompts": len(all_ginis),
             "attribution_gini": float(np.mean(all_ginis)),
             "top1_layer_share": float(np.mean(all_top1_shares)),

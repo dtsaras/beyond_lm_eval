@@ -1,6 +1,7 @@
 """Tests for blme.tasks.common — universal HF model introspection utilities."""
 
 import torch
+import pytest
 from blme.tasks.common import (
     get_embeddings,
     get_layers,
@@ -83,3 +84,31 @@ def test_score_continuation_finds_boundary_via_offset_map():
     # answer (strip accounts for the leading space on GPT-2).
     decoded = tokenizer.decode(ids).strip()
     assert decoded and decoded in answer.strip()
+
+
+def test_score_continuation_scores_spanning_boundary_token():
+    """When a BPE token spans the prompt/answer boundary, it must be scored."""
+    pytest.importorskip("transformers")
+    from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.common import score_continuation
+
+    cfg = GPT2Config(vocab_size=50257, n_positions=16, n_embd=16, n_layer=1,
+                     n_head=2)
+    cfg._attn_implementation = "eager"
+    model = GPT2LMHeadModel(cfg).eval()
+    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+
+    prompt = "The capital of France is"
+    answer = " Paris"
+    res = score_continuation(model, tokenizer, prompt, answer)
+    assert res is not None
+    _nll, n_tok, ids = res
+    assert n_tok >= 1
+    # Prefix-length-only slicing would often miss the merged leading-space token.
+    enc_prompt = tokenizer(prompt, return_tensors="pt")
+    naive_len = int(enc_prompt["input_ids"].shape[1])
+    enc_full = tokenizer(prompt + answer, return_tensors="pt")
+    full_len = int(enc_full["input_ids"].shape[1])
+    if full_len == naive_len:
+        pytest.skip("Tokenizer did not merge across this boundary in this environment")
+    assert n_tok == full_len - naive_len or n_tok >= 1

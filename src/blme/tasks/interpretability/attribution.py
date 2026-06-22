@@ -1,86 +1,123 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import get_embeddings, get_num_layers
+import torch.nn.functional as F
 import torch
 import numpy as np
 import logging
 logger = logging.getLogger("blme")
 
+
+def _gini_nonnegative(values):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return 0.0
+    values = np.maximum(values, 0.0)
+    total = values.sum()
+    if total <= 0:
+        return 0.0
+    values = np.sort(values)
+    n = values.size
+    idx = np.arange(1, n + 1, dtype=float)
+    gini = (2.0 * np.sum(idx * values) / (n * total)) - ((n + 1.0) / n)
+    return float(np.clip(gini, 0.0, 1.0))
+
+
 @register_task("interpretability_attribution")
 class ComponentAttributionTask(DiagnosticTask):
     """
-    Analyzes the coherence of layer updates (deltas) in the token space.
-    Projects delta = h_out - h_in onto vocabulary and checks if top-k tokens are semantically related.
+    Gradient-based input attribution for language-model predictions.
+
+    For each sample, computes the next-token cross-entropy loss and attributes
+    it to input tokens with |gradient × input-embedding activation|. This keeps
+    the public attribution task name meaningful while avoiding residual-delta
+    coherence proxies.
+
+    Reference: Simonyan, Vedaldi & Zisserman 2014 saliency maps; BLME adapts
+    input × gradient to language-model embedding activations.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Component Attribution Analysis...")
         num_samples = self.config.get("num_samples", 50)
         
         device = next(model.parameters()).device
-        E = get_embeddings(model)
-        if E is None: return {"error": "Embeddings not found"}
-        E = E.to(device)
+        try:
+            embedding_module = model.get_input_embeddings()
+        except Exception:
+            embedding_module = None
+        if embedding_module is None:
+            return {"error": "Input embeddings not found"}
         
         if dataset is None:
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
         
-        coherence_scores = []
-        
-        # Detect layers (universal)
-        n_layers = get_num_layers(model)
-        if n_layers == 0:
-            return {"error": "Could not detect layers"}
-
-        # Analyze last few layers where semantics are richer
-        start_layer = max(0, n_layers - 4)
-        
+        attribution_scores = []
         count = 0
-        with torch.no_grad():
+
+        captured = {}
+
+        def _capture_embedding_output(_module, _input_args, output):
+            activation = output[0] if isinstance(output, tuple) else output
+            if torch.is_tensor(activation) and activation.requires_grad:
+                activation.retain_grad()
+            captured["activation"] = activation
+
+        handle = embedding_module.register_forward_hook(_capture_embedding_output)
+        try:
             for sample in dataset:
-                if count >= num_samples: break
-                
+                if count >= num_samples:
+                    break
+
                 if isinstance(sample, str):
                     inputs = tokenizer(sample, return_tensors="pt").to(device)
                 elif isinstance(sample, dict) and 'text' in sample:
                     inputs = tokenizer(sample['text'], return_tensors="pt", truncation=True, max_length=128).to(device)
-                elif 'input_ids' in sample:
-                     inputs = {'input_ids': torch.tensor(sample['input_ids']).long().unsqueeze(0).to(device)}
-                else: continue
+                elif isinstance(sample, dict) and 'input_ids' in sample:
+                    inputs = {'input_ids': torch.tensor(sample['input_ids']).long().unsqueeze(0).to(device)}
+                else:
+                    continue
+
+                input_ids = inputs.get("input_ids")
+                if input_ids is None or input_ids.shape[-1] < 2:
+                    continue
+
+                captured.clear()
+                model.zero_grad(set_to_none=True)
+
+                outputs = model(**inputs)
+                logits = getattr(outputs, "logits", outputs[0] if isinstance(outputs, tuple) else None)
+                if logits is None or logits.shape[1] < 2:
+                    continue
+
+                shift_logits = logits[:, :-1, :].contiguous()
+                shift_labels = input_ids[:, 1:].contiguous().to(shift_logits.device)
+                loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.shape[-1]),
+                    shift_labels.view(-1),
+                )
+                loss.backward()
+
+                activation = captured.get("activation")
+                if not torch.is_tensor(activation) or activation.grad is None:
+                    continue
+
+                token_attr = (activation.grad * activation).abs().sum(dim=-1)
+                token_attr = token_attr[:, :-1].detach().float().cpu().reshape(-1)
+                attribution_scores.extend(token_attr.tolist())
                 count += 1
-                
-                outputs = model(**inputs, output_hidden_states=True)
-                hidden_states = outputs.hidden_states  # (embed, layer0, ..., layerN)
-                
-                if len(hidden_states) <= start_layer + 1: continue
-                
-                for i in range(start_layer, n_layers - 1):
-                    if i + 1 >= len(hidden_states): break
-                    
-                    h_prev = hidden_states[i]
-                    h_curr = hidden_states[i+1]
-                    
-                    if h_prev.shape != h_curr.shape: continue
-                    
-                    delta = h_curr - h_prev
-                    delta = delta[0]  # (T, D)
-                    
-                    limit = min(delta.shape[0], 10)
-                    for pos in range(limit):
-                        d_vec = delta[pos].float()
-                        
-                        sims = d_vec @ E.float().T
-                        top_k_idx = sims.argsort(descending=True)[:5]
-                        
-                        E_top = E[top_k_idx].float()
-                        E_top_norm = E_top / (E_top.norm(dim=1, keepdim=True) + 1e-10)
-                        pair_sims = E_top_norm @ E_top_norm.T
-                        
-                        mask = ~torch.eye(5, dtype=bool, device=device)
-                        coherence = pair_sims[mask].mean().item()
-                        coherence_scores.append(coherence)
-                        
+        finally:
+            handle.remove()
+            model.zero_grad(set_to_none=True)
+
+        if not attribution_scores:
+            return {"error": "Failed to compute gradient attribution"}
+
         return {
-            "component_coherence_mean": float(np.mean(coherence_scores)) if coherence_scores else 0.0,
-            "component_coherence_std": float(np.std(coherence_scores)) if coherence_scores else 0.0
+            "mean_gradient_x_activation": float(np.mean(attribution_scores)),
+            "std_gradient_x_activation": float(np.std(attribution_scores)),
+            "max_gradient_x_activation": float(np.max(attribution_scores)),
+            "attribution_gini": _gini_nonnegative(attribution_scores),
+            "tokens_evaluated": int(len(attribution_scores)),
+            "samples_evaluated": int(count),
         }

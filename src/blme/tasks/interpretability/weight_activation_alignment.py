@@ -7,7 +7,7 @@ activations observed during inference. High alignment means the model
 is using the feature directions it stored in its weights.
 
 References:
-  * Park, Choe, Wattenberg, Jegelka 2024 — "The Linear Representation
+  * Park, Choe, Veitch 2024 — "The Linear Representation
     Hypothesis and the Geometry of Large Language Models", arXiv:
     2311.03658 — formalises the input-space / output-space duality
     this task measures.
@@ -61,6 +61,44 @@ _OUT_PROJ_NAMES = (
 )
 
 
+def _deterministic_top_singular_vector(M: torch.Tensor, side: str) -> torch.Tensor:
+    """Top ``side`` ('left'/'right') singular vector of ``M``, computed
+    DETERMINISTICALLY and accurately.
+
+    The previous implementation used ``torch.svd_lowrank(q=1, niter=2)``
+    seeded from the global (un-reseeded) RNG, so repeated runs on identical
+    input gave wildly different vectors and, on flat spectra, |cos| with the
+    true top vector as low as ~0.07. This helper:
+      * uses an exact SVD when the matrix is small enough; otherwise
+      * a randomized SVD with oversampling (q=8) and niter=7 — which reaches
+        |cos| ~ 0.99 with the exact top vector — SEEDED via save/restore of
+        the RNG state so global determinism elsewhere is untouched.
+
+    Sign is irrelevant downstream (the task uses |cos|).
+    """
+    k = int(min(M.shape))
+    if k <= 1:
+        return None
+    # Exact path when cheap (<= ~4M elements).
+    if int(M.shape[0]) * int(M.shape[1]) <= 4_000_000:
+        U, _S, Vh = torch.linalg.svd(M, full_matrices=False)
+        return U[:, 0] if side == "left" else Vh[0]
+    # Large matrix: seeded, oversampled randomized SVD.
+    cpu_state = torch.random.get_rng_state()
+    cuda_states = (
+        torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+    )
+    try:
+        torch.manual_seed(0)
+        q = min(8, k)
+        U, _S, V = torch.svd_lowrank(M, q=q, niter=7)
+    finally:
+        torch.random.set_rng_state(cpu_state)
+        if cuda_states is not None:
+            torch.cuda.set_rng_state_all(cuda_states)
+    return U[:, 0] if side == "left" else V[:, 0]
+
+
 def _is_projection(m) -> bool:
     if isinstance(m, torch.nn.Linear):
         return True
@@ -103,14 +141,11 @@ def _weight_top_left_singular(proj: torch.nn.Module) -> Optional[torch.Tensor]:
     else:
         W = W.T  # (out, in) → (in, out)
     try:
-        # Randomised rank-1 SVD: ``U`` has shape (in, 1); ``U[:, 0]`` is
-        # the top left-singular vector. Two extra iterations match
-        # scikit-learn's default and give ~1e-6 approximation error.
-        U, _S, _V = torch.svd_lowrank(W, q=1, niter=2)
+        # Deterministic, accurate top left-singular vector (in input space).
+        return _deterministic_top_singular_vector(W, side="left")
     except Exception as e:
         logger.info(f"  WAA SVD failed: {type(e).__name__}: {e}")
         return None
-    return U[:, 0]
 
 
 def _activation_top_principal(acts: torch.Tensor) -> Optional[torch.Tensor]:
@@ -126,14 +161,12 @@ def _activation_top_principal(acts: torch.Tensor) -> Optional[torch.Tensor]:
     acts = acts.float()
     acts = acts - acts.mean(dim=0, keepdim=True)
     try:
-        # ``torch.svd_lowrank`` returns ``U S V`` for rank-q SVD;
-        # ``V[:, 0]`` is the top right-singular vector — the direction
-        # in the feature space with maximum variance.
-        _U, _S, V = torch.svd_lowrank(acts, q=1, niter=2)
+        # Deterministic, accurate top right-singular vector (max-variance
+        # direction in feature space).
+        return _deterministic_top_singular_vector(acts, side="right")
     except Exception as e:
         logger.info(f"  WAA activation SVD failed: {type(e).__name__}: {e}")
         return None
-    return V[:, 0]
 
 
 @register_task("interpretability_waa")

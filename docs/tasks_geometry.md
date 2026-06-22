@@ -2,6 +2,26 @@
 
 This module contains metrics that evaluate the high-dimensional spatial geometry of the LLM's latent representation manifold.
 
+**Current registry coverage (27 tasks)**: `geometry_categories`,
+`geometry_cka`, `geometry_collapse`, `geometry_contextualization`,
+`geometry_correlation_dimension`, `geometry_hsic`, `geometry_hubness`,
+`geometry_intrinsic_dim`, `geometry_isoscore`, `geometry_lid`,
+`geometry_lipschitz`, `geometry_mahalanobis`, `geometry_matrix_entropy`,
+`geometry_mp_bulk_deviation`, `geometry_neural_collapse`,
+`geometry_perplexity`, `geometry_positional_decay`,
+`geometry_prediction_alignment`, `geometry_representation_sensitivity`,
+`geometry_rsa`, `geometry_schatten`, `geometry_spectral`, `geometry_svd`,
+`geometry_tokenizer_efficiency`, `geometry_trajectory_curvature`,
+`geometry_unembedding`, and `geometry_weight_norms`.
+
+**Paper-faithful vs. BLME proxy notes**: IsoScore uses the Rudman et al.
+covariance-isotropy score (`arXiv:2108.07344`). `geometry_hsic` implements
+HSIC dependence, not a KDE mutual-information estimator. `geometry_prediction_alignment`,
+`geometry_categories`, and `geometry_weight_norms` are BLME diagnostics without a
+single canonical paper. `geometry_tokenizer_efficiency` reports tokenizer
+properties (fertility/compression/vocabulary usage); these are confounds and
+efficiency diagnostics, not standalone proof of downstream quality.
+
 ---
 
 ## 1. Local Intrinsic Dimensionality (LID)
@@ -41,7 +61,7 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **How are we measuring**: By computing the Trace of the Empirical Fisher Information Matrix (FIM) of the token representations with respect to the output logits/probabilities.
 * **Hypothesis**: A "sharp" minimum (high trace) often correlates with poor generalization out-of-distribution, while a "flat" minimum (low trace) suggests robust generalization.
 * **Citation/Paper**: `Amari, S. (1998). Natural gradient works efficiently in learning.` [Neural Computation, Vol 10(2)] — foundational reference for information geometry of neural networks. Application to LLMs is an active area of research.
-* **File & Function**: `src/blme/tasks/geometry/information_geometry.py` -> `FisherInformationTraceTask`
+* **File & Function**: `src/blme/tasks/geometry/information_geometry.py` -> `RepresentationSensitivityTask`
 * **Critical Info**: FIM is computationally intractable to store entirely; the trace is an efficient scalar summary of total curvature.
 
 ## 6. Matrix Entropy (Information Bottleneck)
@@ -55,8 +75,8 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 ## 7. Correlation Dimension (Fractal Geometry)
 * **What are we measuring**: The underlying fractal complexity and self-similarity of the generated language manifold.
 * **How are we measuring**: Using the Grassberger-Procaccia algorithm. Measures the fraction of points within a radius $r$ and computes the log-log scaling coefficient.
-* **Hypothesis**: Standard intrinsic dimensions incorrectly assume the text space is locally flat (Euclidean). Correlation dimension proves language lies on a highly complex fractal attractor.
-* **Citation/Paper**: `Du, X., & Tanaka-Ishii, K. (2025). Correlation Dimension of Autoregressive Large Language Models.` [NeurIPS 2025, ArXiv: 2510.21258]
+* **Hypothesis**: Correlation dimension can reveal non-integer scaling structure in the sampled representation cloud. It is evidence about fractal-like scaling, not proof that language globally lies on a fractal attractor.
+* **Citation/Paper**: `Grassberger, P. & Procaccia, I. (1983). Characterization of strange attractors.` [Phys. Rev. Lett. 50(5)]. BLME uses the classical estimator; it does not implement a paper-specific LLM correlation-dimension pipeline.
 * **File & Function**: `src/blme/tasks/geometry/correlation_dimension.py` -> `CorrelationDimensionTask`
 * **Critical Info**: Requires larger sample sizes to compute pairwise distances effectively. Normal text generally exhibits a non-integer structural dimension around ~6-7.
 
@@ -92,12 +112,12 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **File & Function**: `src/blme/tasks/geometry/categories.py` -> `CategoryGeometryTask`
 * **Critical Info**: Also computes category Purity and generates coordinates for UMAP/t-SNE visualization if installed.
 
-## 12. Geometry Consistency
-* **What are we measuring**: The temporal stability of representational distances across generation steps.
-* **How are we measuring**: Computing the difference in successive output hidden states during auto-regressive decoding.
-* **Hypothesis**: Abrupt erratic jumps in successive generation steps often precede hallucinatory behavior, while stable steps indicate confident predictions.
-* **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
-* **File & Function**: `src/blme/tasks/geometry/consistency.py` -> `ConsistencyTask`
+## 12. Prediction Alignment (`geometry_prediction_alignment`)
+* **What are we measuring**: How closely the final hidden state points toward the output-projection vector for the next token.
+* **How are we measuring**: Computing cosine similarity between each final hidden state and the `lm_head.weight` row for its target token. For tied-output models this is a normalized-logit proxy; for untied-output models BLME uses the actual output projection rather than the input embedding table.
+* **Hypothesis**: Higher alignment indicates that the representation is geometrically arranged to support the next-token prediction. This is a BLME diagnostic, not a canonical paper metric.
+* **Citation/Paper**: Derived from standard output-embedding geometry and logit-lens style analyses; no single canonical paper.
+* **File & Function**: `src/blme/tasks/geometry/consistency.py` -> `PredictionAlignmentTask`
 * **Critical Info**: Heavily dependent on generation parameters like temperature and top-p.
 
 ## 13. Representation Collapse
@@ -108,21 +128,21 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **File & Function**: `src/blme/tasks/geometry/collapse.py` -> `RepresentationCollapseTask`
 * **Critical Info**: More pronounced in deep networks lacking robust layernorms or residual pathway scaling.
 
-## 14. Spectral Decay
-* **What are we measuring**: The rate at which the capacity of the model's intermediate dimensions is effectively utilized.
-* **How are we measuring**: By fitting a power-law exponent (alpha) to the spectrum of eigenvalues from the hidden space covariance.
-* **Hypothesis**: If alpha is too low, the manifold is overly noisy. If alpha is highly peaked, the manifold is collapsed. The "1/f" spectral decay is considered optimal for learning architectures.
-* **Citation/Paper**: `Stringer, C., Pachitariu, M., Steinmetz, N., Carandini, M., & Harris, K. D. (2019). High-dimensional geometry of population responses in visual cortex.` [Nature 571, 361–365]
+## 14. Weight Spectral Decay
+* **What are we measuring**: Heavy-tailed spectral structure and effective utilization of learned weight matrices.
+* **How are we measuring**: Scanning linear/Conv1D weight matrices, computing stable rank and a Hill-estimator tail exponent over top singular values.
+* **Hypothesis**: Heavy-tailed spectra can indicate learned correlation structure and implicit self-regularization; extreme collapse or noise-like spectra are warnings.
+* **Citation/Paper**: `Martin, C. H. & Mahoney, M. W. (2019/2021). Traditional and Heavy-Tailed Self Regularization in Neural Network Models / Heavy-Tailed Universality Predicts Trends in Test Accuracies.` BLME's `avg_alpha` is a singular-value Hill proxy, not the exact WeightWatcher ESD alpha.
 * **File & Function**: `src/blme/tasks/geometry/spectral.py` -> `WeightSpectralTask`
 * **Critical Info**: Shows strong parallels between biological neural networks and artificial models.
 
-## 15. Mutual Information (Geometric)
-* **What are we measuring**: The spatial mutual information or dependency captured via kernel density estimations across layers.
-* **How are we measuring**: Analyzing kernel similarity matrices in hidden spaces across layers to detect whether the information content is preserved or transformed.
-* **Hypothesis**: Information Bottleneck theory posits that models first maximize MI with inputs, then progressively forget (minimize MI) extraneous details, compressing semantics.
-* **Citation/Paper**: `Shwartz-Ziv, R., & Tishby, N. (2017). Opening the black box of deep neural networks via information.` [ArXiv: 1703.00810]
-* **File & Function**: `src/blme/tasks/geometry/mutual_info.py` -> `MutualInformationTask`
-* **Critical Info**: Computationally demanding. Requires careful bandwidth tuning for the KDE calculation.
+## 15. HSIC Dependence (`geometry_hsic`)
+* **What are we measuring**: Kernel dependence between representation sets, usually across layers or between input and layer representations.
+* **How are we measuring**: Computing Hilbert-Schmidt Independence Criterion (HSIC) from centered kernel matrices.
+* **Hypothesis**: High HSIC indicates strong statistical dependence between two representation views; low HSIC suggests a stronger transformation or decorrelation.
+* **Citation/Paper**: `Gretton, A., Bousquet, O., Smola, A., & Schölkopf, B. (2005). Measuring Statistical Dependence with Hilbert-Schmidt Norms.` Related representation-similarity use in `Kornblith et al. (2019). Similarity of Neural Network Representations Revisited.`
+* **File & Function**: `src/blme/tasks/geometry/mutual_info.py` -> `HSICDependenceTask`
+* **Critical Info**: Registered task name is `geometry_hsic`; stale docs/recipes should not refer to `geometry_mutual_info`.
 
 ## 16. CKA (Centered Kernel Alignment)
 * **What are we measuring**: The similarity between the underlying structures of two sets of representations without requiring them to have the same features.
@@ -136,17 +156,17 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **What are we measuring**: The relationship between the hidden language representations in the final layer and the static unembedding parameters located in the LM head.
 * **How are we measuring**: Looking at the angles (cosine similarity) and norms between the highest logit token vectors and the actual dynamic context state vectors. 
 * **Hypothesis**: The final language modeling head forces representations into distinct regions of the LM head space. The "Unembedding" operation exhibits severe bias due to token frequency in the pre-training set.
-* **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
+* **Citation/Paper**: Derived from unembedding-geometry and vocabulary-bias analyses; BLME's alignment and purity summaries are diagnostics inspired by unembedding-geometry and vocabulary-bias analyses (effective rank: Roy & Vetterli 2007, EUSIPCO).
 * **File & Function**: `src/blme/tasks/geometry/unembedding.py` -> `UnembeddingDiagnosticsTask`
 * **Critical Info**: Typically reveals that frequent tokens dominate the manifold geometry by pushing less frequent tokens away from the origin computationally.
 
-## 18. Perplexity (Baseline Geometry)
+## 18. Perplexity (Baseline / Y-variable Geometry)
 * **What are we measuring**: Baseline auto-regressive predictability.
 * **How are we measuring**: The exponentiated average negative log-likelihood of a sequence.
 * **Hypothesis**: As the foundational sanity check, it proves the model can actually model text. Used purely as a baseline correlate for other intrinsic measures.
 * **Citation/Paper**: Canonical language modeling metric. 
 * **File & Function**: `src/blme/tasks/geometry/perplexity.py` -> `RarePPLTask`
-* **Critical Info**: Lower is better. Included primarily to compute correlations with the more advanced geometric variables.
+* **Critical Info**: Lower is better. This is a performance-like baseline and is excluded from the primary intrinsic-predictor feature set.
 
 ## 19. Global Intrinsic Dimension (geometry_intrinsic_dim / PDE)
 * **What are we measuring**: The global effective dimensionality of the dataset within the model's space.
@@ -171,4 +191,52 @@ This module contains metrics that evaluate the high-dimensional spatial geometry
 * **Citation/Paper**: `Marchenko, V. A. & Pastur, L. A. (1967). Distribution of eigenvalues for some sets of random matrices.` [Mat. Sb. 72(114):4; Math. USSR-Sbornik 1(4), 457-483] and `Baik, J., Ben Arous, G., & Péché, S. (2005). Phase transition of the largest eigenvalue for nonnull complex sample covariance matrices.` [Annals of Probability 33(5), 1643-1697, ArXiv: math/0403022]
 * **File & Function**: `src/blme/tasks/geometry/rmt_bulk.py` -> `MPBulkDeviationTask`
 * **Critical Info**: Uses the *unordered* flattened token cloud (`per_sample=False` is correct here — RMT statements concern a population of rows). $\gamma$ varies across models, but the MP reference is $\gamma$-matched per layer so the comparison stays fair; the `*_g25` variants additionally pin $\gamma = 0.25$ for strict cross-model comparability (NaN when fewer than $\lceil D/0.25 \rceil$ tokens exist).
+
+## 22. Contextualization
+* **What are we measuring**: How much token representations change across contexts and how anisotropic the contextualized representation space is.
+* **How are we measuring**: Computing Ethayarajh-style self-similarity, intra-sentence similarity, and maximum explainable variance summaries over hidden states.
+* **Hypothesis**: Stronger contextualization means token representations depend meaningfully on context rather than collapsing to static lexical identity.
+* **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [EMNLP 2019, ArXiv: 1909.00512]
+* **File & Function**: `src/blme/tasks/geometry/contextualization.py` -> `ContextualizationTask`
+* **Critical Info**: MEV and similarity profiles are descriptive diagnostics; primary predictor analysis excludes sample-count/configuration fields.
+
+## 23. IsoScore
+* **What are we measuring**: Uniformity of embedding-space dimension utilization.
+* **How are we measuring**: Applying Rudman et al.'s covariance-isotropy IsoScore to hidden-state clouds.
+* **Hypothesis**: More isotropic representations use dimensional capacity more evenly and avoid narrow anisotropy cones.
+* **Citation/Paper**: `Rudman, W., Gillman, N., Rayne, S., & Eickhoff, C. (2022). IsoScore: Measuring the Uniformity of Embedding Space Utilization.` [Findings of ACL 2022, ArXiv: 2108.07344]
+* **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `IsoScoreTask`
+* **Critical Info**: Distinct from `geometry_svd`, which reports generic SVD/effective-rank diagnostics.
+
+## 24. Neural Collapse
+* **What are we measuring**: Topic-label neural-collapse proxies on a bundled labelled corpus.
+* **How are we measuring**: Computing NC1 within-class collapse, NC2 equinorm coefficient of variation, and an ETF cosine-deviation proxy over class means.
+* **Hypothesis**: Lower within-class scatter and more ETF-like class means indicate a cleaner labelled representation geometry.
+* **Citation/Paper**: `Papyan, V., Han, X. Y., & Donoho, D. L. (2020). Prevalence of neural collapse during the terminal phase of deep learning training.` [PNAS, ArXiv: 2008.08186]
+* **File & Function**: `src/blme/tasks/geometry/neural_collapse.py` -> `NeuralCollapseTask`
+* **Critical Info**: BLME reports `nc2_etf_cosine_deviation_proxy`; it does not implement full NC2 normalized-Gram Frobenius distance or NC3 self-duality.
+
+## 25. Schatten / MNN / RankMe
+* **What are we measuring**: Spectral geometry of row-normalized per-sentence hidden-state matrices.
+* **How are we measuring**: Centering columns, row-L2 normalizing, then computing row-normalized Schatten-p norms (p=1,4,∞), Matrix Nuclear-Norm, and RankMe.
+* **Hypothesis**: Spectral concentration and nuclear-norm summaries can proxy representation compression and rank utilization.
+* **Citation/Paper**: `Yusupov et al. (2025). From Internal Representations to Text Quality: A Geometric Approach to LLM Evaluation.` [ArXiv: 2509.25359]; `Li, Xia, Chang, & Wu (2024). Large Language Model Evaluation via Matrix Nuclear-Norm.` [ArXiv: 2410.10672]; `Garrido et al. (2023). RankMe.` [ICML 2023, ArXiv: 2210.02885]
+* **File & Function**: `src/blme/tasks/geometry/schatten.py` -> `SchattenNormTask`
+* **Critical Info**: `schatten_2` is intentionally not exposed because it equals a content-free function of token count and width after row-L2 normalization.
+
+## 26. Tokenizer Efficiency
+* **What are we measuring**: Tokenizer-dependent fertility and compression properties for a fixed text sample.
+* **How are we measuring**: Counting tokens per word/character, compression ratio, vocabulary size, and related tokenizer statistics.
+* **Hypothesis**: Tokenizer efficiency affects compute and can correlate with model family maturity, but it is a confound rather than a representation-quality proof.
+* **Citation/Paper**: Related to tokenizer fertility and tokenization-efficiency literature; BLME treats this as a tokenizer diagnostic.
+* **File & Function**: `src/blme/tasks/geometry/tokenizer_efficiency.py` -> `TokenizerEfficiencyTask`
+* **Critical Info**: Marked non-primary for intrinsic-predictor analyses because it is tokenizer/configuration dependent.
+
+## 27. Weight Norm Profiles
+* **What are we measuring**: Layerwise norms and stable-rank style summaries of model weight matrices.
+* **How are we measuring**: Scanning weight matrices and reporting Frobenius norm, spectral norm, and derived uniformity/profile summaries.
+* **Hypothesis**: Extreme layer-norm concentration can reveal architectural or training instabilities.
+* **Citation/Paper**: BLME diagnostic related to standard spectral/norm analyses; no single canonical paper.
+* **File & Function**: `src/blme/tasks/geometry/weight_norms.py` -> `WeightNormProfileTask`
+* **Critical Info**: Use alongside `geometry_spectral`; do not interpret raw norm size without architecture context.
 

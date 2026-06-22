@@ -40,6 +40,21 @@ def _get_git_hash() -> Optional[str]:
         return None
 
 
+def _dependency_versions() -> Dict[str, Optional[str]]:
+    packages = ["torch", "transformers", "numpy", "scipy", "datasets", "lm_eval"]
+    versions: Dict[str, Optional[str]] = {}
+    try:
+        from importlib.metadata import version
+    except Exception:
+        return versions
+    for package in packages:
+        try:
+            versions[package] = version(package)
+        except Exception:
+            versions[package] = None
+    return versions
+
+
 # ---------------------------------------------------------------------------
 # Results envelope
 # ---------------------------------------------------------------------------
@@ -52,6 +67,9 @@ def build_results_envelope(
     device: str,
     task_timings: Optional[Dict[str, float]] = None,
     seed: Optional[int] = None,
+    task_configs_resolved: Optional[Dict[str, dict]] = None,
+    cache_settings: Optional[Dict[str, Any]] = None,
+    unknown_tasks: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Wrap raw per-task results into a structured envelope with metadata.
@@ -63,11 +81,17 @@ def build_results_envelope(
         "blme_version": _get_blme_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_hash": _get_git_hash(),
+        "environment": {
+            "dependencies": _dependency_versions(),
+        },
         "config": {
             "model_args": model_args,
             "device": device,
             "tasks_requested": tasks_requested,
             "seed": seed,
+            "task_configs_resolved": task_configs_resolved or {},
+            "cache_settings": cache_settings or {},
+            "unknown_tasks": unknown_tasks or [],
         },
         "summary": {
             "total_tasks": len(tasks_requested),

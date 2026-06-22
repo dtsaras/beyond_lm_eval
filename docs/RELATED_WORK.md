@@ -79,7 +79,7 @@ data-free predictor in this line of work is **Martin & Mahoney 2019a/b**
 per-layer weight ESDs predicts test accuracy across hundreds of models
 **without any training or test data access**.
 
-BLME extends this "per-model data-free" line to 54 intrinsic metrics
+BLME extends this "per-model data-free" line to 74 diagnostic tasks
 spanning seven categories. We implement α-on-weights as
 `geometry_spectral.avg_alpha` and extend the per-model
 benchmark-independent predictor axis to cover representation geometry,
@@ -104,7 +104,7 @@ define Representational Similarity Analysis (RSA). **Papyan, Han &
 Donoho 2020** (PNAS) characterise Neural Collapse. **Naitzat,
 Zhitnikov & Lim 2020** (ICLR) apply Topological Data Analysis to
 track Betti-number collapse through network layers. **Bubenik 2015**
-(arXiv:1501.00179) and **Zomorodian & Carlsson 2005** (DCG) develop
+(JMLR, arXiv:1207.6437) and **Zomorodian & Carlsson 2005** (DCG) develop
 the persistence-landscape and persistent-homology frameworks. **Tomašev
 et al. 2014** (IEEE TKDE) characterise high-dimensional hubness.
 
@@ -113,9 +113,9 @@ shows contextualised word representations in BERT / ELMo / GPT-2 are
 highly anisotropic — large cosine similarity between random token
 pairs — and defines the Maximum Explainable Variance (MEV) and
 anisotropy baseline we still use. **Rudman et al. 2022** (IsoScore,
-arXiv:2207.10341) propose a covariance-based isotropy scalar strictly
+arXiv:2108.07344) propose a covariance-based isotropy scalar strictly
 more discriminative than cosine-based anisotropy. **Park, Choe,
-Wattenberg, Jegelka 2024** (Linear Representation Hypothesis,
+Veitch 2024** (Linear Representation Hypothesis,
 arXiv:2311.03658) formalise the input-space / output-space duality of
 concept directions. **Cavagnero et al. 2025** (arXiv:2506.01034)
 demonstrate that local intrinsic dimension predicts generalisation,
@@ -132,17 +132,18 @@ introduce the Matrix Nuclear-Norm as an 8–24× faster alternative.
 the effective rank via `exp(H(σ_i / Σσ_j))` — as a label-free
 predictor of SSL downstream-probe accuracy. **Li et al. 2025** (NeurIPS,
 arXiv:2509.23024) jointly track RankMe and α-ReQ across pretraining
-checkpoints, identifying three geometric phases. **Wei et al. 2025**
+checkpoints, identifying three geometric phases. **Yusupov et al. 2025**
 (arXiv:2509.25359) show Intrinsic Dim, Effective Rank, MEV, Schatten
 Norms, and MAUVE all serve as reference-free text-quality proxies.
 **Jha & Reagen 2025** (EMNLP, arXiv:2510.00537) decompose spectral
 utilisation into Hard Rank (participation ratio), Soft Rank (Shannon
 rank), Spectral Concentration, and a composite SUI.
 
-**BLME implements all of the above in a single library**. We expose
+BLME implements the subset of this literature that can be measured as
+single-model, label-free or label-light diagnostics. We expose
 Roy-Vetterli effective rank and RankMe side-by-side (they use
 different normalisations of σ_i); Schatten-p norms for
-p ∈ {1, 2, 4, ∞} plus Li 2024's L1,2 Matrix Nuclear-Norm; Facco and
+p ∈ {1, 4, ∞} plus Li 2024's row-normalized L1,2 Matrix Nuclear-Norm; Facco and
 Levina-Bickel intrinsic dimension; CKA, RSA, HSIC for layer-pair
 similarity; Kornblith, Ethayarajh, Rudman isotropy measures;
 Papyan-Han-Donoho Neural Collapse; Naitzat, Zomorodian-Carlsson,
@@ -198,16 +199,16 @@ Value Sampling** has been shown to outperform attention and IG in
 plausibility and faithfulness.
 
 BLME implements `interpretability_logit_lens` (nostalgebraist 2020),
-`interpretability_attention_entropy` (Clark 2019), `head_roles`
-(Clark 2019, Voita 2019), `induction_heads` (Olsson 2022),
-`superposition` (Elhage 2022), `attention_rank` (**Dong et al. 2021**,
-arXiv:2103.03404), `probing` (Alain-Bengio 2017), `sae_features`
-(Bricken 2023; GPT-2 only due to SAE availability), `waa` (Park 2024),
-`attribution` (Simonyan 2014, input × gradient), and `attention_graph`
+`interpretability_attention_entropy` (Clark 2019), `interpretability_head_roles`
+(Clark 2019, Voita 2019), `interpretability_induction_heads` (Olsson 2022),
+`interpretability_superposition` (Elhage 2022), `interpretability_attention_rank` (**Dong et al. 2021**,
+arXiv:2103.03404), `interpretability_probing` (Alain-Bengio 2017), `interpretability_sae_features`
+(Bricken 2023; GPT-2 only due to SAE availability), `interpretability_waa` (Park 2024),
+`interpretability_attribution` (Simonyan 2014, input × gradient), and `interpretability_attention_graph`
 (Abnar & Zuidema 2020 attention rollout + PageRank). Causal-tracing
 methods are implemented as `causality_tracing` (Meng 2022),
-`attention_knockout` (Voita 2019), `knowledge_neurons` (Dai 2022),
-`edge_attribution` (Syed 2024), `circuit_quality` (Conmy 2023), and
+`causality_attention_knockout` (Voita 2019), `causality_knowledge_neurons` (Dai 2022),
+`causality_edge_attribution` (Syed 2024), `causality_circuit_quality` (Conmy 2023), and
 `causality_ablation` (BLME diagnostic).
 
 ---
@@ -219,15 +220,15 @@ phenomenon: a few tokens (typically BOS) absorb a disproportionate
 share of attention mass in almost every head of almost every modern
 LLM. **Xiao, Tian, Chen, Han, Han 2023** (StreamingLLM,
 arXiv:2309.17453) introduce the "attention sink" terminology.
-**Sun, Chen, Bai, Hu, Xiong, Kolter 2024** (arXiv:2402.17762) show
+**Sun, Chen, Kolter, Liu 2024** (arXiv:2402.17762) show
 the same tokens host "massive activations": residual-stream entries
 at 100-1000× the typical magnitude, acting as fixed bias terms
 regardless of input; removing them destroys model performance.
-**Gu, Pang, Du, Liu, Collier, Lin 2025** (ICLR Spotlight,
+**Gu, Pang, Du, Liu, Zhang, Du, Wang, Lin 2025** (ICLR Spotlight,
 arXiv:2410.10781) define the Sinkε metric and show its emergence
 depends on optimiser, tokeniser, and attention kernel, with
 downstream implications for long-context performance.
-**Pedrotti & Guo 2025** (arXiv:2510.06477) prove theoretically that
+**Arroyo et al. 2025** (arXiv:2510.06477) prove theoretically that
 massive activations necessarily induce representational compression
 at mid-depth layers — the "compression valley" — empirically
 confirming the link across models from 410M to 120B.
@@ -236,7 +237,7 @@ BLME's `interpretability_activation_sinks` task (added in round 8)
 reproduces the Gu 2025 Sinkε formula from the reference code at
 [sail-sg/Attention-Sink](https://github.com/sail-sg/Attention-Sink);
 measures Sun 2024 massive-activation fraction + max/median ratio;
-and computes the Pedrotti-Guo compression-valley depth from our
+and computes the Arroyo et al. compression-valley depth from our
 matrix-entropy per-layer trajectory. All three signals surface as
 independent capability predictors (valley depth has partial
 ρ = –0.53 with composite benchmark in our 32-model study).
@@ -329,11 +330,13 @@ bits-per-parameter knowledge capacity. **Liang et al. 2024**
 dimensions.
 
 BLME implements `consistency_calibration` (Guo 2017),
-`consistency_position_sensitivity` (Liu 2023), `format_robustness`
-(Sclar 2023), `self_consistency` (Wang 2022), `icl_slope` (Brown
-2020, Min 2022), `bias_weat` (Caliskan 2017, May 2019),
-`knowledge_capacity` (Allen-Zhu 2024), plus membership-inference
-and contamination probes (Yeom 2018, Carlini 2021, Shi 2023).
+`consistency_position_sensitivity` (Liu 2023), `consistency_format_robustness`
+(Sclar 2023), `consistency_self_consistency` (Wang 2022),
+`consistency_icl_slope` (Brown 2020, Min 2022),
+`consistency_bias_weat` (Caliskan 2017, May 2019),
+`consistency_knowledge_capacity` as a legacy-named exact-vs-rephrased
+likelihood proxy, plus membership-inference and contamination probes
+(Yeom 2018, Carlini 2021, Shi 2023).
 
 ---
 
@@ -377,8 +380,8 @@ Prior work falls into four buckets:
    downstream tasks (Kadavath 2022 P(IK), Azaria 2023 Factoscope,
    Yin 2024 TruthfulQA-LID).
 
-**BLME's unique contribution** is the orthogonal cut: 54 intrinsic
-tasks totalling 731 features, across **seven distinct measurement
+**BLME's unique contribution** is the orthogonal cut: 74 diagnostic
+tasks yielding 731 aggregated features, across **seven distinct measurement
 taxonomies** (geometry, interpretability, causality, dynamics,
 consistency, RepE, topology), evaluated systematically on **32
 pretrained LLMs spanning 8 families and 3 orders of magnitude in
@@ -392,7 +395,7 @@ or few-metrics-few-models).
 
 **Concretely**: we are the first to (a) evaluate Wei 2024 matrix
 entropy, Li 2024 matrix nuclear-norm, Garrido 2023 RankMe, Gu 2025
-Sinkε, Sun 2024 massive activations, Pedrotti-Guo 2025 compression
+Sinkε, Sun 2024 massive activations, Arroyo et al. 2025 compression
 valleys, and Wang 2025 Chain-of-Embedding **in a single head-to-head
 comparison against each other and against Martin-Mahoney α,
 Ethayarajh contextualisation, Kornblith CKA, Papyan-Han-Donoho
@@ -437,9 +440,10 @@ Recent papers (2023–2026) considered and rejected: **70+** (see
 `docs/PAPER_SURVEY.md` §3).
 Total in `docs/PAPERS.md` §1 (implemented): **55+**.
 Total arXiv IDs actually cited in source code: **33**.
-Tasks with explicit in-source citations: **37 / 71** (52 %).
-Tasks with citation in paper docs only: **29 / 71** (41 %).
-Pure BLME diagnostics with no canonical paper: **5 / 71** (7 %).
+Tasks tracked in the current registry: **74**.
+Paper-backed tasks, documented proxies, and BLME-custom diagnostics are
+audited in `docs/PAPERS.md` §3; avoid quoting stale percentage splits
+without regenerating them from the live registry.
 
 For the canonical per-task audit and paper-to-task mapping, see
 `docs/PAPERS.md` §3.

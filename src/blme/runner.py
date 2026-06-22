@@ -4,14 +4,15 @@ import sys
 from typing import Optional
 from .core import evaluate
 
-def run_from_yaml(config_path: str):
+def run_from_yaml(config_path: str, dry_run: bool = False, strict: bool = False):
     """
     Run evaluation based on a YAML recipe.
     """
     with open(config_path, 'r') as f:
         recipe = yaml.safe_load(f)
         
-    print(f"Loaded recipe: {recipe.get('experiment_name', 'Unnamed')}")
+    if not dry_run:
+        print(f"Loaded recipe: {recipe.get('experiment_name', 'Unnamed')}")
     
     # Parse Model
     model_config = recipe.get("model", {})
@@ -37,6 +38,21 @@ def run_from_yaml(config_path: str):
     seed = global_config.get("seed", 42)
     task_timeout = global_config.get("task_timeout", 600)
 
+    if dry_run:
+        from .cli import _validate_task_names
+        import json
+
+        plan = _validate_task_names(task_list, strict=strict)
+        plan.update({
+            "recipe": config_path,
+            "model_args": model_args,
+            "output_dir": output_dir,
+            "device": device,
+            "task_configs": tasks_dict,
+        })
+        print(json.dumps(plan, indent=2, sort_keys=True, default=str))
+        return plan
+
     # Run
     return evaluate(
         model_args=model_args,
@@ -49,14 +65,18 @@ def run_from_yaml(config_path: str):
         cache_num_samples=cache_num_samples,
         seed=seed,
         task_timeout=task_timeout,
+        fail_on_task_error=strict,
+        strict_task_validation=strict,
     )
 
 def main():
     parser = argparse.ArgumentParser(description="Run BLME evaluation from YAML recipe")
     parser.add_argument("recipe", type=str, help="Path to YAML recipe file")
+    parser.add_argument("--dry-run", action="store_true", help="Validate without loading model")
+    parser.add_argument("--strict", action="store_true", help="Fail on unknown task/task error")
     args = parser.parse_args()
     
-    run_from_yaml(args.recipe)
+    run_from_yaml(args.recipe, dry_run=args.dry_run, strict=args.strict)
     
 if __name__ == "__main__":
     main()

@@ -10,9 +10,13 @@ logger = logging.getLogger("blme")
 @register_task("consistency_contrastive")
 class ContrastiveConsistencyTask(DiagnosticTask):
     """
-    Measures Contrastive Consistency (Negative Rejection).
-    Evaluates whether the model strongly rejects mutually exclusive 
-    alternatives (B) when it assigns high probability to a factual baseline (A).
+    Measures a CounterFact-style negative-rejection proxy.
+
+    Evaluates whether the model assigns lower probability to a mutually
+    exclusive alternative than to a factual target under the same prompt.
+    The fallback data use the counterfact-tracing split associated with
+    Meng et al. 2022 (ROME); the metric is a BLME likelihood diagnostic,
+    not a full benchmark evaluation.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Contrastive Consistency Analysis...")

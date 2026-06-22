@@ -57,6 +57,10 @@ class ActivationSparsityTask(DiagnosticTask):
     """
     Measures MLP intermediate activation sparsity (L0) and kurtosis.
 
+    Related work: Zhang et al. 2021 Moefication and later contextual
+    sparsity analyses. BLME reports activation-rate diagnostics; it is
+    not an implementation of Deja Vu's inference-time predictor.
+
     **Fix (2026-04-15 audit):** previous implementation hooked the MLP's
     full output (post-residual addition), which captures the dense
     residual stream, not the sparse MLP intermediate. That made L0 > 0.999

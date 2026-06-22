@@ -32,26 +32,30 @@ except ImportError:
 
 def _persistence_entropy(lifespans):
     """Compute Shannon entropy of normalized persistence lifespans.
-    
-    PE = -Σ p_i · log(p_i)   where p_i = lifespan_i / Σ lifespans
-    
+
+    PE = -Σ p_i · log2(p_i)   where p_i = lifespan_i / Σ lifespans
+
+    Uses base-2 logarithm to match the canonical definition (Atienza et al.
+    Def. 3.1, which states "log will refer to the log-base-2 function") and
+    the reference implementation giotto-tda (scipy.stats.entropy base=2).
+
     Args:
         lifespans: list of positive floats (birth-death intervals)
-        
+
     Returns:
         float: persistence entropy (0 = single dominant feature, high = uniform)
     """
     if not lifespans or len(lifespans) < 2:
         return 0.0
-        
+
     arr = np.array(lifespans)
     total = np.sum(arr)
     if total < 1e-12:
         return 0.0
-        
+
     p = arr / total
     p = p[p > 1e-12]  # filter near-zero for log stability
-    return float(-np.sum(p * np.log(p)))
+    return float(-np.sum(p * np.log2(p)))
 
 
 @register_task("topology_persistence_entropy")

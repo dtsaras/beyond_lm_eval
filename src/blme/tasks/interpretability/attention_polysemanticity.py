@@ -9,9 +9,6 @@ mechanism produces more diverse outputs across positions; lower entropy
 Note: this operates on the *combined* multi-head output (post-W_O), not
 individual head outputs.  A monosemantic layer with many diverse heads
 can still show high SVD entropy.
-
-References:
-- "Lorsa: Disentangling Atomic Attention Units from Attention Superposition" (2025)
 """
 
 import torch
@@ -26,8 +23,10 @@ logger = logging.getLogger("blme")
 @register_task("interpretability_attention_effective_rank")
 class AttentionEffectiveRankTask(DiagnosticTask):
     """
-    Measures the SVD entropy (effective rank) of combined attention output
-    projections over a sequence.
+    Measures SVD entropy (effective rank) of combined attention output
+    projections over a sequence. This is not a per-head polysemanticity
+    metric; use interpretability_attention_rank for per-head attention-matrix
+    rank collapse.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Attention Effective Rank Analysis...")
@@ -64,9 +63,11 @@ class AttentionEffectiveRankTask(DiagnosticTask):
         # (index-based, so comparable across architectures with ≥5
         # attention output projections).
         import random
+        num_modules_found = len(target_modules)
         if len(target_modules) > 4:
             _rng = random.Random(0)
             target_modules = _rng.sample(target_modules, 4)
+        num_modules_sampled = len(target_modules)
 
         entropies = []
 
@@ -121,6 +122,8 @@ class AttentionEffectiveRankTask(DiagnosticTask):
         mean_entropy = float(np.mean(entropies))
 
         return {
-            "mean_attention_effective_rank_entropy": mean_entropy,
-            "max_effective_rank_entropy": float(np.max(entropies)),
+            "mean_attention_output_effective_rank_entropy": mean_entropy,
+            "max_attention_output_effective_rank_entropy": float(np.max(entropies)),
+            "num_attention_output_projections_found": int(num_modules_found),
+            "num_attention_output_projections_sampled": int(num_modules_sampled),
         }

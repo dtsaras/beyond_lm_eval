@@ -27,6 +27,31 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     assert results["cond_number"] >= 1.0
 
 
+def test_isoscore_matches_rudman_formula_on_known_spectrum():
+    """Rudman et al. Eq. 4.1 uses L2-normalised PCA variances and maps
+    pure one-dimensional use to 0. The legacy sum-normalised formula gives
+    a different value on non-uniform spectra."""
+    from blme.tasks.geometry.isotropy import _isoscore
+
+    variances = np.array([9.0, 4.0, 1.0], dtype=np.float64)
+    dim = len(variances)
+    rows = []
+    n_rows = 2 * dim
+    for i, var in enumerate(variances):
+        row = np.zeros(dim, dtype=np.float64)
+        row[i] = np.sqrt(var * (n_rows - 1) / 2.0)
+        rows.extend([row, -row])
+    X = np.stack(rows, axis=0)
+
+    sigma_hat = np.sqrt(dim) * variances / np.linalg.norm(variances)
+    defect = np.linalg.norm(sigma_hat - 1.0) / np.sqrt(2.0 * (dim - np.sqrt(dim)))
+    expected = ((dim - defect ** 2 * (dim - np.sqrt(dim))) ** 2 - dim) / (
+        dim * (dim - 1)
+    )
+
+    assert _isoscore(X) == pytest.approx(expected, abs=1e-12)
+
+
 def test_consistency(mock_model, mock_tokenizer):
     from blme.tasks.geometry.consistency import PredictionAlignmentTask
 
@@ -381,6 +406,57 @@ def test_correlation_dimension(mock_model, mock_tokenizer):
         assert results["correlation_dimension"] > 0
 
 
+def test_correlation_dimension_reframes_hidden_state_gp_method():
+    """This task computes Grassberger-Procaccia dimension on hidden-state
+    point clouds, not the cited log-prob trajectory method. The result must
+    say so while keeping the legacy key for compatibility."""
+    import torch.nn as nn
+    from blme.tasks.geometry.correlation_dimension import CorrelationDimensionTask
+
+    class StubModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, input_ids=None, **kwargs):
+            idx = float(input_ids[0, 0].item())
+            t = torch.arange(input_ids.shape[1], dtype=torch.float32)
+            base = torch.stack([
+                idx + t * 0.1,
+                (idx + 1.0) ** 0.5 + t * 0.01,
+                torch.sin(torch.tensor(idx * 0.2)) + t * 0.03,
+            ], dim=1).unsqueeze(0)
+
+            class Out:
+                hidden_states = (base * 0.5, base)
+
+            return Out()
+
+    class Tok:
+        def __call__(self, text, return_tensors="pt", truncation=True, max_length=128):
+            idx = int(str(text).split()[-1])
+
+            class B(dict):
+                def to(self, dev): return self
+                def __getattr__(self, n):
+                    try: return self[n]
+                    except KeyError: raise AttributeError(n)
+
+            ids = torch.full((1, 4), idx, dtype=torch.long)
+            return B({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+    dataset = [{"text": f"sample {i}"} for i in range(25)]
+    result = CorrelationDimensionTask(config={"num_samples": 25}).evaluate(
+        StubModel(), Tok(), dataset=dataset,
+    )
+
+    assert "error" not in result, result
+    assert "correlation_dimension" in result
+    assert result["hidden_state_correlation_dimension"] == result["correlation_dimension"]
+    assert result["correlation_dimension_method"] == "hidden_state_grassberger_procaccia"
+    assert result["correlation_dimension_point_space"] == "mean_pooled_hidden_states"
+
+
 def test_information_geometry(mock_model, mock_tokenizer):
     """Representation sensitivity (gradient norm w.r.t. hidden states)."""
     from blme.tasks.geometry.information_geometry import RepresentationSensitivityTask
@@ -418,7 +494,10 @@ def test_mahalanobis(mock_model, mock_tokenizer):
     # Mock tokenizer returns random tokens — Mahalanobis may encounter
     # singular covariance with tiny hidden dimensions. Accept error or valid.
     if "error" not in results:
-        assert "mean_mahalanobis_id" in results
+        assert (
+            "mean_mahalanobis_id" in results
+            or results.get("insufficient_holdout") is True
+        )
 
 
 def test_mutual_info(mock_model, mock_tokenizer):
@@ -456,6 +535,50 @@ def test_positional_decay(mock_model, mock_tokenizer):
     # Requires output_attentions; may error if SDPA attention is used
     if "error" not in results:
         assert any("corr" in k or "decay" in k for k in results.keys())
+
+
+def test_positional_decay_uniform_causal_attention_is_null():
+    """Uniform causal attention has no within-row distance preference.
+    Pooling all triangular entries together invents a negative decay
+    because later rows have smaller uniform probabilities."""
+    import torch.nn as nn
+    from blme.tasks.geometry.positional_decay import PositionalAttentionDecayTask
+
+    class UniformCausalAttentionModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, input_ids=None, output_attentions=False, **kwargs):
+            seq_len = input_ids.shape[1]
+            attn = torch.zeros(1, 2, seq_len, seq_len)
+            for i in range(1, seq_len):
+                attn[:, :, i, :i] = 1.0 / i
+
+            class Out:
+                attentions = (attn,)
+
+            return Out()
+
+    class Tok:
+        def __call__(self, text, return_tensors="pt", truncation=True, max_length=256):
+            ids = torch.arange(8, dtype=torch.long).unsqueeze(0)
+
+            class B(dict):
+                def to(self, dev): return self
+                def __getattr__(self, n):
+                    try: return self[n]
+                    except KeyError: raise AttributeError(n)
+
+            return B({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+    result = PositionalAttentionDecayTask(config={"num_samples": 1}).evaluate(
+        UniformCausalAttentionModel(), Tok(), dataset=[{"text": "x"}],
+    )
+
+    assert "error" not in result, result
+    assert result["mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
+    assert result["layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_rsa(mock_model, mock_tokenizer):
@@ -676,10 +799,10 @@ def test_matrix_entropy_uses_per_sample_cache():
 def test_effective_rank_consistent_convention():
     """Three geometry tasks compute an "effective rank": collapse
     (per-layer hidden states), isotropy (static embeddings), and
-    unembedding (lm_head weights). They must use the same canonical
-    Roy-Vetterli formula on ``σ²``. The historic code used ``σ``
-    without squaring — numerically different and inconsistent with
-    the paper."""
+    unembedding (lm_head weights). They must use the same Roy-Vetterli
+    formula on raw singular values: ``p_i = σ_i / Σσ``. Covariance
+    effective rank on ``σ²`` is a different convention and must not be
+    mislabeled as Roy-Vetterli."""
     import numpy as np
     from blme.tasks.geometry.utils import effective_rank
 
@@ -696,16 +819,19 @@ def test_effective_rank_consistent_convention():
     val = effective_rank(S)
     assert 1.0 < val < 4.0
 
-    # Linearly-spread σ: erank with σ² normalisation is strictly
-    # smaller than erank with σ normalisation (the historic
-    # miscomputation). This cross-checks the σ²-vs-σ convention.
+    # Linearly-spread σ: Roy-Vetterli raw-σ normalisation is strictly
+    # larger than covariance/eigenvalue σ² normalisation.
     S = np.array([1.0, 0.5, 0.1, 0.01], dtype=np.float64)
-    sq_form = effective_rank(S)
-    lin_p = S / S.sum()
-    lin_form = float(np.exp(-np.sum(lin_p * np.log(lin_p))))
-    assert sq_form < lin_form, (
-        f"σ² erank ({sq_form}) should be < σ erank ({lin_form}) "
-        "for decreasing spectra; if equal, the helper isn't squaring."
+    got = effective_rank(S)
+    raw_p = S / S.sum()
+    raw_form = float(np.exp(-np.sum(raw_p * np.log(raw_p))))
+    sq = S * S
+    sq_p = sq / sq.sum()
+    sq_form = float(np.exp(-np.sum(sq_p * np.log(sq_p))))
+    assert got == pytest.approx(raw_form, rel=1e-12)
+    assert got > sq_form, (
+        f"Roy-Vetterli σ erank ({got}) should be > covariance σ² erank "
+        f"({sq_form}) for decreasing spectra."
     )
 
 

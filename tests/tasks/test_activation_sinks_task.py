@@ -1,7 +1,7 @@
 """Tests for interpretability_activation_sinks (new round-8 task).
 
 Unifies three intrinsic phenomena the 2024-2025 literature shows are
-"two (actually three) sides of the same coin" (Pedrotti & Guo 2025,
+"two (actually three) sides of the same coin" (Arroyo et al. 2025,
 arXiv:2510.06477):
 
   1. **Attention sink** — fraction of attention mass consistently
@@ -12,7 +12,7 @@ arXiv:2510.06477):
      whose magnitude exceeds 100× the median norm (Sun et al. 2024,
      arXiv:2402.17762).
   3. **Compression valley** — the middle-layer dip in representation
-     entropy observed in every modern LLM (Pedrotti & Guo 2025). We
+     entropy observed in every modern LLM (Arroyo et al. 2025). We
      compute the layer index of minimum entropy and the valley depth.
 
 These three metrics jointly characterise whether a model has
@@ -33,10 +33,12 @@ sys.path.insert(0, str(SRC))
 
 
 def test_sink_epsilon_formula_matches_reference():
-    """Reproduce Gu et al. 2025 Sinkε on a minimal attention tensor
-    where ALL queries attend to key-0 (a degenerate BOS-sink pattern).
-    Only key-0's importance score exceeds 0.3 — the other 3 keys get
-    zero attention. So Sinkε = 1/4 = 0.25 per (layer, head)."""
+    """Reproduce Gu et al. 2025 Sink₁ε on a minimal attention tensor where
+    ALL queries attend to key-0 (a BOS-sink pattern). Sink₁ε is the FIRST-
+    token sink fraction over (layer, head): the first token's importance
+    (1.0) exceeds 0.3 in every (layer, head), so Sink₁ε = 1.0.
+    (Corrected 2026-06-22 from the old mean-over-all-key-positions form,
+    which diluted this to 0.25.)"""
     from blme.tasks.interpretability.activation_sinks import _sink_epsilon
 
     # Attention (L=1, H=2, T=4, T=4) where every query attends to
@@ -47,8 +49,8 @@ def test_sink_epsilon_formula_matches_reference():
     attn = attn * mask
     attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-12)
     sink_frac = _sink_epsilon(attn, epsilon=0.3)
-    # Only 1 of 4 keys is a sink.
-    assert sink_frac == pytest.approx(0.25, rel=1e-3)
+    # Every (layer, head) has the first token as a sink.
+    assert sink_frac == pytest.approx(1.0, rel=1e-3)
 
 
 def test_sink_epsilon_zero_when_uniform_attention():

@@ -54,7 +54,7 @@ tasks:
   # Causality
   causality_tracing:
     num_samples: 10
-    noise_std: 0.1
+    # noise_std defaults to a data-driven value when omitted; do not force 0.1
   consistency_calibration:
     num_samples: 200
     use_cache: false

@@ -10,10 +10,9 @@ logger = logging.getLogger("blme")
 @register_task("consistency_paraphrase")
 class ParaphraseInvarianceTask(DiagnosticTask):
     """
-    Measures Paraphrase Invariance (Semantic Isometry).
-    Evaluates how much the representation distance changes between sentences
-    that mean the exact same thing but are syntactically different, compared
-    to completely unrelated sentences.
+    Measures a last-token representation-distance proxy for paraphrase pairs.
+    Evaluates how much the representation distance changes between supplied
+    paraphrases compared to supplied unrelated sentences.
 
     Caveat: This metric can be gamed via superficial pattern matching
     (e.g., lexical overlap). Results are most meaningful with diverse
@@ -117,15 +116,29 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                 paraphrase_cos_sims.append(F.cosine_similarity(rep1.unsqueeze(0), rep2.unsqueeze(0)).item())
                 unrelated_cos_sims.append(F.cosine_similarity(rep1.unsqueeze(0), rep3.unsqueeze(0)).item())
                 
+        mean_para_l2 = float(np.mean(paraphrase_distances))
+        mean_unrelated_l2 = float(np.mean(unrelated_distances))
+        mean_para_cos = float(np.mean(paraphrase_cos_sims))
+        mean_unrelated_cos = float(np.mean(unrelated_cos_sims))
+
         results = {
-            "mean_paraphrase_l2_dist": float(np.mean(paraphrase_distances)),
-            "mean_unrelated_l2_dist": float(np.mean(unrelated_distances)),
-            "mean_paraphrase_cos_sim": float(np.mean(paraphrase_cos_sims)),
-            "mean_unrelated_cos_sim": float(np.mean(unrelated_cos_sims)),
+            "diagnostic_semantics": "last_token_representation_distance_proxy",
+            "representation_paraphrase_l2_dist": mean_para_l2,
+            "representation_unrelated_l2_dist": mean_unrelated_l2,
+            "representation_paraphrase_cos_sim": mean_para_cos,
+            "representation_unrelated_cos_sim": mean_unrelated_cos,
+            # Legacy aliases retained for downstream compatibility.
+            "mean_paraphrase_l2_dist": mean_para_l2,
+            "mean_unrelated_l2_dist": mean_unrelated_l2,
+            "mean_paraphrase_cos_sim": mean_para_cos,
+            "mean_unrelated_cos_sim": mean_unrelated_cos,
         }
         
-        # Ratio of distances: Lower is better (paraphrases are closer relative to unrelated)
-        if results["mean_unrelated_l2_dist"] > 0:
-            results["isometry_ratio_l2"] = results["mean_paraphrase_l2_dist"] / results["mean_unrelated_l2_dist"]
+        # Ratio of distances: lower means supplied paraphrases are closer
+        # than supplied unrelated examples in this representation space.
+        if mean_unrelated_l2 > 0:
+            ratio = mean_para_l2 / mean_unrelated_l2
+            results["representation_distance_ratio_l2"] = ratio
+            results["isometry_ratio_l2"] = ratio
             
         return results

@@ -8,11 +8,87 @@ from ..geometry.utils import collect_prediction_stats
 import logging
 logger = logging.getLogger("blme")
 
+
+def _calibration_from_confidences(confidences, correct, n_bins: int = 10) -> dict:
+    """Guo-style ECE and Brier score from confidences and correctness."""
+    conf_np = np.asarray(confidences, dtype=np.float64)
+    acc_np = np.asarray(correct, dtype=np.float64)
+    finite = np.isfinite(conf_np) & np.isfinite(acc_np)
+    conf_np = conf_np[finite]
+    acc_np = acc_np[finite]
+    if conf_np.size == 0:
+        return {
+            "ece": float("nan"),
+            "brier_score": float("nan"),
+            "calibration_slope": float("nan"),
+            "calibration_intercept": float("nan"),
+            "bin_stats": [],
+            "num_predictions": 0,
+        }
+
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    bin_stats = []
+    total = conf_np.size
+    for i in range(n_bins):
+        lo, hi = bin_boundaries[i], bin_boundaries[i + 1]
+        if i == 0:
+            mask = (conf_np >= lo) & (conf_np <= hi)
+        else:
+            mask = (conf_np > lo) & (conf_np <= hi)
+        if not np.any(mask):
+            continue
+        bin_conf = float(np.mean(conf_np[mask]))
+        bin_acc = float(np.mean(acc_np[mask]))
+        bin_prop = float(np.sum(mask) / total)
+        ece += abs(bin_conf - bin_acc) * bin_prop
+        bin_stats.append({
+            "range": f"{lo:.2f}-{hi:.2f}",
+            "confidence": bin_conf,
+            "accuracy": bin_acc,
+            "count": int(np.sum(mask)),
+        })
+
+    brier_score = float(np.mean((conf_np - acc_np) ** 2))
+    if len(bin_stats) >= 3:
+        try:
+            slope, intercept = np.polyfit(
+                np.array([b["confidence"] for b in bin_stats]),
+                np.array([b["accuracy"] for b in bin_stats]),
+                1,
+            )
+            calibration_slope = float(slope)
+            calibration_intercept = float(intercept)
+        except Exception:
+            calibration_slope = float("nan")
+            calibration_intercept = float("nan")
+    else:
+        calibration_slope = float("nan")
+        calibration_intercept = float("nan")
+
+    return {
+        "ece": float(ece),
+        "brier_score": brier_score,
+        "calibration_slope": calibration_slope,
+        "calibration_intercept": calibration_intercept,
+        "bin_stats": bin_stats,
+        "num_predictions": int(total),
+    }
+
+
 @register_task("consistency_calibration")
 class CalibrationTask(DiagnosticTask):
     """
-    Computes Expected Calibration Error (ECE).
-    Ref: Guo et al. (2017)
+    Computes language-model calibration diagnostics.
+
+    References:
+      * Guo, Pleiss, Sun & Weinberger 2017 — Expected Calibration
+        Error for neural classifier confidence.
+      * Brier 1950 — mean squared probabilistic error.
+
+    BLME adapts these to next-token teacher-forcing: "accuracy" is
+    whether the model's top-1 next token matches corpus text, not a
+    downstream QA correctness label.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Calibration Analysis (ECE)...")
@@ -53,63 +129,11 @@ class CalibrationTask(DiagnosticTask):
         accuracies = accuracies[finite]
         labels = labels[finite]
 
-        # Binning
         n_bins = self.config.get("n_bins", 10)
-        bin_boundaries = np.linspace(0, 1, n_bins + 1)
-
-        ece = 0.0
-        bin_stats = []
-
-        total_samples = confidences.numel()
-        
-        for i in range(n_bins):
-            # Bin range: [bin_boundaries[i], bin_boundaries[i+1]] — first bin uses >= to include 0
-            if i == 0:
-                mask = (confidences >= bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
-            else:
-                mask = (confidences > bin_boundaries[i]) & (confidences <= bin_boundaries[i+1])
-            
-            if mask.any():
-                bin_conf = confidences[mask].mean().item()
-                bin_acc = accuracies[mask].float().mean().item()
-                bin_prop = mask.sum().item() / total_samples
-                
-                ece += np.abs(bin_conf - bin_acc) * bin_prop
-                
-                bin_stats.append({
-                    "range": f"{bin_boundaries[i]:.2f}-{bin_boundaries[i+1]:.2f}",
-                    "confidence": bin_conf,
-                    "accuracy": bin_acc,
-                    "count": mask.sum().item()
-                })
-                
-        # Brier score: mean squared error between confidence and correctness
-        # Brier = E[(confidence - correct)^2]. Lower = better calibrated.
-        conf_np = confidences.float().cpu().numpy()
-        acc_np = accuracies.float().cpu().numpy()
-        brier_score = float(np.mean((conf_np - acc_np) ** 2))
-
-        # Calibration slope: linear fit of bin_acc vs bin_conf.
-        # A perfectly calibrated model has slope = 1.0. Slope < 1 means
-        # overconfident; slope > 1 means underconfident.
-        if len(bin_stats) >= 3:
-            bin_confs = np.array([b["confidence"] for b in bin_stats])
-            bin_accs = np.array([b["accuracy"] for b in bin_stats])
-            try:
-                slope, intercept = np.polyfit(bin_confs, bin_accs, 1)
-                calibration_slope = float(slope)
-                calibration_intercept = float(intercept)
-            except Exception:
-                calibration_slope = float("nan")
-                calibration_intercept = float("nan")
-        else:
-            calibration_slope = float("nan")
-            calibration_intercept = float("nan")
-
-        return {
-            "ece": float(ece),
-            "brier_score": brier_score,
-            "calibration_slope": calibration_slope,
-            "calibration_intercept": calibration_intercept,
-            "num_predictions": total_samples,
-        }
+        metrics = _calibration_from_confidences(
+            confidences.float().cpu().numpy(),
+            accuracies.float().cpu().numpy(),
+            n_bins=n_bins,
+        )
+        metrics.pop("bin_stats", None)
+        return metrics

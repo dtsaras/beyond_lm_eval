@@ -1,35 +1,33 @@
-experiment_name: "gem_geometry_demo"
+experiment_name: "blme_minimal_demo"
 
 global:
-  device: "cuda"
-  output_dir: "results/gem_demo"
+  device: "cpu"
+  output_dir: "results/demo"
   batch_size: 1
+  cache_num_samples: 8
+  seed: 42
+  task_timeout: 120
 
 model:
-  name: "hf"
-  # Replace with actual path or huggingface id
-  path: "HuggingFaceTB/SmolLM2-135M" 
+  path: "hf-internal-testing/tiny-random-gpt2"
+  args: "pretrained=hf-internal-testing/tiny-random-gpt2"
 
 tasks:
-  # Geometry
-  geometry_categories:
-    categories_path: "src/blme/assets/categories.json"
-    projection_method: "pca" # Use 'umap' if installed
-    k_purity: 20
-    
-  geometry_hubness:
-    k_values: [5, 20]
-    n_sample: 2000
-    
-  # Dynamics
-  dynamics_trajectories:
-    prompts:
-      - ["The bank", [" was", " river"]]
-      
-  # Steering
-  steering_concept:
-    method: "hidden_normalized"
-    scales: [1.0]
-    positive_prompts: ["I am happy"]
-    negative_prompts: ["I am sad"]
-    target_prompts: ["I feel"]
+  # Small CPU-safe smoke recipe with registered BLME tasks only.
+  geometry_svd:
+    num_samples: 8
+
+  geometry_isoscore:
+    num_samples: 8
+
+  interpretability_prediction_entropy:
+    num_samples: 8
+
+  consistency_calibration:
+    num_samples: 8
+    n_bins: 5
+
+  dynamics_interpolation:
+    num_pairs: 2
+    steps: 3
+    num_samples: 4

@@ -11,10 +11,12 @@ logger = logging.getLogger("blme")
 @register_task("causality_ablation")
 class AblationRobustnessTask(DiagnosticTask):
     """
-    Measures Ablation Robustness (Circuit Redundancy).
-    Randomly mean-ablates k% of MLP neurons or attention heads and measures 
-    the degradation in Cross-Entropy loss over a random dataset. Generates a 
-    degradation curve to evaluate model brittleness vs. redundancy.
+    Measures robustness to residual-stream feature ablation.
+
+    Randomly mean-ablates k% of residual coordinates in a middle band of
+    transformer layers and measures cross-entropy degradation. This is a
+    coarse residual-feature robustness probe, not localized MLP-neuron or
+    attention-head ablation.
     
     References:
     - "Investigating Neuron Ablation in Attention Heads: The Case for Peak Activation Centering" (2024)
@@ -67,7 +69,11 @@ class AblationRobustnessTask(DiagnosticTask):
         # A simple approximation instead of finding specific MLP weight matrices:
         # We apply a mask to the output of intermediate layers.
         
-        results = {"baseline_loss": float(baseline_mean_loss)}
+        results = {
+            "diagnostic_method": "residual_stream_feature_mean_ablation",
+            "ablation_unit": "residual_stream_features",
+            "baseline_loss": float(baseline_mean_loss),
+        }
         degradation_curve = []
         
         # We randomly ablate across the middle 50% of layers
@@ -139,16 +145,21 @@ class AblationRobustnessTask(DiagnosticTask):
             mean_ablation_loss = np.mean(ablation_losses)
             loss_increase = mean_ablation_loss - baseline_mean_loss
             
-            # Record degradation
+            # Record degradation for residual-feature ablation.
             results[f"loss_ablate_{int(k_pct*100)}pct"] = float(mean_ablation_loss)
             results[f"degradation_{int(k_pct*100)}pct"] = float(loss_increase)
+            results[f"loss_residual_features_ablate_{int(k_pct*100)}pct"] = float(mean_ablation_loss)
+            results[f"residual_feature_degradation_{int(k_pct*100)}pct"] = float(loss_increase)
             degradation_curve.append(float(loss_increase))
             
         # Summary metrics
         # If the curve grows very fast, the model is brittle.
         # If the curve grows slowly, the model is redundant.
-        # np.trapezoid was introduced in NumPy 2.0; fall back to np.trapz for compatibility
-        _trapz = getattr(np, "trapezoid", np.trapz)
+        # np.trapezoid was introduced in NumPy 2.0 and np.trapz removed in it.
+        # Lazy lookup: the eager `getattr(np, "trapezoid", np.trapz)` form
+        # raises AttributeError on NumPy 2.x because np.trapz is evaluated.
+        _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         results["area_under_degradation_curve"] = float(_trapz(degradation_curve, ablation_percentages))
+        results["target_layer_indices"] = [int(i) for i in target_layers]
         
         return results

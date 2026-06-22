@@ -2,15 +2,23 @@
 
 This module contains metrics that analyze and manipulate high-level concepts using the top-down methodology of Representation Engineering (RepE).
 
+**Current registry coverage (4 tasks)**: `repe_concept_separability`,
+`repe_refusal_direction`, `repe_steering_effectiveness`, and
+`repe_task_vectors`.
+
+**Paper-faithful vs. BLME proxy notes**: The RepE tasks are paper-derived
+diagnostics over hidden-state directions, but BLME reports measurement summaries
+rather than reproducing each paper's full intervention/evaluation suite.
+
 ---
 
-## 1. Task Vector Creation and Application
-* **What are we measuring**: The presence and effectiveness of linear "Task Vectors" that guide In-Context Learning (ICL).
-* **How are we measuring**: Computing the average difference in hidden states between a prompt that includes in-context examples (the "learn" phase) and a zero-shot prompt. We then explicitly add this extracted "Task Vector" to a zero-shot prompt (the "apply" phase) to see if it replicates few-shot performance without the actual context.
-* **Hypothesis**: In-Context Learning operates mechanistically by compressing the given training examples into a singular, linear task vector in the latent space.
-* **Citation/Paper**: `Hendel, R., Geva, M., & Globerson, A. (2023). In-Context Learning Creates Task Vectors.` [EMNLP 2023 Findings, ArXiv: 2310.15916]
+## 1. Task / Reading Vector Geometry
+* **What are we measuring**: The geometry of contrastive activation-space directions ("reading vectors") across layers.
+* **How are we measuring**: Computing mean positive-minus-negative hidden-state directions for bundled or user-provided contrastive pairs, then reporting per-layer vector norms and positive/negative mean cosine similarity.
+* **Hypothesis**: If a concept or behavior is linearly represented, contrastive hidden-state means should separate along a stable direction.
+* **Citation/Paper**: `Zou, A., et al. (2023). Representation Engineering: A Top-Down Approach to AI Transparency.` [ArXiv: 2310.01405]. Related weight-space task-vector framing: `Ilharco et al. (2023). Editing Models with Task Arithmetic.` [ICLR 2023, ArXiv: 2212.04089].
 * **File & Function**: `src/blme/tasks/representation_engineering.py` -> `TaskVectorGeometryTask`
-* **Critical Info**: Validates that prompt engineering is fundamentally just shifting the hidden geometric space by a single static vector.
+* **Critical Info**: BLME reports measurement summaries only; it does not prove that all prompt engineering reduces to a single static vector.
 
 ## 2. Concept Separability (Linear Artificial Tomography)
 * **What are we measuring**: How linearly separable high-level behavioral or cognitive concepts (e.g., truthfulness vs deception) are in the representation space.
@@ -27,3 +35,11 @@ This module contains metrics that analyze and manipulate high-level concepts usi
 * **Citation/Paper**: `Zou, A., et al. (2023). Representation Engineering: A Top-Down Approach to AI Transparency.` [ArXiv: 2310.01405]
 * **File & Function**: `src/blme/tasks/representation_engineering.py` -> `SteeringEffectivenessTask`
 * **Critical Info**: The `steering_alpha` parameter controls injection magnitude (default: 1.0). The `steering_threshold` parameter (default: 0.01 KL divergence) determines the minimum effect for a layer to count as "successful." Best steering layer identifies where intervention is most effective.
+
+## 4. Refusal Direction
+* **What are we measuring**: Whether harmful and harmless prompts separate along a linear hidden-state direction.
+* **How are we measuring**: Computing the difference-of-means direction between bundled harmful and harmless prompts, then reporting direction norm, projection gap, and separability AUROC across layers.
+* **Hypothesis**: Refusal behavior in aligned models is often mediated by a comparatively low-dimensional direction; stronger separation suggests a clearer refusal representation.
+* **Citation/Paper**: `Arditi, A., Obeso, O., Syed, A., Paleka, D., Panickssery, N., Gurnee, W., & Nanda, N. (2024). Refusal in Language Models Is Mediated by a Single Direction.` [ArXiv: 2406.11717]. Related top-down framing: `Zou et al. (2023). Representation Engineering.`
+* **File & Function**: `src/blme/tasks/representation_engineering.py` -> `RefusalDirectionTask`
+* **Critical Info**: BLME measures separability and direction strength; it does not perform the paper's full refusal ablation/editing protocol.

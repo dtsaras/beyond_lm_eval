@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+from feature_selection import find_benchmark_columns, find_predictor_columns
+
 
 def _load_data(input_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Load aggregated features and feature metadata."""
@@ -92,33 +94,14 @@ def _partial_spearman(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> Tuple[floa
     return float(partial_r), float(p)
 
 
-def _find_feature_columns(agg: pd.DataFrame) -> List[str]:
+def _find_feature_columns(agg: pd.DataFrame, feat_meta: Optional[pd.DataFrame] = None) -> List[str]:
     """Return the feature (X) column names, excluding metadata and Y variables."""
-    exclude_exact = {
-        "model", "family", "hf_id", "dtype", "n_gpus", "purpose",
-        "d_model", "n_layers", "n_heads", "vocab_size", "n_params_est",
-        "n_params_M", "log_n_params", "composite_benchmark",
-    }
-    exclude_prefixes = ["benchmark_"]
-
-    cols = []
-    for c in agg.columns:
-        if c in exclude_exact:
-            continue
-        if any(c.startswith(p) for p in exclude_prefixes):
-            continue
-        # Must be numeric
-        if pd.api.types.is_numeric_dtype(agg[c]):
-            cols.append(c)
-    return cols
+    return find_predictor_columns(agg, feat_meta)
 
 
 def _find_benchmark_columns(agg: pd.DataFrame) -> List[str]:
     """Return the Y-variable column names."""
-    ys = [c for c in agg.columns if c.startswith("benchmark_")]
-    if "composite_benchmark" in agg.columns:
-        ys.append("composite_benchmark")
-    return ys
+    return find_benchmark_columns(agg)
 
 
 def run_univariate(agg: pd.DataFrame, feature_cols: List[str],
@@ -196,9 +179,11 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
         Pythias at once), tests cross-family generalization. Stricter.
     """
     try:
+        from sklearn.impute import SimpleImputer
         from sklearn.linear_model import LassoCV, LinearRegression
-        from sklearn.preprocessing import StandardScaler
         from sklearn.model_selection import LeaveOneOut, LeaveOneGroupOut
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
     except ImportError:
         print("sklearn not installed; skipping LASSO")
         return pd.DataFrame()
@@ -215,9 +200,8 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
         return pd.DataFrame()
 
     X = agg[feature_cols].copy()
-    X = X.fillna(X.median(numeric_only=True))
-    X = X.loc[:, X.nunique() > 1]
-    X = X.loc[:, X.notna().all()]
+    X = X.loc[:, X.notna().any()]
+    X = X.loc[:, X.nunique(dropna=True) > 1]
     if X.shape[1] == 0:
         return pd.DataFrame()
 
@@ -226,15 +210,24 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
     y_arr = y[mask_y]
     families_valid = families[mask_y]
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_arr)
+    def _lasso_pipeline(n_train: int):
+        cv = min(5, max(2, n_train // 4))
+        return Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("model", LassoCV(cv=cv, max_iter=10000, random_state=42)),
+        ])
 
-    n = X_scaled.shape[0]
+    n = X_arr.shape[0]
     cv_folds = min(5, max(2, n // 4))
-    lasso = LassoCV(cv=cv_folds, max_iter=10000, random_state=42)
-    lasso.fit(X_scaled, y_arr)
+    lasso = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("model", LassoCV(cv=cv_folds, max_iter=10000, random_state=42)),
+    ])
+    lasso.fit(X_arr, y_arr)
 
-    coefs = lasso.coef_
+    coefs = lasso.named_steps["model"].coef_
     nonzero_mask = np.abs(coefs) > 1e-8
     rows = [
         {"feature": col, "coefficient": float(c), "abs_coefficient": float(abs(c))}
@@ -244,7 +237,7 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
 
     # ── R² reports ──
     # Training R² (what the old code reported — overfits trivially)
-    train_r2 = lasso.score(X_scaled, y_arr)
+    train_r2 = lasso.score(X_arr, y_arr)
 
     # Baseline: log_n_params only, simple linear regression — held-out LOO
     baseline_r2_train = np.nan
@@ -272,11 +265,10 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
     # runs ~32 LassoCV fits — a few minutes at most.
     preds_loo = np.zeros(n)
     loo = LeaveOneOut()
-    for fold_i, (tr_idx, te_idx) in enumerate(loo.split(X_scaled)):
-        m = LassoCV(cv=min(5, max(2, len(tr_idx) // 4)),
-                    max_iter=10000, random_state=42)
-        m.fit(X_scaled[tr_idx], y_arr[tr_idx])
-        preds_loo[te_idx] = m.predict(X_scaled[te_idx])
+    for fold_i, (tr_idx, te_idx) in enumerate(loo.split(X_arr)):
+        m = _lasso_pipeline(len(tr_idx))
+        m.fit(X_arr[tr_idx], y_arr[tr_idx])
+        preds_loo[te_idx] = m.predict(X_arr[te_idx])
     ss_res = float(np.sum((y_arr - preds_loo) ** 2))
     ss_tot = float(np.sum((y_arr - y_arr.mean()) ** 2))
     loo_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
@@ -288,13 +280,12 @@ def run_lasso(agg: pd.DataFrame, feature_cols: List[str],
         logo = LeaveOneGroupOut()
         preds_lofo = np.zeros(n)
         mask_predicted = np.zeros(n, dtype=bool)
-        for tr_idx, te_idx in logo.split(X_scaled, y_arr, groups=families_valid):
+        for tr_idx, te_idx in logo.split(X_arr, y_arr, groups=families_valid):
             if len(tr_idx) < 5:
                 continue
-            m = LassoCV(cv=min(5, max(2, len(tr_idx) // 4)),
-                        max_iter=10000, random_state=42)
-            m.fit(X_scaled[tr_idx], y_arr[tr_idx])
-            preds_lofo[te_idx] = m.predict(X_scaled[te_idx])
+            m = _lasso_pipeline(len(tr_idx))
+            m.fit(X_arr[tr_idx], y_arr[tr_idx])
+            preds_lofo[te_idx] = m.predict(X_arr[te_idx])
             mask_predicted[te_idx] = True
         if mask_predicted.sum() >= 5:
             y_eval = y_arr[mask_predicted]
@@ -488,7 +479,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     agg, feat_meta = _load_data(input_dir)
-    feature_cols = _find_feature_columns(agg)
+    feature_cols = _find_feature_columns(agg, feat_meta)
     benchmark_cols = _find_benchmark_columns(agg)
 
     print(f"Models: {len(agg)}")

@@ -1,3 +1,5 @@
+import hashlib
+
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -18,6 +20,13 @@ _FALLBACK_FACTS = [
     ("The Great Wall is located in the country of", "The Great Wall", " China"),
     ("The Statue of Liberty stands in the city of", "The Statue of Liberty", " New"),
 ]
+
+
+def _stable_prompt_seed(prompt: str, base_seed: int = 1, modulo: int = 10_000) -> int:
+    """Derive a cross-process-stable seed offset from prompt text."""
+    digest = hashlib.blake2b(str(prompt).encode("utf-8"), digest_size=8).digest()
+    prompt_offset = int.from_bytes(digest, byteorder="big", signed=False) % modulo
+    return int(base_seed) + prompt_offset
 
 
 def _resolve_noise_std(
@@ -284,7 +293,7 @@ class CausalTracingTask(DiagnosticTask):
                     # shape (N, span, D)). Deterministic per-prompt seed
                     # so reruns produce the same AIE.
                     rng_gen = torch.Generator(device="cpu").manual_seed(
-                        int(self.config.get("seed", 1)) + hash(prompt) % 10_000
+                        _stable_prompt_seed(prompt, base_seed=int(self.config.get("seed", 1)))
                     )
                     span = corrupt_idx_end - corrupt_idx_start
                     try:

@@ -1,5 +1,5 @@
 """
-Position sensitivity ("lost in the middle") — Liu et al. 2023, arXiv:2307.03172.
+Position sensitivity score inspired by "lost in the middle" probes.
 
 Inserts a key fact at varying relative positions inside a distractor passage
 and measures the NLL of a short recall continuation that depends on the
@@ -9,7 +9,7 @@ the start or end.
 
 Reported metrics:
 - mean NLL per relative position {0.0, 0.25, 0.5, 0.75, 1.0}
-- "U-curve" depth: max(start, end) - middle (positive = lost in the middle)
+- lost-in-middle NLL depth: middle - best edge (positive = higher middle NLL)
 - position_spread: max NLL - min NLL across positions
 - position_argmin: relative position of best recall (0.0 ... 1.0)
 
@@ -151,7 +151,7 @@ _NEEDLE_BUNDLE: List[Tuple[str, str, str]] = [
 
 @register_task("consistency_position_sensitivity")
 class PositionSensitivityTask(DiagnosticTask):
-    """Lost-in-the-middle position sensitivity (Liu et al. 2023)."""
+    """Position-dependent continuation-NLL proxy."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Position Sensitivity (Lost in the Middle) Analysis...")
@@ -243,6 +243,11 @@ class PositionSensitivityTask(DiagnosticTask):
         return {
             **per_pos_mean,
             "mean_nll_across_positions": float(np.nanmean(nll_arr)),
+            "diagnostic_semantics": "position_conditioned_continuation_nll_proxy",
+            "lost_in_middle_nll_depth": u_curve_depth,
+            "position_nll_spread": position_spread,
+            "best_recall_position": position_argmin,
+            # Legacy aliases retained for downstream compatibility.
             "u_curve_depth": u_curve_depth,
             "position_spread": position_spread,
             "position_argmin": position_argmin,

@@ -17,7 +17,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
     References:
       * Facco, d'Errico, Rodriguez, Laio 2017 — "Estimating the Intrinsic
         Dimension of Datasets by a Minimal Neighborhood Information",
-        Scientific Reports 7, arXiv:1705.10933. The Two-NN estimator used
+        Scientific Reports 7, arXiv:1803.06992. The Two-NN estimator used
         here.
       * Ansuini, Laio, Macke, Zoccolan 2019 — "Intrinsic Dimension of
         Data Representations in Deep Neural Networks", NeurIPS 2019,
@@ -57,7 +57,10 @@ class IntrinsicDimensionTask(DiagnosticTask):
                 X = layer_activations[layer_idx].float().numpy()
                 # Subsample if too large
                 if len(X) > 20000:
-                    indices = np.random.choice(len(X), 20000, replace=False)
+                    rng = np.random.default_rng(
+                        int(self.config.get("subsample_seed", 42))
+                    )
+                    indices = rng.choice(len(X), 20000, replace=False)
                     X = X[indices]
                     
                 lid_result = self._compute_id(X)

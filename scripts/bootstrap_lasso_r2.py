@@ -17,62 +17,76 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LassoCV, LinearRegression
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import LeaveOneOut, LeaveOneGroupOut
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+from feature_selection import find_predictor_columns
 
 
-def _feat_matrix(agg: pd.DataFrame, target: str, bench_names: set):
+def _feat_matrix(
+    agg: pd.DataFrame,
+    target: str,
+    bench_names: set,
+    feature_metadata: Optional[pd.DataFrame] = None,
+):
     """Build (X, feat_names) using the same column-selection logic as
-    analyze_correlations.py: drop metadata + all analysed-benchmark
-    columns, then keep columns with >1 unique value and zero NaNs after
-    median imputation. ``bench_names`` comes from the analysis CSVs so we
-    are guaranteed to drop exactly the 68 benchmark targets and nothing
-    else.
+    analyze_correlations.py: drop metadata, target-like/leaky columns, and all
+    analysed benchmark columns. Keep only numeric columns with observed
+    variance; imputation happens inside each held-out fold.
     """
-    meta_cols = {"model", "family", "num_params", "log_n_params",
-                 "is_instruct", "n_params_M", "model_path", "size_family",
-                 "hf_id", "dtype", "purpose"}
-    feats = [c for c in agg.columns
-             if c not in meta_cols and c != target and c not in bench_names]
+    feats = find_predictor_columns(
+        agg,
+        feature_metadata,
+        benchmark_columns=bench_names,
+        target=target,
+    )
     X = agg[feats].copy()
-    # Only keep numeric columns (drop any leftover string cols)
     X = X.select_dtypes(include=[np.number])
-    X = X.fillna(X.median(numeric_only=True))
-    X = X.loc[:, X.nunique() > 1]
-    X = X.loc[:, X.notna().all()]
+    X = X.loc[:, X.notna().any()]
+    X = X.loc[:, X.nunique(dropna=True) > 1]
     return X, list(X.columns)
 
 
-def _lasso_loo(X_scaled: np.ndarray, y: np.ndarray) -> float:
+def _lasso_pipeline(n_train: int):
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("model", LassoCV(cv=min(5, max(2, n_train // 4)),
+                          max_iter=10000, random_state=42)),
+    ])
+
+
+def _lasso_loo(X: np.ndarray, y: np.ndarray) -> float:
     preds = np.zeros_like(y)
     loo = LeaveOneOut()
-    for tr, te in loo.split(X_scaled):
-        m = LassoCV(cv=min(5, max(2, len(tr) // 4)),
-                    max_iter=10000, random_state=42)
-        m.fit(X_scaled[tr], y[tr])
-        preds[te] = m.predict(X_scaled[te])
+    for tr, te in loo.split(X):
+        m = _lasso_pipeline(len(tr))
+        m.fit(X[tr], y[tr])
+        preds[te] = m.predict(X[te])
     ss_res = float(np.sum((y - preds) ** 2))
     ss_tot = float(np.sum((y - y.mean()) ** 2))
     return 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
 
-def _lasso_lofo(X_scaled: np.ndarray, y: np.ndarray, groups: np.ndarray) -> float:
+def _lasso_lofo(X: np.ndarray, y: np.ndarray, groups: np.ndarray) -> float:
     if len(set(groups)) < 3:
         return float("nan")
     preds = np.zeros_like(y)
     mask = np.zeros_like(y, dtype=bool)
     logo = LeaveOneGroupOut()
-    for tr, te in logo.split(X_scaled, y, groups=groups):
+    for tr, te in logo.split(X, y, groups=groups):
         if len(tr) < 5:
             continue
-        m = LassoCV(cv=min(5, max(2, len(tr) // 4)),
-                    max_iter=10000, random_state=42)
-        m.fit(X_scaled[tr], y[tr])
-        preds[te] = m.predict(X_scaled[te])
+        m = _lasso_pipeline(len(tr))
+        m.fit(X[tr], y[tr])
+        preds[te] = m.predict(X[te])
         mask[te] = True
     if mask.sum() < 5:
         return float("nan")
@@ -93,7 +107,7 @@ def _baseline_loo(z: np.ndarray, y: np.ndarray) -> float:
     return 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
 
-def _oob_lasso_r2(X_scaled: np.ndarray, y: np.ndarray, in_bag: np.ndarray) -> float:
+def _oob_lasso_r2(X: np.ndarray, y: np.ndarray, in_bag: np.ndarray) -> float:
     """Out-of-bag R²: fit LASSO on in-bag rows, predict out-of-bag.
 
     In-bag rows may contain duplicates; OOB rows appear exactly once. This
@@ -104,12 +118,11 @@ def _oob_lasso_r2(X_scaled: np.ndarray, y: np.ndarray, in_bag: np.ndarray) -> fl
     oob_mask[np.unique(in_bag)] = False
     if oob_mask.sum() < 3:
         return float("nan")
-    X_tr = X_scaled[in_bag]
+    X_tr = X[in_bag]
     y_tr = y[in_bag]
-    m = LassoCV(cv=min(5, max(2, len(in_bag) // 4)),
-                max_iter=10000, random_state=42)
+    m = _lasso_pipeline(len(in_bag))
     m.fit(X_tr, y_tr)
-    preds = m.predict(X_scaled[oob_mask])
+    preds = m.predict(X[oob_mask])
     y_te = y[oob_mask]
     ss_res = float(np.sum((y_te - preds) ** 2))
     ss_tot = float(np.sum((y_te - y_te.mean()) ** 2))
@@ -156,18 +169,18 @@ def main():
         bench_names = set(pd.read_csv(uni_path)["benchmark"].unique())
     else:
         bench_names = {args.target}
-    X_df, feat_names = _feat_matrix(agg, args.target, bench_names)
+    meta_path = args.input_dir / "feature_metadata.csv"
+    feature_metadata = pd.read_csv(meta_path) if meta_path.exists() else None
+    X_df, feat_names = _feat_matrix(agg, args.target, bench_names, feature_metadata)
     X = X_df.values.astype(np.float64)
-    scaler = StandardScaler().fit(X)
-    X_scaled = scaler.transform(X)
     n = len(y)
-    print(f"n={n} models, p={X_scaled.shape[1]} features, "
+    print(f"n={n} models, p={X.shape[1]} features, "
           f"{len(set(families))} families")
 
     # Point estimates
     print("\n── Point estimates ──")
-    point_loo = _lasso_loo(X_scaled, y)
-    point_lofo = _lasso_lofo(X_scaled, y, families)
+    point_loo = _lasso_loo(X, y)
+    point_lofo = _lasso_lofo(X, y, families)
     point_base = _baseline_loo(z, y)
     print(f"  LASSO LOO R² = {point_loo:.3f}")
     print(f"  LASSO LOFO R² = {point_lofo:.3f}")
@@ -186,7 +199,7 @@ def main():
     t0 = time.time()
     for b in range(args.n_bootstrap):
         in_bag = rng.choice(n, size=n, replace=True)
-        r_lasso = _oob_lasso_r2(X_scaled, y, in_bag)
+        r_lasso = _oob_lasso_r2(X, y, in_bag)
         r_base = _oob_baseline_r2(z, y, in_bag)
         oob_lasso.append(r_lasso)
         oob_base.append(r_base)
@@ -216,7 +229,7 @@ def main():
 
     out = {
         "n": int(n),
-        "p": int(X_scaled.shape[1]),
+        "p": int(X.shape[1]),
         "n_families": int(len(set(families))),
         "n_bootstrap": args.n_bootstrap,
         "point_estimates": {

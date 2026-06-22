@@ -19,6 +19,19 @@ from ...tasks.base import DiagnosticTask
 logger = logging.getLogger("blme")
 
 
+def _attention_entropy(att: torch.Tensor) -> torch.Tensor:
+    """Per-distribution Shannon entropy (natural log) of an attention tensor.
+
+    ``att`` is an attention-weight tensor whose LAST axis is the key
+    distribution (rows sum to 1). Returns the entropy reduced over that
+    last axis, i.e. shape ``att.shape[:-1]``. The 0·log0 = 0 convention is
+    handled by clamping. This is the standard attention entropy of Clark
+    et al. 2019; for a uniform distribution over T keys it equals log(T).
+    """
+    p = att.float().clamp(min=1e-12)
+    return -(p * p.log()).sum(dim=-1)
+
+
 @register_task("interpretability_attention_entropy")
 class AttentionEntropyTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -105,9 +118,8 @@ class AttentionEntropyTask(DiagnosticTask):
                 if layer_att is None:
                     layer_entropies = None
                     break
-                # Guard against upstream dtype choices.
-                p = layer_att.float().clamp(min=1e-12)
-                entropy = -(p * p.log()).sum(dim=-1)  # (H, T) — 0·log0 handled by clamp
+                # Per-(head, query) Shannon entropy over the key axis.
+                entropy = _attention_entropy(layer_att)  # (H, T)
                 # Average across query positions → (H,).
                 avg_head_entropy = entropy.mean(dim=-1).numpy()
                 layer_entropies.append(avg_head_entropy)

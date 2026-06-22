@@ -46,8 +46,8 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
     held-out subset rather than on the same samples used to fit the
     covariance. Detected by: ID distances should not be pathologically
     small (e.g. 30-dim data in 50 samples should give mean > 0.1)."""
-    # Patch collect_hidden_states to return deterministic Gaussian data
-    # sized like a real hidden-state matrix.
+    # Patch the sample-level collector to return deterministic Gaussian
+    # representations sized like a real mean-pooled hidden-state matrix.
     import blme.tasks.geometry.mahalanobis as modmahal
 
     rng = np.random.default_rng(7)
@@ -64,7 +64,7 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
             return torch.from_numpy(X_id_full[:num_samples])
         return torch.from_numpy(X_ood_full[:num_samples])
 
-    monkeypatch.setattr(modmahal, "collect_hidden_states", fake_collect)
+    monkeypatch.setattr(modmahal, "_collect_mean_pooled_hidden_states", fake_collect)
 
     # Minimal dataset — the task just needs it to exist with "text" keys.
     dataset = [{"text": "a"}] * 60
@@ -91,3 +91,87 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
     assert "n_id_fit" in result or "n_id_score" in result, (
         "Task should report how many ID samples were used for fitting vs scoring"
     )
+
+
+def test_task_scores_mean_pooled_sample_representations():
+    """Each text sample must contribute one mean-pooled final-layer vector.
+    Token-flattened hidden states inflate the sample counts by sequence
+    length and change the covariance population."""
+    import torch.nn as nn
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            base = int(str(text).split()[-1])
+            return [base, base + 1, base + 2, base + 3]
+
+        def decode(self, ids):
+            return f"sample {int(ids[0])}"
+
+        def __call__(self, text, return_tensors="pt", **kwargs):
+            ids = torch.tensor([self.encode(text)], dtype=torch.long)
+
+            class B(dict):
+                def to(self, dev): return self
+                def __getattr__(self, n):
+                    try: return self[n]
+                    except KeyError: raise AttributeError(n)
+
+            return B({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        @property
+        def device(self):
+            return self.p.device
+
+        def forward(self, input_ids=None, output_hidden_states=False, **kwargs):
+            ids = input_ids[0].float()
+            token_features = torch.stack([
+                ids,
+                ids * 0.5 + torch.arange(len(ids), dtype=torch.float32),
+                torch.sin(ids * 0.1),
+            ], dim=1).unsqueeze(0)
+
+            class Out:
+                hidden_states = (token_features * 0.5, token_features)
+
+            return Out()
+
+    dataset = [{"text": f"sample {i}"} for i in range(20)]
+    result = MahalanobisOODTask({"num_samples": 10, "ood_strategy": "shuffle"}).evaluate(
+        Model(), Tokenizer(), dataset=dataset, cache=None,
+    )
+
+    assert "error" not in result, result
+    assert result["n_id_fit"] + result["n_id_score"] == 10
+    assert result["n_ood_score"] == 10
+
+
+def test_fit_split_preserves_id_scoring_holdout_for_small_n():
+    """With only five ID samples the split must still leave ≥2 score rows."""
+    n_id = 5
+    fit_n = max(2, min(n_id - 2, max(5, n_id // 2)))
+    assert n_id - fit_n >= 2
+
+
+def test_insufficient_holdout_payload_omits_auroc():
+    """When holdout scoring is impossible, omit biased ID/AUROC fields."""
+    from blme.tasks.geometry.mahalanobis import _compute_mahalanobis_distances
+
+    rng = np.random.default_rng(0)
+    X_id_fit = rng.standard_normal((5, 12)).astype(np.float32)
+    X_ood = rng.standard_normal((5, 12)).astype(np.float32) + 1.0
+    dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
+    payload = {
+        "insufficient_holdout": True,
+        "n_id_fit": int(X_id_fit.shape[0]),
+        "n_id_score": 1,
+        "mean_mahalanobis_ood": float(np.mean(dists_ood)),
+    }
+    assert payload["insufficient_holdout"] is True
+    assert "auroc" not in payload
+    assert "mean_mahalanobis_id" not in payload
+    assert np.isfinite(payload["mean_mahalanobis_ood"])

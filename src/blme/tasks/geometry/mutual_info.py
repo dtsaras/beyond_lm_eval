@@ -8,6 +8,24 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _centered_linear_gram(X: torch.Tensor) -> torch.Tensor:
+    """Linear kernel Gram matrix centered by H K H."""
+    X = X.float()
+    K = X @ X.t()
+    return K - K.mean(dim=0) - K.mean(dim=1, keepdim=True) + K.mean()
+
+
+def _normalized_linear_hsic(X: torch.Tensor, Y: torch.Tensor) -> float:
+    """Normalized linear HSIC, equivalent to linear CKA."""
+    Kx = _centered_linear_gram(X)
+    Ky = _centered_linear_gram(Y)
+    hsic_xy = float(torch.sum(Kx * Ky))
+    hsic_xx = float(torch.sum(Kx * Kx))
+    hsic_yy = float(torch.sum(Ky * Ky))
+    denom = np.sqrt(hsic_xx * hsic_yy)
+    return float(hsic_xy / (denom + 1e-12))
+
+
 @register_task("geometry_hsic")
 class HSICDependenceTask(DiagnosticTask):
     """
@@ -59,7 +77,9 @@ class HSICDependenceTask(DiagnosticTask):
         max_tokens = self.config.get("max_hsic_tokens", 2000)
         n_tokens = layer_activations[layers[0]].shape[0]
         if n_tokens > max_tokens:
-            shared_perm = torch.randperm(n_tokens)[:max_tokens]
+            rng = torch.Generator(device="cpu")
+            rng.manual_seed(int(self.config.get("seed", 42)))
+            shared_perm = torch.randperm(n_tokens, generator=rng)[:max_tokens]
         else:
             shared_perm = None
 
@@ -71,14 +91,7 @@ class HSICDependenceTask(DiagnosticTask):
             if shared_perm is not None:
                 X = X[shared_perm]
 
-            # Linear kernel: K = X @ X^T
-            K = X @ X.t()
-
-            # Center the Gram matrix: H K H where H = I - 1/n * 11^T
-            # Optimized representation:
-            K_centered = K - K.mean(dim=0) - K.mean(dim=1, keepdim=True) + K.mean()
-
-            gram_matrices[idx] = K_centered.cpu()
+            gram_matrices[idx] = _centered_linear_gram(X).cpu()
 
         # Compute HSIC between pairs of layers
         # HSIC(X, Y) = (1/(n-1)^2) * trace(K_X @ K_Y)

@@ -200,8 +200,9 @@ def score_continuation(model, tokenizer, prompt: str, answer: str):
          ``return_offsets_mapping=True`` (when the tokenizer supports
          it) so each token carries its character range in the joined
          string.
-      2. The first token whose *start* offset is ≥ ``len(prompt)`` is
-         the first answer token; everything before is prompt.
+      2. The first token whose offset overlaps the answer substring
+         (``end > len(prompt)``) is the first answer token; this handles
+         BPE tokens that span the prompt/answer boundary.
       3. Fall back to ``len(tokenize(prompt))`` only if offset
          mapping is unavailable — older slow tokenizers (SentencePiece
          without offsets) use the prefix-length approximation, which
@@ -209,8 +210,7 @@ def score_continuation(model, tokenizer, prompt: str, answer: str):
 
     This function is used by every task that scores a string
     continuation (``format_robustness``, ``icl_slope``,
-    ``consistency_logical``, ``consistency_paraphrase``,
-    ``consistency_contrastive``) to eliminate a systematic
+    ``consistency_logical``, ``consistency_contrastive``) to eliminate a systematic
     tokenisation-boundary bias across models with different BPE
     vocabularies.
     """
@@ -233,13 +233,17 @@ def score_continuation(model, tokenizer, prompt: str, answer: str):
         offsets = enc_full.get("offset_mapping", None)
         if offsets is not None:
             offs = offsets[0].tolist()
-            for i, (s, _e) in enumerate(offs):
-                if s >= len(prompt):
-                    prompt_len = i
-                    break
+            pl = len(prompt)
+            for i, (s, e) in enumerate(offs):
+                # Skip tokens wholly inside the prompt region.
+                if e <= pl:
+                    continue
+                # First token with any overlap into the answer substring.
+                # This handles GPT-style leading-space merges where a
+                # single BPE token spans the prompt/answer boundary.
+                prompt_len = i
+                break
             if prompt_len is None:
-                # Every token overlaps with the prompt — no answer
-                # tokens survived tokenisation.
                 return None
         # offset_mapping is not a valid model kwarg; drop it.
         enc_full = {k: v for k, v in enc_full.items() if k != "offset_mapping"}

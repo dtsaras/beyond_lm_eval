@@ -7,12 +7,31 @@ except ImportError:
 from typing import List
 import torch
 
+_LM_EVAL_TASK_CACHE = None
+
 def is_lm_eval_task(task_name: str) -> bool:
-    # This is a heuristic. Ideally we query lm_eval.tasks.TaskManager
-    # For now, if it's not a diagnostic task, we assume it is lm_eval
-    # But strictly, we should check.
-    # Allow-list or query lm_eval
-    # Simple check: does it look like a benchmark?
+    """Return True when lm_eval knows about *task_name*.
+
+    Falls back to a small allow-list only when lm_eval is unavailable, so
+    CLI validation remains useful in minimal BLME installs.
+    """
+    global _LM_EVAL_TASK_CACHE
+    if HAS_LM_EVAL:
+        try:
+            if _LM_EVAL_TASK_CACHE is None:
+                from lm_eval.tasks import TaskManager
+                manager = TaskManager()
+                if hasattr(manager, "all_tasks"):
+                    _LM_EVAL_TASK_CACHE = set(manager.all_tasks)
+                elif hasattr(manager, "task_index"):
+                    _LM_EVAL_TASK_CACHE = set(manager.task_index)
+                else:
+                    _LM_EVAL_TASK_CACHE = set()
+            if task_name in _LM_EVAL_TASK_CACHE:
+                return True
+        except Exception:
+            pass
+
     common = ["hellaswag", "piqa", "arc_easy", "arc_challenge", "truthfulqa", "winogrande", "gsm8k", "mmlu"]
     return task_name in common or any(c in task_name for c in common)
 

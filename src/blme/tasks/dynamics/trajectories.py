@@ -9,6 +9,23 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _canonical_alpha(alpha: float) -> float:
+    """Round alpha to avoid string-key collisions in convexity lookups."""
+    return round(float(alpha), 6)
+
+
+def _alpha_label(alpha: float) -> str:
+    """Human-readable alpha label for exported metric keys."""
+    a = _canonical_alpha(alpha)
+    if a == 0.0:
+        return "0.0"
+    if a == 1.0:
+        return "1.0"
+    if a == 0.5:
+        return "0.5"
+    return f"{a:.6g}"
+
+
 def _slerp(h1, h2, alpha):
     """Spherical linear interpolation between two vectors."""
     h1_norm = F.normalize(h1, dim=-1)
@@ -47,7 +64,11 @@ class LatentInterpolationTask(DiagnosticTask):
 
         entropies = defaultdict(list)
         slerp_entropies = defaultdict(list)
-        alphas = np.linspace(0, 1, steps)
+        base_alphas = np.linspace(0, 1, steps)
+        alphas = np.array(sorted(set(np.concatenate([
+            base_alphas,
+            np.array([0.0, 0.5, 1.0]),
+        ]))))
 
         # Seeded RNG for reproducible pair sampling across runs.
         import random as _random
@@ -75,6 +96,7 @@ class LatentInterpolationTask(DiagnosticTask):
                 h1, h2 = h_states
 
                 for alpha in alphas:
+                    alpha_key = _canonical_alpha(alpha)
                     # Norm-corrected linear interpolation
                     h_interp = (1 - alpha) * h1 + alpha * h2
                     target_norm = (1 - alpha) * h1.norm() + alpha * h2.norm()
@@ -88,7 +110,7 @@ class LatentInterpolationTask(DiagnosticTask):
 
                     probs = F.softmax(logits, dim=-1)
                     entropy = -(probs * (probs + 1e-10).log()).sum(dim=-1).item()
-                    entropies[f"{alpha:.1f}"].append(entropy)
+                    entropies[alpha_key].append(entropy)
 
                     # Slerp interpolation for comparison
                     h_slerp = _slerp(h1, h2, alpha)
@@ -103,22 +125,28 @@ class LatentInterpolationTask(DiagnosticTask):
 
                     probs_s = F.softmax(logits_s, dim=-1)
                     entropy_s = -(probs_s * (probs_s + 1e-10).log()).sum(dim=-1).item()
-                    slerp_entropies[f"{alpha:.1f}"].append(entropy_s)
+                    slerp_entropies[alpha_key].append(entropy_s)
 
                 count += 1
 
         results = {}
         for alpha_key, vals in entropies.items():
-            results[f"interp_entropy_{alpha_key}"] = float(np.mean(vals))
+            results[f"interp_entropy_{_alpha_label(alpha_key)}"] = float(np.mean(vals))
         for alpha_key, vals in slerp_entropies.items():
-            results[f"slerp_entropy_{alpha_key}"] = float(np.mean(vals))
+            results[f"slerp_entropy_{_alpha_label(alpha_key)}"] = float(np.mean(vals))
 
-        mid = results.get("interp_entropy_0.5", 0)
-        end = (results.get("interp_entropy_0.0", 0) + results.get("interp_entropy_1.0", 0)) / 2
+        mid = float(np.mean(entropies[_canonical_alpha(0.5)]))
+        end = (
+            float(np.mean(entropies[_canonical_alpha(0.0)]))
+            + float(np.mean(entropies[_canonical_alpha(1.0)]))
+        ) / 2
         results["convexity_gap"] = mid - end
 
-        mid_s = results.get("slerp_entropy_0.5", 0)
-        end_s = (results.get("slerp_entropy_0.0", 0) + results.get("slerp_entropy_1.0", 0)) / 2
+        mid_s = float(np.mean(slerp_entropies[_canonical_alpha(0.5)]))
+        end_s = (
+            float(np.mean(slerp_entropies[_canonical_alpha(0.0)]))
+            + float(np.mean(slerp_entropies[_canonical_alpha(1.0)]))
+        ) / 2
         results["slerp_convexity_gap"] = mid_s - end_s
 
         return results

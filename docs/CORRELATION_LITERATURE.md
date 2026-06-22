@@ -87,16 +87,18 @@ experimental scope, and whether BLME captures that signal.
 - **Scope**: Cerebras-GPT (111M-6.7B), LLaMA 7B-65B.
 - **BLME status**: ✅ implemented in round-7 `geometry_schatten`.
 
-### Wei et al. 2025 — From Internal Representations to Text Quality
+### Yusupov et al. 2025 — From Internal Representations to Text Quality
 - arXiv:2509.25359.
 - **Claim**: Intrinsic Dim, Effective Rank, MEV, MAUVE, and
   Schatten norms are **reference-free text-quality proxies** that
   produce consistent rankings of text generators across 6 models
   from 0.5B to 8B.
 - **Scope**: 0.5B-8B autoregressive + diffusion text generators.
-- **BLME status**: ✅ all 5 metrics are in BLME — `geometry_intrinsic_dim`,
+- **BLME status**: ✅ all 5 metric families are represented in BLME — `geometry_intrinsic_dim`,
   `geometry_svd.effective_rank`, `geometry_contextualization.per_layer.*.mev`,
-  and `geometry_schatten.schatten_{1,2,4,inf}_last`.
+  and `geometry_schatten.row_normalized_schatten_{1,4,inf}_last`.
+  `schatten_2` is intentionally omitted from primary outputs because it is
+  content-free after row-L2 normalization.
 
 ---
 
@@ -124,7 +126,7 @@ experimental scope, and whether BLME captures that signal.
 - **BLME status**: ✅ in round-8
   `interpretability_activation_sinks.massive_activation_{fraction,max_ratio}`.
 
-### Pedrotti & Guo 2025 — Compression Valleys
+### Arroyo et al. 2025 — Compression Valleys
 - arXiv:2510.06477.
 - **Claim**: sinks and massive activations are mechanically linked
   (massive activations → attention sink) and **produce a provable
@@ -294,7 +296,7 @@ experimental scope, and whether BLME captures that signal.
 Martin-Mahoney 2019/2021, Garrido 2023 RankMe, Li 2025 Tracing
 Geometry (metrics yes, phase-label no), Wei 2024 matrix entropy,
 Li 2024 MNN, Wei 2025 Text-Quality Geometric, Gu 2025 Sinkε,
-Sun 2024 massive activations, Pedrotti & Guo 2025 compression
+Sun 2024 massive activations, Arroyo et al. 2025 compression
 valleys, Cavagnero 2025 Local ID, Yin 2024 truthfulness LID,
 Bonfanti 2025 token geometry, Naitzat 2020 Betti, Kaplan 2020
 + Hoffmann 2022 scaling laws.
@@ -311,7 +313,7 @@ Liu 2025 Intrinsic Rewards, Girrbach 2025 Reference-Free.
 
 ### Most impactful experimental-correlation finding for BLME
 
-**Pedrotti & Guo 2025** (arXiv:2510.06477) unifies three metrics
+**Arroyo et al. 2025** (arXiv:2510.06477) unifies three metrics
 (attention sinks, massive activations, compression valleys) and
 **proves theoretically** that they're manifestations of a single
 mechanism — and shows the mid-layer entropy-valley depth
@@ -339,7 +341,7 @@ experimental papers for (and would be publishable if we ran them):
   grid (we already reported ρ ≈ -0.75 for Schatten-1 — no prior
   paper has done this at this scale across tokeniser families).
 - **Compression-valley depth vs. in-context learning slope** —
-  Pedrotti & Guo argue for this but didn't sweep 30+ instruct
+  Arroyo et al. argue for this but didn't sweep 30+ instruct
   models.
 - **Sinkε vs. format-robustness** — has not been explicitly tied
   to a cross-prompt consistency metric in the literature.

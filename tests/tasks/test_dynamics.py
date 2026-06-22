@@ -22,15 +22,35 @@ def test_interpolation(mock_model, mock_tokenizer):
     assert "interp_entropy_0.5" in results
 
 
+def test_interpolation_default_steps_include_true_midpoint(mock_model, mock_tokenizer):
+    """The default ``steps=10`` must still measure alpha=0.5.
+
+    ``np.linspace(0, 1, 10)`` skips 0.5, and the previous implementation
+    silently used a zero fallback for convexity_gap.
+    """
+    from blme.tasks.dynamics.trajectories import LatentInterpolationTask
+
+    task = LatentInterpolationTask(config={"num_pairs": 1})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=["left", "right"])
+
+    assert "interp_entropy_0.5" in results
+    expected_gap = results["interp_entropy_0.5"] - (
+        results["interp_entropy_0.0"] + results["interp_entropy_1.0"]
+    ) / 2
+    assert results["convexity_gap"] == pytest.approx(expected_gap)
+
+
 def test_stability(mock_model, mock_tokenizer):
     from blme.tasks.dynamics.stability import NeighborhoodStabilityTask
 
-    # Self-comparison (should be 1.0)
-    task = NeighborhoodStabilityTask(config={"k": 5, "n_sample": 10})
+    # Default should be an informative perturbation stability estimate, not
+    # a self-comparison that is identically 1.0.
+    task = NeighborhoodStabilityTask(config={"k": 5, "num_samples": 10})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "stability_mean" in results
-    assert results["stability_mean"] == 1.0  # Self comparison
+    assert results["stability_mode"] == "embedding_noise"
+    assert "reference_required" not in results
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +178,34 @@ def test_chain_of_embedding_emits_paper_scores():
     assert np.isfinite(res["mean_normalized_angle"])
 
 
+def test_chain_of_embedding_coe_c_matches_reference_normalized():
+    """CoE-C matches the reference score.py (Alsace08/Chain-of-Embedding):
+    NORMALIZED magnitude as radius AND NORMALIZED angle as phase.
+
+    Reference compute_CoE_C: x=Mag̃·cos(Ãng), y=Mag̃·sin(Ãng),
+    CoE-C = sqrt(mean(x)^2 + mean(y)^2). (Corrected 2026-06-22 from the
+    earlier raw-magnitude/raw-angle implementation.)
+    """
+    from blme.tasks.dynamics.coe import _coe_from_chain
+
+    chain = [
+        torch.tensor([1.0, 0.0]),
+        torch.tensor([0.0, 1.0]),
+        torch.tensor([1.0, 1.0]),
+    ]
+
+    result = _coe_from_chain(chain)
+    rn = result["normalized_magnitudes"]
+    sn = result["normalized_angles"]
+    x = np.mean([rn[i] * np.cos(sn[i]) for i in range(len(rn))])
+    y = np.mean([rn[i] * np.sin(sn[i]) for i in range(len(rn))])
+    expected = float(np.sqrt(x ** 2 + y ** 2))
+
+    assert result["coe_c"] == pytest.approx(expected, abs=1e-6)
+    # The reference CoE-C is the fully-normalized form; the alias matches.
+    assert result["normalized_coe_c"] == pytest.approx(result["coe_c"], abs=1e-9)
+
+
 def test_chain_of_embedding_is_layerwise(mock_model, mock_tokenizer):
     """Wang et al. define CoE as the layer-wise chain
     ``h^{(0)}, h^{(1)}, …, h^{(L)}`` at a fixed token. The historic
@@ -181,3 +229,107 @@ def test_chain_of_embedding_is_layerwise(mock_model, mock_tokenizer):
     # And for the mock model (2 layers), each chain has exactly
     # num_layers steps between hidden states.
     assert results.get("chain_length_per_sample") == 2
+
+
+def test_generation_diversity_seed_and_trims_special_tokens():
+    from blme.tasks.dynamics.generation_diversity import GenerationDiversityTask
+
+    class Batch(dict):
+        def to(self, device):
+            return self
+
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError:
+                raise AttributeError(name)
+
+    class Tok:
+        eos_token_id = 1
+        pad_token_id = 0
+
+        def __call__(self, text, return_tensors="pt"):
+            return Batch({"input_ids": torch.tensor([[10, 11]])})
+
+    class Out:
+        pass
+
+    class FakeModel:
+        def __init__(self):
+            self.param = torch.nn.Parameter(torch.zeros(()))
+            self.generator_was_passed = False
+
+        def parameters(self):
+            return iter([self.param])
+
+        def generate(self, **kwargs):
+            gen = kwargs.get("generator")
+            self.generator_was_passed = gen is not None and gen.initial_seed() == 123
+            out = Out()
+            out.sequences = torch.tensor([
+                [10, 11, 5, 1, 0, 0, 0],
+                [10, 11, 6, 1, 0, 0, 0],
+            ])
+            out.scores = [torch.zeros(2, 8) for _ in range(5)]
+            return out
+
+    model = FakeModel()
+    result = GenerationDiversityTask(config={
+        "num_prompts": 1,
+        "n_samples_per_prompt": 2,
+        "max_new_tokens": 5,
+        "seed": 123,
+    }).evaluate(model, Tok(), dataset=["prompt"])
+
+    assert model.generator_was_passed
+    assert result["completion_filter"] == "trim_at_eos_drop_special"
+    assert result["distinct_n_scope"] == "per_completion_mean"
+    assert result["mean_distinct_1"] == pytest.approx(1.0)
+
+
+def test_generation_diversity_entropy_masks_post_eos_positions():
+    from blme.tasks.dynamics.generation_diversity import GenerationDiversityTask
+
+    class Batch(dict):
+        def to(self, device):
+            return self
+
+    class Tok:
+        eos_token_id = 1
+        pad_token_id = 0
+
+        def __call__(self, text, return_tensors="pt"):
+            return Batch({"input_ids": torch.tensor([[10, 11]])})
+
+    class Out:
+        pass
+
+    class FakeModel:
+        def __init__(self):
+            self.param = torch.nn.Parameter(torch.zeros(()))
+
+        def parameters(self):
+            return iter([self.param])
+
+        def generate(self, **kwargs):
+            out = Out()
+            out.sequences = torch.tensor([
+                [10, 11, 5, 6, 1, 0, 0],
+                [10, 11, 7, 8, 9, 10, 11],
+            ])
+            # High entropy after EOS for row 0; low entropy tail for row 1.
+            scores = []
+            for step in range(6):
+                row0 = torch.full((2, 8), 100.0 if step >= 3 else 0.0)
+                row1 = torch.full((2, 8), 0.0 if step < 4 else 100.0)
+                scores.append(torch.stack([row0[0], row1[1]], dim=0))
+            out.scores = scores
+            return out
+
+    result = GenerationDiversityTask(config={
+        "num_prompts": 1,
+        "n_samples_per_prompt": 2,
+        "max_new_tokens": 6,
+    }).evaluate(FakeModel(), Tok(), dataset=["prompt"])
+
+    assert result["entropy_collapse_delta"] == pytest.approx(0.0, abs=1e-6)

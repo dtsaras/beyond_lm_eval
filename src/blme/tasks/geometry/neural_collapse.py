@@ -12,9 +12,10 @@ class label. Three metrics from the Neural Collapse phenomenon:
   - **NC2-equinorm**: coefficient of variation of class-mean norms
     ||μ_k - μ_global||. Lower = more equal class-mean norms.
 
-  - **NC2-equiangularity**: standard deviation of cosine similarities
-    between every pair of (μ_k - μ_global) vectors, vs. the ETF target of
-    -1/(K-1). Lower = closer to a simplex equiangular tight frame.
+  - **NC2-ETF cosine deviation proxy**: standard deviation of pairwise
+    cosine similarities between centred class-mean vectors vs. the ETF
+    target of ``-1/(K-1)``. This is a lightweight ETF-alignment proxy,
+    not the full normalized Gram/Frobenius NC2 measure from Papyan et al.
 
 Because BLME is unsupervised, we use a small bundled topic-classification
 dataset. The user can override `dataset` with their own
@@ -160,7 +161,7 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     else:
         nc2_equinorm_cv = float("nan")
 
-    # NC2 — equiangularity
+    # NC2 — ETF cosine deviation proxy (not full normalized Gram NC2).
     # Pairwise cosine similarities between centered class means.
     M_unit = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
     cos = M_unit @ M_unit.T
@@ -168,15 +169,15 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     pair_cos = cos[iu]
     if len(pair_cos) > 0:
         target = -1.0 / (K - 1)  # ETF target
-        nc2_equiangularity_dev = float(np.mean(np.abs(pair_cos - target)))
+        nc2_etf_cosine_deviation_proxy = float(np.mean(np.abs(pair_cos - target)))
     else:
-        nc2_equiangularity_dev = float("nan")
+        nc2_etf_cosine_deviation_proxy = float("nan")
 
     return {
         "nc1_within_class_collapse": nc1,
         "nc1_subspace_rank": int(subspace_rank),
         "nc2_equinorm_cv": nc2_equinorm_cv,
-        "nc2_equiangularity_dev": nc2_equiangularity_dev,
+        "nc2_etf_cosine_deviation_proxy": nc2_etf_cosine_deviation_proxy,
         "n_classes": int(K),
         "n_samples": int(n),
     }

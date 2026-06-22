@@ -15,3 +15,10 @@ def get_task(name: str) -> Optional[Type[DiagnosticTask]]:
 
 def list_tasks() -> list[str]:
     return list(_TASK_REGISTRY.keys())
+
+
+def task_group(name: str) -> str:
+    """Return the top-level BLME group for a task name."""
+    if name.startswith("repe_"):
+        return "repe"
+    return name.split("_", 1)[0]

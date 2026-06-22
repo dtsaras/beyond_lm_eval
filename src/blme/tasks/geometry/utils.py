@@ -14,26 +14,26 @@ import atexit
 
 
 def effective_rank(S: np.ndarray) -> float:
-    """Roy & Vetterli 2007 effective rank, computed on the eigenvalues
-    of the Gram matrix (i.e. the *squared* singular values). This is
-    the canonical "exponential-entropy" effective rank:
+    """Roy & Vetterli 2007 effective rank, computed on raw singular
+    values using the exponential entropy formula:
 
-        erank = exp(− Σ pᵢ log pᵢ),   where pᵢ = σᵢ² / Σ σⱼ²
+        erank = exp(− Σ pᵢ log pᵢ),   where pᵢ = σᵢ / Σ σⱼ
 
     All BLME geometry tasks should funnel through this helper so the
-    "effective rank" feature is comparable across tasks (the legacy
-    versions of ``collapse.py``, ``isotropy.py`` and
-    ``unembedding.py`` used ``pᵢ = σᵢ / Σ σⱼ`` — numerically different
-    and not the paper convention).
+    "effective rank" feature is comparable across tasks. Metrics that
+    intentionally use covariance/eigenvalue probabilities should be
+    named as such rather than reported as Roy-Vetterli effective rank.
     """
     S = np.asarray(S, dtype=np.float64)
     if S.size == 0:
         return 0.0
-    sq = S * S
-    total = float(sq.sum())
+    S = S[np.isfinite(S) & (S > 0)]
+    if S.size == 0:
+        return 0.0
+    total = float(S.sum())
     if total <= 0 or not np.isfinite(total):
         return 0.0
-    p = sq / total
+    p = S / total
     p = p[p > 0]
     if p.size == 0:
         return 0.0
@@ -126,7 +126,9 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                     # Subsample tokens for single-layer mode
                     T = h.shape[1]
                     if T > 10:
-                        indices = torch.randperm(T)[:10]
+                        rng = torch.Generator(device=h.device)
+                        rng.manual_seed(42 + i * 1009 + actual_idx)
+                        indices = torch.randperm(T, generator=rng, device=h.device)[:10]
                         h = h[:, indices, :]
 
                     h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()

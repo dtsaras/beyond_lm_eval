@@ -1,12 +1,10 @@
 """
-Self-consistency under temperature sampling — Wang et al. 2022,
-arXiv:2203.11171.
+Sampling stability under temperature sampling.
 
 For each prompt, sample N completions with temperature > 0 and measure
-how often the samples agree on the same answer (the "self-consistency"
-of the model). Strong models concentrate their probability mass on a
-small set of plausible completions; weak models produce wildly different
-samples.
+how often the samples agree on the first generated token. This is a
+sampling-stability proxy, not reasoning-path self-consistency with
+answer majority vote.
 
 We use exact-match agreement on the first generated word and a softer
 "common-prefix overlap" measure as well.
@@ -47,7 +45,7 @@ _SELFC_PROMPTS: List[str] = [
 
 @register_task("consistency_self_consistency")
 class SelfConsistencyTask(DiagnosticTask):
-    """Sampling-based self-consistency (Wang et al. 2022)."""
+    """Sampling-stability proxy based on first generated token agreement."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Self-Consistency Sampling Analysis...")
@@ -56,6 +54,7 @@ class SelfConsistencyTask(DiagnosticTask):
         temperature = self.config.get("temperature", 0.7)
         max_new_tokens = self.config.get("max_new_tokens", 8)
         num_prompts = self.config.get("num_prompts", len(_SELFC_PROMPTS))
+        seed = self.config.get("seed", None)
 
         if dataset is not None and isinstance(dataset, list) and dataset and (
             isinstance(dataset[0], dict) and "prompt" in dataset[0]
@@ -67,6 +66,15 @@ class SelfConsistencyTask(DiagnosticTask):
             prompts = _SELFC_PROMPTS[:num_prompts]
 
         device = next(model.parameters()).device
+        generator = None
+        if seed is not None:
+            seed = int(seed)
+            torch.manual_seed(seed)
+            try:
+                generator = torch.Generator(device=device)
+            except Exception:
+                generator = torch.Generator()
+            generator.manual_seed(seed)
 
         # Per-prompt agreement rates
         per_prompt_top1_rate = []
@@ -80,15 +88,26 @@ class SelfConsistencyTask(DiagnosticTask):
                 prompt_len = input_ids.shape[1]
 
                 # Sample N completions in a single batched call.
+                generate_kwargs = {
+                    "input_ids": input_ids.expand(n_samples_per_prompt, -1),
+                    "max_new_tokens": max_new_tokens,
+                    "do_sample": True,
+                    "temperature": temperature,
+                    "top_p": 1.0,
+                    "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
+                }
+                if generator is not None:
+                    generate_kwargs["generator"] = generator
+
                 try:
-                    outputs = model.generate(
-                        input_ids=input_ids.expand(n_samples_per_prompt, -1),
-                        max_new_tokens=max_new_tokens,
-                        do_sample=True,
-                        temperature=temperature,
-                        top_p=1.0,
-                        pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
-                    )
+                    outputs = model.generate(**generate_kwargs)
+                except TypeError:
+                    # Some generate implementations do not accept a
+                    # generator kwarg; keep deterministic global seeding.
+                    generate_kwargs.pop("generator", None)
+                    if seed is not None:
+                        torch.manual_seed(seed)
+                    outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed for prompt '{prompt[:40]}': {e}")
                     continue
@@ -112,11 +131,27 @@ class SelfConsistencyTask(DiagnosticTask):
         if not per_prompt_top1_rate:
             return {"error": "No samples successfully generated"}
 
+        mean_agreement = float(np.mean(per_prompt_top1_rate))
+        median_agreement = float(np.median(per_prompt_top1_rate))
+        mean_entropy = float(np.mean(first_token_entropies))
+        mean_uniqueness = float(np.mean(per_prompt_token_diversity))
+
         return {
-            "mean_first_token_agreement": float(np.mean(per_prompt_top1_rate)),
-            "median_first_token_agreement": float(np.median(per_prompt_top1_rate)),
-            "mean_first_token_entropy": float(np.mean(first_token_entropies)),
-            "mean_first_token_uniqueness": float(np.mean(per_prompt_token_diversity)),
+            "diagnostic_semantics": "sampling_stability",
+            "diagnostic_method": (
+                "first-token agreement over sampled completions; not "
+                "reasoning-path answer majority vote"
+            ),
+            "generation_seed": seed,
+            "sampling_stability_mean_first_token_agreement": mean_agreement,
+            "sampling_stability_median_first_token_agreement": median_agreement,
+            "sampling_stability_mean_first_token_entropy": mean_entropy,
+            "sampling_stability_mean_first_token_uniqueness": mean_uniqueness,
+            # Legacy aliases retained for downstream compatibility.
+            "mean_first_token_agreement": mean_agreement,
+            "median_first_token_agreement": median_agreement,
+            "mean_first_token_entropy": mean_entropy,
+            "mean_first_token_uniqueness": mean_uniqueness,
             "n_prompts": len(per_prompt_top1_rate),
             "n_samples_per_prompt": n_samples_per_prompt,
             "temperature": temperature,

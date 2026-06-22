@@ -2,6 +2,25 @@
 
 This module contains metrics that directly probe the internal properties, specialized circuits, and representational capacity of the model's layers and heads.
 
+**Current registry coverage (15 tasks)**: `interpretability_activation_sinks`,
+`interpretability_attention_effective_rank`, `interpretability_attention_entropy`,
+`interpretability_attention_graph`, `interpretability_attention_rank`,
+`interpretability_attribution`, `interpretability_head_roles`,
+`interpretability_induction_heads`, `interpretability_logit_lens`,
+`interpretability_prediction_entropy`, `interpretability_probing`,
+`interpretability_sae_features`, `interpretability_sparsity`,
+`interpretability_superposition`, and `interpretability_waa`.
+
+**Paper-faithful vs. BLME proxy notes**: `interpretability_activation_sinks`
+implements paper-derived Sinkε, massive-activation, and compression-valley
+diagnostics. `interpretability_attention_graph` is a BLME graph-centrality
+diagnostic inspired by attention-sink/attention-rollout literature; PageRank
+centralization alone is not definitive proof of attention-sink mechanics.
+`interpretability_attention_effective_rank` is the registered task in
+`attention_polysemanticity.py`; it reports an effective-rank proxy for head
+capacity and should not be described as a paper-faithful polysemanticity or
+monosemanticity method.
+
 ---
 
 ## 1. Attention Entropy
@@ -18,15 +37,15 @@ This module contains metrics that directly probe the internal properties, specia
 * **Hypothesis**: Models offload computation to "Attention Sinks" (usually the BOS token or newline characters) to act as a structural anchor. Finding the central node reveals the computational topology.
 * **Citation/Paper**: `Xiao, G., Tian, Y., Chen, B., Han, S., & Lewis, M. (2023). Efficient Streaming Language Models with Attention Sinks.` [ArXiv: 2309.17453]
 * **File & Function**: `src/blme/tasks/interpretability/attention_graph.py` -> `AttentionGraphTopologyTask`
-* **Critical Info**: High centralization at index 0 without context is a definitive signature of Attention Sink mechanics.
+* **Critical Info**: High centralization at index 0 is a useful attention-sink-like signal, but it is a proxy; confirm with Sinkε or intervention-based analyses before making mechanistic claims.
 
-## 3. Attention Head Polysemanticity (Superposition)
-* **What are we measuring**: The degree of concept superposition within individual attention heads.
+## 3. Attention Effective Rank (BLME head-capacity proxy)
+* **What are we measuring**: The effective rank of attention-head value/output representations as a proxy for how much capacity a head uses across samples.
 * **How are we measuring**: By computing the Singular Value Entropy (Effective Rank) of the isolated value-projection outputs corresponding to specific heads.
-* **Hypothesis**: A single attention head compresses multiple unrelated atomic concepts into its subspace. High SVD entropy signifies severe polysemanticity (superposition), while low entropy indicates a clean, monosemantic head.
-* **Citation/Paper**: Derived from the superposition framework established in `Elhage, N., et al. (2022). Toy Models of Superposition` [ArXiv: 2209.10652].
-* **File & Function**: `src/blme/tasks/interpretability/attention_polysemanticity.py` -> `AttentionHeadPolysemanticityTask`
-* **Critical Info**: Because attention acts as a routing mechanism, highly polysemantic heads route multiple conflicting signals simultaneously.
+* **Hypothesis**: Higher effective rank suggests a head is using a broader subspace; lower rank suggests a more constrained or collapsed head. This is not a direct concept-level polysemanticity measurement.
+* **Citation/Paper**: BLME proxy inspired by effective-rank diagnostics and the superposition literature (`Elhage et al. 2022`; closest concept-level benchmark: `Templeton et al. 2024`, Scaling Monosemanticity).
+* **File & Function**: `src/blme/tasks/interpretability/attention_polysemanticity.py` -> `AttentionEffectiveRankTask`
+* **Critical Info**: Registered task name is `interpretability_attention_effective_rank`; stale recipe/docs references to `interpretability_attention_polysemanticity` are invalid.
 
 ## 4. Induction Heads
 * **What are we measuring**: The presence and strength of specialized "Induction Heads" that complete in-context patterns (e.g., A B ... A -> predicts B).
@@ -64,15 +83,15 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The frequency of inactive (zeroed-out or highly negative) neurons in the MLP feed-forward blocks.
 * **How are we measuring**: Computing the L0 pseudo-norm fraction (percentage of active neurons) and the Kurtosis (heavy-tailedness) of the post-GELU/SwiGLU activations.
 * **Hypothesis**: LLMs demonstrate severe activation sparsity; only a tiny fraction of the network fires for a given token. This translates to efficient computation and specialized feature maps.
-* **Citation/Paper**: `Liu, Z., et al. (2023). Deja Vu: Contextual Sparsity for Efficient LLMs at Inference Time.` [ICML 2023, ArXiv: 2310.17157]
+* **Citation/Paper**: Related to `Zhang et al. (2021). Moefication: Transformer Feed-forward Layers are Mixtures of Experts.` and later contextual-sparsity analyses. BLME reports activation-rate diagnostics; it does not implement Deja Vu's inference-time predictor.
 * **File & Function**: `src/blme/tasks/interpretability/sparsity.py` -> `ActivationSparsityTask`
 * **Critical Info**: Relu networks have hard sparsity (true 0s), whereas GELU models have soft sparsity (negative values near 0). The task supports thresholding for soft sparsity.
 
 ## 9. Linear Probing
-* **What are we measuring**: How linearly accessible a specific high-level concept (e.g., Parts of Speech) is within the hidden states.
-* **How are we measuring**: Extracting hidden states and training a simple supervised Logistic Regression classifier to separate the concepts. Evaluated via Cross-Entropy or Accuracy.
-* **Hypothesis**: If a linear probe can retrieve the concept with high accuracy, the model has actively constructed a structural geometric boundary for that concept in its primary representation space.
-* **Citation/Paper**: `Belinkov, Y. (2022). Probing classifiers: Promises, shortcomings, and advances.` [Computational Linguistics, Vol 48(1), ArXiv: 2102.12452]
+* **What are we measuring**: How linearly accessible bundled labels are from hidden states.
+* **How are we measuring**: Extracting hidden states and training a regularized Logistic Regression probe. Evaluated via cross-validated accuracy/AUC.
+* **Hypothesis**: If a linear probe can retrieve a label with high accuracy, the model has made that label linearly decodable; this does not prove the model uses that feature causally.
+* **Citation/Paper**: `Alain, G. & Bengio, Y. (2017). Understanding intermediate layers using linear classifier probes.` [ArXiv: 1610.01644]. See also `Belinkov (2022)` for limitations of probing.
 * **File & Function**: `src/blme/tasks/interpretability/probing.py` -> `LinearProbingTask`
 * **Critical Info**: The metric is essentially measuring the capacity of the *probe*, not just the model, so high regularisation is required to prevent the probe from learning the task entirely.
 
@@ -80,7 +99,7 @@ This module contains metrics that directly probe the internal properties, specia
 * **What are we measuring**: The mechanistic capacity utilization of the network.
 * **How are we measuring**: Computing the Cosine Similarity between the empirical principal components of the actual inference activations (dynamic) and the principal singular vectors of the static weight matrices.
 * **Hypothesis**: If weight and activation eigenvectors are aligned, the model is using its learned capacity cleanly. Misalignment means the static weights contain parameters irrelevant to dynamic generation, causing parameter waste.
-* **Citation/Paper**: Broadly derived from general intrinsic dimensionality and capacity literature in LLMs.
+* **Citation/Paper**: Related to `Park, K., Choe, Y. J., & Veitch, V. (2024). The Linear Representation Hypothesis and the Geometry of Large Language Models.` [ICML 2024, arXiv:2311.03658]. BLME's WAA is a proxy diagnostic, not that paper's full linear-representation analysis.
 * **File & Function**: `src/blme/tasks/interpretability/weight_activation_alignment.py` -> `WeightActivationAlignmentTask`
 * **Critical Info**: Heavily reliant on computing local SVD on weight matrices, making it expensive for massive models (>70B params) without specific approximations.
 
@@ -99,3 +118,27 @@ This module contains metrics that directly probe the internal properties, specia
 * **Citation/Paper**: `Elhage, N., et al. (2022). Toy Models of Superposition.` [ArXiv: 2209.10652] and `Templeton, A., et al. (2024). Scaling Monosemanticity.` [Transformer Circuits Thread]
 * **File & Function**: `src/blme/tasks/interpretability/superposition.py` -> `SuperpositionIndexTask`
 * **Critical Info**: The bimodality coefficient (BC) uses skewness and kurtosis: BC = (skewness^2 + 1) / kurtosis. Values > 0.555 suggest bimodality. Higher mean_polysemanticity_index indicates more severe superposition across the model.
+
+## 13. Attention Rank Collapse
+* **What are we measuring**: Effective rank of attention matrices across layers and heads.
+* **How are we measuring**: Computing Roy-Vetterli effective rank on attention maps and summarizing collapse trends across depth.
+* **Hypothesis**: Very low attention rank suggests attention maps are collapsing to a small set of directions or tokens.
+* **Citation/Paper**: `Dong, Y., Cordonnier, J. B., & Loukas, A. (2021). Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth.` [ICML 2021, ArXiv: 2103.03404]
+* **File & Function**: `src/blme/tasks/interpretability/attention_rank.py` -> `AttentionRankCollapseTask`
+* **Critical Info**: Requires eager attention weights on modern transformer backends.
+
+## 14. Attention Head Roles
+* **What are we measuring**: Simple structural roles such as previous-token and duplicate-token attention.
+* **How are we measuring**: Measuring how much heads attend to immediately previous tokens and repeated-token positions.
+* **Hypothesis**: A larger fraction of specialized heads can indicate more developed in-context and copy-like mechanisms.
+* **Citation/Paper**: `Clark et al. (2019). What Does BERT Look At?` and `Voita et al. (2019). Analyzing Multi-Head Self-Attention.`
+* **File & Function**: `src/blme/tasks/interpretability/head_roles.py` -> `HeadRolesTask`
+* **Critical Info**: BLME reports simple role fractions; it does not implement a full OV/copying-score decomposition.
+
+## 15. Activation Sinks, Massive Activations, and Compression Valley
+* **What are we measuring**: Three related phenomena: attention sink concentration, massive residual activations, and entropy valleys across layers.
+* **How are we measuring**: Computing Gu et al.'s Sinkε, BOS attention mass, residual outlier fractions/ratios, and the minimum of a per-layer matrix-entropy profile.
+* **Hypothesis**: These metrics describe emergent bias-token and compression mechanisms that often appear in modern LLMs.
+* **Citation/Paper**: `Xiao et al. (2023). Efficient Streaming Language Models with Attention Sinks.` [ArXiv: 2309.17453]; `Gu et al. (2025). When Attention Sink Emerges in Language Models.` [ICLR 2025, ArXiv: 2410.10781]; `Sun et al. (2024). Massive Activations in Large Language Models.` [ArXiv: 2402.17762]; `Arroyo et al. (2025). Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin.` [ArXiv: 2510.06477]
+* **File & Function**: `src/blme/tasks/interpretability/activation_sinks.py` -> `ActivationSinksTask`
+* **Critical Info**: Sinkε is formula-faithful; the compression-valley output is a BLME matrix-entropy proxy, not the full paper pipeline.

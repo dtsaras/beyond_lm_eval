@@ -11,73 +11,98 @@ model:
   args: "pretrained=gpt2"
 
 tasks:
-  # ==========================================
-  # Geometry Tasks
-  # ==========================================
+  # ---- Geometry Tasks (27) ----
   geometry_svd:
     num_samples: 100
-  
+    layerwise: false
+
+  geometry_isoscore:
+    num_samples: 100
+
   geometry_hubness:
     k_values: [10, 50, 100]
     batch_size: 2000
-    
+
   geometry_collapse:
     num_samples: 100
-    
+
   geometry_lid:
     k: 20
     num_samples: 50
-    
-  geometry_information_fisher:
+    layerwise: false
+
+  geometry_representation_sensitivity:
     num_samples: 20
-    
+
   geometry_correlation_dimension:
-    num_samples: 50
-    
+    num_samples: 100
+    max_length: 128
+    num_radii: 30
+    pooling: mean
+    max_points: 2000
+
   geometry_matrix_entropy:
     num_samples: 10
-    
+
+  geometry_schatten:
+    num_samples: 10
+    max_length: 128
+
   geometry_rsa:
     num_samples: 20
     max_tokens: 200
-    
+
+  geometry_contextualization:
+    num_samples: 200
+    min_word_occurrences: 5
+    layers: null
+
   geometry_lipschitz:
     num_samples: 20
-    
+
   geometry_perplexity:
     num_samples: 100
-    
-  geometry_spectral: {}
-    
+
+  geometry_spectral:
+    tail_fraction: 0.2
+
   geometry_positional_decay:
     num_samples: 5
-    
+
   geometry_cka:
     num_samples: 100
-    
+
   geometry_unembedding:
-    n_sample: 2000
+    num_samples: 2000
     k: 20
     categories_path: null
-    
+
   geometry_intrinsic_dim:
     layerwise: false
     num_samples: 100
-    
-  geometry_mutual_info:
+
+  geometry_hsic:
     num_samples: 100
-    max_mi_tokens: 2000
-    
-  geometry_consistency:
+    max_hsic_tokens: 2000
+
+  geometry_prediction_alignment:
     num_samples: 100
-    
+
   geometry_categories:
     categories_path: null
     k_purity: 20
     projection_method: null
-    
+
+  geometry_neural_collapse: {}
+
   geometry_mahalanobis:
     num_samples: 50
+    ood_strategy: shuffle
+
+  geometry_weight_norms: {}
+
+  geometry_tokenizer_efficiency:
+    num_samples: 20
 
   geometry_trajectory_curvature:
     num_samples: 100
@@ -90,115 +115,186 @@ tasks:
     edge_tol: 0.05
     fixed_gamma: 0.25
 
-  # ==========================================
-  # Topology Tasks
-  # ==========================================
+  # ---- Topology Tasks (4) ----
   topology_homology:
     num_samples: 20
-    
+
   topology_betti_curve:
     num_samples: 20
-    
+
   topology_persistence_entropy:
     num_samples: 20
 
-  # ==========================================
-  # Causality Tasks
-  # ==========================================
+  topology_persistence_landscape:
+    num_samples: 20
+    n_landscapes: 5
+    n_points: 200
+
+  # ---- Causality Tasks (6) ----
   causality_tracing:
     num_samples: 3
-    # noise_std intentionally unset so the task computes 3×σ(E) per
+    # noise_std intentionally unset so the task computes 3 x sigma(E) per
     # Meng et al. 2022 §3.2 (hardcoding 0.1 made AIE non-comparable
     # across architectures — v1 bug).
-    
+
   causality_attention_knockout:
     num_samples: 3
-    
+
   causality_ablation:
     num_samples: 5
     ablation_percentages: [0.01, 0.05, 0.1, 0.25]
 
-  # ==========================================
-  # Interpretability Tasks
-  # ==========================================
+  causality_circuit_quality:
+    num_samples: 3
+    top_k_pct: 25
+
+  causality_edge_attribution:
+    num_samples: 10
+
+  causality_knowledge_neurons: {}
+
+  # ---- Interpretability Tasks (15) ----
   interpretability_logit_lens:
     num_samples: 100
-    
+
   interpretability_attention_entropy:
     batch_size: 1
     num_samples: 100
-    
+
   interpretability_prediction_entropy:
     num_samples: 100
-    
+
   interpretability_induction_heads:
     seq_len: 30
     num_samples: 20
-    
+
   interpretability_sae_features:
     num_samples: 5
     sae_release: "gpt2-small-res-jb"
     sae_id: "blocks.8.hook_resid_pre"
-    
+
   interpretability_sparsity:
     num_samples: 5
-    
+
   interpretability_waa:
     num_samples: 5
-    
-  interpretability_attention_polysemanticity:
+
+  interpretability_attention_effective_rank:
     num_samples: 3
-    
+
+  interpretability_attention_rank:
+    num_samples: 50
+
+  interpretability_head_roles:
+    seq_len: 30
+    num_samples: 20
+
   interpretability_probing:
     num_samples: 50
     max_tokens: 128
     max_probe_samples: 5000
-    
+
   interpretability_attention_graph:
     num_samples: 10
-    
+
   interpretability_attribution:
     num_samples: 50
 
-  # ==========================================
-  # Dynamics Tasks
-  # ==========================================
+  interpretability_superposition:
+    num_samples: 5
+    max_neurons: 256
+
+  interpretability_activation_sinks:
+    num_samples: 10
+    max_length: 128
+    sink_epsilon: 0.3
+    massive_threshold_ratio: 100.0
+
+  # ---- Dynamics Tasks (6) ----
   dynamics_stability:
     k: 50
-    n_sample: 5000
+    num_samples: 5000
     reference_model_path: null
-    
+
+  dynamics_sharpness:
+    param_scope: last_layer
+    n_hutchinson: 5
+    n_power_iter: 8
+    sam_rho: 0.05
+    num_samples: 4
+
+  dynamics_gradient_flow:
+    num_samples: 4
+
   dynamics_interpolation:
     num_pairs: 50
     steps: 10
     num_samples: 10
-    
+
   dynamics_coe:
     num_samples: 5
-    generation_steps: 10
+    token_position: last
 
-  # ==========================================
-  # Consistency Tasks
-  # ==========================================
+  dynamics_generation_diversity:
+    n_samples_per_prompt: 6
+    temperature: 0.8
+    max_new_tokens: 32
+    num_prompts: 6
+
+  # ---- Consistency Tasks (12) ----
   consistency_contrastive:
     num_samples: 3
-    
+
   consistency_logical:
-    num_samples: 3
-    margin: 0.1
-    
+    num_samples: 5
+
   consistency_calibration:
     num_samples: 100
     n_bins: 10
-    
+    use_cache: false
+
   consistency_paraphrase:
     num_samples: 5
 
-  # ==========================================
-  # Representation Engineering Tasks
-  # ==========================================
+  consistency_contamination:
+    num_samples: 10
+    k_pct: 20
+
+  consistency_knowledge_capacity:
+    num_samples: 5
+
+  consistency_position_sensitivity:
+    positions: [0.0, 0.25, 0.5, 0.75, 1.0]
+    num_samples: 10
+
+  consistency_format_robustness:
+    num_samples: 12
+
+  consistency_self_consistency:
+    n_samples_per_prompt: 8
+    temperature: 0.7
+    max_new_tokens: 8
+    num_prompts: 12
+
+  consistency_bias_weat:
+    n_permutations: 500
+    template: "This is {}."
+
+  consistency_membership_inference: {}
+
+  consistency_icl_slope:
+    shot_counts: [0, 1, 2, 4]
+
+  # ---- Representation Engineering Tasks (4) ----
   repe_task_vectors:
     num_samples: 5
-    
+
   repe_concept_separability:
     num_samples: 20
+
+  repe_steering_effectiveness:
+    num_samples: 3
+    steering_alpha: 1.0
+    steering_threshold: 0.01
+
+  repe_refusal_direction: {}

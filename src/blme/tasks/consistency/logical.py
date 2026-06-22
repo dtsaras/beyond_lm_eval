@@ -10,14 +10,15 @@ logger = logging.getLogger("blme")
 @register_task("consistency_logical")
 class LogicalConsistencyTask(DiagnosticTask):
     """
-    Measures Logical Consistency (A implies B) using conditional probability.
+    Measures a conditional-likelihood entailment proxy.
     Evaluates whether P(conclusion | premise) > P(conclusion) — knowing the
     premise should make the conclusion more likely if entailment holds.
     A violation occurs when conditioning on the premise *decreases* the
-    probability of the conclusion.
+    probability of the conclusion. This is not a proof of logical reasoning.
 
-    References:
-    - "Measuring and Improving Consistency in Pretrained Language Models" (Elazar et al., 2021)
+    This is a BLME likelihood-consistency diagnostic related to general
+    textual entailment and LM consistency work; it is not the ParaRel
+    paraphrase-consistency metric from Elazar et al. 2021.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Logical Consistency Analysis...")
@@ -93,9 +94,18 @@ class LogicalConsistencyTask(DiagnosticTask):
         if not conditional_logprobs:
             return {"error": "No valid samples processed."}
 
+        mean_conditional = float(np.mean(conditional_logprobs))
+        mean_unconditional = float(np.mean(unconditional_logprobs))
+        lift = float(np.mean([c - u for c, u in zip(conditional_logprobs, unconditional_logprobs)]))
+        violation_rate = float(violations / len(conditional_logprobs))
+
         return {
-            "mean_conditional_logprob": float(np.mean(conditional_logprobs)),
-            "mean_unconditional_logprob": float(np.mean(unconditional_logprobs)),
-            "mean_lift": float(np.mean([c - u for c, u in zip(conditional_logprobs, unconditional_logprobs)])),
-            "logical_violation_rate": float(violations / len(conditional_logprobs)),
+            "diagnostic_semantics": "conditional_likelihood_entailment_proxy",
+            "mean_conditional_logprob": mean_conditional,
+            "mean_unconditional_logprob": mean_unconditional,
+            "conditional_likelihood_lift": lift,
+            "premise_decreases_conclusion_likelihood_rate": violation_rate,
+            # Legacy aliases retained for downstream compatibility.
+            "mean_lift": lift,
+            "logical_violation_rate": violation_rate,
         }

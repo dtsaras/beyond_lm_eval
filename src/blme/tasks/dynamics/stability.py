@@ -14,8 +14,11 @@ class NeighborhoodStabilityTask(DiagnosticTask):
     """
     Measures Jaccard stability of k-NN neighborhoods.
     If 'reference_model_path' is provided in config, compares current model to reference.
-    Otherwise, compares model against itself (sanity check = 1.0) or different seed/noise if implemented.
-    For now, standard usage requires a reference.
+    Otherwise, compares the embedding neighborhood graph against a seeded
+    small Gaussian perturbation of the embeddings.
+
+    This is a BLME embedding-graph diagnostic, not a Lyapunov exponent or
+    Jacobian spectral-norm calculation.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neighborhood Stability Analysis...")
@@ -29,6 +32,7 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         E1 = E1.to(device)
         
         if ref_path:
+            stability_mode = "reference_model"
             logger.info(f"Loading reference model from {ref_path}...")
             # This is heavy. Optimally we just load embeddings if possible.
             # But assume we load model for compatibility.
@@ -45,8 +49,24 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             except Exception as e:
                 return {"error": f"Failed to load ref model: {e}"}
         else:
-            logger.info("No reference model provided. Calculating self-stability (should be 1.0).")
-            E2 = E1
+            stability_mode = "embedding_noise"
+            noise_std = float(self.config.get("noise_std", 0.01))
+            seed = int(self.config.get("seed", 42))
+            logger.info(
+                "No reference model provided. Calculating embedding-noise "
+                f"stability with noise_std={noise_std}."
+            )
+            generator = torch.Generator(device=E1.device)
+            generator.manual_seed(seed)
+            E1_float = E1.float()
+            row_scale = E1_float.norm(dim=1, keepdim=True).clamp_min(1e-10)
+            noise = torch.randn(
+                E1_float.shape,
+                device=E1.device,
+                dtype=E1_float.dtype,
+                generator=generator,
+            ) * row_scale * noise_std
+            E2 = E1_float + noise
             
         # Compute Stability
         E1_np = E1.float().cpu().numpy()
@@ -80,6 +100,8 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             jaccards.append(jaccard)
             
         return {
+            "diagnostic_semantics": "embedding_neighborhood_jaccard_stability",
             "stability_mean": float(np.mean(jaccards)),
-            "stability_std": float(np.std(jaccards))
+            "stability_std": float(np.std(jaccards)),
+            "stability_mode": stability_mode,
         }

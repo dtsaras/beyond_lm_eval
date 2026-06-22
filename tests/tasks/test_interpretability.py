@@ -32,8 +32,13 @@ def test_attribution(mock_model, mock_tokenizer):
     task = ComponentAttributionTask(config={"num_samples": 2})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
-    assert "component_coherence_mean" in results
-    assert -1.0 <= results["component_coherence_mean"] <= 1.0
+    assert "mean_gradient_x_activation" in results
+    assert "max_gradient_x_activation" in results
+    assert "attribution_gini" in results
+    assert "component_coherence_mean" not in results
+    assert results["mean_gradient_x_activation"] >= 0
+    assert results["max_gradient_x_activation"] >= results["mean_gradient_x_activation"]
+    assert 0 <= results["attribution_gini"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +74,7 @@ def test_attention_graph(mock_model, mock_tokenizer):
 
 
 def test_attention_polysemanticity(mock_model, mock_tokenizer):
-    """SVD entropy (effective rank) of attention outputs."""
+    """SVD entropy (effective rank) of combined attention outputs."""
     from blme.tasks.interpretability.attention_polysemanticity import (
         AttentionEffectiveRankTask,
     )
@@ -80,8 +85,10 @@ def test_attention_polysemanticity(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # Architecture-specific module name matching — may return error
     if "error" not in results:
-        assert "mean_attention_effective_rank_entropy" in results
-        assert results["mean_attention_effective_rank_entropy"] >= 0
+        assert "mean_attention_output_effective_rank_entropy" in results
+        assert "num_attention_output_projections_sampled" in results
+        assert "mean_attention_effective_rank_entropy" not in results
+        assert results["mean_attention_output_effective_rank_entropy"] >= 0
 
 
 def test_induction_heads(mock_model, mock_tokenizer):
@@ -166,6 +173,233 @@ def test_sae_features(mock_model, mock_tokenizer):
     # Expected to return error when sae_lens is not installed or SAE doesn't
     # match the test model — both are valid outcomes
     assert "error" in results or "mean_active_features_l0" in results
+
+
+def test_sae_resid_pre_hook_uses_input_to_parsed_block(monkeypatch):
+    """blocks.8.hook_resid_pre maps to hidden_states[8], not [9]."""
+    import torch
+    import torch.nn as nn
+
+    from blme.tasks.interpretability import sae_features
+    from blme.tasks.interpretability.sae_features import SAEFeatureDimensionalityTask
+
+    class FakeSAE:
+        observed_mean = None
+        cfg = type("Cfg", (), {"d_sae": 3})()
+
+        @classmethod
+        def from_pretrained(cls, release, sae_id, device):
+            return cls(), None, None
+
+        def eval(self):
+            return self
+
+        def encode(self, h):
+            FakeSAE.observed_mean = float(h.mean().item())
+            return torch.ones(h.shape[0], 3, device=h.device)
+
+    class Batch(dict):
+        def to(self, device):
+            return self
+
+    class Tok:
+        def __call__(self, text, return_tensors="pt", truncation=True, max_length=128):
+            return Batch({"input_ids": torch.tensor([[1, 2, 3, 4]])})
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.transformer = type("Transformer", (), {})()
+            self.transformer.h = nn.ModuleList([nn.Identity() for _ in range(10)])
+            self.config = type("Cfg", (), {"_name_or_path": "gpt2"})()
+            self.p = nn.Parameter(torch.zeros(()))
+
+        def forward(self, input_ids=None, **kwargs):
+            hidden_states = tuple(
+                torch.full((1, input_ids.shape[1], 4), float(i))
+                for i in range(11)
+            )
+            return type("Out", (), {"hidden_states": hidden_states})()
+
+    monkeypatch.setattr(sae_features, "HAS_SAE_LENS", True)
+    monkeypatch.setattr(sae_features, "SAE", FakeSAE, raising=False)
+
+    task = SAEFeatureDimensionalityTask(
+        config={
+            "num_samples": 1,
+            "sae_release": "gpt2-small-res-jb",
+            "sae_id": "blocks.8.hook_resid_pre",
+        }
+    )
+    result = task.evaluate(Model(), Tok(), dataset=[{"text": "x"}])
+
+    assert "error" not in result
+    assert FakeSAE.observed_mean == 8.0
+
+
+def test_sae_rejects_unsupported_hook():
+    from blme.tasks.interpretability.sae_features import _select_sae_hidden_state_index
+
+    with pytest.raises(ValueError, match="Unsupported SAE hook"):
+        _select_sae_hidden_state_index("blocks.4.hook_mlp_out", 12)
+
+
+def test_attention_effective_rank_reports_output_metric_and_deterministic_sample():
+    import torch
+    import torch.nn as nn
+
+    from blme.tasks.interpretability.attention_polysemanticity import (
+        AttentionEffectiveRankTask,
+    )
+
+    class AttentionBlock(nn.Module):
+        def __init__(self, width):
+            super().__init__()
+            self.attn = nn.Module()
+            self.attn.c_proj = nn.Linear(width, width, bias=False)
+            nn.init.eye_(self.attn.c_proj.weight)
+
+        def forward(self, h):
+            return self.attn.c_proj(h)
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = nn.ModuleList([AttentionBlock(4) for _ in range(6)])
+            self.p = nn.Parameter(torch.zeros(()))
+
+        def forward(self, input_ids=None, **kwargs):
+            h = torch.nn.functional.one_hot(input_ids % 4, num_classes=4).float()
+            for i, block in enumerate(self.blocks):
+                h = block(h + float(i))
+            return type("Out", (), {})()
+
+    class Batch(dict):
+        def to(self, device):
+            return self
+
+    class Tok:
+        def __call__(self, text, return_tensors="pt", truncation=True, max_length=128):
+            return Batch({"input_ids": torch.tensor([[0, 1, 2, 3, 0]])})
+
+    task = AttentionEffectiveRankTask(config={"num_samples": 1})
+    dataset = [{"text": "sample"}]
+
+    first = task.evaluate(Model(), Tok(), dataset=dataset)
+    second = task.evaluate(Model(), Tok(), dataset=dataset)
+
+    assert "error" not in first
+    assert first["num_attention_output_projections_found"] == 6
+    assert first["num_attention_output_projections_sampled"] == 4
+    assert "mean_attention_output_effective_rank_entropy" in first
+    assert "mean_attention_effective_rank_entropy" not in first
+    assert first == second
+
+
+def test_core_forces_eager_for_non_cached_attention_task(monkeypatch):
+    import torch
+    import torch.nn as nn
+
+    import blme.core as core
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(()))
+            self.config = type("Cfg", (), {"_attn_implementation": "sdpa"})()
+            self.set_calls = []
+
+        def set_attn_implementation(self, value):
+            self.set_calls.append(value)
+            self.config._attn_implementation = value
+
+    model = Model()
+
+    class EagerCheckTask:
+        def __init__(self, config=None):
+            self.config = config or {}
+
+        def evaluate(self, model, tokenizer, dataset=None, cache=None):
+            return {"attn_impl": model.config._attn_implementation}
+
+    monkeypatch.setattr(core, "_register_all_tasks", lambda: None)
+    monkeypatch.setattr(
+        core,
+        "get_task",
+        lambda name: EagerCheckTask
+        if name == "interpretability_attention_rank"
+        else None,
+    )
+    monkeypatch.setattr(
+        core,
+        "load_model_and_tokenizer",
+        lambda model_args, device: (model, object()),
+    )
+    monkeypatch.setattr(core, "print_results_table", lambda *args, **kwargs: None)
+
+    result = core.evaluate(
+        tasks=["interpretability_attention_rank"],
+        dataset=[{"text": "x"}],
+        task_configs={"interpretability_attention_rank": {"use_cache": False}},
+        device="cpu",
+    )
+
+    task_result = result["results"]["interpretability_attention_rank"]
+    assert task_result["attn_impl"] == "eager"
+    assert model.set_calls == ["eager"]
+
+
+def test_core_forces_eager_for_activation_sinks(monkeypatch):
+    import torch
+    import torch.nn as nn
+
+    import blme.core as core
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(()))
+            self.config = type("Cfg", (), {"_attn_implementation": "sdpa"})()
+            self.set_calls = []
+
+        def set_attn_implementation(self, value):
+            self.set_calls.append(value)
+            self.config._attn_implementation = value
+
+    model = Model()
+
+    class EagerCheckTask:
+        def __init__(self, config=None):
+            self.config = config or {}
+
+        def evaluate(self, model, tokenizer, dataset=None, cache=None):
+            return {"attn_impl": model.config._attn_implementation}
+
+    monkeypatch.setattr(core, "_register_all_tasks", lambda: None)
+    monkeypatch.setattr(
+        core,
+        "get_task",
+        lambda name: EagerCheckTask
+        if name == "interpretability_activation_sinks"
+        else None,
+    )
+    monkeypatch.setattr(
+        core,
+        "load_model_and_tokenizer",
+        lambda model_args, device: (model, object()),
+    )
+    monkeypatch.setattr(core, "print_results_table", lambda *args, **kwargs: None)
+
+    result = core.evaluate(
+        tasks=["interpretability_activation_sinks"],
+        dataset=[{"text": "x"}],
+        task_configs={"interpretability_activation_sinks": {"use_cache": False}},
+        device="cpu",
+    )
+
+    task_result = result["results"]["interpretability_activation_sinks"]
+    assert task_result["attn_impl"] == "eager"
+    assert model.set_calls == ["eager"]
 
 
 def test_weight_activation_alignment(mock_model, mock_tokenizer):

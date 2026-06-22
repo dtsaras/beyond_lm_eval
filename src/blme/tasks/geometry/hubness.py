@@ -8,6 +8,40 @@ from tqdm import tqdm
 import logging
 logger = logging.getLogger("blme")
 
+
+def _gini_from_counts(counts: np.ndarray) -> float:
+    counts = np.sort(np.asarray(counts, dtype=np.float64))
+    n = len(counts)
+    total = counts.sum()
+    if n == 0 or total <= 0:
+        return 0.0
+    ranks = np.arange(1, n + 1, dtype=np.float64)
+    return float((2 * np.sum(ranks * counts)) / (n * total) - (n + 1) / n)
+
+
+def _hubness_stats_from_occurrences(n_occ, k: int) -> dict:
+    """Hubness skew/max/top-1%/Gini from k-NN occurrence counts."""
+    n_occ_cpu = np.asarray(n_occ, dtype=np.int64)
+    if n_occ_cpu.std() == 0 or n_occ_cpu.sum() == 0:
+        hub_skew = 0.0
+    else:
+        hub_skew = float(skew(n_occ_cpu))
+    hub_max = int(n_occ_cpu.max()) if n_occ_cpu.size else 0
+    top_1pct_threshold = np.percentile(n_occ_cpu, 99) if n_occ_cpu.size else 0
+    denom = n_occ_cpu.sum()
+    top_1pct_mass = (
+        float(n_occ_cpu[n_occ_cpu >= top_1pct_threshold].sum() / denom)
+        if denom > 0
+        else 0.0
+    )
+    return {
+        f"hubness_k{k}_skew": float(hub_skew),
+        f"hubness_k{k}_max": hub_max,
+        f"hubness_k{k}_top1pct": float(top_1pct_mass),
+        f"hubness_k{k}_gini": _gini_from_counts(n_occ_cpu),
+    }
+
+
 @register_task("geometry_hubness")
 class GlobalHubnessTask(DiagnosticTask):
     """
@@ -17,7 +51,7 @@ class GlobalHubnessTask(DiagnosticTask):
     References:
       * Tomašev, Radovanović, Mladenić, Ivanović 2014 — "The Role of
         Hubness in Clustering High-Dimensional Data", IEEE TKDE 26 (3),
-        arXiv:1209.6425. Formalises the k-NN skewness / Gini hubness
+        IEEE TKDE 26(3):739-751, 2014 (DOI 10.1109/TKDE.2013.25; no arXiv). Formalises the k-NN skewness / Gini hubness
         measures used here.
       * Radovanović, Nanopoulos, Ivanović 2010 — "Hubs in Space: Popular
         Nearest Neighbors in High-Dimensional Data", JMLR 11. The
@@ -91,26 +125,6 @@ class GlobalHubnessTask(DiagnosticTask):
         results = {}
         for k in k_values:
             n_occ_cpu = n_occ[k].cpu().numpy().astype(np.int64)
-
-            hub_skew = skew(n_occ_cpu)
-            hub_max = int(n_occ_cpu.max())
-
-            # Top 1% mass (concentration)
-            top_1pct_threshold = np.percentile(n_occ_cpu, 99)
-            denom = n_occ_cpu.sum()
-            top_1pct_mass = float(n_occ_cpu[n_occ_cpu >= top_1pct_threshold].sum() / denom) if denom > 0 else 0.0
-
-            # Gini coefficient — sorted ascending, 1-based ranks
-            n_occ_sorted = np.sort(n_occ_cpu).astype(np.float64)
-            n = len(n_occ_sorted)
-            if n_occ_sorted.sum() > 0:
-                gini = (2 * np.sum((np.arange(1, n + 1) * n_occ_sorted))) / (n * n_occ_sorted.sum()) - (n + 1) / n
-            else:
-                gini = 0.0
-
-            results[f'hubness_k{k}_skew'] = float(hub_skew)
-            results[f'hubness_k{k}_max'] = hub_max
-            results[f'hubness_k{k}_top1pct'] = float(top_1pct_mass)
-            results[f'hubness_k{k}_gini'] = float(gini)
+            results.update(_hubness_stats_from_occurrences(n_occ_cpu, k))
 
         return results

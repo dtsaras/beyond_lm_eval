@@ -23,10 +23,10 @@ class RepresentationCollapseTask(DiagnosticTask):
         Dimensionality", European Signal Processing Conference. The
         exp(Shannon-entropy-of-normalised-singular-values) erank formula
         this task reports under ``erank_per_layer``.
-      * Pedrotti, Guo, Jaffe et al. 2025 — "The Compression Valley:
-        A Depth-Dependent View of LLM Capability", arXiv:2505.xxxxx.
-        The shape of erank-vs-depth is the "compression valley" motif;
-        its max-drop and the per-layer slope we expose.
+      * Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv 2025 —
+        "Attention Sinks and Compression Valleys in LLMs are Two Sides
+        of the Same Coin", arXiv:2510.06477. The erank-vs-depth profile
+        is a BLME collapse/valley proxy, not the full paper pipeline.
 
     ``erank_per_layer.q75`` and ``collapse_ratio`` are BLME's top-17 and
     top-23 partial predictors beyond scale (+0.71 and +0.68 partial ρ;
@@ -77,8 +77,7 @@ class RepresentationCollapseTask(DiagnosticTask):
                     erank_per_layer.append(0.0)
                     continue
 
-            # Effective Rank (Roy & Vetterli 2007) — canonical form
-            # operates on eigenvalues of the Gram matrix, i.e. σ².
+            # Effective Rank (Roy & Vetterli 2007) on raw singular values.
             from .utils import effective_rank
             erank = effective_rank(S)
             erank_per_layer.append(erank)

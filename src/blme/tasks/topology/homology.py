@@ -30,6 +30,23 @@ except ImportError:
     HAS_RIPSER = False
 
 
+def _lifespan_summary(dgms) -> dict:
+    """Summarize ripser/GUDHI persistence diagrams into finite-bar lifespan
+    statistics (lifespan = death - birth; the essential infinite-death H0
+    bar is dropped). Matches the textbook persistence summary and is exact
+    against an analytically-known diagram (e.g. unit square -> H0 mean/max=1,
+    one H1 loop of persistence sqrt(2)-1).
+    """
+    h0 = [d - b for b, d in dgms[0] if d != np.inf]
+    h1 = [d - b for b, d in dgms[1] if d != np.inf] if len(dgms) > 1 else []
+    return {
+        "mean_persistence_h0": float(np.mean(h0)) if h0 else 0.0,
+        "max_persistence_h0": float(np.max(h0)) if h0 else 0.0,
+        "mean_persistence_h1": float(np.mean(h1)) if h1 else 0.0,
+        "num_loops_h1": len(h1),
+    }
+
+
 @register_task("topology_homology")
 class PersistentHomologyTask(DiagnosticTask):
     """
@@ -105,25 +122,11 @@ class PersistentHomologyTask(DiagnosticTask):
             # dgms[0] contains 0-dimensional features (connected components)
             # dgms[1] contains 1-dimensional features (loops)
             
-            # Feature lifespans
-            # The lifespan is birth - death. For H0, first feature has infinite death.
-            lifespans_h0 = []
-            for birth, death in dgms[0]:
-                if death != np.inf:
-                    lifespans_h0.append(death - birth)
-                    
-            lifespans_h1 = []
-            for birth, death in dgms[1]:
-                 if death != np.inf:
-                    lifespans_h1.append(death - birth)
-                    
-            # Describe the topology.
-            # Mean lifespan gives an idea of how persistent the structural features are.
-            results[f"layer_{l_idx}_mean_persistence_h0"] = float(np.mean(lifespans_h0)) if lifespans_h0 else 0.0
-            results[f"layer_{l_idx}_max_persistence_h0"] = float(np.max(lifespans_h0)) if lifespans_h0 else 0.0
-            results[f"layer_{l_idx}_mean_persistence_h1"] = float(np.mean(lifespans_h1)) if lifespans_h1 else 0.0
-            
-            # The number of non-trivial loops
-            results[f"layer_{l_idx}_num_loops_h1"] = len(lifespans_h1)
-            
+            # Summarize finite-bar lifespans (shared, testable helper).
+            summary = _lifespan_summary(dgms)
+            results[f"layer_{l_idx}_mean_persistence_h0"] = summary["mean_persistence_h0"]
+            results[f"layer_{l_idx}_max_persistence_h0"] = summary["max_persistence_h0"]
+            results[f"layer_{l_idx}_mean_persistence_h1"] = summary["mean_persistence_h1"]
+            results[f"layer_{l_idx}_num_loops_h1"] = summary["num_loops_h1"]
+
         return results

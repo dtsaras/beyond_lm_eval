@@ -3,7 +3,7 @@ Attention head role classification — Olsson et al. 2022 complement.
 
 While `induction.py` detects induction heads (attend to J+1 where J is
 the previous occurrence of the current token), this module classifies
-heads into the additional roles described in the mechanistic
+heads into simple attention-pattern roles described in the mechanistic
 interpretability literature:
 
   - **Previous-token head**: head at position K attends strongly to
@@ -14,16 +14,14 @@ interpretability literature:
     all positions J where token[J] == token[K]. These detect repeated
     tokens without doing the +1 shift that induction heads require.
 
-  - **Copying score (OV circuit)**: for each head, project the attended
-    token through the OV circuit (W_V @ W_O) and check how much the
-    output aligns with the attended token's embedding. High copying
-    score = the head's OV moves information about the attended token to
-    the output (which is the second half of what makes an induction
-    head work).
+All detection is attention-weight-based (no ablation and no OV copying
+score), which makes this fast (~3x a single forward pass). Use dedicated
+circuit/OV analyses for claims about value-copying mechanisms.
 
-All detection is attention-weight-based (no ablation), which makes this
-fast (~3x a single forward pass). The copying score additionally uses
-the static W_V @ W_O matrices.
+Attribution: the previous-token score follows Olsson et al. 2022
+(arXiv:2209.11895); the duplicate-token score follows Wang et al. 2022,
+"Interpretability in the Wild" (IOI, arXiv:2211.00593). Clark et al. 2019
+and Voita et al. 2019 are the broader attention-head-analysis context.
 """
 
 import logging

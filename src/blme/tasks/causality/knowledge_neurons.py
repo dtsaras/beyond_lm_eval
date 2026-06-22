@@ -1,10 +1,11 @@
 """
-Knowledge neuron localization — Dai et al. 2022, arXiv:2104.08696.
+FFN intermediate-neuron saliency concentration.
 
 For each (prompt, target_token) pair, compute saliency of every MLP
 intermediate neuron with respect to the target token's logit, then
-aggregate across facts to find which neurons consistently contribute
-to factual recall.
+aggregate across prompts. The registered task name remains
+``causality_knowledge_neurons`` for compatibility, but this is not
+Dai-style integrated-gradient knowledge-neuron localization.
 
 Metrics reported:
   - **mean_attribution_gini**: average Gini coefficient of the
@@ -23,8 +24,7 @@ Metrics reported:
 Caveats:
   - This is the *gradient × activation* approximation, not full
     integrated gradients (no path integral). It is a fixed-point
-    saliency rather than IG, but is several orders of magnitude
-    cheaper and the qualitative signal is the same.
+    saliency concentration diagnostic.
   - Requires autograd (no `torch.no_grad()`); may need
     `attn_implementation='eager'` for some models that route through
     SDPA's specialized kernels.
@@ -88,10 +88,10 @@ def _gini(values: np.ndarray) -> float:
 
 @register_task("causality_knowledge_neurons")
 class KnowledgeNeuronsTask(DiagnosticTask):
-    """Per-fact saliency on MLP intermediates (Dai et al. 2022)."""
+    """Per-prompt gradient-activation saliency on MLP intermediates."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Knowledge Neurons Localization...")
+        logger.info("Running FFN saliency concentration diagnostic...")
 
         if dataset is not None and isinstance(dataset, list) and dataset and (
             isinstance(dataset[0], dict) and {"prompt", "target"} <= set(dataset[0])
@@ -226,12 +226,26 @@ class KnowledgeNeuronsTask(DiagnosticTask):
         if not all_attribution_ginis:
             return {"error": "No facts produced usable attribution"}
 
+        mean_saliency_gini = float(np.mean(all_attribution_ginis))
+        mean_top1_share = float(np.mean(all_top1_shares))
+        mean_top1pct_share = float(np.mean(all_top1pct_shares))
+        saliency_layer_mean = float(np.mean(all_top_neuron_layers))
+        saliency_layer_entropy = float(np.mean(all_layer_entropies))
+
         return {
+            "diagnostic_method": "ffn_gradient_activation_saliency",
+            "saliency_unit": "ffn_intermediate_neuron",
             "n_facts": len(all_attribution_ginis),
-            "mean_attribution_gini": float(np.mean(all_attribution_ginis)),
-            "mean_top1_share": float(np.mean(all_top1_shares)),
-            "mean_top1pct_share": float(np.mean(all_top1pct_shares)),
-            "localization_layer_mean": float(np.mean(all_top_neuron_layers)),
-            "attribution_layer_entropy": float(np.mean(all_layer_entropies)),
+            "mean_saliency_gini": mean_saliency_gini,
+            "mean_top1_saliency_share": mean_top1_share,
+            "mean_top1pct_saliency_share": mean_top1pct_share,
+            "saliency_layer_mean": saliency_layer_mean,
+            "saliency_layer_entropy": saliency_layer_entropy,
+            # Compatibility aliases for existing result readers.
+            "mean_attribution_gini": mean_saliency_gini,
+            "mean_top1_share": mean_top1_share,
+            "mean_top1pct_share": mean_top1pct_share,
+            "localization_layer_mean": saliency_layer_mean,
+            "attribution_layer_entropy": saliency_layer_entropy,
             "n_layers": n_layers,
         }

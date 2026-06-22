@@ -58,6 +58,28 @@ def _cosine_pairwise_mean(vectors: np.ndarray, max_pairs: int = 5000) -> float:
     return float(np.einsum("ij,ij->i", unit[a], unit[b]).mean())
 
 
+def _intra_sentence_mean_cosine(vectors: np.ndarray) -> float:
+    """Ethayarajh 2019 IntraSim: mean cosine of each token vector to the
+    SENTENCE-MEAN vector.
+
+    IntraSim_l(s) = (1/n) Σ_i cos(f_l(s, i), s̄_l), where s̄_l is the
+    average of the token vectors. This is distinct from the pairwise-mean
+    cosine used for SelfSim — the reference (kawine/contextual analyze.py)
+    averages token-to-sentence-mean similarities, not token-to-token pairs.
+    """
+    n = vectors.shape[0]
+    if n < 2:
+        return float("nan")
+    mean = vectors.mean(axis=0, keepdims=True)
+    m_norm = np.linalg.norm(mean)
+    if m_norm == 0:
+        return float("nan")
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    unit = vectors / np.where(norms > 0, norms, 1.0)
+    unit_mean = mean / m_norm
+    return float((unit @ unit_mean.T).mean())
+
+
 def _max_explainable_variance(vectors: np.ndarray) -> float:
     """Fraction of variance captured by the top PC of `vectors` (n, d)."""
     n = vectors.shape[0]
@@ -192,13 +214,15 @@ class ContextualizationTask(DiagnosticTask):
             self_sim_corr = (self_sim_raw - baseline) if not np.isnan(self_sim_raw) else float("nan")
             mev_mean = float(np.nanmean(mevs)) if mevs else float("nan")
 
-            # 2. Intra-sentence similarity: average cosine sim within each
-            # sentence, then average across sentences.
+            # 2. Intra-sentence similarity (Ethayarajh 2019 IntraSim):
+            # mean cosine of each token to the sentence-mean vector, then
+            # average across sentences. (Token-to-mean, NOT pairwise — the
+            # pairwise form is SelfSim, used above.)
             intra_sims = []
             for h_np in intra_per_layer[li]:
                 if h_np.shape[0] < 2:
                     continue
-                intra_sims.append(_cosine_pairwise_mean(h_np))
+                intra_sims.append(_intra_sentence_mean_cosine(h_np))
             intra_raw = float(np.nanmean(intra_sims)) if intra_sims else float("nan")
             intra_corr = (intra_raw - baseline) if not np.isnan(intra_raw) else float("nan")
 

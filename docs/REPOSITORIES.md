@@ -1,7 +1,13 @@
 # Reference Repositories for BLME-Cited Papers
 
-Authoritative list of **reference implementations** for every paper
-cited by BLME. For reviewers verifying implementation faithfulness.
+Authoritative list of **reference implementations** for papers cited by
+BLME. For reviewers verifying implementation faithfulness.
+
+This file distinguishes *reference-code availability* from *BLME parity*:
+a GitHub URL means reviewers have a comparison target. It does not mean
+BLME is a line-for-line clone of that project. BLME uses paper-faithful
+formulas where practical and explicitly labels adaptations/proxies in the
+task docs.
 
 **Confidence**:
 - **HIGH** — official author / research-group repo or community-
@@ -10,7 +16,7 @@ cited by BLME. For reviewers verifying implementation faithfulness.
 - **LOW** — third-party implementation, verify against paper;
 - **NONE** — no code found; BLME implementation is paper-only.
 
-Last updated: **2026-04-20**.
+Last updated: **2026-06-20**.
 
 ---
 
@@ -35,7 +41,7 @@ Last updated: **2026-04-20**.
 | **Wei et al. 2024** — Matrix Entropy / Diff-eRank | arXiv:2401.17139, NeurIPS 2024 | [waltonfuture/Matrix-Entropy](https://github.com/waltonfuture/Matrix-Entropy) | HIGH |
 | **Li et al. 2024** — Matrix Nuclear-Norm | arXiv:2410.10672 | [MLGroupJLU/MatrixNuclearNorm](https://github.com/MLGroupJLU/MatrixNuclearNorm) | HIGH |
 | **Garrido et al. 2023** — RankMe | arXiv:2210.02885, ICML 2023 | no official code; formula is 1-line; reproduced inside [facebookresearch/stable-SSL](https://github.com/facebookresearch/stable-SSL) | LOW |
-| **Wei et al. 2025** — Text-Quality Geometric | arXiv:2509.25359 | no repo released as of 2026-04-20 | NONE |
+| **Yusupov et al. 2025** — Text-Quality Geometric | arXiv:2509.25359 | no repo released as of 2026-06-20 | NONE |
 | **Li et al. 2025** — Tracing Representation Geometry | arXiv:2509.23024, NeurIPS 2025 | [project page](https://melodylizx.github.io/llm-geometry-project/) — code "Coming Soon" | LOW |
 | **Park et al. 2024** — Linear Representation Hypothesis | arXiv:2311.03658, ICML 2024 | [KihoPark/linear_rep_geometry](https://github.com/KihoPark/linear_rep_geometry) | HIGH |
 
@@ -70,7 +76,7 @@ Last updated: **2026-04-20**.
 | **Gu et al. 2025** — Attention Sink Emergence | arXiv:2410.10781, ICLR 2025 | [sail-sg/Attention-Sink](https://github.com/sail-sg/Attention-Sink) | HIGH |
 | **Sun et al. 2024** — Massive Activations | arXiv:2402.17762 | [locuslab/massive-activations](https://github.com/locuslab/massive-activations) | HIGH |
 | **Xiao et al. 2023** — StreamingLLM | arXiv:2309.17453, ICLR 2024 | [mit-han-lab/streaming-llm](https://github.com/mit-han-lab/streaming-llm) | HIGH |
-| **Pedrotti, Guo 2025** — Compression Valleys | arXiv:2510.06477 | no repo released as of 2026-04-20 | NONE |
+| **Arroyo et al. 2025** — Compression Valleys | arXiv:2510.06477 | no repo released as of 2026-04-20 | NONE |
 
 ## Causality
 
@@ -171,24 +177,37 @@ Of the 10 papers with **NONE**: 5 are so-recent (2025+) that code is
 pending release; 5 are pre-2020 papers whose authors never released
 code (Simonyan 2014 saliency, Alain-Bengio 2017 probes, Caliskan 2017
 WEAT, Wang 2022 self-consistency, Allen-Zhu 2024 Physics of LMs).
-For all 10, BLME re-implements from the paper's formulas, verified
-against unit tests.
+For these papers, BLME re-implements from the published formulas or
+labels the task as a proxy/adaptation. Formula-level unit tests exist
+where the task has a compact closed form; otherwise the task docs carry
+the limitation explicitly.
 
-For the HIGH-confidence rows, BLME's implementation has been
-cross-checked against the reference code for the following
-paper-critical tasks:
+## BLME reference-check status
+
+The following task helpers have focused regression tests against the
+paper/reference-code formula, not just broad smoke tests. The compact
+fixture manifest is checked in at
+`tests/fixtures/reference_parity/formula_fixtures.json`.
+
 - Matrix Nuclear Norm ([MLGroupJLU/MatrixNuclearNorm](https://github.com/MLGroupJLU/MatrixNuclearNorm)) — `geometry_schatten._matrix_nuclear_norm_fast`
 - Attention Sink Sinkε ([sail-sg/Attention-Sink](https://github.com/sail-sg/Attention-Sink)) — `interpretability_activation_sinks._sink_epsilon`
-- Matrix Entropy ([waltonfuture/Matrix-Entropy](https://github.com/waltonfuture/Matrix-Entropy)) — `geometry_matrix_entropy`
-- ROME causal tracing ([kmeng01/rome](https://github.com/kmeng01/rome)) — `causality_tracing`
+- Matrix Entropy / Diff-eRank ([waltonfuture/Matrix-Entropy](https://github.com/waltonfuture/Matrix-Entropy)) — `geometry_matrix_entropy`
 - IsoScore ([bcbi-edu/p_eickhoff_isoscore](https://github.com/bcbi-edu/p_eickhoff_isoscore)) — `geometry_isoscore`
-- Representation Engineering ([andyzoujm/representation-engineering](https://github.com/andyzoujm/representation-engineering)) — `repe_*`
-- SAELens ([jbloomAus/SAELens](https://github.com/jbloomAus/SAELens)) — `interpretability_sae_features`
-- tuned-lens ([AlignmentResearch/tuned-lens](https://github.com/AlignmentResearch/tuned-lens)) — `interpretability_logit_lens` (with final-norm handling in round 4)
+- Two-NN intrinsic dimension ([efacco/TWO-NN](https://github.com/efacco/TWO-NN)) — `geometry_intrinsic_dim`
+- RankMe formula (paper-only / reproduced in community code) — `geometry_schatten.rankme`
+- Chain-of-Embedding equations ([Alsace08/Chain-of-Embedding](https://github.com/Alsace08/Chain-of-Embedding)) — `dynamics_coe`
+- Min-K % probability ([swj0419/detect-pretrain-code](https://github.com/swj0419/detect-pretrain-code)) — `consistency_contamination`
+- Linear CKA / normalized HSIC formulas — `geometry_cka`, `geometry_hsic`
+- Hubness occurrence summaries — `geometry_hubness`
+- ECE / Brier calibration formulas — `consistency_calibration`
+- Distinct-n / Self-BLEU formulas — `dynamics_generation_diversity`
+- Persistence entropy / landscape formulas — `topology_persistence_entropy`, `topology_persistence_landscape`
 
-For the remaining HIGH-confidence repos, the BLME implementation
-follows the paper's published formulas; the repo URLs above give
-reviewers a point of comparison.
+For the remaining HIGH-confidence repos, BLME follows the paper's
+published formulas or implements a documented proxy/adaptation. The repo
+URLs above are maintained as reviewer comparison targets. Do not claim
+line-for-line reference-code parity unless a task has a dedicated parity
+test or an explicit audit note.
 
 ---
 
@@ -198,6 +217,5 @@ Whenever a paper is added to `PAPERS.md` §1, add a row here. If the
 paper has no released code (NONE), say so — pretending a repo exists
 when it doesn't is worse than admitting it.
 
-Last audit: **2026-04-20** — 66 papers mapped, all URLs verified
-via direct GitHub page fetch or WebSearch during the April 2026
-audit cycle.
+Last audit: **2026-06-20** — repository links and parity claims were
+reviewed conservatively; undocumented parity claims were removed.

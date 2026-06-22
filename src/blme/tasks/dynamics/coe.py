@@ -14,7 +14,7 @@ The paper's headline "output-free" scores:
   * ``Ãng = (1/L) Σ A(h_l,h_{l+1}) / A(h_0, h_L)``                          (Eq. 3)
   * ``CoE-R = (1/L) Σ [M(h_l,h_{l+1})/M(h_0,h_L) − A(h_l,h_{l+1})/A(h_0,h_L)]`` (Eq. 5)
   * ``CoE-C = |(1/L) Σ C(h_l,h_{l+1})|`` where
-              ``C(h_l,h_{l+1}) = (M/M_0L) · exp(i · A/A_0L)``                 (Eq. 7)
+              ``C(h_l,h_{l+1}) = M · exp(i · A)``                             (Eq. 7)
 
 Note on token position (departure from the paper): Wang et al. run
 ``model.generate`` and mean-pool ``h^(l)`` across every generated
@@ -40,8 +40,12 @@ def _angle_between(a: torch.Tensor, b: torch.Tensor) -> float:
     """Arccos of the clamped cosine similarity — Eq. 2."""
     an = F.normalize(a, p=2, dim=-1)
     bn = F.normalize(b, p=2, dim=-1)
-    c = torch.clamp(torch.dot(an, bn), -1.0 + 1e-7, 1.0 - 1e-7)
-    return float(torch.acos(c).item())
+    c = float(torch.dot(an, bn).item())
+    if c >= 1.0 - 1e-12:
+        return 0.0
+    if c <= -1.0 + 1e-12:
+        return float(np.pi)
+    return float(torch.acos(torch.tensor(c)).item())
 
 
 def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
@@ -89,20 +93,23 @@ def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
     else:
         coe_r = float("nan")
 
-    # CoE-C (Eq. 7) — Euclidean norm of the complex-plane centroid.
-    # C(h_l, h_{l+1}) = (M_l / Z_M) · exp(i · A_l / Z_A)
-    if (
-        np.all(np.isfinite(mag_norm_pair))
-        and np.all(np.isfinite(ang_norm_pair))
-    ):
-        vecs = np.array([
-            m * np.exp(1j * a)
-            for m, a in zip(mag_norm_pair, ang_norm_pair)
-        ])
-        centroid = vecs.mean()
-        coe_c = float(abs(centroid))
+    # CoE-C (Eq. 6/7) — magnitude of the complex-plane centroid, using the
+    # NORMALIZED magnitude as radius AND the NORMALIZED angle as phase,
+    # exactly matching the reference score.py compute_CoE_C
+    # (Alsace08/Chain-of-Embedding): x = Mag̃·cos(Ãng), y = Mag̃·sin(Ãng),
+    # CoE-C = sqrt(mean(x)^2 + mean(y)^2).
+    # (Fixed 2026-06-22: previously used RAW magnitude and RAW angle, which
+    # matched neither the paper code nor the paper prose.)
+    if np.all(np.isfinite(mag_norm_pair)) and np.all(np.isfinite(ang_norm_pair)):
+        x = np.array([mn * np.cos(an) for mn, an in zip(mag_norm_pair, ang_norm_pair)])
+        y = np.array([mn * np.sin(an) for mn, an in zip(mag_norm_pair, ang_norm_pair)])
+        coe_c = float(np.sqrt(x.mean() ** 2 + y.mean() ** 2))
+        # The reference CoE-C IS the fully-normalized form; keep the
+        # ``normalized_coe_c`` key as a documented alias for compatibility.
+        normalized_coe_c = coe_c
     else:
         coe_c = float("nan")
+        normalized_coe_c = float("nan")
 
     return {
         "magnitudes": mags,
@@ -115,6 +122,7 @@ def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
         "ang_norm_mean": ang_norm_mean,
         "coe_r": coe_r,
         "coe_c": coe_c,
+        "normalized_coe_c": normalized_coe_c,
     }
 
 
@@ -187,6 +195,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "coe_r_std": _std("coe_r"),
             "coe_c": _mean("coe_c"),
             "coe_c_std": _std("coe_c"),
+            "normalized_coe_c": _mean("normalized_coe_c"),
+            "normalized_coe_c_std": _std("normalized_coe_c"),
 
             # Raw (unnormalised) magnitudes/angles for completeness.
             "mean_magnitude_change": float(np.mean(flat_mags)),
@@ -203,6 +213,9 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             ],
             "per_sample_coe_r": [r["coe_r"] for r in sample_results],
             "per_sample_coe_c": [r["coe_c"] for r in sample_results],
+            "per_sample_normalized_coe_c": [
+                r["normalized_coe_c"] for r in sample_results
+            ],
 
             # Metadata so reviewers can interpret the numbers.
             "axis": "layers",

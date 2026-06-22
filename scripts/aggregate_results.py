@@ -24,6 +24,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_zoo import MODELS
+from feature_selection import is_lower_is_better_benchmark
 
 # ── Feature category mapping ────────────────────────────────────────────
 TASK_CATEGORY = {
@@ -390,6 +391,33 @@ def _fetch_hf_config_sizes(metadata: pd.DataFrame) -> pd.DataFrame:
     return metadata.merge(sizes_df, on="model", how="left")
 
 
+def _compute_composite_benchmark(bench_matrix: pd.DataFrame) -> pd.Series:
+    """Min-max normalize benchmarks to higher-is-better, then average.
+
+    Columns with fewer than two valid values or zero range are dropped so
+    degenerate lower-is-better metrics (e.g. constant perplexity) cannot
+    pollute the composite in raw units.
+    """
+    normalized = bench_matrix.copy()
+    usable_cols: List[str] = []
+    for c in normalized.columns:
+        col = normalized[c]
+        valid = col.notna()
+        if valid.sum() < 2:
+            continue
+        mn, mx = col[valid].min(), col[valid].max()
+        if mx <= mn:
+            continue
+        if is_lower_is_better_benchmark(c):
+            normalized[c] = (mx - col) / (mx - mn)
+        else:
+            normalized[c] = (col - mn) / (mx - mn)
+        usable_cols.append(c)
+    if not usable_cols:
+        return pd.Series(np.nan, index=bench_matrix.index)
+    return normalized[usable_cols].mean(axis=1, skipna=True)
+
+
 # Manual parameter counts (authoritative, in millions)
 MANUAL_PARAM_COUNTS_M = {
     "gpt2-small": 124, "gpt2-medium": 355, "gpt2-large": 774, "gpt2-xl": 1500,
@@ -583,16 +611,7 @@ def main():
     # Compute composite benchmark score
     bench_cols = [c for c in aggregated.columns if c.startswith("benchmark_")]
     if bench_cols:
-        # Min-max normalize each benchmark, then mean
-        bench_matrix = aggregated[bench_cols].copy()
-        for c in bench_cols:
-            col = bench_matrix[c]
-            valid = col.notna()
-            if valid.sum() >= 2:
-                mn, mx = col[valid].min(), col[valid].max()
-                if mx > mn:
-                    bench_matrix[c] = (col - mn) / (mx - mn)
-        aggregated["composite_benchmark"] = bench_matrix.mean(axis=1, skipna=True)
+        aggregated["composite_benchmark"] = _compute_composite_benchmark(aggregated[bench_cols])
     else:
         aggregated["composite_benchmark"] = np.nan
 
@@ -605,6 +624,8 @@ def main():
     print(f"Wrote metadata: {meta_path}")
 
     # Feature metadata CSV (for filtering by category/tier)
+    from feature_selection import is_excluded_predictor, tag_primary_eligibility
+
     feature_meta_rows = []
     for col in features_df.columns:
         if col == "model":
@@ -617,6 +638,7 @@ def main():
             "task": task_name,
             "category": category,
             "tier": tier,
+            "primary_eligible": not is_excluded_predictor(col),
         })
     feature_meta = pd.DataFrame(feature_meta_rows)
     feature_meta_path = output_dir / "feature_metadata.csv"

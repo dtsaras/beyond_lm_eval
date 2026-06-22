@@ -529,34 +529,66 @@ class RefusalDirectionTask(DiagnosticTask):
         per_layer = {}
         best_auc = -1.0
         best_layer = -1
+        min_class = min(len(harmful), len(harmless))
+        n_splits = min(int(self.config.get("cv_splits", 3)), min_class)
+        if n_splits < 2:
+            return {"error": "Need at least 2 prompts in each class for held-out separability"}
+        seed = int(self.config.get("seed", 42))
         for li in range(n_layers):
             if harmful_states[li].size == 0 or harmless_states[li].size == 0:
                 continue
-            mu_h = harmful_states[li].mean(axis=0)
-            mu_n = harmless_states[li].mean(axis=0)
-            direction = mu_h - mu_n
-            d_norm = float(np.linalg.norm(direction))
+            X = np.concatenate([harmful_states[li], harmless_states[li]], axis=0)
+            y = np.concatenate([
+                np.ones(len(harmful_states[li]), dtype=int),
+                np.zeros(len(harmless_states[li]), dtype=int),
+            ])
+            mask = np.isfinite(X).all(axis=1)
+            X = X[mask]
+            y = y[mask]
+            if len(np.unique(y)) < 2 or np.bincount(y).min() < n_splits:
+                continue
+
+            mu_h = X[y == 1].mean(axis=0)
+            mu_n = X[y == 0].mean(axis=0)
+            full_direction = mu_h - mu_n
+            d_norm = float(np.linalg.norm(full_direction))
             if d_norm == 0:
                 continue
-            unit = direction / d_norm
 
-            proj_h = harmful_states[li] @ unit
-            proj_n = harmless_states[li] @ unit
-            mean_gap = float(proj_h.mean() - proj_n.mean())
+            cv = StratifiedKFold(
+                n_splits=n_splits, shuffle=True, random_state=seed,
+            )
+            fold_aucs = []
+            fold_gaps = []
+            for train_idx, test_idx in cv.split(X, y):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                train_h = X_train[y_train == 1]
+                train_n = X_train[y_train == 0]
+                direction = train_h.mean(axis=0) - train_n.mean(axis=0)
+                norm = float(np.linalg.norm(direction))
+                if norm == 0:
+                    continue
+                unit = direction / norm
+                scores = X_test @ unit
+                try:
+                    fold_aucs.append(float(roc_auc_score(y_test, scores)))
+                except Exception:
+                    continue
+                test_h = scores[y_test == 1]
+                test_n = scores[y_test == 0]
+                if len(test_h) and len(test_n):
+                    fold_gaps.append(float(test_h.mean() - test_n.mean()))
 
-            # AUROC via Mann-Whitney U statistic
-            try:
-                from sklearn.metrics import roc_auc_score
-                ys = np.concatenate([np.ones_like(proj_h), np.zeros_like(proj_n)])
-                scores = np.concatenate([proj_h, proj_n])
-                auc = float(roc_auc_score(ys, scores))
-            except Exception:
-                auc = float("nan")
+            auc = float(np.mean(fold_aucs)) if fold_aucs else float("nan")
+            mean_gap = float(np.mean(fold_gaps)) if fold_gaps else float("nan")
 
             per_layer[f"layer{li}"] = {
                 "direction_norm": d_norm,
                 "separability_auc": auc,
                 "mean_projection_gap": mean_gap,
+                "separability_validation": "stratified_kfold_projection",
+                "cv_splits": int(n_splits),
             }
             if not np.isnan(auc) and auc > best_auc:
                 best_auc = auc
@@ -615,6 +647,9 @@ class RefusalDirectionTask(DiagnosticTask):
             "best_layer_fraction": best_layer_fraction,
             "n_harmful": len(harmful),
             "n_harmless": len(harmless),
+            "separability_validation": "stratified_kfold_projection",
+            "metric_interpretation": "heldout_linear_separability",
+            "cv_splits": int(n_splits),
             **depth_auc,
         }
         return result

@@ -25,11 +25,13 @@ def _svd_metrics_for_layer(X):
             return None
 
     explained_variance = np.cumsum(S ** 2) / np.sum(S ** 2)
-    # np.trapezoid was introduced in NumPy 2.0; fall back to np.trapz for compatibility
-    _trapz = getattr(np, "trapezoid", np.trapz)
+    # np.trapezoid was introduced in NumPy 2.0 and np.trapz removed in it.
+    # Use a LAZY lookup: `getattr(np, "trapezoid", np.trapz)` eagerly
+    # evaluates np.trapz, which raises AttributeError on NumPy 2.x.
+    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
     auc = _trapz(explained_variance) / max(1, len(explained_variance))
 
-    # Canonical Roy-Vetterli effective rank on σ² (shared helper).
+    # Roy-Vetterli effective rank on raw singular values (shared helper).
     from .utils import effective_rank as _effective_rank
     effective_rank = float(_effective_rank(S))
 
@@ -38,7 +40,8 @@ def _svd_metrics_for_layer(X):
     sum_eig_sq = np.sum(eigenvalues ** 2)
     participation_ratio = float((sum_eig ** 2) / (sum_eig_sq + 1e-12))
 
-    indices = np.random.choice(len(X), size=(min(1000, len(X)), 2), replace=True)
+    rng = np.random.default_rng(42)
+    indices = rng.choice(len(X), size=(min(1000, len(X)), 2), replace=True)
     vecs1 = X[indices[:, 0]]
     vecs2 = X[indices[:, 1]]
     norms1 = np.linalg.norm(vecs1, axis=1, keepdims=True)
@@ -79,22 +82,17 @@ def _isoscore(X: np.ndarray) -> float:
     Ethayarajh anisotropy baseline (which only looks at average cosine
     similarity of random pairs).
 
-    Algorithm (sum-normalisation form):
+    Algorithm (Rudman et al. Eq. 4.1):
       1. Center X and compute the eigenvalue spectrum lambda_i of cov(X)
-         via SVD on centered data.
-      2. Scale lambda so sum(lambda_i) = d, so the isotropic case gives
-         the all-ones vector.
-      3. delta^2 = ||lambda - 1||^2.
-      4. delta_iso^2 = d*(d-1) — the maximum delta achieved when all the
-         variance lives in a single PC (lambda = (d, 0, ..., 0)).
-      5. psi = (delta_iso^2 - delta^2) / delta_iso^2  (in [0, 1]).
-      6. IsoScore = ((d - 1) * psi + 1) / d  (in [1/d, 1]).
+         via SVD on centered data, padding zeros to the ambient dimension.
+      2. L2-normalise the spectrum to length sqrt(d); an isotropic spectrum
+         becomes the all-ones vector.
+      3. Compute the isotropy defect
+         delta = ||lambda_hat - 1|| / sqrt(2 * (d - sqrt(d))).
+      4. IsoScore = ((d - delta^2 * (d - sqrt(d)))^2 - d) / (d * (d - 1)).
 
-    Verified empirically: 1.00 for an isotropic Gaussian, ~0.03 when
-    99.99% of the variance lives in a single dimension, ~0.64 for a
-    1.5^-i power-law decay spectrum.
-
-    Returns a scalar in [1/d, 1] where 1 = perfectly isotropic.
+    Returns a scalar in [0, 1] where 1 = perfectly isotropic and 0 =
+    effectively one-dimensional ambient-space use.
     """
     n, d = X.shape
     if n < 2 or d < 2:
@@ -109,19 +107,18 @@ def _isoscore(X: np.ndarray) -> float:
 
     full = np.zeros(d, dtype=np.float64)
     full[: len(eigvals)] = eigvals
-    s = full.sum()
-    if s <= 0:
-        return float("nan")
-    full = full * (d / s)
-
-    delta_sq = float(np.sum((full - 1.0) ** 2))
-    delta_iso_sq = float(d * (d - 1))
-    if delta_iso_sq == 0:
+    spectrum_norm = float(np.linalg.norm(full))
+    if spectrum_norm <= 0 or not np.isfinite(spectrum_norm):
         return float("nan")
 
-    psi = max(0.0, (delta_iso_sq - delta_sq) / delta_iso_sq)
-    xi = ((d - 1) * psi + 1.0) / d
-    return float(max(0.0, min(1.0, xi)))
+    sigma_hat = np.sqrt(d) * full / spectrum_norm
+    denom = float(np.sqrt(2.0 * (d - np.sqrt(d))))
+    if denom <= 0 or not np.isfinite(denom):
+        return float("nan")
+
+    defect = float(np.linalg.norm(sigma_hat - 1.0) / denom)
+    score = ((d - defect ** 2 * (d - np.sqrt(d))) ** 2 - d) / (d * (d - 1))
+    return float(max(0.0, min(1.0, score)))
 
 
 @register_task("geometry_isoscore")

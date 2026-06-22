@@ -24,7 +24,6 @@ except ImportError:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_hidden_states
 import logging
 logger = logging.getLogger("blme")
 
@@ -69,6 +68,54 @@ def _compute_mahalanobis_distances(X_train, X_test):
         return []
 
 
+def _collect_mean_pooled_hidden_states(
+    model, tokenizer, dataset, num_samples: int, max_length: int = 128,
+) -> torch.Tensor:
+    """Collect one final-layer mean-pooled representation per text sample."""
+    samples = list(dataset)[:num_samples]
+    if not samples:
+        return torch.empty(0)
+
+    try:
+        device = next(model.parameters()).device
+    except Exception:
+        device = torch.device("cpu")
+
+    reps = []
+    with torch.no_grad():
+        for sample in samples:
+            text = sample["text"] if isinstance(sample, dict) and "text" in sample else str(sample)
+            inputs = tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_length,
+            )
+            if hasattr(inputs, "to") and callable(inputs.to):
+                inputs = inputs.to(device)
+            else:
+                inputs = {
+                    k: (v.to(device) if hasattr(v, "to") else v)
+                    for k, v in inputs.items()
+                }
+
+            outputs = model(**inputs, output_hidden_states=True)
+            hidden_states = getattr(outputs, "hidden_states", None)
+            if not hidden_states:
+                continue
+
+            h = hidden_states[-1][0].detach().float().cpu()
+            attention_mask = inputs.get("attention_mask") if isinstance(inputs, dict) else None
+            if attention_mask is not None and hasattr(attention_mask, "detach"):
+                mask = attention_mask[0].detach().cpu().bool()
+                if mask.numel() == h.shape[0] and bool(mask.any()):
+                    h = h[mask]
+            if h.numel() > 0:
+                reps.append(h.mean(dim=0))
+
+    return torch.stack(reps, dim=0) if reps else torch.empty(0)
+
+
 @register_task("geometry_mahalanobis")
 class MahalanobisOODTask(DiagnosticTask):
     """
@@ -84,6 +131,7 @@ class MahalanobisOODTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Mahalanobis OOD Detection...")
         num_samples = self.config.get("num_samples", 50)
+        max_length = int(self.config.get("max_length", 128))
         ood_strategy = self.config.get("ood_strategy", "shuffle")  # "shuffle" or "random"
 
         def _shuffle_tokens(text, tokenizer, rng):
@@ -131,12 +179,22 @@ class MahalanobisOODTask(DiagnosticTask):
         if len(dataset_id) < 5 or len(dataset_ood) < 5:
             return {"error": "Need at least 5 ID and 5 OOD samples to compute stable covariance."}
 
-        # Collect representations from the last layer, mean-pooled over sequence
-        X_id = collect_hidden_states(model, tokenizer, dataset_id, num_samples=len(dataset_id))
+        # Collect one final-layer representation per text sample, mean-pooled
+        # over sequence positions. Token-flattening would inflate the
+        # covariance population by sequence length and violate the sample-level
+        # OOD framing.
+        X_id = _collect_mean_pooled_hidden_states(
+            model, tokenizer, dataset_id, num_samples=len(dataset_id), max_length=max_length,
+        )
         X_id = X_id.float().numpy()
 
-        X_ood = collect_hidden_states(model, tokenizer, dataset_ood, num_samples=len(dataset_ood))
+        X_ood = _collect_mean_pooled_hidden_states(
+            model, tokenizer, dataset_ood, num_samples=len(dataset_ood), max_length=max_length,
+        )
         X_ood = X_ood.float().numpy()
+
+        if X_id.shape[0] < 5 or X_ood.shape[0] < 5:
+            return {"error": "Need at least 5 ID and 5 OOD sample representations."}
 
         # Lee et al. 2018 scores **held-out** samples against a Gaussian
         # fitted on a distinct training split. Re-using the same ID
@@ -146,14 +204,30 @@ class MahalanobisOODTask(DiagnosticTask):
         # with Ledoit-Wolf shrinkage). Split the ID set roughly 50/50
         # so the ID-distance baseline matches the OOD-distance statistic.
         n_id = X_id.shape[0]
-        fit_n = max(5, n_id // 2)
+        fit_n = max(2, min(n_id - 2, max(5, n_id // 2)))
         X_id_fit = X_id[:fit_n]
         X_id_score = X_id[fit_n:]
-        if X_id_score.shape[0] < 2:
-            # Tiny-n fallback: use all of X_id as both fit and score,
-            # but flag the bias so downstream can see it.
-            X_id_fit = X_id
-            X_id_score = X_id
+        insufficient_holdout = X_id_score.shape[0] < 2
+
+        if insufficient_holdout:
+            dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
+            if not dists_ood:
+                return {
+                    "error": "Failed to compute Mahalanobis distance (likely covariance singularity).",
+                    "insufficient_holdout": True,
+                    "n_id_fit": int(X_id_fit.shape[0]),
+                    "n_id_score": int(X_id_score.shape[0]),
+                    "n_ood_score": int(X_ood.shape[0]),
+                }
+            return {
+                "insufficient_holdout": True,
+                "n_id_fit": int(X_id_fit.shape[0]),
+                "n_id_score": int(X_id_score.shape[0]),
+                "n_ood_score": int(X_ood.shape[0]),
+                "mean_mahalanobis_ood": float(np.mean(dists_ood)),
+                "ood_separation_gap": float("nan"),
+                "ood_separation_ratio": float("nan"),
+            }
 
         dists_id = _compute_mahalanobis_distances(X_id_fit, X_id_score)
         dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
@@ -174,6 +248,7 @@ class MahalanobisOODTask(DiagnosticTask):
             auroc = None
 
         result = {
+            "insufficient_holdout": False,
             "mean_mahalanobis_id": mean_id,
             "mean_mahalanobis_ood": mean_ood,
             "ood_separation_gap": mean_ood - mean_id,

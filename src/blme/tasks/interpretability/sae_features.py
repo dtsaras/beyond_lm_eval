@@ -14,6 +14,45 @@ try:
 except ImportError:
     HAS_SAE_LENS = False
 
+
+def _select_sae_hidden_state_index(sae_id, num_layers):
+    """Map a TransformerLens SAE hook name to HF ``hidden_states`` index.
+
+    HuggingFace hidden states are ``(embed, after block 0, ..., after block N)``.
+    TransformerLens ``blocks.N.hook_resid_pre`` is the input to block N, so it
+    lives at ``hidden_states[N]`` rather than ``hidden_states[N + 1]``.
+
+    Unsupported TransformerLens hooks are rejected rather than silently
+    mapped to an arbitrary residual tensor.
+    """
+    import re as _re
+
+    fallback_layer = num_layers // 2
+    fallback_index = min(num_layers, fallback_layer + 1)
+
+    m = _re.search(r"blocks\.(\d+)\.([^.\s]+)", sae_id or "")
+    if m is None:
+        return max(0, min(num_layers - 1, fallback_layer)), fallback_index
+
+    parsed_layer = int(m.group(1))
+    hook_name = m.group(2)
+    target_layer = max(0, min(num_layers - 1, parsed_layer))
+
+    hook_to_index = {
+        "hook_resid_pre": parsed_layer,
+        "hook_resid_post": parsed_layer + 1,
+        "hook_resid_mid": parsed_layer + 1,
+    }
+    if hook_name not in hook_to_index:
+        raise ValueError(
+            f"Unsupported SAE hook '{hook_name}' in sae_id={sae_id!r}. "
+            "Supported hooks: hook_resid_pre, hook_resid_post, hook_resid_mid."
+        )
+
+    hidden_state_index = hook_to_index[hook_name]
+    return target_layer, max(0, min(num_layers, hidden_state_index))
+
+
 @register_task("interpretability_sae_features")
 class SAEFeatureDimensionalityTask(DiagnosticTask):
     """
@@ -78,20 +117,14 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         
         layers = get_layers(model)
         num_layers = len(layers)
-        # Extract the target layer from the SAE id if possible
-        # ("blocks.8.hook_resid_pre" → 8), falling back to the middle
-        # layer. The previous code ignored the SAE's trained hook point
-        # and applied it at ``num_layers // 2`` — for GPT-2 small that's
-        # layer 6, but the default SAE is trained on layer 8's
-        # residual-pre, so the L0 counts were computed on the wrong
-        # hidden state.
-        import re as _re
-        m = _re.search(r"blocks\.(\d+)\.", sae_id or "")
-        if m is not None:
-            parsed = int(m.group(1))
-            target_layer = max(0, min(num_layers - 1, parsed))
-        else:
-            target_layer = num_layers // 2
+        # Extract the target layer from the SAE id if possible, and map
+        # TransformerLens hook points onto HuggingFace hidden-state indices.
+        try:
+            target_layer, hidden_state_index = _select_sae_hidden_state_index(
+                sae_id, num_layers
+            )
+        except ValueError as e:
+            return {"error": str(e)}
         
         active_features_counts = []
         max_active_features = []
@@ -106,8 +139,9 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
                 out = model(**inputs, output_hidden_states=True)
                 
-                # Get the target hidden state
-                h = out.hidden_states[target_layer + 1][0] # shape (seq_len, hidden_dim)
+                # Get the target hidden state. For hook_resid_pre this is the
+                # input to the parsed block, i.e. hidden_states[target_layer].
+                h = out.hidden_states[hidden_state_index][0] # shape (seq_len, hidden_dim)
                 
                 # Try to map hidden state to SAE
                 # sae() returns sae_out, feature_acts, loss, ...
@@ -128,7 +162,9 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         results = {
             "mean_active_features_l0": float(np.mean(active_features_counts)),
             "max_active_features_l0": float(np.max(max_active_features)),
-            "sae_total_dict_size": sae.cfg.d_sae
+            "sae_total_dict_size": sae.cfg.d_sae,
+            "sae_target_layer": int(target_layer),
+            "sae_hidden_state_index": int(hidden_state_index),
         }
             
         return results

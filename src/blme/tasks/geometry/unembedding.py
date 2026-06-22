@@ -74,7 +74,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             if E_in_np.shape == W_out_np.shape:
                 is_tied = np.allclose(W_out_np, E_in_np, atol=1e-5)
         
-        # Effective Rank — canonical Roy-Vetterli on σ² (shared helper).
+        # Effective Rank — Roy-Vetterli on raw singular values (shared helper).
         # The unembedding matrix is (V, D) with V up to ~200 k on
         # modern models; a CPU SVD there was the single slowest call
         # in the library (~70 s on Qwen-2B). Run it on GPU when
@@ -201,6 +201,12 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             "unembedding_eff_rank": float(eff_rank),
             "unembedding_purity_mean": float(purity_mean),
             "unembedding_n_category_tokens": int(n_category_tokens),
+            "cross_model_comparable": False if n_category_tokens > 0 else True,
+            "comparability_note": (
+                "tokenizer_dependent_category_token_mapping"
+                if n_category_tokens > 0
+                else "intrinsic_unembedding_geometry"
+            ),
             "embedding_alignment_mean": emb_alignment_mean,
             "embedding_alignment_std": emb_alignment_std,
             "embedding_high_alignment_frac": emb_high_alignment_frac,

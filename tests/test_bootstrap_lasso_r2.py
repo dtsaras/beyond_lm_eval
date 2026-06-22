@@ -15,6 +15,7 @@ import sys
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.base import BaseEstimator, RegressorMixin
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -111,3 +112,77 @@ def test_oob_bootstrap_signal_stronger_than_noise():
     assert len(r2s) >= 20
     # Signal is informative → median OOB R² should be positive
     assert np.median(r2s) > 0.0
+
+
+class _RecordingLasso(RegressorMixin, BaseEstimator):
+    """Tiny estimator that verifies preprocessing happened inside the fold."""
+
+    fit_calls = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def fit(self, X, y):
+        _RecordingLasso.fit_calls += 1
+        assert not np.isnan(X).any()
+        assert np.allclose(X.mean(axis=0), 0.0, atol=1e-12)
+        self.prediction_ = float(np.mean(y))
+        return self
+
+    def predict(self, X):
+        assert not np.isnan(X).any()
+        return np.full(X.shape[0], self.prediction_)
+
+
+def _raw_matrix_with_missing_values():
+    X = np.array([
+        [0.0, 2.0],
+        [1.0, np.nan],
+        [2.0, 4.0],
+        [50.0, 6.0],
+        [4.0, np.nan],
+        [5.0, 10.0],
+        [6.0, 12.0],
+        [7.0, 14.0],
+        [8.0, 16.0],
+        [9.0, 18.0],
+        [10.0, 20.0],
+        [11.0, 22.0],
+    ])
+    y = np.linspace(0.0, 1.0, len(X))
+    return X, y
+
+
+def test_lasso_loo_preprocesses_inside_each_fold(monkeypatch):
+    X, y = _raw_matrix_with_missing_values()
+    _RecordingLasso.fit_calls = 0
+    monkeypatch.setattr(boot, "LassoCV", _RecordingLasso)
+
+    r2 = boot._lasso_loo(X, y)
+
+    assert np.isfinite(r2)
+    assert _RecordingLasso.fit_calls == len(y)
+
+
+def test_lasso_lofo_preprocesses_inside_each_family_fold(monkeypatch):
+    X, y = _raw_matrix_with_missing_values()
+    groups = np.array(["a"] * 4 + ["b"] * 4 + ["c"] * 4)
+    _RecordingLasso.fit_calls = 0
+    monkeypatch.setattr(boot, "LassoCV", _RecordingLasso)
+
+    r2 = boot._lasso_lofo(X, y, groups)
+
+    assert np.isfinite(r2)
+    assert _RecordingLasso.fit_calls == 3
+
+
+def test_oob_lasso_preprocesses_inside_in_bag_split(monkeypatch):
+    X, y = _raw_matrix_with_missing_values()
+    in_bag = np.array([0, 1, 1, 2, 3, 4, 5, 6, 7])
+    _RecordingLasso.fit_calls = 0
+    monkeypatch.setattr(boot, "LassoCV", _RecordingLasso)
+
+    r2 = boot._oob_lasso_r2(X, y, in_bag)
+
+    assert np.isfinite(r2)
+    assert _RecordingLasso.fit_calls == 1

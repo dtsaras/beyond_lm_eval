@@ -127,3 +127,29 @@ def test_refusal_direction_architecture_agnostic_output(mock_model, mock_tokeniz
     assert "best_layer_fraction" in results
     bf = results["best_layer_fraction"]
     assert 0.0 <= bf <= 1.0
+
+
+def test_refusal_direction_reports_heldout_separability(mock_model, mock_tokenizer):
+    """AUROC must be evaluated on held-out folds, not the prompts used
+    to fit each direction."""
+    from blme.tasks.representation_engineering import RefusalDirectionTask
+
+    dataset = [
+        {"text": "harmful request one", "label": "harmful"},
+        {"text": "harmful request two", "label": "harmful"},
+        {"text": "harmful request three", "label": "harmful"},
+        {"text": "harmless request one", "label": "harmless"},
+        {"text": "harmless request two", "label": "harmless"},
+        {"text": "harmless request three", "label": "harmless"},
+    ]
+
+    results = RefusalDirectionTask(config={}).evaluate(
+        mock_model, mock_tokenizer, dataset=dataset,
+    )
+
+    if "error" in results:
+        pytest.skip(f"architecture error: {results['error']}")
+
+    assert results["separability_validation"] == "stratified_kfold_projection"
+    assert results["metric_interpretation"] == "heldout_linear_separability"
+    assert "causal_steering_auc" not in results

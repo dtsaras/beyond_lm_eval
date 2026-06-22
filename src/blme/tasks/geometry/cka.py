@@ -8,6 +8,18 @@ from .utils import collect_hidden_states
 import logging
 logger = logging.getLogger("blme")
 
+
+def _linear_cka(X: torch.Tensor, Y: torch.Tensor) -> float:
+    """Linear CKA from Kornblith et al. 2019 on column-centered features."""
+    X = X.float() - X.float().mean(dim=0, keepdim=True)
+    Y = Y.float() - Y.float().mean(dim=0, keepdim=True)
+    numerator = torch.norm(Y.t() @ X, p="fro").item() ** 2
+    norm_x = torch.norm(X.t() @ X, p="fro").item()
+    norm_y = torch.norm(Y.t() @ Y, p="fro").item()
+    denom = norm_x * norm_y
+    return float(numerator / denom) if denom > 1e-12 else 0.0
+
+
 @register_task("geometry_cka")
 class CKATask(DiagnosticTask):
     """
@@ -93,13 +105,7 @@ class CKATask(DiagnosticTask):
                 Y = centered_acts[idx_j]
                 norm_y = norms[idx_j]
                 
-                # Numerator: ||Y^T X||_F^2
-                # Y^T X is (D, D)
-                ytx = Y.t() @ X
-                numerator = torch.norm(ytx, p='fro').item() ** 2
-                
-                denom = norm_x * norm_y
-                cka = numerator / denom if denom > 1e-12 else 0.0
+                cka = _linear_cka(X, Y)
                 cka_matrix[i, j] = cka
                 cka_matrix[j, i] = cka
                 

@@ -19,10 +19,10 @@ The 2024-2025 literature unifies three closely-related phenomena:
      *produce* the attention-sink phenomenon via their outsize impact
      on the softmax denominator.
 
-  3. **Compression valley** (Pedrotti & Guo 2025, arXiv:2510.06477):
+  3. **Compression valley** (Arroyo et al. 2025, arXiv:2510.06477):
      the middle layers of every modern LLM exhibit a sharp dip in
      representation entropy — a "valley" where information is
-     compressed before later layers expand it. Pedrotti & Guo prove
+     compressed before later layers expand it. Arroyo et al. connect
      theoretically that massive activations in the residual stream
      necessarily produce compression with bounds on the resulting
      entropy reduction, unifying all three phenomena.
@@ -31,7 +31,7 @@ This task reports:
   - ``sink_epsilon_fraction``: Gu et al. Sinkε at the default
     ε = 0.3 threshold. Higher = more attention concentrated on a
     few positions per head.
-  - ``bos_sink_fraction``: simpler variant — mean attention weight
+  - ``bos_attn_fraction``: simpler variant — mean attention weight
     on the first token, averaged over (sample, head, layer, query).
   - ``massive_activation_fraction``: fraction of residual-stream
     entries with magnitude > 100× the median |activation|.
@@ -53,8 +53,9 @@ References:
     arXiv:2410.10781.
   Sun, Chen, Bai, Hu, Xiong, Kolter, "Massive Activations in Large
     Language Models", arXiv:2402.17762 (2024).
-  Pedrotti & Guo, "Attention Sinks and Compression Valleys in LLMs
-    are Two Sides of the Same Coin", arXiv:2510.06477 (Oct 2025).
+  Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv,
+    "Attention Sinks and Compression Valleys in LLMs are Two Sides
+    of the Same Coin", arXiv:2510.06477 (2025).
 """
 
 from __future__ import annotations
@@ -92,10 +93,12 @@ def _sink_epsilon(attn: torch.Tensor, epsilon: float = 0.3) -> float:
         ratios[k] = T - k      (how many queries can attend to key k
                                 under the causal mask)
         importance[k] = Σ_q attn[q, k] / ratios[k]
-        Sinkε = mean_{layer, head, k} [importance[k] > ε]
+        Sink₁ε = mean_{layer, head} [importance[first token] > ε]
 
-    A higher Sinkε = more concentration of attention on a small
-    subset of keys per (layer, head).
+    This is Gu et al.'s headline Sink₁ε: the fraction of (layer, head)
+    pairs for which the FIRST token is an attention sink. (Fixed
+    2026-06-22: previously averaged the indicator over ALL key positions
+    k, a diluted statistic that does not match the reference's metric1[0].)
     """
     if attn.dim() == 4:
         # (L, H, T, T)
@@ -113,9 +116,11 @@ def _sink_epsilon(attn: torch.Tensor, epsilon: float = 0.3) -> float:
     ratios = torch.arange(T, 0, -1, dtype=attn.dtype, device=attn.device)
     ratios = ratios.view(1, 1, 1, T)  # broadcast over (L, H, T_query, T_key)
     # importance: sum over query axis of attn/ratio, giving (L, H, T_key).
-    importance = (attn / ratios).sum(dim=-2)
+    importance = (attn / ratios).sum(dim=-2)  # (L, H, T_key)
     is_sink = (importance > epsilon).float()
-    return float(is_sink.mean().item())
+    # Gu et al.'s Sink₁ε: the FIRST-token (k=0) sink indicator, averaged
+    # over (layer, head). NOT a mean over all key positions.
+    return float(is_sink[..., 0].mean().item())
 
 
 def _massive_activation_fraction(

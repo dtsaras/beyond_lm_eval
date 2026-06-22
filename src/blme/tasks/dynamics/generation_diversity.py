@@ -24,7 +24,7 @@ For each prompt, generate N completions (with temperature > 0) and measure:
 
 import logging
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -49,13 +49,32 @@ _DIVERSITY_PROMPTS: List[str] = [
 
 
 def _distinct_n(tokens: List[int], n: int) -> float:
-    """Fraction of unique n-grams in a token list."""
+    """Distinct-n (Li et al. 2016): distinct n-grams / total generated tokens.
+
+    Li et al. 2016 (Sec. 5.2) and the ACL-2022 refinement define Distinct-n as
+    the number of distinct n-grams divided by the TOTAL number of generated
+    tokens (len(tokens)), not by the n-gram count (len-n+1) — the token-count
+    denominator is what "avoids favoring long sentences". Identical for n=1.
+    """
     if len(tokens) < n:
         return 0.0
     ngrams = [tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
     if not ngrams:
         return 0.0
-    return len(set(ngrams)) / len(ngrams)
+    return len(set(ngrams)) / len(tokens)
+
+
+def _trim_completion(tokens: List[int], eos_token_id: Optional[int],
+                     pad_token_id: Optional[int]) -> List[int]:
+    """Drop EOS/pad tokens and anything generated after EOS."""
+    trimmed = []
+    for token in tokens:
+        if eos_token_id is not None and token == eos_token_id:
+            break
+        if pad_token_id is not None and token == pad_token_id:
+            continue
+        trimmed.append(token)
+    return trimmed
 
 
 def _ngram_overlap(ref_ngrams: Counter, hyp_ngrams: Counter, n: int) -> float:
@@ -67,10 +86,39 @@ def _ngram_overlap(ref_ngrams: Counter, hyp_ngrams: Counter, n: int) -> float:
 
 def _self_bleu_single(hypothesis: List[int], references: List[List[int]],
                       max_n: int = 4) -> float:
-    """Corpus-level BLEU of one hypothesis against all other completions."""
+    """Self-BLEU of one hypothesis against all other completions, matching
+    the Texygen reference (Zhu et al. 2018): NLTK ``sentence_bleu`` with
+    ``SmoothingFunction().method1`` and uniform weights ``(1/max_n,)*max_n``,
+    including NLTK's brevity penalty.
+
+    Texygen's SelfBleu calls exactly this; the previous hand-rolled version
+    returned a hard 0.0 whenever any higher-order precision was 0 (common
+    for short/diverse completions), systematically understating Self-BLEU.
+    Falls back to the smoothed hand-rolled estimator only if NLTK is absent.
+    """
     if not references or len(hypothesis) < 1:
         return 0.0
-    # Build reference n-gram pool (union)
+    try:
+        from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+    except ImportError:
+        return _self_bleu_single_fallback(hypothesis, references, max_n)
+    weights = tuple(1.0 / max_n for _ in range(max_n))
+    return float(sentence_bleu(
+        references, hypothesis, weights,
+        smoothing_function=SmoothingFunction().method1,
+    ))
+
+
+def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]],
+                               max_n: int = 4) -> float:
+    """NLTK-free fallback for Self-BLEU (used only when nltk is unavailable).
+
+    Geometric mean of clipped n-gram precisions with add-epsilon (method1-
+    style) smoothing on zero precisions, so it no longer hard-zeros — a close
+    approximation to the Texygen/NLTK value but not byte-identical.
+    """
+    if not references or len(hypothesis) < 1:
+        return 0.0
     ref_pool = [Counter() for _ in range(max_n)]
     for ref in references:
         for n in range(1, max_n + 1):
@@ -82,11 +130,7 @@ def _self_bleu_single(hypothesis: List[int], references: List[List[int]],
     for n in range(1, max_n + 1):
         hyp_ng = Counter(tuple(hypothesis[i:i + n]) for i in range(len(hypothesis) - n + 1))
         p = _ngram_overlap(ref_pool[n - 1], hyp_ng, n)
-        precisions.append(p)
-    # Geometric mean of precisions (brevity penalty omitted since all
-    # completions have the same max_new_tokens).
-    if any(p == 0 for p in precisions):
-        return 0.0
+        precisions.append(p if p > 0 else 1e-9)  # method1-style smoothing
     log_avg = np.mean([np.log(p) for p in precisions])
     return float(np.exp(log_avg))
 
@@ -102,6 +146,7 @@ class GenerationDiversityTask(DiagnosticTask):
         temperature = self.config.get("temperature", 0.8)
         max_new_tokens = self.config.get("max_new_tokens", 32)
         num_prompts = self.config.get("num_prompts", len(_DIVERSITY_PROMPTS))
+        seed = self.config.get("seed", None)
 
         if dataset is not None and isinstance(dataset, list) and dataset:
             if isinstance(dataset[0], dict) and "prompt" in dataset[0]:
@@ -131,22 +176,34 @@ class GenerationDiversityTask(DiagnosticTask):
                 prompt_len = enc["input_ids"].shape[1]
 
                 try:
-                    outputs = model.generate(
-                        input_ids=enc["input_ids"].expand(n_samples, -1),
-                        max_new_tokens=max_new_tokens,
-                        do_sample=True,
-                        temperature=temperature,
-                        top_p=1.0,
-                        pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
-                        output_scores=True,
-                        return_dict_in_generate=True,
-                    )
+                    generate_kwargs = {
+                        "input_ids": enc["input_ids"].expand(n_samples, -1),
+                        "max_new_tokens": max_new_tokens,
+                        "do_sample": True,
+                        "temperature": temperature,
+                        "top_p": 1.0,
+                        "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
+                        "output_scores": True,
+                        "return_dict_in_generate": True,
+                    }
+                    if seed is not None:
+                        generator = torch.Generator(device=device)
+                        generator.manual_seed(int(seed))
+                        generate_kwargs["generator"] = generator
+                    outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed: {e}")
                     continue
 
                 gen_ids = outputs.sequences[:, prompt_len:]  # (N, L)
-                completions = [row.tolist() for row in gen_ids]
+                completions = [
+                    _trim_completion(
+                        row.tolist(),
+                        getattr(tokenizer, "eos_token_id", None),
+                        getattr(tokenizer, "pad_token_id", None),
+                    )
+                    for row in gen_ids
+                ]
 
                 # Distinct-n per completion, averaged
                 for comp in completions:
@@ -184,21 +241,21 @@ class GenerationDiversityTask(DiagnosticTask):
                         if total_4g > 0:
                             all_phrase_rep_rate.append(rep_4g / total_4g)
 
-                # Entropy collapse from the per-step scores. Compute
-                # via ``log_softmax`` directly on fp32 logits so the
-                # log-sum-exp trick keeps full floating-point precision
-                # on the low-probability tail (``torch.log(clamp)`` can
-                # wash out small probs and bias the entropy sum).
+                # Entropy collapse from the per-step scores. Mask positions
+                # after each sequence's EOS/pad so uneven completion lengths
+                # do not bias the quarter summaries.
                 if hasattr(outputs, "scores") and outputs.scores:
                     scores_stack = torch.stack(outputs.scores, dim=1).float()  # (N, L, V)
                     log_probs = F.log_softmax(scores_stack, dim=-1)
                     probs = log_probs.exp()
                     per_token_H = -(probs * log_probs).sum(dim=-1)  # (N, L)
-                    mean_H = per_token_H.mean(dim=0).cpu().numpy()  # (L,)
-                    L = len(mean_H)
-                    if L >= 4:
-                        q1 = float(mean_H[:L // 4].mean())
-                        q4 = float(mean_H[3 * L // 4:].mean())
+                    for row_idx, comp in enumerate(completions):
+                        valid_len = len(comp)
+                        if valid_len < 4:
+                            continue
+                        h_row = per_token_H[row_idx, :valid_len].cpu().numpy()
+                        q1 = float(h_row[:valid_len // 4].mean())
+                        q4 = float(h_row[3 * valid_len // 4:].mean())
                         all_entropy_first_q.append(q1)
                         all_entropy_last_q.append(q4)
                         all_entropy_delta.append(q4 - q1)
@@ -219,4 +276,7 @@ class GenerationDiversityTask(DiagnosticTask):
             "n_prompts": len(prompts),
             "n_samples_per_prompt": n_samples,
             "temperature": temperature,
+            "seed": int(seed) if seed is not None else None,
+            "completion_filter": "trim_at_eos_drop_special",
+            "distinct_n_scope": "per_completion_mean",
         }

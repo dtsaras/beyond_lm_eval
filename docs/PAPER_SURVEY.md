@@ -2,8 +2,9 @@
 
 Comprehensive survey of intrinsic-metric papers considered for inclusion
 in BLME, with justification for every INCLUDE / SKIP decision. Compiled
-across ~40 targeted literature searches during the 2026-04-17 –
-2026-04-19 audit cycle.
+across targeted literature searches during the 2026-04-17 –
+2026-04-19 audit cycle and hardened for publication-readiness on
+2026-06-20.
 
 Sections:
 1. **What BLME currently measures** — every metric, the paper that
@@ -34,21 +35,22 @@ Each entry: `task_name` — **Paper (year)** — short description.
 - `geometry_svd` — **Roy & Vetterli 2007** (EURASIP) — effective
   rank + participation ratio + cond number + average cosine
   similarity.
-- `geometry_isoscore` — **Rudman 2022** (arXiv:2207.10341) —
+- `geometry_isoscore` — **Rudman et al. 2022** (arXiv:2108.07344) —
   covariance-based isotropy scalar.
 - `geometry_intrinsic_dim` — **Facco et al. 2017** (Sci. Rep.) —
   Two-NN intrinsic dimension.
 - `geometry_lid` — **Levina & Bickel 2004** (NeurIPS) + **Ma et al.
   2018** (ICLR) — per-sample MLE local intrinsic dimensionality.
 - `geometry_neural_collapse` — **Papyan, Han, Donoho 2020** (PNAS)
-  — NC1 within-class variance collapse + NC2 equinorm + NC3
-  self-duality.
+  — NC1 within-class variance collapse + NC2 equinorm + an
+  ETF-cosine-deviation proxy. BLME does not report full NC3 self-duality.
 - `geometry_matrix_entropy` — **Wei et al. 2024**
   (arXiv:2401.17139) — per-sentence von Neumann entropy of the
   centred-and-row-normalised token covariance, divided by `log d`.
 - `geometry_spectral` — **Martin & Mahoney 2019–2021** (arXiv:
-  1901.08276, 2104.09276) — power-law exponent α of the weight
-  matrix ESD; tail fraction; stable rank.
+  1901.08276, 1901.08278; Nature Communications 2021) — heavy-tailed
+  spectral diagnostics. BLME's `avg_alpha` is a Hill estimate on singular
+  values, a monotone proxy rather than the exact WeightWatcher ESD alpha.
 - `geometry_weight_norms` — per-layer Frobenius, spectral, and
   stable-rank profiles of weight matrices (no single canonical
   reference; standard convention).
@@ -68,16 +70,28 @@ Each entry: `task_name` — **Paper (year)** — short description.
   skewness of kNN in-degree distribution over the vocabulary.
 - `geometry_tokenizer_efficiency` — fertility + compression ratio +
   char/tokens (standard tokeniser diagnostics).
-- `geometry_perplexity` — **Wei 2023 (BLME own)** + BPC (Shannon 1948
-  style) — NLL per token in nats, per character in bits, and the
+- `geometry_perplexity` — standard language-model cross-entropy /
+  perplexity + BPC (Shannon 1948 style) — NLL per token in nats, per character in bits, and the
   frequency-stratified `ppl_rare`, `ppl_freq`, `ppl_overall`.
 - `geometry_categories` — category coherence of token embeddings on
   a curated 200-token vocabulary partition.
+- `geometry_schatten` — **Yusupov et al. 2025**, **Li et al. 2024**,
+  and **Garrido et al. 2023** — row-normalized Schatten-p norms
+  (p=1,4,∞), Matrix Nuclear-Norm, and RankMe; Schatten-2 is omitted
+  because it is content-free after row-L2 normalization.
+- `geometry_trajectory_curvature` — **Hosseini & Fedorenko 2023**
+  (NeurIPS, arXiv:2311.04930) — discrete token-trajectory curvature
+  and straightening through layers.
+- `geometry_mp_bulk_deviation` — **Marchenko & Pastur 1967** plus
+  **Baik, Ben Arous & Péché 2005** — RMT bulk-deviation and spike-energy
+  summaries for hidden-state spectra.
 
 ### Interpretability
 
 - `interpretability_logit_lens` — **nostalgebraist 2020** (LessWrong)
-  — per-layer top-1 accuracy & entropy of `lm_head(h_l)`.
+  — per-layer decoded-token proxy via `lm_head(h_l)`, with entropy and
+  agreement summaries. It is not tuned-lens unless an explicit tuned
+  translator is used.
 - `interpretability_attention_entropy` — **Clark et al. 2019** (EMNLP
   BlackBoxNLP) — mean Shannon entropy of attention rows per head.
 - `interpretability_attention_rank` — **Dong et al. 2021** (ICML
@@ -99,8 +113,8 @@ Each entry: `task_name` — **Paper (year)** — short description.
   activation alignment via down-proj top-1 singular vector.
 - `interpretability_attention_graph` — PageRank on attention matrix +
   BOS-sink ratio + edge Gini.
-- `interpretability_attention_polysemanticity` — SVD entropy of
-  attention-output projection activations.
+- `interpretability_attention_effective_rank` — SVD effective-rank
+  proxy over attention-output projection activations.
 - `interpretability_attribution` — input-gradient × activation
   attribution (gradient-based saliency).
 - `interpretability_probing` — linear probe accuracy on
@@ -108,17 +122,18 @@ Each entry: `task_name` — **Paper (year)** — short description.
 - `interpretability_sae_features` — **Bricken et al. 2023**
   (Anthropic) — L0 of pretrained SAE features (GPT-2 only).
 - `interpretability_activation_sinks` — **round 8**: Gu 2025 Sinkε
-  + Sun 2024 massive activations + Pedrotti & Guo 2025 compression
+  + Sun 2024 massive activations + Arroyo et al. 2025 compression
   valley (see §2).
 
 ### Causality
 
 - `causality_tracing` — **Meng et al. 2022** (NeurIPS ROME) —
-  per-layer AIE restoration sweep + causal entropy.
+  ROME-style causal tracing proxy over bundled factual prompts, with
+  per-layer restoration summaries. It is not a full ROME editing run.
 - `causality_attention_knockout` — **Michel et al. 2019**, **Voita
   et al. 2019** — per-head zero-ablation NLL impact + Gini.
-- `causality_edge_attribution` — **Syed et al. 2024** (arXiv:
-  2403.00745 EAP) — per-layer gradient × residual attribution
+- `causality_edge_attribution` — **Syed, Rager, Conmy 2024** (arXiv:
+  2310.10348 EAP) — per-layer gradient × residual attribution
   under token-shuffle corruption.
 - `causality_knowledge_neurons` — **Dai et al. 2022** (ACL) —
   gradient × activation attribution on MLP intermediate neurons.
@@ -139,7 +154,7 @@ Each entry: `task_name` — **Paper (year)** — short description.
 - `dynamics_stability` — representation stability under paraphrase.
 - `dynamics_generation_diversity` — self-BLEU + phrase repetition
   + per-step entropy collapse.
-- `dynamics_trajectories` — slerp interpolation entropy between
+- `dynamics_interpolation` — slerp interpolation entropy between
   two sample points.
 
 ### Consistency
@@ -149,7 +164,7 @@ Each entry: `task_name` — **Paper (year)** — short description.
 - `consistency_format_robustness` — NLL variance across prompt
   formats (custom).
 - `consistency_icl_slope` — ICL-slope of NLL vs. shot count
-  (Wei et al. 2022 style).
+  (Brown et al. 2020 / Min et al. 2022 motivation).
 - `consistency_position_sensitivity` — **Liu et al. 2023** (lost
   in the middle) — NLL vs. relative position.
 - `consistency_paraphrase`, `consistency_contrastive`,
@@ -157,19 +172,22 @@ Each entry: `task_name` — **Paper (year)** — short description.
 - `consistency_bias_weat` — **Caliskan et al. 2017** (Science) +
   **May et al. 2019** (SEAT) — WEAT/SEAT d-statistic on
   contextualised embeddings.
-- `consistency_self_consistency` — **Wang et al. 2023** (ICLR) —
+- `consistency_self_consistency` — **Wang et al. 2022** (arXiv:2203.11171; ICLR 2023) —
   first-token agreement across temperature (simplified variant).
-- `consistency_contamination` — **Carlini et al. 2021** (USENIX) —
-  per-token log-prob as a contamination / memorisation proxy.
-- `consistency_knowledge_capacity` — fact-recall accuracy at mean
-  log-prob above threshold.
-- `consistency_membership_inference` — **Shokri et al. 2017** (IEEE
-  S&P) — loss-based membership inference attack AUROC.
+- `consistency_contamination` — **Shi et al. 2023** Min-K % probability,
+  with Carlini-style memorisation context — per-token log-prob as a
+  contamination / memorisation proxy. Thresholds are in-sample unless
+  held-out calibration is configured.
+- `consistency_knowledge_capacity` — exact-vs-rephrased factual
+  likelihood proxy related to memorization/generalization work.
+- `consistency_membership_inference` — **Yeom et al. 2018** and
+  **Carlini et al. 2021** — loss-based membership-inference proxy AUROC.
 
 ### RepE
 
-- `repe_task_vectors` — **Ilharco et al. 2023** (ICLR) — task-vector
-  geometry (norm, cosine across layers).
+- `repe_task_vectors` — **Zou et al. 2023** RepE reading vectors plus
+  **Ilharco et al. 2023** task-vector motivation — activation-space
+  vector geometry (norm, cosine across layers).
 - `repe_concept_separability` — **Zou et al. 2023** (arXiv:2310.01405
   Representation Engineering) — linear probe AUC per layer.
 - `repe_refusal_direction` — **Arditi et al. 2024** (NeurIPS) —
@@ -193,13 +211,15 @@ Each entry: `task_name` — **Paper (year)** — short description.
 ## 2. Considered and INCLUDED (rounds 7–8)
 
 Four recent (2024–2025) papers added through rounds 7–8 because each
-introduces a distinct, paper-faithful signal not already in BLME.
+introduces a distinct signal not already in BLME. Some signals are
+paper-faithful formulas; others are explicitly labelled BLME proxies or
+prompt-side variants.
 
 ### Round 7 — `geometry_schatten`
 
 | Metric | Paper | Reason for inclusion |
 |---|---|---|
-| **Schatten-p norms** (p=1,2,4,∞) | Wei et al. 2025 — *From Internal Representations to Text Quality* (arXiv:2509.25359) | Reference-free text-quality proxy; closed-form over SVD; we normalise by `d^{1/p}` per their cross-width convention. Observed ρ(composite) ≈ –0.72 to –0.75 on our 32-model grid. |
+| **Row-normalized Schatten-p norms** (p=1,4,∞) | Yusupov et al. 2025 — *From Internal Representations to Text Quality* (arXiv:2509.25359) | Reference-free text-quality proxy; closed-form over SVD after BLME's centre + row-L2 preprocessing. `schatten_2` is intentionally omitted because it is content-free under row-L2 normalization. |
 | **Matrix Nuclear-Norm (MNN)** | Li, Xia, Chang, Wu 2024 (arXiv:2410.10672) | 8–24× faster than matrix entropy with comparable capability signal. Reimplementation matches the reference code at [MLGroupJLU/MatrixNuclearNorm](https://github.com/MLGroupJLU/MatrixNuclearNorm): center → row-L2-normalise → sort column L2-norms descending → sum top-D. ρ(composite) ≈ –0.71. |
 | **RankMe** | Garrido, Balestriero, Najman, LeCun 2023 (ICML) | Effective rank via `exp(H(σ_i/Σσ_j))` (normalises raw singular values) — distinct from our Roy-Vetterli `effective_rank` (normalises σ²). The ICLR 2025 "Tracing Representation Geometry" paper (arXiv:2509.23024) uses this exact variant to trace pretraining phases. |
 
@@ -207,9 +227,9 @@ introduces a distinct, paper-faithful signal not already in BLME.
 
 | Metric | Paper | Reason for inclusion |
 |---|---|---|
-| **Sinkε** | Gu, Pang, Du, Liu, Collier, Lin 2025 (ICLR Spotlight, arXiv:2410.10781) | Thresholded attention-sink metric with (T-k) normalisation. Reimplementation verified against [sail-sg/Attention-Sink](https://github.com/sail-sg/Attention-Sink). Distinct from our existing `bos_sink_ratio` (only counts "is argmax on BOS?"). ρ(composite) ≈ –0.52. |
-| **Massive-activation fraction** & **max/median ratio** | Sun, Chen, Bai, Hu, Xiong, Kolter 2024 (arXiv:2402.17762) | Fraction of residual-stream entries with \|h\| > 100× median. GPT-2 shows ratios 150–3000, a classic massive-activation signature not captured by any other BLME metric. |
-| **Compression valley** (valley_layer, valley_depth) | Pedrotti & Guo 2025 (arXiv:2510.06477) | Argmin of the matrix-entropy per-layer trajectory + endpoint-mean depth. ρ(composite) ≈ –0.53 — an independent capability signal not explained by any single layer's entropy. |
+| **Sinkε** | Gu, Pang, Du, Liu, Zhang, Du, Wang, Lin 2025 (ICLR Spotlight, arXiv:2410.10781) | Thresholded attention-sink metric with (T-k) normalisation. Reimplementation verified against [sail-sg/Attention-Sink](https://github.com/sail-sg/Attention-Sink). Distinct from our existing `bos_sink_ratio` (only counts "is argmax on BOS?"). ρ(composite) ≈ –0.52. |
+| **Massive-activation fraction** & **max/median ratio** | Sun, Chen, Kolter, Liu 2024 (arXiv:2402.17762) | Fraction of residual-stream entries with \|h\| > 100× median. GPT-2 shows ratios 150–3000, a classic massive-activation signature not captured by any other BLME metric. |
+| **Compression valley** (valley_layer, valley_depth) | Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv 2025 (arXiv:2510.06477) | Argmin of the matrix-entropy per-layer trajectory + endpoint-mean depth. ρ(composite) ≈ –0.53 — an independent capability signal not explained by any single layer's entropy. |
 
 ---
 
@@ -422,11 +442,11 @@ explicit reason.
 
 ## 5. Summary counts
 
-- **Intrinsic metrics implemented in BLME**: 54 tasks spanning 70+
+- **Intrinsic metrics implemented in BLME**: 74 tasks spanning 70+
   referenced papers (see §1).
 - **Papers added in rounds 7–8 from 2023–2026 literature**: 8
-  (Wei 2025, Li 2024, Garrido 2023, Gu 2025, Sun 2024, Pedrotti &
-  Guo 2025, + partial reuse of Wang 2025 CoE already added in round
+  (Wei 2025, Li 2024, Garrido 2023, Gu 2025, Sun 2024, Arroyo et al.
+  2025, + partial reuse of Wang 2025 CoE already added in round
   3 and Arditi 2024 already added in an earlier round).
 - **Papers considered and skipped with explicit reasons**: 55+
   (see §3).

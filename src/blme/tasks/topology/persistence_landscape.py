@@ -1,5 +1,6 @@
 """
-Persistence landscapes — Bubenik 2015 (arXiv:1501.00179); Chazal et al. 2015.
+Persistence landscapes — Bubenik 2015 (JMLR, arXiv:1207.6437);
+Bubenik & Dlotko 2017 toolbox reference (arXiv:1501.00179).
 
 A persistence landscape is a functional summary of a persistence diagram
 that is richer than scalar statistics (lifespans, entropy) and amenable
@@ -89,9 +90,11 @@ def _compute_landscape(dgm: np.ndarray, n_landscapes: int = 5,
 def _landscape_stats(landscapes: np.ndarray, dt: float
                      ) -> Dict[str, float]:
     """Summary statistics from a (K, n_points) landscape array."""
-    # np.trapezoid (NumPy 2.0) replaces the deprecated np.trapz; fall
-    # back on older NumPy.
-    _trapz = getattr(np, "trapezoid", np.trapz)
+    # np.trapezoid (NumPy 2.0) replaces np.trapz, which was REMOVED in 2.0.
+    # Must be a lazy lookup: the eager `getattr(np, "trapezoid", np.trapz)`
+    # form raises AttributeError on NumPy 2.x (np.trapz evaluated as the
+    # default arg). Numerically identical (same algorithm, renamed).
+    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
     K = landscapes.shape[0]
     integrals = []
     maxes = []

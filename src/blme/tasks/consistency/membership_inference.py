@@ -1,13 +1,16 @@
 """
-Loss-based membership inference attack (MIA) — Yeom et al. 2018
-(arXiv:1709.01604); counterfactual memorization proxy.
+Loss-based membership separability proxy.
 
 A membership inference attack asks: "Was this sample in the model's
 training data?" The simplest and most effective MIA for language models
 (Carlini et al. 2021) thresholds on per-sample loss: training-set
 members tend to have lower loss than held-out text.
 
-Since we don't have the actual training set, we use a proxy split:
+When callers provide comparable member/non-member examples (for example
+paired via ``pair_id`` / ``comparison_id`` / ``calibration_group``), the
+loss split can be interpreted as a calibrated membership-inference
+diagnostic. Since the default data is not actual training-set membership,
+it is reported as a domain/frequency separability proxy:
   - "Members": common factual sentences likely present in standard
     web-crawl corpora (Wikipedia, news, etc.)
   - "Non-members": niche / unusual text unlikely to appear verbatim
@@ -32,7 +35,8 @@ References:
 
 import logging
 import random
-from typing import List
+from collections import defaultdict
+from typing import Any, List, Optional
 
 import numpy as np
 import torch
@@ -75,6 +79,28 @@ _NON_MEMBERS: List[str] = [
 ]
 
 
+def _normalise_membership_label(label: Any) -> Optional[int]:
+    if label in (1, "1", True, "member", "members", "train", "training"):
+        return 1
+    if label in (0, "0", False, "non_member", "non-member", "nonmember", "heldout", "test"):
+        return 0
+    return None
+
+
+def _has_comparable_pairs(dataset: List[dict]) -> bool:
+    """Return True when labels are paired within a shared comparison group."""
+    for key in ("pair_id", "comparison_id", "calibration_group"):
+        if not all(key in item for item in dataset):
+            continue
+        grouped = defaultdict(set)
+        for item in dataset:
+            label = _normalise_membership_label(item.get("label"))
+            if label is not None:
+                grouped[item[key]].add(label)
+        return bool(grouped) and all(labels == {0, 1} for labels in grouped.values())
+    return False
+
+
 def _compute_nll(model, tokenizer, text: str, device) -> float:
     """Mean per-token NLL for a single text."""
     enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=256).to(device)
@@ -92,19 +118,43 @@ def _compute_nll(model, tokenizer, text: str, device) -> float:
 
 @register_task("consistency_membership_inference")
 class MembershipInferenceTask(DiagnosticTask):
-    """Loss-based MIA and counterfactual memorization score."""
+    """Loss-based separability proxy; calibrated MIA only with comparable labels."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
-        logger.info("Running Membership Inference (Loss-based MIA)...")
+        logger.info("Running Membership Separability Analysis...")
 
-        if dataset is not None and isinstance(dataset, list) and dataset and (
-            isinstance(dataset[0], dict) and {"text", "label"} <= set(dataset[0])
+        require_comparable = bool(self.config.get("require_comparable_membership_data", False))
+        has_comparable_data = False
+        used_default_proxy = False
+
+        if dataset is not None and isinstance(dataset, list) and dataset and all(
+            isinstance(item, dict) and {"text", "label"} <= set(item) for item in dataset
         ):
-            members = [d["text"] for d in dataset if d["label"] in ("member", 1, "1")]
-            non_members = [d["text"] for d in dataset if d["label"] in ("non_member", 0, "0")]
+            has_comparable_data = _has_comparable_pairs(dataset)
+            if require_comparable and not has_comparable_data:
+                return {
+                    "error": (
+                        "Comparable member/non-member examples are required. "
+                        "Provide paired labels with pair_id, comparison_id, or calibration_group."
+                    )
+                }
+            members = [
+                d["text"] for d in dataset if _normalise_membership_label(d["label"]) == 1
+            ]
+            non_members = [
+                d["text"] for d in dataset if _normalise_membership_label(d["label"]) == 0
+            ]
         else:
+            if require_comparable:
+                return {
+                    "error": (
+                        "Comparable member/non-member examples are required; "
+                        "the bundled defaults are only a domain/frequency separability proxy."
+                    )
+                }
             members = list(_MEMBERS)
             non_members = list(_NON_MEMBERS)
+            used_default_proxy = True
 
         if len(members) < 2 or len(non_members) < 2:
             return {"error": "Need at least 2 members and 2 non-members"}
@@ -155,12 +205,35 @@ class MembershipInferenceTask(DiagnosticTask):
             if not (np.isnan(orig_nll) or np.isnan(shuf_nll)):
                 cf_gaps.append(shuf_nll - orig_nll)
 
-        return {
-            "mia_auroc": auroc,
+        if has_comparable_data:
+            score_semantics = "calibrated_membership_inference"
+            warning = None
+        elif used_default_proxy:
+            score_semantics = "domain_frequency_separability_proxy"
+            warning = (
+                "Bundled defaults compare common factual sentences to niche text; "
+                "this is not membership inference against a known training set."
+            )
+        else:
+            score_semantics = "uncalibrated_loss_separability_proxy"
+            warning = (
+                "Provided member/non-member labels are not paired or calibrated; "
+                "interpret AUROC as loss separability, not membership inference."
+            )
+
+        result = {
+            "score_semantics": score_semantics,
+            "is_calibrated_membership_inference": bool(has_comparable_data),
+            "separability_auroc": auroc,
             "loss_gap": loss_gap,
             "mean_loss_member": mean_member,
             "mean_loss_nonmember": mean_nonmember,
             "counterfactual_gap": float(np.mean(cf_gaps)) if cf_gaps else float("nan"),
             "n_members": len(member_losses),
             "n_nonmembers": len(nonmember_losses),
+            # Legacy alias retained for downstream compatibility.
+            "mia_auroc": auroc,
         }
+        if warning is not None:
+            result["diagnostic_warning"] = warning
+        return result

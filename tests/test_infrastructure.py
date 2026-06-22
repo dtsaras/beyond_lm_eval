@@ -289,8 +289,8 @@ class TestRegistry:
         # Phase C1-C5 added: PositionSensitivity, FormatRobustness,
         #   NeuralCollapse, SelfConsistency, RefusalDirection (+5)
         # Future additions should bump this number.
-        # 50 original + 3 Phase B + 5 Phase C1-5 + 4 Phase C6-9 + 4 Phase D + 4 Phase E = 70
-        assert len(tasks) == 70
+        # Current registry: 74 diagnostic tasks across 7 categories.
+        assert len(tasks) == 74
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks
@@ -350,6 +350,45 @@ class TestCLI:
         # Should NOT contain other groups
         assert "geometry_svd" not in captured.out
 
+    def test_list_tasks_json_runs(self, capsys):
+        import json
+        import sys
+        from blme.cli import main
+
+        with patch.object(sys, "argv", ["blme", "list-tasks", "--group", "geometry", "--json"]):
+            main()
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["count"] == 27
+        first = payload["tasks"][0]
+        assert {"name", "group", "status", "papers"} <= set(first)
+        assert all(task["group"] == "geometry" for task in payload["tasks"])
+
+    def test_evaluate_dry_run_validates_before_model_load(self, capsys):
+        import json
+        import sys
+        from blme.cli import main
+
+        with patch.object(sys, "argv", [
+            "blme", "evaluate", "--model-args", "pretrained=test",
+            "--tasks", "geometry_svd", "--dry-run", "--strict",
+        ]):
+            main()
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["diagnostic_tasks"] == ["geometry_svd"]
+        assert payload["unknown_tasks"] == []
+        assert payload["task_metadata"]["geometry_svd"]["status"]
+
+    def test_evaluate_strict_rejects_unknown_before_model_load(self):
+        import sys
+        from blme.cli import main
+
+        with patch.object(sys, "argv", [
+            "blme", "evaluate", "--model-args", "pretrained=test",
+            "--tasks", "not_a_task", "--dry-run", "--strict",
+        ]):
+            with pytest.raises(SystemExit):
+                main()
+
     def test_evaluate_no_args_exits(self):
         import sys
         from blme.cli import main
@@ -365,3 +404,45 @@ class TestCLI:
         with patch.object(sys, "argv", ["blme"]):
             with pytest.raises(SystemExit):
                 main()
+
+
+# ---------------------------------------------------------------------------
+# NumPy 2.x compatibility — the eager `getattr(np, "trapezoid", np.trapz)`
+# pattern raises AttributeError on NumPy>=2.0 (np.trapz removed; the default
+# arg is evaluated before getattr). Verified bug: it crashed the metric path
+# of geometry_svd, causality_ablation, and topology_persistence_landscape.
+# ---------------------------------------------------------------------------
+
+
+class TestNumpyTrapezoidCompat:
+    def test_no_eager_trapz_getattr_in_source(self):
+        """Guard against reintroducing the eager-eval np.trapz pattern."""
+        import pathlib
+        import re
+
+        src = pathlib.Path(__file__).resolve().parents[1] / "src" / "blme"
+        bad = re.compile(r"getattr\(\s*np\s*,\s*[\"']trapezoid[\"']\s*,\s*np\.trapz\s*\)")
+        offenders = []
+        for py in src.rglob("*.py"):
+            for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+                # skip comment lines that merely document the anti-pattern
+                if line.lstrip().startswith("#"):
+                    continue
+                if bad.search(line):
+                    offenders.append(f"{py}:{i}")
+        assert not offenders, f"eager np.trapz pattern present (crashes NumPy 2.x): {offenders}"
+
+    def test_landscape_stats_runs_under_installed_numpy(self):
+        import numpy as np
+        from blme.tasks.topology.persistence_landscape import (
+            _compute_landscape, _landscape_stats,
+        )
+        L = _compute_landscape(np.array([[0.0, 2.0], [0.5, 3.0]]), 5, 200)
+        stats = _landscape_stats(L, dt=0.01)
+        assert np.isfinite(stats["mean_landscape_integral"])
+
+    def test_svd_metrics_runs_under_installed_numpy(self):
+        import numpy as np
+        from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
+        m = _svd_metrics_for_layer(torch.randn(50, 8))
+        assert m is not None and np.isfinite(m["svd_auc"])

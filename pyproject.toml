@@ -10,10 +10,9 @@ readme = "README.md"
 authors = [
   { name = "BLME Contributors" },
 ]
-license = {text = "MIT"}
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.9"
@@ -42,6 +41,10 @@ probing = [
 topology = [
     "ripser",
 ]
+diversity = [
+    # exact Texygen-parity Self-BLEU (NLTK sentence_bleu + method1 smoothing)
+    "nltk",
+]
 sae = [
     "sae-lens",
 ]
@@ -59,6 +62,7 @@ all = [
     "sae-lens",
     "wandb",
     "datasets",
+    "nltk",
 ]
 
 [project.urls]
@@ -66,6 +70,12 @@ all = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+blme = [
+    "assets/*.json",
+    "tasks/configs/*.yaml",
+]
 
 [project.scripts]
 blme = "blme.cli:main"

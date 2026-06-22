@@ -37,7 +37,7 @@ def test_causality_edge_attribution_seeds_shuffle():
     assert "torch.Generator" in src
 
 
-def test_dynamics_trajectories_uses_seeded_sampler():
+def test_dynamics_interpolation_uses_seeded_sampler():
     """trajectories.py must use a seeded ``random.Random`` for pair
     sampling, not the global ``random`` module."""
     from blme.tasks.dynamics import trajectories
@@ -125,3 +125,39 @@ def test_prediction_alignment_uses_output_projection_not_input_embedding():
     # The old unconditional ``get_embeddings(model)`` fallback must be
     # gated behind the lm_head path.
     assert "embeddings = _get_output_projection_weight(model)" in src
+
+
+def test_collect_hidden_states_token_subsampling_is_seeded():
+    """geometry.utils.collect_hidden_states must not draw token
+    subsamples from the global torch RNG."""
+    from blme.tasks.geometry import utils
+    src = inspect.getsource(utils.collect_hidden_states)
+    assert "torch.randperm(T)[:10]" not in src
+    assert "torch.Generator" in src
+
+
+def test_svd_isotropy_pair_sampling_is_seeded():
+    """SVD isotropy's average cosine sample must be deterministic across
+    reruns of the same hidden-state matrix."""
+    from blme.tasks.geometry import isotropy
+    src = inspect.getsource(isotropy._svd_metrics_for_layer)
+    assert "np.random.choice" not in src
+    assert "default_rng" in src
+
+
+def test_correlation_dimension_subsampling_is_seeded():
+    """Correlation dimension's max_points downsampling must avoid the
+    process-global NumPy RNG."""
+    from blme.tasks.geometry import correlation_dimension
+    src = inspect.getsource(correlation_dimension)
+    assert "np.random.choice(N, max_points, replace=False)" not in src
+    assert "default_rng" in src
+
+
+def test_hsic_token_subsampling_is_seeded():
+    """HSIC dependence must choose its shared token subset with an
+    explicit torch Generator."""
+    from blme.tasks.geometry import mutual_info
+    src = inspect.getsource(mutual_info)
+    assert "torch.randperm(n_tokens)[:max_tokens]" not in src
+    assert "torch.Generator" in src

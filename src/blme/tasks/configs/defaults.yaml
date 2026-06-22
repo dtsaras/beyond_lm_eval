@@ -11,6 +11,9 @@ geometry_svd:
   num_samples: 100
   layerwise: false
 
+geometry_isoscore:
+  num_samples: 100
+
 geometry_hubness:
   k_values: [10, 50, 100]
   batch_size: 2000
@@ -50,6 +53,11 @@ geometry_rsa:
   num_samples: 20
   max_tokens: 200
 
+geometry_contextualization:
+  num_samples: 200
+  min_word_occurrences: 5
+  layers: null
+
 geometry_lipschitz:
   num_samples: 20
 
@@ -86,9 +94,16 @@ geometry_categories:
   k_purity: 20
   projection_method: null
 
+geometry_neural_collapse: {}
+
 geometry_mahalanobis:
   num_samples: 50
   ood_strategy: shuffle  # "shuffle" or "random"
+
+geometry_weight_norms: {}
+
+geometry_tokenizer_efficiency:
+  num_samples: 20
 
 geometry_trajectory_curvature:
   num_samples: 100
@@ -111,6 +126,11 @@ topology_betti_curve:
 topology_persistence_entropy:
   num_samples: 20
 
+topology_persistence_landscape:
+  num_samples: 20
+  n_landscapes: 5
+  n_points: 200
+
 # ---- Causality Tasks ----
 causality_tracing:
   num_samples: 3
@@ -131,6 +151,11 @@ causality_ablation:
 causality_circuit_quality:
   num_samples: 3
   top_k_pct: 25
+
+causality_edge_attribution:
+  num_samples: 10
+
+causality_knowledge_neurons: {}
 
 # ---- Interpretability Tasks ----
 interpretability_logit_lens:
@@ -161,6 +186,13 @@ interpretability_waa:
 interpretability_attention_effective_rank:
   num_samples: 3
 
+interpretability_attention_rank:
+  num_samples: 50
+
+interpretability_head_roles:
+  seq_len: 30
+  num_samples: 20
+
 interpretability_probing:
   num_samples: 50
   max_tokens: 128
@@ -182,6 +214,16 @@ dynamics_stability:
   num_samples: 5000
   reference_model_path: null
 
+dynamics_sharpness:
+  param_scope: last_layer
+  n_hutchinson: 5
+  n_power_iter: 8
+  sam_rho: 0.05
+  num_samples: 4
+
+dynamics_gradient_flow:
+  num_samples: 4
+
 dynamics_interpolation:
   num_pairs: 50
   steps: 10
@@ -189,7 +231,13 @@ dynamics_interpolation:
 
 dynamics_coe:
   num_samples: 5
-  generation_steps: 10
+  token_position: last
+
+dynamics_generation_diversity:
+  n_samples_per_prompt: 6
+  temperature: 0.8
+  max_new_tokens: 32
+  num_prompts: 6
 
 # ---- Consistency Tasks ----
 consistency_contrastive:
@@ -213,6 +261,28 @@ consistency_contamination:
 consistency_knowledge_capacity:
   num_samples: 5
 
+consistency_position_sensitivity:
+  positions: [0.0, 0.25, 0.5, 0.75, 1.0]
+  num_samples: 10
+
+consistency_format_robustness:
+  num_samples: 12
+
+consistency_self_consistency:
+  n_samples_per_prompt: 8
+  temperature: 0.7
+  max_new_tokens: 8
+  num_prompts: 12
+
+consistency_bias_weat:
+  n_permutations: 500
+  template: "This is {}."
+
+consistency_membership_inference: {}
+
+consistency_icl_slope:
+  shot_counts: [0, 1, 2, 4]
+
 # ---- Representation Engineering Tasks ----
 repe_task_vectors:
   num_samples: 5
@@ -224,3 +294,5 @@ repe_steering_effectiveness:
   num_samples: 3
   steering_alpha: 1.0
   steering_threshold: 0.01
+
+repe_refusal_direction: {}

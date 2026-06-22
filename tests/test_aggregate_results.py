@@ -15,6 +15,7 @@ summarised the same way.
 from pathlib import Path
 import sys
 
+import pandas as pd
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -142,3 +143,33 @@ def test_bare_integer_keyed_dict_treated_as_layers():
     assert "waa.layer_waa_alignments.mean" in flat
     assert "waa.layer_waa_alignments.slope" in flat
     assert flat["waa.layer_waa_alignments.mean"] == pytest.approx(0.75)
+
+
+def test_composite_benchmark_inverts_lower_is_better_metrics():
+    """Perplexity/NLL benchmark columns must not reward worse scores."""
+    bench = pd.DataFrame({
+        "benchmark_arc_acc": [0.2, 0.8],
+        "benchmark_wikitext_perplexity": [100.0, 10.0],
+        "benchmark_lambada_nll": [5.0, 1.0],
+    })
+
+    composite = agg._compute_composite_benchmark(bench)
+
+    assert composite.iloc[1] == pytest.approx(1.0)
+    assert composite.iloc[0] == pytest.approx(0.0)
+
+
+def test_composite_benchmark_drops_degenerate_columns():
+    """Zero-range or single-value benchmark columns must not pollute the composite."""
+    bench = pd.DataFrame({
+        "benchmark_arc_acc": [0.5, 0.5, 0.8],
+        "benchmark_wikitext_perplexity": [100.0, 50.0, 10.0],
+        "benchmark_constant": [1.0, 1.0, 1.0],
+        "benchmark_sparse": [float("nan"), float("nan"), 0.3],
+    })
+
+    composite = agg._compute_composite_benchmark(bench)
+
+    # Best model: high acc, low perplexity; constant/sparse columns ignored.
+    assert composite.iloc[2] == pytest.approx(1.0)
+    assert composite.iloc[0] < composite.iloc[2]

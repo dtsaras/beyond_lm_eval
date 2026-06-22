@@ -76,12 +76,12 @@ BLME_RESEARCH_TASKS = [
     "causality_ablation",
     "geometry_mahalanobis",
     # Round-7: 2025-2026 literature additions. Schatten-p norms +
-    # Matrix Nuclear-Norm + RankMe (Wei et al. 2025, Li et al. 2024,
+    # Matrix Nuclear-Norm + RankMe (Yusupov et al. 2025, Li et al. 2024,
     # Garrido et al. 2023 — all new spectral representations of
     # capability.
     "geometry_schatten",
     # Round-8: attention-sink + massive-activation + compression-
-    # valley (Gu et al. ICLR 2025, Sun et al. 2024, Pedrotti & Guo
+    # valley (Gu et al. ICLR 2025, Sun et al. 2024, Arroyo et al.
     # arXiv:2510.06477) — three linked phenomena the 2024-2025
     # literature unifies as the BOS-as-bias-channel mechanism.
     "interpretability_activation_sinks",

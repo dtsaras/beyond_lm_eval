@@ -12,8 +12,12 @@ class PredictionEntropyTask(DiagnosticTask):
     """
     Computes the entropy of the output probability distribution at each
     token position, profiling the model's inherent uncertainty.
-    Ref: Holtzman et al., "The Curious Case of Neural Text Degeneration",
-         ICLR 2020. arXiv:1904.09751
+
+    The per-token entropy is the generic Shannon entropy of the next-token
+    distribution (Shannon 1948), H = -Σ p log p — not a quantity defined by
+    Holtzman et al. (whose contribution is nucleus/top-p sampling). Holtzman
+    et al. 2020 (ICLR, arXiv:1904.09751) is the *degeneration* motivation
+    for tracking output uncertainty, not the source of this metric.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

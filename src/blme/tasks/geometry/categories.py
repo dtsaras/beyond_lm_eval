@@ -71,7 +71,14 @@ class CategoryGeometryTask(DiagnosticTask):
         if hasattr(self, 'relation_pairs') and self.relation_pairs:
             rel_results = self._compute_relation_consistency(E, self.relation_pairs, tokenizer)
             results.update(rel_results)
-        
+
+        n_mapped = sum(len(tids) for tids in cat_tokens.values())
+        results["n_category_tokens_mapped"] = int(n_mapped)
+        results["cross_model_comparable"] = False
+        results["comparability_note"] = (
+            "tokenizer_dependent_category_token_mapping"
+        )
+
         return results
 
     def _get_category_tokens(self, tokenizer, categories):
@@ -214,7 +221,9 @@ class CategoryGeometryTask(DiagnosticTask):
                 for idx in top_k:
                     n_occ[idx] += 1
             
-            results[f"{cat_name}_hub_skew"] = float(skew(n_occ))
+            results[f"{cat_name}_hub_skew"] = float(
+                0.0 if n_occ.std() == 0 else skew(n_occ)
+            )
             results[f"{cat_name}_hub_max"] = int(n_occ.max())
             
         return results

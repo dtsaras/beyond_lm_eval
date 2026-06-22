@@ -56,6 +56,12 @@ blme evaluate --recipe examples/recipes/default_all.yaml
 # List available tasks
 blme list-tasks
 blme list-tasks --group topology
+
+# Machine-readable task list with certification status
+blme list-tasks --json
+
+# Validate a run without loading a model
+blme evaluate --model-args pretrained=gpt2 --tasks geometry_svd --dry-run --strict
 ```
 
 ### Python API
@@ -95,9 +101,11 @@ tasks:
 
 ## Key Features
 
-- **Shared forward-pass cache** — runs one forward pass, shares hidden states across all tasks (~10x faster for multi-task runs)
-- **Structured JSON output** — results envelope with metadata, git hash, timestamps for reproducibility
+- **Shared forward-pass cache** — shares hidden states/logits for cache-aware tasks to avoid redundant forwards
+- **Structured JSON output** — results envelope with metadata, git hash, dependency versions, resolved task configs, cache settings, and timestamps for reproducibility
 - **Error isolation** — one failing task doesn't crash the entire run
+- **Strict validation** — use `--strict` / `--dry-run` to catch task-name and recipe drift before model loading
+- **Task certification metadata** — every task is labeled as `parity-ready`, `formula-faithful`, `refined-adaptation`, or `proxy-only`
 - **Default configs** — every task has sensible defaults in `defaults.yaml`, override per-task in your recipe
 - **HuggingFace-native** — supports `dtype`, `device_map`, quantization, `trust_remote_code`, `attn_implementation`
 
@@ -110,6 +118,7 @@ See [**docs/interpreting_results.md**](docs/interpreting_results.md) for a compr
 - [Getting Started](docs/getting_started.md)
 - [Configuration](docs/configuration.md)
 - [Interpreting Results](docs/interpreting_results.md)
+- [Task Certification Status](docs/TASK_STATUS.md)
 - Task category docs: [Geometry](docs/tasks_geometry.md) · [Interpretability](docs/tasks_interpretability.md) · [Topology](docs/tasks_topology.md) · [Causality](docs/tasks_causality.md) · [Consistency](docs/tasks_consistency.md) · [Dynamics](docs/tasks_dynamics.md) · [RepE](docs/tasks_representation_engineering.md)
 
 ## License

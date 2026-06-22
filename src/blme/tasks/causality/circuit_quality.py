@@ -1,9 +1,11 @@
 """
-Circuit Quality Metrics — Faithfulness and Minimality
-──────────────────────────────────────────────────────────────────────
-Identifies critical model components via causal effect, ablates everything
-else, and measures circuit faithfulness (does the circuit reproduce the
-model's behavior?) and minimality (is the circuit compact?).
+Layer-ablation circuit proxy metrics — faithfulness and minimality.
+
+This task does not discover mechanistic circuits in the strong causal
+scrubbing / ACDC sense. It ranks transformer layers by observed
+dataset-mean ablation effect, keeps the highest-impact layers as a
+coarse proxy circuit, ablates the remaining layers, and measures how
+well that layer subset preserves the model's next-token distribution.
 
 References:
 - "Causal Scrubbing" (Chan et al., 2022)
@@ -22,11 +24,24 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _observed_layer_minimality(layer_importances, circuit_layers) -> float:
+    """Combine compactness with the observed importance captured by selected layers."""
+    importances = np.maximum(0.0, np.asarray(layer_importances, dtype=np.float64))
+    if importances.size == 0:
+        return 0.0
+    compactness = 1.0 - (len(circuit_layers) / importances.size)
+    total_importance = float(importances.sum())
+    if total_importance <= 0.0:
+        return 0.0
+    selected = [idx for idx in circuit_layers if 0 <= int(idx) < importances.size]
+    selected_share = float(importances[selected].sum() / total_importance) if selected else 0.0
+    return float(max(0.0, min(1.0, compactness * selected_share)))
+
+
 @register_task("causality_circuit_quality")
 class CircuitQualityTask(DiagnosticTask):
     """
-    Identifies critical components via causal effect, ablates everything
-    else, and measures circuit faithfulness x minimality.
+    Ranks layers by mean-ablation effect and scores a coarse circuit proxy.
 
     Returns circuit_faithfulness, circuit_minimality, and
     circuit_quality_score.
@@ -180,8 +195,17 @@ class CircuitQualityTask(DiagnosticTask):
                     for h in hooks:
                         h.remove()
 
-        # Step 5: Compute minimality
-        minimality = 1.0 - (n_circuit / num_layers)
+        # Step 5: Compute minimality from observed effects, not only from
+        # the configured top-k layer count.
+        positive_importance = np.maximum(0.0, importances)
+        total_importance = float(positive_importance.sum())
+        if total_importance > 0:
+            selected_layer_importance_share = float(
+                positive_importance[list(circuit_layers)].sum() / total_importance
+            )
+        else:
+            selected_layer_importance_share = 0.0
+        minimality = _observed_layer_minimality(layer_importances, circuit_layers)
 
         # Step 6: Aggregate
         mean_faithfulness = float(np.mean(faithfulness_scores)) if faithfulness_scores else 0.0
@@ -193,10 +217,13 @@ class CircuitQualityTask(DiagnosticTask):
             quality = 0.0
 
         return {
+            "diagnostic_method": "layer_mean_ablation_circuit_proxy",
             "circuit_faithfulness": mean_faithfulness,
             "circuit_minimality": float(minimality),
             "circuit_quality_score": float(quality),
             "circuit_size_layers": n_circuit,
             "total_layers": num_layers,
             "layer_importances": layer_importances,
+            "selected_layers": sorted(int(i) for i in circuit_layers),
+            "selected_layer_importance_share": selected_layer_importance_share,
         }
