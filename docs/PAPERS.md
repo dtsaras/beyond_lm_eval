@@ -104,6 +104,22 @@ it's cited. Sorted alphabetically by first author.
 | **Rucco, Castiglione, Merelli, Pettini 2016** — *Characterisation of the Idiotypic Immune Network Through Persistent Entropy* | `topology_persistence_entropy` | Springer 2016 | `topology/persistence_entropy.py` |
 | **Zomorodian, Carlsson 2005** — *Computing Persistent Homology* | `topology_homology` | Discrete & Computational Geometry | `topology/homology.py` |
 
+### Campaign-2 additions (2026-07) — new methods, official-code parity-verified
+
+Each was numeric-parity-verified against the paper's OFFICIAL reference before
+landing (see `VERIFICATION_LEDGER.md` and `tests/tasks/parity/`).
+
+| Paper | Task(s) | Identifier | Source file |
+|---|---|---|---|
+| **Friedman, Dieng 2023** — *The Vendi Score: A Diversity Evaluation Metric for Machine Learning* | `geometry_vendi_score` | arXiv:2210.02410 (TMLR 2023) | `geometry/vendi.py` |
+| **Tulchinskii, Kuznetsov, Kushnareva, Cherniavskii, Barannikov, Piontkovskaya, Nikolenko, Burnaev 2023** — *Intrinsic Dimension Estimation for Robust Detection of AI-Generated Texts* (PHD) | `geometry_phd_dimension` | arXiv:2306.04723 (NeurIPS 2023) | `geometry/phd_dimension.py` |
+| **Huh, Cheung, Wang, Isola 2024** — *The Platonic Representation Hypothesis* (CKNNA) | `geometry_cknna` | arXiv:2405.07987 (ICML 2024) | `geometry/cknna.py` |
+| **Limbeck, Andreeva, Sarkar, Rieck 2024** — *Metric Space Magnitude for Evaluating the Diversity of Latent Representations* | `geometry_magnitude` | arXiv:2311.16054 (NeurIPS 2024) | `geometry/magnitude.py` |
+| **Razzhigaev et al. 2024** — *Your Transformer is Secretly Linear* | `geometry_procrustes_linearity` | arXiv:2405.12250 (ACL 2024) | `geometry/procrustes_linearity.py` |
+| **Akhondzadeh, Bojchevski, Eleftheriou, Dazzi 2025** — *KurTail: Kurtosis-based LLM Quantization* | `interpretability_activation_kurtosis` | arXiv:2503.01483 (Findings of EMNLP 2025) | `interpretability/activation_kurtosis.py` |
+| **Abnar, Zuidema 2020** — *Quantifying Attention Flow in Transformers* (attention rollout) | `interpretability_attention_rollout` | arXiv:2005.00928 (ACL 2020) | `interpretability/attention_rollout.py` |
+| **Gardinazzi, Viswanathan, Panerai, Ansuini, Cazzaniga, Biagetti 2025** — *Persistent Topological Features in Large Language Models* (zigzag persistence) | `topology_zigzag_persistence` | arXiv:2410.11042 (ICML 2025) | `topology/zigzag.py` |
+
 ### Metrics with weak citation — paper-provenance documented but not in docstring
 
 These tasks work correctly and match their reference, but the

@@ -16,7 +16,7 @@ task docs.
 - **LOW** — third-party implementation, verify against paper;
 - **NONE** — no code found; BLME implementation is paper-only.
 
-Last updated: **2026-06-20**.
+Last updated: **2026-07** (Campaign-2 additions section).
 
 ---
 
@@ -162,16 +162,38 @@ see `PAPER_SURVEY.md` §3 for rejection reasons).
 
 ---
 
+## Campaign-2 additions (2026-07) — new methods, official-code parity-verified
+
+Diagnostic tasks added in Campaign 2; each was numeric-parity-verified against the
+paper's OFFICIAL reference before landing (see `VERIFICATION_LEDGER.md`).
+
+| Paper | arXiv / venue | Reference repo | Confidence | BLME task |
+|---|---|---|---|---|
+| **Friedman, Dieng 2023** — Vendi Score | arXiv:2210.02410, TMLR 2023 | [vertaix/Vendi-Score](https://github.com/vertaix/Vendi-Score) (pip `vendi_score`) | HIGH | `geometry_vendi_score` |
+| **Tulchinskii et al. 2023** — PHD intrinsic dimension | arXiv:2306.04723, NeurIPS 2023 | [ArGintum/GPTID](https://github.com/ArGintum/GPTID) | HIGH | `geometry_phd_dimension` |
+| **Huh et al. 2024** — CKNNA (Platonic Rep.) | arXiv:2405.07987, ICML 2024 | [minyoungg/platonic-rep](https://github.com/minyoungg/platonic-rep) (already indexed under Universality) | HIGH | `geometry_cknna` |
+| **Limbeck et al. 2024** — Metric-space magnitude | arXiv:2311.16054, NeurIPS 2024 | [aidos-lab/magnipy](https://github.com/aidos-lab/magnipy) | HIGH | `geometry_magnitude` |
+| **Razzhigaev et al. 2024** — Transformer linearity (Procrustes) | arXiv:2405.12250, ACL 2024 | [AIRI-Institute/LLM-Microscope](https://github.com/AIRI-Institute/LLM-Microscope) (pip `llm-microscope`) | HIGH | `geometry_procrustes_linearity` |
+| **Akhondzadeh et al. 2025** — KurTail (activation kurtosis) | arXiv:2503.01483, Findings of EMNLP 2025 | no dedicated repo; reference = `scipy.stats.kurtosis` (formula) + [locuslab/massive-activations](https://github.com/locuslab/massive-activations) (motivation) | Formula-only | `interpretability_activation_kurtosis` |
+| **Abnar, Zuidema 2020** — Attention rollout | arXiv:2005.00928, ACL 2020 | [samiraabnar/attention_flow](https://github.com/samiraabnar/attention_flow) (already indexed) | LOW | `interpretability_attention_rollout` |
+| **Gardinazzi et al. 2025** — Zigzag persistence in LLMs | arXiv:2410.11042, ICML 2025 | [RitAreaSciencePark/ZigZagLLMs](https://github.com/RitAreaSciencePark/ZigZagLLMs) | HIGH | `topology_zigzag_persistence` |
+
+Counts below include these additions (5 new HIGH repos: Vendi-Score, GPTID, magnipy,
+LLM-Microscope, ZigZagLLMs; +1 formula-only: KurTail. cknna/platonic-rep and
+attention_rollout/attention_flow reuse already-indexed repos).
+
+---
+
 ## Summary statistics
 
 | Status | Count |
 |---|---|
-| HIGH confidence (official author / lab repo) | **42** |
+| HIGH confidence (official author / lab repo) | **47** |
 | MEDIUM confidence (community-standard library) | **7** |
 | LOW confidence (third-party or partial) | **5** |
 | NONE (no code released, paper-only) | **10** |
-| Formula-only / engineering helpers (no repo needed) | **2** |
-| **Total papers with repo mapping** | **66** |
+| Formula-only / engineering helpers (no repo needed) | **3** |
+| **Total papers with repo mapping** | **72** |
 
 Of the 10 papers with **NONE**: 5 are so-recent (2025+) that code is
 pending release; 5 are pre-2020 papers whose authors never released
