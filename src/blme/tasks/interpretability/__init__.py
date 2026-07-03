@@ -13,3 +13,7 @@ from .superposition import SuperpositionIndexTask
 from .attention_rank import AttentionRankCollapseTask
 from .head_roles import HeadRolesTask
 from .activation_sinks import ActivationSinksTask
+# Campaign-2 addition (2026-06, scipy-parity-verified)
+from .activation_kurtosis import ActivationKurtosisTask
+# Campaign-2 Wave-2/3 addition (2026-07, Abnar rollout parity-verified)
+from .attention_rollout import AttentionRolloutTask

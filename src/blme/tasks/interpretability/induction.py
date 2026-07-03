@@ -52,6 +52,37 @@ def _make_head_ablation_pre_hook(head_indices, head_dim):
     return pre_hook
 
 
+def _induction_score_per_head(att, N):
+    """Per-head induction (prefix-matching) score for a repeated random
+    sequence ``[r_0..r_{N-1} r_0..r_{N-1}]`` of length ``2N``.
+
+    The induction "stripe" is the attention diagonal at offset ``1 - N``:
+    query position ``k`` attending to key ``(k - N) + 1`` — the token that
+    followed the previous occurrence of the current token. This is exactly
+    the official **TransformerLens** ``induction_score`` kernel (Olsson et al.
+    2022): ``pattern.diagonal(offset=1-seq_len).mean()`` over the full
+    diagonal, i.e. query rows ``k in [N-1, 2N-1]`` (``N+1`` entries).
+
+    Args:
+        att: (H, T, T) attention pattern for one layer/sample (torch or numpy).
+        N:   the repeat-block length (``seq_len``); the sequence length is 2N.
+
+    Returns:
+        list[float] of length H — the per-head induction score in [0, 1].
+
+    Note (2026-07 fix): previously averaged only ``k in [N, 2N-2]`` (``N-1``
+    entries), which dropped the two endpoint stripe entries and read ~0.03
+    below the published TransformerLens number. Now averages the full
+    diagonal for exact parity with the official metric.
+    """
+    if hasattr(att, "detach"):
+        att = att.detach().float().cpu().numpy()
+    att = np.asarray(att, dtype=np.float64)
+    H = att.shape[0]
+    offset = -(N - 1)
+    return [float(np.diagonal(att[h], offset=offset).mean()) for h in range(H)]
+
+
 @register_task("interpretability_induction_heads")
 class InductionHeadTask(DiagnosticTask):
     """
@@ -138,27 +169,11 @@ class InductionHeadTask(DiagnosticTask):
                     # From N to 2N-2 (last token 2N-1 has no next token in this tensor usually, or it does?)
                     # Attention matrix is TxT.
                     
-                    head_scores = []
-                    for h in range(att.shape[0]):
-                        # Compute score for this head
-                        # For each position k in [N, 2N-2]:
-                        # Target attention index = (k - N) + 1
-                        # Check attention weight `att[h, k, target_idx]`
-                        
-                        induction_score = 0.0
-                        count = 0
-                        
-                        for k in range(N, 2*N - 1):
-                            target_idx = (k - N) + 1
-                            if target_idx < k: # Causal mask check
-                                weight = att[h, k, target_idx].item()
-                                induction_score += weight
-                                count += 1
-                                
-                        avg_score = induction_score / max(1, count)
-                        head_scores.append(avg_score)
-                    
-                    sample_scores.append(head_scores)
+                    # Per-head induction score over the FULL induction diagonal
+                    # (offset 1-N) — the official TransformerLens kernel. See
+                    # _induction_score_per_head (2026-07: was [N, 2N-2], which
+                    # dropped 2 endpoint entries and read ~0.03 below TL).
+                    sample_scores.append(_induction_score_per_head(att, N))
                 
                 scores.append(np.array(sample_scores)) # (L, H)
                 

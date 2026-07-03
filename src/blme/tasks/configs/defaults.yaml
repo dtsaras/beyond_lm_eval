@@ -296,3 +296,54 @@ repe_steering_effectiveness:
   steering_threshold: 0.01
 
 repe_refusal_direction: {}
+
+# ---- Campaign-2 additions (2026-06): new methods, official-code parity-verified ----
+geometry_vendi_score:
+  num_samples: 100
+  kernel: cosine
+  gamma: null
+  max_points: 512
+  seed: 0
+
+geometry_phd_dimension:
+  num_samples: 100
+  layer_idx: -1
+  pooling: all_tokens
+  max_points: 2000
+  seed: 42
+  alpha: 1.0
+  n_reruns: 3
+  n_points: 7
+  n_points_min: 3
+  min_points: 50
+  phd_max_points: 512
+  point_jump: 40
+
+geometry_cknna:
+  num_samples: 100
+  topk: 10
+  unbiased: true
+  use_cache: true
+
+geometry_magnitude:
+  num_samples: 100
+  n_scales: 10
+  scale_span: 10.0
+  layer_idx: -1
+
+geometry_procrustes_linearity:
+  num_samples: 100
+
+interpretability_activation_kurtosis:
+  num_samples: 100
+  kurtosis_threshold: 10
+  use_cache: true
+
+topology_zigzag_persistence:
+  num_samples: 40
+  n_neighbors: 5
+  persistence_frac: 0.3
+  use_cache: true
+
+interpretability_attention_rollout:
+  num_samples: 10

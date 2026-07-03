@@ -24,3 +24,9 @@ from .tokenizer_efficiency import TokenizerEfficiencyTask
 from .schatten import SchattenNormTask
 from .trajectory_curvature import TrajectoryCurvatureTask
 from .rmt_bulk import MPBulkDeviationTask
+# Campaign-2 additions (2026-06, official-code parity-verified)
+from .vendi import VendiScoreTask
+from .phd_dimension import PHDimensionTask
+from .cknna import CKNNATask
+from .magnitude import MagnitudeTask
+from .procrustes_linearity import ProcrustesLinearityTask

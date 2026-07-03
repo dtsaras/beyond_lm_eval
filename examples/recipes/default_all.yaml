@@ -115,7 +115,25 @@ tasks:
     edge_tol: 0.05
     fixed_gamma: 0.25
 
-  # ---- Topology Tasks (4) ----
+  # ---- Campaign-2 geometry additions (2026-06) ----
+  geometry_vendi_score:
+    num_samples: 100
+    kernel: cosine
+    max_points: 512
+  geometry_phd_dimension:
+    num_samples: 100
+    layer_idx: -1
+    max_points: 2000
+  geometry_cknna:
+    num_samples: 100
+    topk: 10
+  geometry_magnitude:
+    num_samples: 100
+    n_scales: 10
+  geometry_procrustes_linearity:
+    num_samples: 100
+
+  # ---- Topology Tasks (5) ----
   topology_homology:
     num_samples: 20
 
@@ -129,6 +147,11 @@ tasks:
     num_samples: 20
     n_landscapes: 5
     n_points: 200
+
+  topology_zigzag_persistence:
+    num_samples: 40
+    n_neighbors: 5
+    persistence_frac: 0.3
 
   # ---- Causality Tasks (6) ----
   causality_tracing:
@@ -178,6 +201,13 @@ tasks:
 
   interpretability_waa:
     num_samples: 5
+
+  interpretability_activation_kurtosis:
+    num_samples: 100
+    kurtosis_threshold: 10
+
+  interpretability_attention_rollout:
+    num_samples: 10
 
   interpretability_attention_effective_rank:
     num_samples: 3

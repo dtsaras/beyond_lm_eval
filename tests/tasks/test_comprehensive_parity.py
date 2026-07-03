@@ -5003,12 +5003,14 @@ def test_interpretability_induction_heads():
             for layer_att in attentions:
                 a = layer_att[0]                      # (H, 2N, 2N)
                 # Induction stripe: a[h, k, k-(N-1)] lives on the diagonal at
-                # offset -(N-1). torch.diagonal returns, for j=0..N, the
-                # entry at row k=(N-1)+j, col=j. Query rows k in [N, 2N-2]
-                # correspond to j in [1, N-1].
+                # offset -(N-1). torch.diagonal returns, for j=0..N, the entry
+                # at row k=(N-1)+j, col=j — the FULL diagonal (N+1 entries,
+                # query rows k in [N-1, 2N-1]). This is the official
+                # TransformerLens induction_score kernel; BLME was fixed
+                # 2026-07 to average the full diagonal (previously dropped the
+                # two endpoints via stripe[:, 1:N]).
                 stripe = torch.diagonal(a, offset=-(N - 1), dim1=-2, dim2=-1)
-                sel = stripe[:, 1:N]                  # (H, N-1) -> k=N..2N-2
-                per_layer.append(sel.mean(dim=-1).cpu().numpy())
+                per_layer.append(stripe.mean(dim=-1).cpu().numpy())
             per_sample.append(np.stack(per_layer))    # (L, H)
     ref_avg = np.mean(np.stack(per_sample), axis=0)   # (L, H)
 

@@ -12,7 +12,7 @@ _register_all_tasks()
 
 # The complete set of expected task names across all 7 categories
 EXPECTED_TASKS = [
-    # --- Geometry (27) ---
+    # --- Geometry (32) ---
     "geometry_svd",
     "geometry_isoscore",
     "geometry_categories",
@@ -40,7 +40,13 @@ EXPECTED_TASKS = [
     "geometry_schatten",
     "geometry_trajectory_curvature",
     "geometry_mp_bulk_deviation",
-    # --- Interpretability (15) ---
+    # Campaign-2 additions (2026-06):
+    "geometry_vendi_score",
+    "geometry_phd_dimension",
+    "geometry_cknna",
+    "geometry_magnitude",
+    "geometry_procrustes_linearity",
+    # --- Interpretability (17) ---
     "interpretability_attention_effective_rank",
     "interpretability_attention_entropy",
     "interpretability_attention_graph",
@@ -56,6 +62,8 @@ EXPECTED_TASKS = [
     "interpretability_sparsity",
     "interpretability_superposition",
     "interpretability_waa",
+    "interpretability_activation_kurtosis",
+    "interpretability_attention_rollout",
     # --- Consistency (12) ---
     "consistency_bias_weat",
     "consistency_calibration",
@@ -83,11 +91,12 @@ EXPECTED_TASKS = [
     "causality_edge_attribution",
     "causality_knowledge_neurons",
     "causality_tracing",
-    # --- Topology (4) ---
+    # --- Topology (5) ---
     "topology_betti_curve",
     "topology_homology",
     "topology_persistence_entropy",
     "topology_persistence_landscape",
+    "topology_zigzag_persistence",
     # --- Representation Engineering (4) ---
     "repe_concept_separability",
     "repe_refusal_direction",
@@ -133,10 +142,10 @@ def test_task_instantiable(task_name):
 
 
 def test_task_count():
-    """Registry must expose the current 74-task catalog."""
+    """Registry must expose the current 82-task catalog."""
     registered = list_tasks()
-    assert len(registered) == 74, (
-        f"Expected exactly 74 registered tasks, got {len(registered)}"
+    assert len(registered) == 82, (
+        f"Expected exactly 82 registered tasks, got {len(registered)}"
     )
     assert len(registered) >= len(EXPECTED_TASKS), (
         f"Expected at least {len(EXPECTED_TASKS)} tasks, "
@@ -148,4 +157,4 @@ def test_getting_started_docs_task_count():
     """Docs drift guard: getting_started must mention the current task total."""
     from pathlib import Path
     text = Path("docs/getting_started.md").read_text(encoding="utf-8")
-    assert "74 diagnostic tasks" in text
+    assert "82 diagnostic tasks" in text

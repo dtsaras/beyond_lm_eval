@@ -289,8 +289,11 @@ class TestRegistry:
         # Phase C1-C5 added: PositionSensitivity, FormatRobustness,
         #   NeuralCollapse, SelfConsistency, RefusalDirection (+5)
         # Future additions should bump this number.
-        # Current registry: 74 diagnostic tasks across 7 categories.
-        assert len(tasks) == 74
+        # Current registry: 82 diagnostic tasks across 7 categories
+        # (74 + 8 Campaign-2 additions: vendi, phd, cknna, magnitude,
+        #  procrustes_linearity, activation_kurtosis, zigzag_persistence,
+        #  attention_rollout).
+        assert len(tasks) == 82
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks
@@ -358,7 +361,7 @@ class TestCLI:
         with patch.object(sys, "argv", ["blme", "list-tasks", "--group", "geometry", "--json"]):
             main()
         payload = json.loads(capsys.readouterr().out)
-        assert payload["count"] == 27
+        assert payload["count"] == 32
         first = payload["tasks"][0]
         assert {"name", "group", "status", "papers"} <= set(first)
         assert all(task["group"] == "geometry" for task in payload["tasks"])
