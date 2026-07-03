@@ -1,0 +1,22 @@
+{
+  "task": "dynamics_sharpness",
+  "metric": "top_hessian_eigenvalue_lambda_max",
+  "blme_file": "src/blme/tasks/dynamics/sharpness.py",
+  "blme_kernel": "_hvp (line 69) + _make_random_vec (line 87) + power-iteration in compute() (lines 195-211); reports top_eig = ||H v|| at the final iteration",
+  "reference": "pyhessian.hessian(model, criterion, data=(x,y), cuda=False).eigenvalues(top_n=1)",
+  "pyhessian_version": "0.1 (package exposes no __version__; file: site-packages/pyhessian/hessian.py)",
+  "model": "2-layer MLP (Linear 4->6, Tanh, Linear 6->3), float64",
+  "n_params": 51,
+  "data": "x~N(0,I)[5x4], y~N(0,I)[5x3], MSE loss, torch.manual_seed(0)",
+  "exact_lambda_max": 2.0562113169633243,
+  "pyhessian_lambda_max": 2.056207196430183,
+  "blme_lambda_max": 2.0562113169633243,
+  "rel_pyhessian_vs_exact": 2.003944393928377e-06,
+  "rel_blme_vs_exact": 0.0,
+  "rel_blme_vs_pyhessian": 2.003948409729558e-06,
+  "tol_blme_vs_exact": 1e-09,
+  "tol_vs_pyhessian": 1e-05,
+  "blme_n_power_iter_for_convergence": 200,
+  "notes": "BLME's power iteration converges to the EXACT lambda_max (from torch.autograd.functional.hessian + numpy.linalg.eigh) at float64 machine precision. PyHessian agrees to ~2e-6; its small residual is its own off-by-one Rayleigh-quotient reporting (eigenvalues() returns <Hv,v> before the final v renormalization), not a BLME divergence.",
+  "verdict": "PASS"
+}

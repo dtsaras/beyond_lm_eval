@@ -1,0 +1,132 @@
+{
+  "task": "geometry_spectral",
+  "blme_file": "src/blme/tasks/geometry/spectral.py",
+  "blme_lines": "77-91 (Hill alpha kernel inside WeightSpectralTask.evaluate)",
+  "label": "REFINED-ADAPTATION / PROXY",
+  "paper": [
+    "Martin & Mahoney, Heavy-Tailed Self-Regularization (2019/2021)",
+    "Martin, Peng & Mahoney, Nature Communications 12:4122 (2021)"
+  ],
+  "reference_impl": {
+    "library": "weightwatcher",
+    "function": "WeightWatcher().fit_powerlaw(evals)  (KS-optimal xmin MLE)",
+    "alpha_definition": "alpha = 1 + n/(sum(log(evals[i:])) - n*log(xmin)) for each candidate xmin=evals[i]; pick xmin minimizing KS distance D. Fit is on EIGENVALUES lambda=sigma^2.",
+    "blme_definition": "alpha = 1 + k/sum(log(top_k/x_min)), k=round(0.2*len), x_min=top_k[-1].  Fit is on SINGULAR values sigma, fixed 20% tail (no KS xmin search).",
+    "ww_version": "0.7.7",
+    "venv": "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/venvs/ww"
+  },
+  "check_a_known_exponent_recovery": {
+    "generator": "inverse-CDF power law p(sigma)~sigma^-a, xmin=1, N=5000",
+    "tail_fraction": 0.05,
+    "rows": [
+      {
+        "a_true": 2.0,
+        "blme_hill_alpha_tail0.05": 1.9070369197034442,
+        "abs_err": 0.09296308029655576
+      },
+      {
+        "a_true": 2.5,
+        "blme_hill_alpha_tail0.05": 2.3695453702533342,
+        "abs_err": 0.13045462974666577
+      },
+      {
+        "a_true": 3.0,
+        "blme_hill_alpha_tail0.05": 2.926868235415664,
+        "abs_err": 0.0731317645843359
+      },
+      {
+        "a_true": 3.5,
+        "blme_hill_alpha_tail0.05": 3.501257555526407,
+        "abs_err": 0.0012575555264069394
+      },
+      {
+        "a_true": 4.0,
+        "blme_hill_alpha_tail0.05": 4.281838715418196,
+        "abs_err": 0.2818387154181963
+      }
+    ],
+    "max_abs_err": 0.2818,
+    "note": "Hill alpha recovers the density exponent a within statistical error; tighter tail_fraction -> less bias, more variance.",
+    "pass": true
+  },
+  "check_b_independent_hill": {
+    "n_cases": 18,
+    "max_abs_diff": 0.0,
+    "tol": 1e-09,
+    "sample_rows": [
+      {
+        "case": 0,
+        "tail_fraction": 0.1,
+        "blme": 6.873833324643144,
+        "independent": 6.873833324643144,
+        "abs_diff": 0.0
+      },
+      {
+        "case": 0,
+        "tail_fraction": 0.2,
+        "blme": 5.5897592644130984,
+        "independent": 5.5897592644130984,
+        "abs_diff": 0.0
+      },
+      {
+        "case": 0,
+        "tail_fraction": 0.35,
+        "blme": 3.159495866215576,
+        "independent": 3.159495866215576,
+        "abs_diff": 0.0
+      }
+    ],
+    "pass": true
+  },
+  "check_c_blme_vs_ww_delta": {
+    "rows": [
+      {
+        "matrix": "heavy_tailed_linear",
+        "shape": [
+          96,
+          128
+        ],
+        "blme_alpha_sigma_tail0.2": 1.9536,
+        "ww_alpha_lambda_ksxmin": 1.431,
+        "ww_xmin": 1.7e-05,
+        "ww_ks_D": 0.0125,
+        "ww_mapped_2a_minus_1": 1.8621,
+        "delta_blme_vs_ww_raw": 0.5225,
+        "delta_blme_vs_ww_mapped": 0.0915
+      },
+      {
+        "matrix": "marchenko_pastur",
+        "shape": [
+          150,
+          120
+        ],
+        "blme_alpha_sigma_tail0.2": 8.1763,
+        "ww_alpha_lambda_ksxmin": 6.7005,
+        "ww_xmin": 2.762725,
+        "ww_ks_D": 0.1469,
+        "ww_mapped_2a_minus_1": 12.4011,
+        "delta_blme_vs_ww_raw": 1.4758,
+        "delta_blme_vs_ww_mapped": -4.2247
+      }
+    ],
+    "interpretation": "BLME alpha (on singular values, fixed 20% tail) is NOT equal to WW alpha (on eigenvalues, KS-optimal xmin).  The two differ by (i) the sigma-vs-lambda factor-2 scale [alpha_sigma ~ 2*alpha_lambda-1] and (ii) the fixed-tail-vs-KS-xmin choice.  The 'mapped' column removes (i); the residual is (ii).  Divergence is EXPECTED and documented; equality is NOT forced.",
+    "verdict": "PROXY (kernel-exact vs independent Hill; NOT WW xmin-MLE alpha)"
+  },
+  "check_d_anchor_marchenko_pastur": {
+    "matrix_shape": [
+      400,
+      300
+    ],
+    "blme_alpha_sigma_tail0.2": 7.8646,
+    "ww_alpha_lambda_ksxmin": 8.7611,
+    "expected_band_sigma_scale": [
+      3.0,
+      11.0
+    ],
+    "band_derivation": "HTSR eigenvalue band [2,6] mapped to sigma scale via alpha_sigma ~ 2*alpha_lambda - 1.",
+    "note": "Random (MP) layer -> LARGE alpha in both BLME and WW (no real heavy tail; sharp spectral edge). BLME(sigma)=7.865 and WW(lambda)=8.761 AGREE that this is a high-alpha random layer; BLME lands inside the sigma-scale [3,11] band.",
+    "pass": true
+  },
+  "verdict": "PROXY",
+  "verdict_detail": "BLME's Hill kernel is EXACT vs an independent Hill transcription (<1e-9). It is NOT WeightWatcher's xmin-MLE alpha: WW scans all xmin candidates and picks the KS-optimal one on the eigenvalue ESD, whereas BLME uses a fixed 20% tail on singular values.  geometry_spectral is honestly a REFINED-ADAPTATION proxy of HTSR alpha; ranking-preserving but not value-comparable to published WW alpha."
+}

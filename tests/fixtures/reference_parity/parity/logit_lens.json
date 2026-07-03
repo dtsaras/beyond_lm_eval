@@ -1,0 +1,43 @@
+{
+  "task": "interpretability_logit_lens",
+  "blme_file": "src/blme/tasks/interpretability/logit_lens.py",
+  "blme_kernel": "h_normed = get_final_norm(model)(h); logits = apply_lm_head(model, h_normed)  (logit_lens.py:121-140; helpers in tasks/common.py apply_lm_head:148, get_final_norm:281)",
+  "blme_repo_commit": "f8fada60d4d0a928519d046b3562362db1de263a",
+  "metric_definition": "Logit Lens (nostalgebraist 2020): project an intermediate residual-stream hidden state h to vocab logits via the model's OWN final layernorm then unembedding: logits = W_U( ln_f(h) ). NO learned transform.",
+  "reference_primary_pkg": "tuned-lens (AlignmentResearch/tuned-lens) == 0.2.0",
+  "reference_primary_class": "tuned_lens.nn.lenses.LogitLens.from_model(model); LogitLens.forward(h, idx) = unembed.forward(h); tuned_lens.nn.unembed.Unembed.forward(h) = self.unembedding(self.final_norm(h))",
+  "reference_note": "LogitLens is the PLAIN/untrained lens (transform_hidden is identity). tuned-lens' TunedLens (learned per-layer affine probe, arXiv:2303.08112) is a DIFFERENT quantity that BLME deliberately does NOT use.",
+  "venv": "$SCRATCH/venvs/tunedlens (python -m venv; pip install tuned-lens==0.2.0; torch 2.12.1+cu130 CPU)",
+  "input": {
+    "model": "gpt2",
+    "prompt": "The quick brown fox jumps over the lazy dog",
+    "layer": 6,
+    "n_layers": 12,
+    "n_tokens": 9,
+    "d_model": 768,
+    "vocab": 50257,
+    "dtype": "float32",
+    "device": "cpu"
+  },
+  "tolerance": 1e-4,
+  "tolerance_note": "float32; cross-env residual is torch-build rounding (main torch 2.8.0+cu128 vs venv 2.12.1+cu130). Same-env BLME-vs-manual is 0.0.",
+  "verdict": "PARITY — BLME logit-lens projection == official tuned-lens LogitLens == manual W_U(ln_f(h)) to <1e-4 on identical gpt2 mid-layer hidden state.",
+  "results": {
+    "blme_vs_manual_maxabs": 0.0,
+    "tunedlens_vs_blme_mid_maxabs": 1.9073486328125e-05,
+    "ref_mid_argmax_row0": 262,
+    "blme_mid_argmax_row0": 262,
+    "ref_mid_logits_head5_row0": [
+      -5.558308124542236,
+      -5.367150783538818,
+      -7.786713600158691,
+      -8.011938095092773,
+      -6.782522201538086
+    ]
+  },
+  "anchors": {
+    "final_layer_lens_equals_model_logits_maxabs": 0.0,
+    "softmax_row_sum_maxdev": 1.0251998901367188e-05,
+    "top1_last_layer_matches_model_argmax": true
+  }
+}

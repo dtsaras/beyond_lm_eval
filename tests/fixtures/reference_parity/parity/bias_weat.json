@@ -1,0 +1,30 @@
+{
+  "task": "consistency_bias_weat",
+  "paper": "Caliskan, Bryson & Narayanan 2017, 'Semantics derived automatically from language corpora contain human-like biases', Science 356(6334):183-186 (WEAT); May, Wang, Bordia, Bowman & Rudinger 2019, 'On Measuring Social Biases in Sentence Encoders', NAACL, arXiv:1903.10561 (SEAT)",
+  "repo": "https://github.com/W4ngatang/sent-bias",
+  "commit": "e3559fb669ca4832743b42fee715994c15c7f1af",
+  "reference_function": "sentbias/weat.py::effect_size (line 178) and s_XYAB/s_XAB/s_wAB (lines 32-79); cossim (line 13), construct_cossim_lookup (line 17)",
+  "blme_helper": "src/blme/tasks/consistency/bias.py::_weat_effect_size (line 142), _weat_statistic (line 133)",
+  "toy_input": {
+    "generator": "numpy.random.default_rng(seed=12345).standard_normal((dim,)) per vector, drawn in order X,Y,A,B",
+    "seed": 12345,
+    "dim": 5,
+    "n_per_set": 4,
+    "sets": ["X targets", "Y targets", "A attributes", "B attributes"]
+  },
+  "metrics": {
+    "effect_size_cohens_d": {
+      "official_output": -0.5483337931868121,
+      "blme_output": -0.5483337931868121,
+      "abs_diff": 0.0
+    },
+    "weat_statistic": {
+      "official_output": -0.7437862779422525,
+      "blme_output": -0.7437862779422525,
+      "abs_diff": 0.0
+    }
+  },
+  "tol": 1e-9,
+  "verdict": "PARITY",
+  "caveats": "Effect size and test statistic are deterministic closed forms and match to 0.0 (well within 1e-9). The permutation p-value is NOT pinned: BLME's _weat_p_value uses random permutations (seeded rng, n_permutations) over X u Y, while the official p_val_permutation_test uses exact enumeration / shuffles AND relies on the removed numpy<1.20 alias np.int (so it cannot be executed under numpy 2.4 without patching). Both p-value estimators are one-sided over the same statistic; only effect_size and the statistic are claimed at numeric parity here. BLME's per-vector embeddings are model hidden states; this parity check substitutes synthetic vectors to isolate the closed-form math, which is the only part BLME implements differently from the reference."
+}

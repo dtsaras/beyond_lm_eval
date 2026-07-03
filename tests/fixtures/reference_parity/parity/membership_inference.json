@@ -1,0 +1,42 @@
+{
+  "paper": "Yeom, Giacomelli, Fredrikson, Jha 2018 IEEE CSF 'Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting' (arXiv:1709.01604). Loss-threshold membership inference; membership advantage = TPR - FPR.",
+  "repo": "https://github.com/sam-yeom/ml-privacy-csf18",
+  "reference_function": "code/inclusion.py:27-50 sklearn_decide/sklearn_inclusion (predict TRAIN/member when statistic crosses threshold); code/main.py:23-30,177-195 advantage = train_TRAIN - test_TRAIN = TPR - FPR. BLME score = -loss (member-like high); membership advantage taken as max_threshold(TPR-FPR). AUROC of the score cross-checked 3 ways (sklearn.metrics.roc_auc_score, Mann-Whitney U rank statistic, trapezoidal swept-ROC area).",
+  "blme_target": "src/blme/tasks/consistency/membership_inference.py MembershipInferenceTask.evaluate lines 178-189 (separability_auroc/mia_auroc = roc_auc_score(labels, -losses)) and line 176 (loss_gap = mean_nonmember - mean_member); _compute_nll line 104-116.",
+  "toy_input": {
+    "description": "Synthetic per-example NLL arrays; members lower mean loss, non-members higher, overlapping spread (partial overlap -> non-trivial attack).",
+    "seed": 20240624,
+    "n_member": 40,
+    "n_nonmember": 45,
+    "member_loss_dist": "Normal(loc=2.0, scale=0.8), clipped >=0.05",
+    "nonmember_loss_dist": "Normal(loc=3.2, scale=0.9), clipped >=0.05",
+    "member_loss_mean": 2.0206416881735154,
+    "nonmember_loss_mean": 3.041047634627647
+  },
+  "official_output": {
+    "membership_advantage_max_tpr_minus_fpr": 0.5027777777777778,
+    "auroc_sklearn": 0.8027777777777777,
+    "auroc_mannwhitney": 0.8027777777777778,
+    "auroc_trapezoid": 0.8027777777777779,
+    "loss_gap": 1.0204059464541317
+  },
+  "blme_output": {
+    "separability_auroc": 0.8027777777777777,
+    "mia_auroc": 0.8027777777777777,
+    "loss_gap": 1.0204059464541317,
+    "mean_loss_member": 2.0206416881735154,
+    "mean_loss_nonmember": 3.041047634627647,
+    "n_members": 40,
+    "n_nonmembers": 45
+  },
+  "abs_diff": {
+    "auroc": 1.1102230246251565e-16,
+    "loss_gap": 0.0
+  },
+  "tol": {
+    "auroc": 1e-09,
+    "loss_gap": 1e-09
+  },
+  "verdict": "PARITY",
+  "caveats": "BLME's headline metric is AUROC of the loss score (and loss_gap), which is the standard equivalent of Yeom's loss-threshold attack; the 'membership advantage = max TPR-FPR' (0.5028) is the strict Yeom definition and is reported alongside. AUROC and loss_gap match to machine precision. The verification feeds prescribed losses through BLME's real evaluate() via a stub model whose float64 logits reproduce the target cross-entropy exactly (float32 logits would add a ~1e-8 harness artifact to loss_gap, not a BLME divergence)."
+}

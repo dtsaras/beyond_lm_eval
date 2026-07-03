@@ -1,0 +1,55 @@
+{
+  "task": "geometry_lipschitz",
+  "metric": "spectral_norm_sigma_max (AutoLip per-layer kernel)",
+  "IMPORTANT_task_scope": "BLME's geometry_lipschitz (src/blme/tasks/geometry/lipschitz.py) does NOT implement a spectral-norm / power-iteration sigma_max kernel and does NOT form an AutoLip product of per-layer spectral norms. It computes the hidden-state RELATIVE-CHANGE ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)|| across adjacent layers, and is already labelled 'proxy-only' in task_metadata.py and in its own docstring (lines 37-40, 112-115). The Virmaux&Scaman/Miyato citations describe the sigma_max KERNEL, which in BLME lives in weight_norms.py and spectral.py (exact SVD), not in lipschitz.py.",
+  "blme_sigma_max_kernel_file": "src/blme/tasks/geometry/weight_norms.py:79-80 (torch.linalg.svdvals(W)[0]); also src/blme/tasks/geometry/spectral.py:66,96",
+  "blme_sigma_max_kernel": "spectral norm = largest singular value via EXACT SVD: torch.linalg.svdvals(W)[0]. This is NOT power iteration; it is exact, so it is bit-parity with numpy.linalg.norm(W,2) / scipy.linalg.svdvals(W)[0].",
+  "reference_repo": "avirmaux/lipEstimation",
+  "reference_commit": "336b6ccfecec6d965fda1798da8f9e204998766b",
+  "reference_sigma_max": "max_eigenvalue._power_method_matrix (power iteration on W^T W) and max_eigenvalue.generic_power_method (power iteration on a linear layer). Both estimate sigma_max(W).",
+  "reference_autolip_product": "lipschitz_approximations.lipschitz_spectral_ub (lines 275-309): product over layers of generic_power_method(layer). This is the AutoLip UPPER BOUND.",
+  "exact_sigma_max_reference": "numpy.linalg.norm(W, 2) == scipy.linalg.svdvals(W)[0] (largest singular value).",
+
+  "blme_svd_vs_exact": {
+    "shapes": [[8, 8], [16, 32], [64, 64], [128, 96], [256, 256]],
+    "seed": "np.random.seed(0), torch.manual_seed(0)",
+    "max_abs_diff": 6.750155989720952e-14,
+    "tol": 1e-9,
+    "pass": true,
+    "note": "BLME's torch.linalg.svdvals(W)[0] == exact numpy/scipy sigma_max to float64 eps."
+  },
+
+  "reference_power_iteration_vs_exact": {
+    "shapes": [[8, 8], [16, 32], [64, 64], [128, 96], [256, 256]],
+    "max_rel_diff": 6.99814326825926e-08,
+    "tol_rel": 1e-3,
+    "pass": true,
+    "note": "lipEstimation power iteration runs in float32 (its own dtype contract) and converges to exact sigma_max to ~7e-8 relative given enough iterations. Both _power_method_matrix and generic_power_method agree."
+  },
+
+  "autolip_product": {
+    "layer_shapes": [[32, 48], [48, 48], [48, 16]],
+    "per_layer_exact": [11.899440648004658, 12.90991706109623, 10.735765262883442],
+    "product_exact": 1649.2367606836879,
+    "product_blme": 1649.2367606836879,
+    "abs_diff": 0.0,
+    "tol": 1e-9,
+    "pass": true,
+    "label": "AutoLip UPPER BOUND (product of per-layer sigma_max) — NOT the true / tighter SeqLip network Lipschitz constant."
+  },
+
+  "anchors": {
+    "diagonal_diag[-3,0.5,2,-1.25,4]": {"expected_max_abs_diag": 4.0, "blme_svd": 4.0, "ref_power": 4.0},
+    "orthogonal_Q_20x20": {"expected": 1.0, "blme_svd": 1.0000000000000004, "ref_power": 0.9999999403953552},
+    "scaled_identity_c=3.7": {"expected": 3.7, "blme_svd": 3.7, "ref_power": 3.700000286102295},
+    "blme_max_abs_diff": 4.440892098500626e-16,
+    "ref_power_max_abs_diff": 2.861022947442393e-07
+  },
+
+  "verdict": {
+    "sigma_max_kernel": "PARITY",
+    "global_lipschitz": "PROXY / AutoLip UPPER BOUND (not the true SeqLip network Lipschitz constant)",
+    "geometry_lipschitz_task": "hidden-state relative-change ratio ||dh||/||h|| — a separate PROXY that does NOT use the sigma_max kernel; already labelled proxy-only.",
+    "summary": "The spectral-norm sigma_max KERNEL is PARITY (BLME exact SVD == numpy.linalg.norm(W,2); lipEstimation power iteration converges to the same to ~7e-8 rel). The GLOBAL AutoLip product-of-sigma_max is an honest documented UPPER BOUND (PROXY), not the tight network Lipschitz constant. The geometry_lipschitz task ships a different hidden-state relative-change proxy entirely."
+  }
+}

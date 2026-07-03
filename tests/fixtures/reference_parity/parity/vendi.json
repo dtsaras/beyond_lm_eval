@@ -1,0 +1,50 @@
+{
+  "task": "geometry_vendi_score",
+  "paper": "Friedman & Dieng 2023, 'The Vendi Score: A Diversity Evaluation Metric for Machine Learning', TMLR 2023, arXiv:2210.02410",
+  "repo": "https://github.com/vertaix/Vendi-Score",
+  "version": "vendi_score==0.0.3 (scipy 1.18.0, numpy 2.4.6)",
+  "reference_function": "vendi_score/vendi.py :: score_K(K, q=1, p=None, normalize=False) [lines 30-38] -> weight_K(K,None)=K/n [lines 8-12]; w=scipy.linalg.eigvalsh(K/n); entropy_q(w,q=1)=-(w[w>0]*log(w[w>0])).sum() [lines 22-27]; return exp(entropy)",
+  "blme_file": "src/blme/tasks/geometry/vendi.py",
+  "blme_function": "_vendi_score(X, kernel='cosine'|'rbf', gamma=None) -> builds nonlinear PSD kernel with unit diagonal, then runs the score_K algebra verbatim (same scipy.linalg.eigvalsh, same positive-eigval mask)",
+  "definition": "Given n samples and a PSD similarity matrix K (K_ii=1), let K/n have eigenvalues lambda_1..lambda_n (>=0, sum=1). VS_{q=1} = exp(-sum_i lambda_i log lambda_i). The effective number of distinct samples.",
+  "distinctness_note": "Uses a NONLINEAR kernel (cosine default, rbf optional) on the representations, deliberately distinct from effective_rank / RankMe which use the raw (linear) singular-value spectrum.",
+  "toy_input": {
+    "cosine_random": {"n": 8, "d": 5, "seed": 0, "kernel": "cosine"},
+    "rbf_random": {"n": 8, "d": 5, "seed": 0, "kernel": "rbf", "gamma": 0.5},
+    "cosine_mid": {"description": "4 clusters x 2 near-duplicate rows (1e-3 jitter), cosine; rng chain consumes the (8,5) random cloud first", "n": 8, "d": 5, "seed": 0, "kernel": "cosine"}
+  },
+  "official_output": {
+    "cosine_random": 3.751352462688749,
+    "rbf_random": 7.123163160295763,
+    "cosine_mid": 3.0033817835431083,
+    "identical_rows_all_ones_K": 1.000000000000001,
+    "orthonormal_rows_K_eq_I7": 6.999999999999998,
+    "score_K_I20": 20.0
+  },
+  "blme_output": {
+    "cosine_random": 3.751352462688749,
+    "rbf_random": 7.123163160295763,
+    "cosine_mid": 3.0033817835431083,
+    "identical_rows": 1.000000000000001,
+    "orthonormal_rows": 6.999999999999998
+  },
+  "abs_diff": {
+    "cosine_random": 0.0,
+    "rbf_random": 0.0,
+    "cosine_mid": 0.0,
+    "identical_rows_vs_one": 1.1102230246251565e-15,
+    "orthonormal_rows_vs_seven": 1.7763568394002505e-15,
+    "score_K_I20_vs_twenty": 3.552713678800501e-15
+  },
+  "tol": {
+    "same_kernel_bit_exact": 1e-12,
+    "closed_form_anchor": 1e-09
+  },
+  "anchors": {
+    "identical_rows_VS_eq_1": "n identical rows -> K all-ones -> VS = 1 (PASS)",
+    "orthonormal_rows_VS_eq_n": "n mutually orthogonal unit rows -> K = I -> VS = n (PASS, n=7)",
+    "score_K_identity_VS_eq_n": "vendi.score_K(I_n) == n (PASS, n=5,20)",
+    "bounded_1_to_n": "VS in [1, n] for random cosine clouds (PASS, n=4,10,25)"
+  },
+  "verdict": "PARITY"
+}

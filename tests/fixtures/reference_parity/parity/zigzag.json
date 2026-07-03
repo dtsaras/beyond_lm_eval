@@ -1,0 +1,142 @@
+{
+  "task": "topology_zigzag_persistence",
+  "blme_file": "src/blme/tasks/topology/zigzag.py",
+  "blme_lines": "_zigzag_summary + _layer_topology + _contiguous_bands (the verified helper)",
+  "label": "FAITHFUL PROXY (ripser self-contained); H1 layer-band anchored EXACTLY to the paper's dionysus zigzag engine on ground-truth constructions",
+  "verdict": "FAITHFUL-PROXY",
+  "paper": [
+    "Gardinazzi, Viswanathan, Panerai, Ansuini, Cazzaniga & Biagetti, 'Persistent Topological Features in Large Language Models', ICML 2025 (poster), arXiv:2410.11042"
+  ],
+  "reference_repo": "RitAreaSciencePark/ZigZagLLMs @ bcfe0a60b08395583d11418a5d81b53f169454c3 (2025-06-20)",
+  "reference_pipeline": {
+    "file": "src/zigzag/zigzag_DL.py",
+    "generate_simplex_tree_L139": "per-layer kNN graph (sklearn.kneighbors_graph, n_neighbors=knn) -> gudhi SimplexTree, S.expansion(dim) flag complex, dim-skeleton simplices with global IDs",
+    "compute_layers_with_intersection_L171": "zigzag sequence: even entries = per-layer complexes, odd entries = pairwise intersections",
+    "compute_filtration_times_L181": "per-simplex contiguous appearance runs -> birth/death times over the 2L-1 zigzag sequence",
+    "compute_zigzag_persistence_L202": "dionysus d.zigzag_homology_persistence (or FastZigZag pyfzz in run_fast_zigzag.py)"
+  },
+  "reference_engine": {
+    "library": "dionysus",
+    "version": "2.1.1",
+    "function": "dionysus.zigzag_homology_persistence(filtration, times)",
+    "isolated_venv": "$SCRATCH/venvs/zigzag (BLME does NOT depend on dionysus/fzz; C++ build, not a repo dep, fails against system Boost 1.74)",
+    "note": "This IS the engine zigzag_DL.py imports as `import dionysus as d`. FastZigZag/pyfzz is unavailable (fzz license forbids redistribution, per repo README) but produces the same barcode."
+  },
+  "why_proxy": "BLME cannot depend on dionysus/fzz. The self-contained helper computes per-layer significant H0/H1 (graph-geodesic kNN + ripser, same construction as topology_betti_curve) and summarises feature persistence across the layer axis as contiguous layer-bands. On ground-truth inputs this reproduces the dionysus zigzag answer by construction: a loop present only in layers a..b -> one H1 band spanning exactly a..b.",
+  "toy_construction": "20 points; circle = unit circle (H1 loop), line = points on a 1D segment (no loop). Same point identities across layers. knn=3,dim=2 for dionysus; n_neighbors=5,persistence_frac=0.3 for BLME.",
+  "index_convention_note": "dionysus births/deaths are in 2L-1 zigzag-sequence-index units (the ZigZagLLMs demo maps to layers via //2). A loop in layers 2..3 -> dionysus H1 bar [5,8] (layers 2.5..4.0); BLME reports the same feature as a band over layers 2..3. Same lifetime, different axis convention: the loop is 'born' at the intersection node AFTER the first layer it appears in, so the layer-mapped birth is offset by +0.5. Verified exact relationship on all scenarios: floor(dionysus_birth_layer) == BLME band-onset layer.",
+  "tol_blme_vs_independent": 1e-12,
+  "scenarios": {
+    "circle_middle": {
+      "n_layers": 6,
+      "description": "loop present ONLY in layers 2,3",
+      "per_layer_components": [1, 1, 1, 1, 1, 1],
+      "per_layer_loops": [0, 0, 1, 1, 0, 0],
+      "dionysus_H1_bars_zigzag_idx": [[5.0, 8.0]],
+      "dionysus_H1_bars_layer": [[2.5, 4.0]],
+      "dionysus_n_H1_bars": 1,
+      "dionysus_n_seq": 11,
+      "blme_summary": {
+        "h1_total_layer_persistence": 2.0,
+        "h1_loop_layer_sum": 2.0,
+        "h1_num_bands": 1.0,
+        "h1_max_band_length": 2.0,
+        "h1_first_layer": 0.4,
+        "h1_last_layer": 0.6,
+        "betti1_fraction_layers": 0.3333333333333333,
+        "h0_mean_components": 1.0,
+        "h0_persistence_range": 0.0,
+        "h0_first_layer_components": 1.0,
+        "h0_last_layer_components": 1.0
+      },
+      "max_abs_diff_blme_vs_independent": 0.0
+    },
+    "circle_all": {
+      "n_layers": 5,
+      "description": "loop present in every layer",
+      "per_layer_components": [1, 1, 1, 1, 1],
+      "per_layer_loops": [1, 1, 1, 1, 1],
+      "dionysus_H1_bars_zigzag_idx": [[1.0, 10.0]],
+      "dionysus_H1_bars_layer": [[0.5, 5.0]],
+      "dionysus_n_H1_bars": 1,
+      "dionysus_n_seq": 9,
+      "blme_summary": {
+        "h1_total_layer_persistence": 5.0,
+        "h1_loop_layer_sum": 5.0,
+        "h1_num_bands": 1.0,
+        "h1_max_band_length": 5.0,
+        "h1_first_layer": 0.0,
+        "h1_last_layer": 1.0,
+        "betti1_fraction_layers": 1.0,
+        "h0_mean_components": 1.0,
+        "h0_persistence_range": 0.0,
+        "h0_first_layer_components": 1.0,
+        "h0_last_layer_components": 1.0
+      },
+      "max_abs_diff_blme_vs_independent": 0.0
+    },
+    "no_loop": {
+      "n_layers": 5,
+      "description": "no loop in any layer",
+      "per_layer_components": [1, 1, 1, 1, 1],
+      "per_layer_loops": [0, 0, 0, 0, 0],
+      "dionysus_H1_bars_zigzag_idx": [],
+      "dionysus_H1_bars_layer": [],
+      "dionysus_n_H1_bars": 0,
+      "dionysus_n_seq": 9,
+      "blme_summary": {
+        "h1_total_layer_persistence": 0.0,
+        "h1_loop_layer_sum": 0.0,
+        "h1_num_bands": 0.0,
+        "h1_max_band_length": 0.0,
+        "h1_first_layer": 0.0,
+        "h1_last_layer": 0.0,
+        "betti1_fraction_layers": 0.0,
+        "h0_mean_components": 1.0,
+        "h0_persistence_range": 0.0,
+        "h0_first_layer_components": 1.0,
+        "h0_last_layer_components": 1.0
+      },
+      "max_abs_diff_blme_vs_independent": 0.0
+    },
+    "circle_single_mid": {
+      "n_layers": 5,
+      "description": "loop present only in the single middle layer 2",
+      "per_layer_components": [1, 1, 1, 1, 1],
+      "per_layer_loops": [0, 0, 1, 0, 0],
+      "dionysus_H1_bars_zigzag_idx": [[5.0, 6.0]],
+      "dionysus_H1_bars_layer": [[2.5, 3.0]],
+      "dionysus_n_H1_bars": 1,
+      "dionysus_n_seq": 9,
+      "blme_summary": {
+        "h1_total_layer_persistence": 1.0,
+        "h1_loop_layer_sum": 1.0,
+        "h1_num_bands": 1.0,
+        "h1_max_band_length": 1.0,
+        "h1_first_layer": 0.5,
+        "h1_last_layer": 0.5,
+        "betti1_fraction_layers": 0.2,
+        "h0_mean_components": 1.0,
+        "h0_persistence_range": 0.0,
+        "h0_first_layer_components": 1.0,
+        "h0_last_layer_components": 1.0
+      },
+      "max_abs_diff_blme_vs_independent": 0.0
+    }
+  },
+  "anchors": {
+    "circle_middle_loop_layers": [2, 3],
+    "circle_single_mid_loop_layers": [2],
+    "no_loop_bands": 0,
+    "circle_all_single_full_depth_band_len": 5,
+    "all_anchors_pass": true
+  },
+  "independent_reimpl_pass": true,
+  "dionysus_anchor_pass": true,
+  "caveats": [
+    "PROXY, not an exact port of the dionysus barcode. BLME summarises per-layer significant-loop presence as contiguous layer-bands; it does NOT reproduce dionysus' full multiplicity of short zigzag bars (with knn=2/3 the reference produces many spurious length-1 H0/H1 bars from the kNN flag complex that are pure noise). The verified claim is the FEATURE LIFETIME: a loop present in a contiguous band of layers -> one band / one dionysus H1 bar spanning that band.",
+    "dionysus birth/death are in zigzag-sequence-index units (2L-1); the layer mapping is idx/2 (the ZigZagLLMs demo uses dgm//2). BLME reports layer-index bands directly.",
+    "Anchored on synthetic circle/line clouds with KNOWN feature lifetimes; not on real LLM activations (those have no ground-truth barcode). Real-model behaviour of the BLME task is exercised by the task's own smoke path, not this parity fixture.",
+    "n_neighbors=5 / persistence_frac=0.3 are BLME defaults chosen (as in topology_betti_curve) to suppress Euclidean-scale spurious loops; the dionysus reference used knn=3/dim=2 (its own defaults are knn=2/dim=3). The two engines are compared on FEATURE LIFETIME, which is invariant to these within-reason parameter choices on the ground-truth clouds."
+  ]
+}

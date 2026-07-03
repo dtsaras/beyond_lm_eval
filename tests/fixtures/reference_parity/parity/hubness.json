@@ -1,0 +1,32 @@
+{
+  "paper": "Radovanovic, Nanopoulos, Ivanovic 2010 JMLR 11 'Hubs in Space'; Tomasev et al. 2014 IEEE TKDE 26(3) 'Role of Hubness in Clustering High-Dimensional Data'",
+  "repo": "https://github.com/VarIr/scikit-hubness",
+  "commit": "c36a058e67c34696182d3b8c5da089e287eb60bf",
+  "reference_function": "skhubness/analysis/estimation.py:442 (Hubness.score: hubness_measures['k_skewness'] = stats.skew(k_occurrence)); k_occurrence built via _k_neighbors (line 231, self-hit filtered start=1/end=k+1) + np.bincount (line 434). Gini cross-checked against independent mean-absolute-difference definition.",
+  "toy_input": {
+    "n": 60,
+    "d": 8,
+    "k": 5,
+    "seed": 0,
+    "hub_points": [0, 1],
+    "metric": "euclidean",
+    "k_occurrence": [26, 25, 2, 0, 2, 1, 7, 7, 6, 6, 1, 5, 4, 1, 5, 3, 12, 7, 1, 3, 2, 8, 2, 1, 3, 2, 10, 1, 6, 2, 5, 9, 6, 0, 1, 6, 2, 3, 3, 18, 1, 1, 0, 8, 7, 13, 13, 1, 3, 5, 1, 4, 0, 0, 7, 10, 6, 3, 1, 2]
+  },
+  "official_output": {
+    "k_skewness": 2.1327252317535574,
+    "gini": 0.5146666666666667
+  },
+  "blme_output": {
+    "hubness_k5_skew": 2.1327252317535574,
+    "hubness_k5_gini": 0.5146666666666668
+  },
+  "abs_diff": {
+    "skew": 0.0,
+    "gini": 1.1102230246251565e-16
+  },
+  "tol": {
+    "skew": 1e-09,
+    "gini": 1e-09
+  },
+  "verdict": "PARITY"
+}

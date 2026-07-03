@@ -1,0 +1,34 @@
+{
+  "task": "geometry_neural_collapse",
+  "reference_repo": "https://github.com/rhubarbwu/neural-collapse",
+  "reference_commit": "c05a0b80d6bc6e8e2e102f2180f1f33b2c9605fd",
+  "reference_fn": "neural_collapse/measure.py::covariance_ratio (lines 16-54)",
+  "toy": {
+    "K": 3,
+    "n_per_class": 30,
+    "d": 5,
+    "seed": 0,
+    "spread": 0.15
+  },
+  "nc1": {
+    "reference_pinv": 0.00409094387203806,
+    "reference_svd": 0.004090943872038057,
+    "reference_quotient": 0.0185994875752756,
+    "handrolled_pinv": 0.00409094387203806,
+    "blme": 0.00409094387203806,
+    "blme_subspace_rank": 2,
+    "abs_diff_blme_vs_pinv": 0.0,
+    "abs_diff_blme_vs_svd": 3.469446951953614e-18,
+    "abs_diff_blme_vs_handrolled": 0.0,
+    "abs_diff_ref_vs_handrolled": 0.0
+  },
+  "nc2": {
+    "blme_equinorm_cv": 0.00784386467284082,
+    "blme_etf_cosine_deviation_proxy": 0.011144638743029825,
+    "etf_status": "PROXY (different definition from reference simplex_etf_error)"
+  },
+  "global_mean_max_diff_unweighted_vs_data": 4.440892098500626e-16,
+  "tol": 1e-09,
+  "verdict_blme_nc1_vs_pinv": "MATCH",
+  "verdict_blme_nc1_vs_svd": "MATCH"
+}

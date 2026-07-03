@@ -1,0 +1,65 @@
+{
+  "task": "geometry_procrustes_linearity",
+  "blme_file": "src/blme/tasks/geometry/procrustes_linearity.py",
+  "blme_symbol": "_procrustes_similarity(X, Y)",
+  "label": "PARITY (official reference code run; bit-exact, abs_diff=0.0, incl. real ill-conditioned layer clouds)",
+  "paper": [
+    "Razzhigaev, Mikhalchuk, Goncharova, Gerasimenko, Oseledets, Dimitrov, Kuznetsov (2024). 'Your Transformer is Secretly Linear.' ACL 2024 (long), arXiv:2405.12250."
+  ],
+  "reference_impl": {
+    "repo": "AIRI-Institute/LLM-Microscope",
+    "commit": "b6db939b2696845ce1f88cf69cddc41e808eea17",
+    "pip_package": "llm-microscope==0.0.7",
+    "function": "procrustes_similarity(x, y)  (+ helper get_est_svd)",
+    "location": "LLM_microscope.ipynb cell 3 == llm_microscope/functions.py:86-115",
+    "transform": "UNCONSTRAINED least-squares linear map A = X^+ Y via thin-SVD pseudo-inverse (NOT orthogonal Procrustes A=UV^T)",
+    "pipeline": "center columns -> Frobenius-normalize (x/x.norm()) -> A = Vh^T diag(1/S) U^T Y -> sim = 1 - ||X A - Y||_F^2 (||Y||_F=1 after normalization)"
+  },
+  "blme_port_note": "BLME runs the SAME torch.linalg.svd + unguarded 1/S as the reference (promoted to float64 for determinism), NOT numpy. This is required: on ill-conditioned clouds numpy's and torch's SVD resolve the ~1e-17 null-space singular values differently and the unguarded 1/S amplifies them by ~1e17, so a numpy port would disagree with the reference by up to ~0.4. Using torch => bit-exact (abs_diff 0.0) on both toys AND real layer clouds. BLME adds one guard only: NaN on a degenerate constant / exactly-singular cloud where the reference emits NaN/inf.",
+  "primary": {
+    "desc": "Well-conditioned N>>D pair. Y = X@A_true + 0.30*noise.",
+    "n": 200,
+    "d": 16,
+    "seed": 0,
+    "official": 0.9953462120501121,
+    "blme": 0.9953462120501121,
+    "abs_diff": 0.0,
+    "tol": 1e-06,
+    "pass": true
+  },
+  "anchor_orthogonal": {
+    "desc": "Y = X @ Q, Q random ORTHOGONAL (proper Procrustes rotation) => Y in row space of X => sim == 1.0",
+    "official": 1.0,
+    "blme": 1.0,
+    "abs_diff": 0.0,
+    "eq_one": true
+  },
+  "anchor_independent": {
+    "desc": "Y independent random Gaussian => low linearity (~0.08, well below 1)",
+    "official": 0.08121091172302186,
+    "blme": 0.08121091172302186,
+    "abs_diff": 0.0,
+    "below_half": true
+  },
+  "anchor_scaled_2x": {
+    "desc": "Y = 2*X. Frobenius-normalization removes the global scale, so the identity map sends normalized X exactly onto normalized Y => sim == 1.0. Documents that the score is scale-invariant.",
+    "official": 1.0,
+    "blme": 1.0,
+    "abs_diff": 0.0,
+    "eq_one": true
+  },
+  "anchor_wide_NleD": {
+    "desc": "N<D (12x40), full row-rank X, Y=X@A exactly in row space. Now bit-exact vs the reference because BLME uses the same torch SVD. (An earlier numpy port gave 1.0 here vs the reference's ~0.996 — a null-space-resolution artifact, now eliminated.)",
+    "n": 12,
+    "d": 40,
+    "official": 0.9961401659776773,
+    "blme": 0.9961401659776773,
+    "abs_diff": 0.0,
+    "pass": true
+  },
+  "conditioning_caveat": {
+    "desc": "When X is near-rank-deficient (effective rank << D), the value is dominated by how the SVD backend resolves ~1e-17 singular values, which the unguarded 1/S amplifies by ~1e17. numpy vs torch SVD then disagree by up to ~0.4 on the SAME input, and a numerically-stable solver returns ~1.0 (Y truly in X's column space). The reference is DEFINED by torch, so BLME uses torch and reproduces it bit-exactly; but the absolute value is a conditioning artifact, not a robust linearity. The metric is well-posed only for reasonably-conditioned X (paper toy is (1000,10)). Interpret the across-depth PROFILE, not a single absolute value.",
+    "example_pythia70m": "on real pythia-70m clouds (N~987, D=512), numpy port gave 1.0 for every pair while torch reference gave 0.92-0.99; BLME (torch) matches the reference bit-exactly."
+  },
+  "verdict": "PARITY"
+}

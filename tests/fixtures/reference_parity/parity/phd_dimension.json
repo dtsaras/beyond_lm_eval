@@ -1,0 +1,172 @@
+{
+  "task": "geometry_phd_dimension",
+  "blme_file": "src/blme/tasks/geometry/phd_dimension.py",
+  "blme_symbol": "_phd_dimension (reproduces GPTID PHD.fit_transform)",
+  "label": "PARITY",
+  "paper": "Tulchinskii et al., Intrinsic Dimension Estimation for Robust Detection of AI-Generated Texts, NeurIPS 2023, arXiv:2306.04723",
+  "reference_impl": {
+    "repo": "github.com/ArGintum/GPTID",
+    "commit": "8c8759ef94c8769e2f40f3e507f270e4c948a562",
+    "file": "IntrinsicDim.py",
+    "symbol": "class PHD (PHD.fit_transform / _calc_ph_dim_single / prim_tree)"
+  },
+  "seed_handling": "reference draws from global np.random inside n_reruns threads (non-deterministic interleaving). Parity taken with n_reruns=1 (one thread, single-threaded), np.random.seed(seed) before fit_transform; BLME drives np.random.RandomState(seed) issuing the identical np.random.choice(n_cloud,size=n,replace=False) sequence. Both consume the same RNG stream => bit-exact.",
+  "estimator_params": {
+    "alpha": 1.0,
+    "metric": "euclidean",
+    "n_reruns_parity": 1,
+    "n_points": 7,
+    "n_points_min": 3,
+    "min_points": 50,
+    "max_points": 512,
+    "point_jump": 40
+  },
+  "exact_parity_cases": [
+    {
+      "k": 1,
+      "N": 600,
+      "cloud_seed": 101,
+      "sample_seed": 0,
+      "ref": 1.0106143776673555,
+      "blme": 1.0106143776673555,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 1,
+      "N": 600,
+      "cloud_seed": 101,
+      "sample_seed": 1,
+      "ref": 1.0113796138243072,
+      "blme": 1.0113796138243072,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 1,
+      "N": 600,
+      "cloud_seed": 101,
+      "sample_seed": 7,
+      "ref": 1.0148325502958109,
+      "blme": 1.0148325502958109,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 1,
+      "N": 600,
+      "cloud_seed": 101,
+      "sample_seed": 42,
+      "ref": 1.0107740141836836,
+      "blme": 1.0107740141836836,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 2,
+      "N": 600,
+      "cloud_seed": 102,
+      "sample_seed": 0,
+      "ref": 1.9304905617457122,
+      "blme": 1.9304905617457122,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 2,
+      "N": 600,
+      "cloud_seed": 102,
+      "sample_seed": 1,
+      "ref": 1.9556182416785686,
+      "blme": 1.9556182416785686,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 2,
+      "N": 600,
+      "cloud_seed": 102,
+      "sample_seed": 7,
+      "ref": 1.9165293292700352,
+      "blme": 1.9165293292700352,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 2,
+      "N": 600,
+      "cloud_seed": 102,
+      "sample_seed": 42,
+      "ref": 1.9534189558054935,
+      "blme": 1.9534189558054935,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 3,
+      "N": 600,
+      "cloud_seed": 103,
+      "sample_seed": 0,
+      "ref": 2.775670595744406,
+      "blme": 2.775670595744406,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 3,
+      "N": 600,
+      "cloud_seed": 103,
+      "sample_seed": 1,
+      "ref": 2.812695065518018,
+      "blme": 2.812695065518018,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 3,
+      "N": 600,
+      "cloud_seed": 103,
+      "sample_seed": 7,
+      "ref": 2.7361257937454213,
+      "blme": 2.7361257937454213,
+      "abs_diff": 0.0
+    },
+    {
+      "k": 3,
+      "N": 600,
+      "cloud_seed": 103,
+      "sample_seed": 42,
+      "ref": 2.793718407582811,
+      "blme": 2.793718407582811,
+      "abs_diff": 0.0
+    }
+  ],
+  "exact_max_abs_diff": 0.0,
+  "tol_abs": 1e-09,
+  "anchors": {
+    "uniform_R1": {
+      "N": 1000,
+      "cloud_seed": 2001,
+      "expected_dim": 1,
+      "ref": 1.0067692754272333,
+      "blme": 1.0067692754272333,
+      "abs_diff": 0.0
+    },
+    "uniform_R2": {
+      "N": 1000,
+      "cloud_seed": 2002,
+      "expected_dim": 2,
+      "ref": 1.9542356194053365,
+      "blme": 1.9542356194053365,
+      "abs_diff": 0.0
+    },
+    "uniform_R3": {
+      "N": 1000,
+      "cloud_seed": 2003,
+      "expected_dim": 3,
+      "ref": 2.8499540839123765,
+      "blme": 2.8499540839123765,
+      "abs_diff": 0.0
+    },
+    "line_in_R5": {
+      "N": 1000,
+      "cloud_seed": 3000,
+      "ambient": 5,
+      "expected_dim": 1,
+      "ref": 1.0152852141375721,
+      "blme": 1.0152852141375721,
+      "abs_diff": 0.0
+    }
+  },
+  "verdict": "PARITY"
+}

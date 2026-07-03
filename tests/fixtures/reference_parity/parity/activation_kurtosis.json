@@ -1,0 +1,48 @@
+{
+  "task": "interpretability_activation_kurtosis",
+  "metric": "per_channel_excess_kurtosis",
+  "convention": "Fisher excess kurtosis (normal -> 0); bias=True (population moments E[(x-mu)^4]/E[(x-mu)^2]^2 - 3, NO n-based sample-size correction) -- scipy.stats.kurtosis DEFAULT",
+  "blme_file": "src/blme/tasks/interpretability/activation_kurtosis.py",
+  "blme_kernel": "_activation_kurtosis_stats(A, threshold) -> per-channel excess kurtosis over the token axis (axis=0), plus mean/max/frac_above_threshold/tensor_kurtosis summaries",
+  "reference": "scipy.stats.kurtosis(A, axis=0, fisher=True, bias=True)",
+  "scipy_version": "1.18.0",
+  "numpy_version": "2.4.6",
+  "paper": {
+    "primary": "Akhondzadeh, Bojchevski, Eleftheriou, Dazzi, 'KurTail: Kurtosis-based LLM Quantization', Findings of EMNLP 2025, arXiv:2503.01483 (ACL Anthology 2025.findings-emnlp.943)",
+    "motivation": [
+      "Sun et al. 2024, 'Massive Activations in Large Language Models', arXiv:2402.17762",
+      "Dettmers et al. 2022, 'LLM.int8()', NeurIPS 2022, arXiv:2208.07339"
+    ]
+  },
+  "parity_array": {
+    "rng": "numpy default_rng(20250703)",
+    "shape": [3000, 24],
+    "composition": "cols 0-5 student-t(df=5); 6-11 laplace(0,1); 12-17 uniform(-1,1); 18-23 standard normal",
+    "per_channel_max_abs_diff_vs_scipy": 0.0,
+    "tol": 1e-09,
+    "blme_mean": 1.9040834871608237,
+    "scipy_mean": 1.9040834871608237,
+    "blme_max": 9.09445344289808,
+    "scipy_max": 9.09445344289808,
+    "blme_tensor": 5.380424329666427,
+    "scipy_tensor": 5.380424329666427,
+    "tensor_max_abs_diff_vs_scipy": 0.0
+  },
+  "bias_flag_check": {
+    "note": "BLME matches scipy bias=True bit-exactly and is clearly distinguishable from bias=False on small N.",
+    "N": 30,
+    "max_abs_diff_vs_bias_true": 0.0,
+    "max_abs_diff_vs_bias_false": 0.5267753,
+    "matches": "bias=True"
+  },
+  "anchors": {
+    "note": "Single-channel large-N (N=400000, default_rng(2024)); recovered value AND exact scipy agreement.",
+    "gaussian": {"expected": 0.0, "recovered": 0.004378291784604027, "recover_tol": 0.2, "scipy_max_abs_diff": 0.0},
+    "laplace": {"expected": 3.0, "recovered": 3.074085212901763, "recover_tol": 0.2, "scipy_max_abs_diff": 0.0},
+    "uniform": {"expected": -1.2, "recovered": -1.196810087164456, "recover_tol": 0.05, "scipy_max_abs_diff": 0.0},
+    "spike": {"expected": "very high (>1e4)", "recovered": 399994.67901910556, "scipy_max_abs_diff": 0.0}
+  },
+  "tol": 1e-09,
+  "verdict": "PARITY",
+  "notes": "BLME per-channel excess kurtosis reproduces scipy.stats.kurtosis(axis=0, fisher=True, bias=True) to 0.0 (bit-exact) on synthetic activations; anchors recover the textbook kurtoses (Gaussian ~0, Laplace ~3, uniform ~-1.2) and a single-spike channel is very high; all agree with scipy element-for-element. Zero-variance channels are guarded (NaN, dropped from summaries)."
+}

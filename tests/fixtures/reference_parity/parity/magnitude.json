@@ -1,0 +1,38 @@
+{
+  "task": "geometry_magnitude",
+  "blme_file": "src/blme/tasks/geometry/magnitude.py",
+  "blme_symbol": "_magnitude(D, t) = 1^T (exp(-t*D))^{-1} 1 = sum(solve(exp(-t*D), 1))",
+  "label": "REFERENCE-EXACT",
+  "paper": "Limbeck, Andreeva, Sarkar, Rieck (2024). Metric Space Magnitude for Evaluating the Diversity of Latent Representations. NeurIPS 2024, arXiv:2311.16054.",
+  "reference_impl": {
+    "repo": "aidos-lab/magnipy @7d49b90",
+    "path_no_gpu": "magnipy/magnitude/approximation.py::compute_magnitude_no_gpu(W, t) -> pinv(exp(-t*distance_matrix(W,W))).sum()",
+    "path_cholesky": "magnipy/magnitude/compute.py::compute_magnitude_from_distances(D, ts, method='cholesky') -> weights_cholesky solve of exp(-D)**t against ones, sum of weights",
+    "note": "Z = similarity_matrix(D) = exp(-D); per-scale similarity Z**t = exp(-t*D); magnitude = 1^T Z_t^{-1} 1. Identical algebra to BLME's np.linalg.solve."
+  },
+  "check_a_parity": {
+    "toy": {"n": 25, "d": 4, "seed": 0, "t_med": 0.8824663039950454},
+    "scales": "geomspace(t_med/10, t_med*10, 7)",
+    "max_abs_diff": 2.842170943040401e-14,
+    "tol": 1e-06,
+    "pass": true,
+    "note": "BLME _magnitude vs BOTH magnipy paths (no_gpu pinv + cholesky-from-distances) at each scale."
+  },
+  "check_b_anchors": {
+    "single_point": {"blme": 1.0, "magnipy": 1.0, "expected": 1.0, "pass": true},
+    "two_points_large_t": {"L": 5.0, "t": 20.0, "blme": 2.0, "closed_form_2_over_1_plus_exp_negtL": 2.0, "limit": 2.0, "pass": true},
+    "n_separated_large_t": {"n": 8, "t": 5.0, "blme": 8.0, "magnipy": 8.0, "pass": true},
+    "monotonic_nondecreasing": {"n_strict_decreases": 0, "steps": 29, "pass": true},
+    "magnitude_dimension": {"value": 1.0936927558485128, "note": "max log-log slope on toy d=4 cloud; intrinsic-dim proxy (Meckes 2015)", "pass": true}
+  },
+  "check_c_full_ladder": {
+    "ts": "geomspace(t_med/10, t_med*10, 10)",
+    "magnipy_cholesky_first": 1.3524172650978015,
+    "magnipy_cholesky_last": 24.94722616175732,
+    "max_abs_diff": 3.552713678800501e-15,
+    "tol": 1e-06,
+    "pass": true
+  },
+  "caveats": "zeta = exp(-t*D) is ill-conditioned at large t (approaches identity) and can be singular on near-duplicate points; BLME retries with a +1e-2*I perturbation (Bunch et al. 2020, as in magnipy's perturb_singularities) then falls back to a Hermitian pseudo-inverse (magnipy weights_pinv). magnipy's pinv path (compute_magnitude_no_gpu) and cholesky path can diverge on genuinely singular zeta; on well-conditioned toy clouds they agree to fp.",
+  "verdict": "PARITY"
+}

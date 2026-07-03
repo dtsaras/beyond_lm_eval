@@ -1,0 +1,64 @@
+{
+  "task": "geometry_correlation_dimension",
+  "blme_file": "src/blme/tasks/geometry/correlation_dimension.py",
+  "blme_lines": "83-119 (GP kernel inside CorrelationDimensionTask.evaluate)",
+  "label": "FORMULA-FAITHFUL / PROXY",
+  "paper": [
+    "Grassberger & Procaccia, Phys. Rev. Lett. 50(5) 346 (1983)",
+    "Grassberger & Procaccia, Physica D 9(1) 189-208 (1983)"
+  ],
+  "reference_impl": {
+    "library": "nolds",
+    "function": "nolds.corr_dim(data, emb_dim, rvals=..., fit='poly')",
+    "file": "/home/dtsaras/miniconda3/lib/python3.12/site-packages/nolds/measures.py",
+    "version_note": "nolds exposes no __version__; pinned by file path + transcribed kernel",
+    "kernel": "csums = 1/(n(n-1)) * sum(dists<=r); poly_fit(log(rvals),log(csums),1,'poly')"
+  },
+  "check_a_independent_gp": {
+    "toy": {
+      "n": 60,
+      "d": 6,
+      "seed": 7
+    },
+    "blme_slope": 2.8189338871387006,
+    "independent_slope": 2.8189338871387006,
+    "abs_diff_slope": 0.0,
+    "max_abs_diff_curve": 0.0,
+    "tol_slope": 1e-06,
+    "tol_curve": 1e-12,
+    "pass": true
+  },
+  "check_b_nolds": {
+    "toy": {
+      "signal": "logistic map x_{n+1}=3.97 x(1-x)",
+      "n": 500,
+      "x0": 0.371,
+      "emb_dim": 3,
+      "lag": 1,
+      "rvals": "nolds logarithmic_r(0.1*sd, 0.5*sd, 1.03)"
+    },
+    "nolds_intended_slope": 0.9675619766124346,
+    "nolds_raw_api_slope": 0.9227377086316992,
+    "blme_slope": 0.9675619766124346,
+    "abs_diff_slope_vs_intended": 0.0,
+    "max_abs_diff_curve_vs_intended": 1.3877787807814457e-17,
+    "artifact_gap_vs_raw_api": 0.044824267980735355,
+    "artifact_explanation": "nolds inits dists=zeros((n,n)) and leaves the diagonal at 0; sum(dists<=r) counts n self-pairs, inflating each csum by n/(n(n-1)). nolds' own docstring says self-matches should be excluded; BLME excludes them via upper-triangle i<j.",
+    "tol_slope": 1e-06,
+    "tol_curve": 1e-12,
+    "pass": true
+  },
+  "check_c_known_dims": {
+    "line_R5_slope": 0.8908411482338383,
+    "line_expected": 1.0,
+    "line_tol": 0.15,
+    "plane_R5_slope": 1.480331509163251,
+    "plane_true_dim": 2.0,
+    "plane_caveat": "BLME's 5th-95th percentile radius window includes the large-r saturating regime, biasing the GP slope DOWN to ~1.5; the bias does not vanish as N grows. Recovery is DIRECTIONAL: line < plane < ambient.",
+    "ordering_pass": true,
+    "n_points": 3000,
+    "seed": 123,
+    "pass": true
+  },
+  "verdict": "PARITY"
+}

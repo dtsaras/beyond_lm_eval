@@ -1,0 +1,52 @@
+{
+  "task": "interpretability_sae_features",
+  "blme_file": "src/blme/tasks/interpretability/sae_features.py",
+  "blme_kernel": "l0_per_token = (feature_acts > 0).float().sum(dim=-1); mean_active_features_l0 = mean_over_samples(l0_per_token.mean()); max_active_features_l0 = max_over_samples(l0_per_token.max()); sae_total_dict_size = sae.cfg.d_sae  (sae_features.py:149-167)",
+  "blme_repo_commit": "f8fada60d4d0a928519d046b3562362db1de263a",
+  "metric_definition": "SAE feature-usage stats. L0 = mean number of strictly-active (>0) SAE features per token; density = per-feature fraction of tokens active; dead-fraction = features never active across all tokens. BLME's task outputs mean/max L0 + dict size only.",
+  "reference_primary_pkg": "sae-lens==6.44.4",
+  "reference_primary_class": "sae_lens.SAE.from_pretrained(release, sae_id).encode(acts) -> StandardSAE (jbloom/GPT2-Small-SAEs-Reformatted, Joseph Bloom gpt2-small-res-jb release; the canonical Anthropic/Bricken-style residual-stream SAE served through SAELens).",
+  "venv": "$SCRATCH/venvs/saelens (python -m venv --system-site-packages; pip install sae-lens)",
+  "input": {
+    "model": "gpt2",
+    "sae_release": "gpt2-small-res-jb",
+    "sae_id": "blocks.8.hook_resid_pre",
+    "sae_arch": "StandardSAE",
+    "d_sae": 24576,
+    "d_in": 768,
+    "hidden_state_index": 8,
+    "n_prompts": 5,
+    "total_tokens": 54,
+    "dtype": "float32",
+    "device": "cpu"
+  },
+  "tolerance": 0.0,
+  "tolerance_note": "The BLME L0 kernel and the numpy reference operate on the IDENTICAL SAELens-encoded feature matrix. The per-token L0 counts are EXACT integers (bit-identical between torch and numpy), and the reference mean is computed in BLME's own float32 dtype, so the kernel stats agree to 0.0. (A float64 higher-precision mean differs by ~5e-5 due purely to float32 accumulation over ~2700-active-feature rows \u2014 this is BLME's own dtype choice, not a kernel divergence; reported as 'full_matrix_f64_info_diff'.) The trained-SAE pipeline itself is FAITHFUL: SAELens's own SAE.encode produced the features.",
+  "verdict": "PARITY (stat kernels) + FAITHFUL (trained-SAE pipeline). BLME's L0 kernel == independent numpy reference to 0.0 (float32 dtype) on SAELens-encoded features from the real pretrained gpt2-small-res-jb SAE; per-token counts are bit-exact integers.",
+  "results": {
+    "per_token_counts_bit_exact": true,
+    "blme_mean_active_features_l0": 2714.004541015625,
+    "ref_mean_l0": 2714.004541015625,
+    "agg_diff_mean_l0": 0.0,
+    "blme_max_active_features_l0": 23967.0,
+    "ref_max_l0": 23967.0,
+    "agg_diff_max_l0": 0.0,
+    "max_per_sample_kernel_diff": 0.0,
+    "full_matrix_diff_mean_l0": 0.0,
+    "full_matrix_diff_max_l0": 0.0,
+    "full_matrix_f64_info_diff": 2.7126736313221045e-05,
+    "sae_total_dict_size": 24576,
+    "density_min": 0.0,
+    "density_mean": 0.11045780888310185,
+    "density_max": 0.9629629629629629,
+    "dead_feature_fraction": 0.011027018229166666
+  },
+  "anchors": {
+    "known_sparsity_k": 7,
+    "known_k_l0_exact": true,
+    "dead_feature_detected": true,
+    "density_in_unit_interval": true
+  },
+  "all_kernel_diffs_zero": true,
+  "all_anchors_pass": true
+}

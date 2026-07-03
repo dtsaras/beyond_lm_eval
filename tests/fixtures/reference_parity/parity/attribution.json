@@ -1,0 +1,51 @@
+{
+  "task": "interpretability_attribution",
+  "blme_source": "src/blme/tasks/interpretability/attribution.py::ComponentAttributionTask.evaluate (+_gini_nonnegative)",
+  "reference": {
+    "library": "captum",
+    "version": "0.9.0",
+    "function": "captum.attr.InputXGradient",
+    "method_citation": "Simonyan, Vedaldi & Zisserman 2014 (saliency / input x gradient)"
+  },
+  "scalar_target": "next-token cross-entropy loss (BLME) == captum forward_func output",
+  "per_token_reduction": "abs(input*grad).sum(dim=-1), drop last token",
+  "model": "TinyLM(vocab=23, dim=8, hidden=16) deterministic seeds, eval mode, float64",
+  "input": "input_ids shape (1,7), torch.randint seed=1",
+  "tol": {
+    "float64": 1e-09,
+    "float32": 1e-05
+  },
+  "canonical_case": {
+    "dtype": "torch.float64",
+    "seed_model": 0,
+    "seed_data": 1,
+    "S": 7,
+    "loss": 3.307266045853367,
+    "blme_pertoken": [
+      0.1773958830829223,
+      0.17317480995671825,
+      0.0748825713157332,
+      0.06405762541623476,
+      0.13931334985532717,
+      0.1399833927726529
+    ],
+    "captum_pertoken": [
+      0.1773958830829223,
+      0.17317480995671825,
+      0.0748825713157332,
+      0.06405762541623476,
+      0.13931334985532717,
+      0.1399833927726529
+    ],
+    "max_elementwise_inputxgrad_diff": 0.0,
+    "max_pertoken_diff": 0.0,
+    "gini_blme": 0.18692106469740177,
+    "gini_independent": 0.18692106469740175,
+    "gini_diff": 2.7755575615628914e-17,
+    "tol": 1e-09,
+    "pertoken_pass": true,
+    "elementwise_pass": true,
+    "gini_pass": true
+  },
+  "all_pass": true
+}

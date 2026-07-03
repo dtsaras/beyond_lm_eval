@@ -1,0 +1,113 @@
+{
+  "task": "causality_edge_attribution",
+  "blme_source": "src/blme/tasks/causality/edge_attribution.py::EdgeAttributionTask.evaluate (kernel lines 172-173)",
+  "blme_kernel": "attr = |(clean_h - c_h) * grad_h).sum()|  (per residual-stream layer input; abs of dot of activation-difference with the metric gradient)",
+  "paper": {
+    "citation": "Syed, Rager & Conmy 2024, 'Attribution Patching Outperforms Automated Circuit Discovery', arXiv:2310.10348 (NeurIPS 2023 ATTRIB Workshop / BlackBoxNLP)",
+    "eq2_attribution_score": "L(x_clean | do(E=e_corr)) ~= L(x_clean) + (e_corr - e_clean)^T . dL/de_clean ;  Delta_e L := (e_corr - e_clean)^T . dL/de_clean",
+    "eq3_absolute_attribution_score": "|Delta_e L|  (paper always ranks by the absolute attribution score, averaged over (x_clean,x_corr) pairs)",
+    "sign_note": "Paper writes (e_corr - e_clean); the reference repo writes (clean - corr). These differ only in sign; both are taken |.| when ranking (Eq 3 / attr_absolute_val=True). BLME uses (clean - corr) then abs -> matches the repo convention and Eq (3) exactly (sign-invariant)."
+  },
+  "reference": {
+    "repo": "Aaquib111/edge-attribution-patching (official EAP/ACDC++ implementation, built on transformer_lens)",
+    "commit": "7124ef815b320383f2d29b0e2c2757075ed0c417",
+    "commit_date": "2024-02-21",
+    "kernel_file": "utils/prune_utils.py",
+    "node_kernel_line": 211,
+    "node_kernel": "node_attr = (clean_head_act - corr_head_act) * clean_grad_act ; then split_layers_and_heads(...).sum((2,3,4))  # completes the dot over d_model and sums batch/seq",
+    "edge_kernel_line": 283,
+    "edge_kernel": "current_result = (clean_grad_cache[down] * (clean_cache[fwd] - corrupted_cache[fwd])).sum()",
+    "abs_line": "285-286: if attr_absolute_val: current_result = current_result.abs()",
+    "get_3_caches": "lines 108-148: 2 forward passes (clean, corrupted) + 1 backward pass (clean metric)",
+    "venv": "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/venvs/tlens2 (transformer_lens 3.5.1, transformers 5.12.1, torch 2.8.0, --system-site-packages) \u2014 used ONLY in the verify script; BLME does not depend on transformer_lens"
+  },
+  "method": {
+    "level_A": "kernel parity on a tiny controlled autograd model: BLME kernel formula == reference line-283/211 formula == paper Eq(2)/Eq(3), all computed independently.",
+    "level_B": "exactness anchor: on a LINEAR residual model where activation patching is EXACT, EAP first-order score == true patching effect L(clean|do(E=corr)) - L(clean).",
+    "level_C": "real transformer_lens cross-check: the reference line-283 edge kernel run through a genuine gpt2 HookedTransformer over a clean/corrupt pair, vs an independent autograd recomputation of the same residual-stream edge scores; ranking stability checked."
+  },
+  "tol": {
+    "exact_formula_native_dtype": 1e-10,
+    "blme_float32_downcast_path": 0.0001,
+    "transformer_lens_crosscheck": 1e-08
+  },
+  "canonical_kernel_case_A": {
+    "model": "TinyResidLM(vocab=19,dim=8,hidden=16), nonlinear residual block, eval, float64, params frozen",
+    "input": "clean_ids=torch.randint(0,19,(1,6)) seed_data=1; corrupted=token-shuffle perm(seed 1*997+11)",
+    "scalar_metric": "logit of clean argmax next token at last position (BLME's exact target)",
+    "target_token": 15,
+    "blme_score_f32": 0.9379982948303223,
+    "ref_abs_score_native": 0.9379983271300023,
+    "paper_eq2_signed_native": -0.9379983271300023,
+    "d_ref283_vs_paperEq2_magnitude": 0.0,
+    "d_refabs_vs_paperEq3": 0.0,
+    "d_blme_vs_ref_identical_f32": 0.0,
+    "d_blme_f32_vs_ref_native": 3.229968004170303e-08
+  },
+  "canonical_exactness_case_B": {
+    "model": "TinyResidLM(...) LINEAR residual block (activation patching is EXACT), float64",
+    "target_token": 15,
+    "eap_signed_paper": -0.9170505872215198,
+    "true_patch_effect": -0.9170505872215198,
+    "d_eap_vs_true_patch": 0.0
+  },
+  "transformer_lens_gpt2_crosscheck": {
+    "model": "gpt2 (HookedTransformer, transformer_lens 3.5.1)",
+    "device": "cuda",
+    "clean_prompt": "The capital of France is",
+    "corrupt_prompt": "The tallest mountain on Earth is",
+    "target_token_id": 783,
+    "target_token": " now",
+    "n_resid_nodes": 12,
+    "ref_line283_scores": [
+      3.5680403858554666,
+      0.47544608515663683,
+      0.014324940654452278,
+      1.592834865832366,
+      0.13436750541531317,
+      0.26015462108257,
+      0.7853995088473602,
+      1.5982247443437312,
+      0.690071148142124,
+      1.8140783283094404,
+      0.7420739846032062,
+      0.11857335188846524
+    ],
+    "independent_eq2_scores": [
+      3.5680403858554666,
+      0.47544608515663683,
+      0.014324940654452334,
+      1.592834865832366,
+      0.1343675054153127,
+      0.26015462108256965,
+      0.7853995088473601,
+      1.5982247443437312,
+      0.6900711481421246,
+      1.8140783283094408,
+      0.7420739846032066,
+      0.11857335188846485
+    ],
+    "max_abs_diff_ref_vs_independent": 5.551115123125783e-16,
+    "ref_top_layer": 0,
+    "independent_top_layer": 0,
+    "ranking_identical": true
+  },
+  "anchors": {
+    "first_order_approx": "EAP is a first-order (Taylor) approximation of activation patching; on a LINEAR model patching is exact -> EAP score == true patching effect (Part B: d=0..1e-16).",
+    "ranking": "the edge with the largest |activation-difference x gradient| ranks highest; identical ranking between reference and independent recomputation on gpt2 (Part C)."
+  },
+  "verdict": {
+    "kernel_parity": "PARITY",
+    "exactness_on_linear_model": "EXACT",
+    "transformer_lens_crosscheck": "PASS",
+    "full_circuit_pipeline": "PROXY \u2014 BLME's registered task 'causality_edge_attribution' does NOT run the transformer_lens edge graph; it applies the same EAP KERNEL to residual-stream LAYER inputs (documented in the task docstring). The KERNEL is at numeric parity; the CIRCUIT-level pipeline is a faithful proxy, not the full EAP edge graph."
+  },
+  "caveats": [
+    "BLME is a per-LAYER residual-stream proxy, not the per-EDGE transformer_lens computational graph of the official EAP repo. The task docstring states this explicitly.",
+    "BLME downcasts activations/grads to float32 numpy before the kernel (task lines 155-156,168), so BLME-vs-reference at the same formula is exact (0.0) but BLME-float32-vs-reference-native is bounded ~1e-6.",
+    "EAP is a FIRST-ORDER approximation of activation patching; it is exact only for models linear in the edge activation (Part B). For real nonlinear transformers it is an approximation (as the paper states).",
+    "BLME corrupts by token-shuffling a single prompt rather than using a curated counterfactual (x_clean,x_corr) pair; the paper averages the score over such pairs. This affects the INPUT distribution, not the kernel formula verified here.",
+    "Reference architecture is transformer_lens HookedTransformer; BLME uses architecture-agnostic HF forward hooks. The kernel formula is identical; the graph abstraction differs."
+  ],
+  "all_pass": true
+}

@@ -1,0 +1,102 @@
+{
+  "provenance": {
+    "reference": "kmeng01/rome experiments/causal_trace.py",
+    "rome_commit": "0874014cd9837e4365f3e6f3c71400ef11509e04",
+    "paper": "Meng et al. 2022, arXiv:2202.05262 (NeurIPS 2022)",
+    "run_mode": "actual ROME trace_with_patch imported unchanged; shared noise tensor injected into ROME (via noise callable) and BLME to isolate the algorithm",
+    "transformers": "5.2.0",
+    "torch": "2.8.0+cu128",
+    "device": "cuda"
+  },
+  "input": {
+    "model": "gpt2",
+    "prompt": "The capital of Italy is",
+    "subject": "Italy",
+    "target": " Rome",
+    "target_token_id": 10598,
+    "n_noise_samples": 10,
+    "seed": 1,
+    "subject_range": [
+      3,
+      4
+    ],
+    "num_layers": 12
+  },
+  "sigma": {
+    "blme": 0.44797199964523315,
+    "rome": 0.44797199964523315,
+    "abs_diff": 0.0
+  },
+  "scores": {
+    "clean_high": {
+      "rome": 0.15734979510307312,
+      "blme": 0.15734979510307312
+    },
+    "corrupted_low": {
+      "rome": 0.0035503488034009933,
+      "blme": 0.0035503488034009933
+    }
+  },
+  "aie_span_patch": {
+    "rome": [
+      0.09252985753118992,
+      0.09045791812241077,
+      0.0947179738432169,
+      0.11254574544727802,
+      0.07759123481810093,
+      0.0815714318305254,
+      0.059855932369828224,
+      0.04726439528167248,
+      0.04865792579948902,
+      0.022885456681251526,
+      0.005625946447253227,
+      0.0
+    ],
+    "blme": [
+      0.09252985753118992,
+      0.09045791812241077,
+      0.0947179738432169,
+      0.11254574544727802,
+      0.07759123481810093,
+      0.0815714318305254,
+      0.059855932369828224,
+      0.04726439528167248,
+      0.04865792579948902,
+      0.022885456681251526,
+      0.005625946447253227,
+      0.0
+    ],
+    "max_abs_diff": 0.0,
+    "tol": 0.0001,
+    "peak_layer": {
+      "rome": 3,
+      "blme": 3
+    }
+  },
+  "aie_subject_last_token": {
+    "rome": [
+      0.09252985753118992,
+      0.09045791812241077,
+      0.0947179738432169,
+      0.11254574544727802,
+      0.07759123481810093,
+      0.0815714318305254,
+      0.059855932369828224,
+      0.04726439528167248,
+      0.04865792579948902,
+      0.022885456681251526,
+      0.005625946447253227,
+      0.0
+    ],
+    "peak_layer": 3
+  },
+  "packaged_task": {
+    "max_causal_layer_idx": 3,
+    "max_aie": 0.11254574544727802
+  },
+  "verdict": "PARITY",
+  "anchors": {
+    "early_site_localization": true,
+    "peak_above_final": true
+  }
+}

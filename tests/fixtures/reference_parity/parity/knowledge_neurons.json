@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "task": "causality_knowledge_neurons",
+    "paper": "Dai et al. 2022, Knowledge Neurons in Pretrained Transformers (arXiv:2104.08696, ACL 2022)",
+    "ig_equation": "Attr(w_i) = (w_i_bar/m) * sum_{k=1..m} dP(y|x, w_i=(k/m) w_i_bar)/dw_i",
+    "reference_package": "knowledge-neurons==0.0.2 (EleutherAI port)",
+    "reference_pkg_file": "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/venvs/kn/lib/python3.12/site-packages/knowledge_neurons/__init__.py",
+    "model": "gpt2",
+    "prompt": "The capital of France is",
+    "target": " Paris",
+    "target_id": 6342,
+    "ref_layer": 6,
+    "ref_steps": 20,
+    "n_layers": 12,
+    "intermediate_size": 3072,
+    "blme_helper": "src/blme/tasks/causality/knowledge_neurons.py: KnowledgeNeuronsTask.evaluate (grad-of-logit x activation saliency)",
+    "reference_hook_point": "mlp.c_fc OUTPUT (pre-GELU intermediate)",
+    "blme_hook_point": "mlp.c_proj INPUT (post-GELU intermediate)",
+    "divergence_summary": "BLME is grad-of-LOGIT x activation single-point saliency (m=1), NOT Dai IG (softmax-prob integrated grads). Different target (logit vs prob), no path integral, different hook point (post- vs pre-GELU). BLME docstring states this explicitly. Verdict: PROXY."
+  },
+  "reference_ig": {
+    "layer": 6,
+    "steps": 20,
+    "top_neuron": 2789,
+    "ig_top": 0.026260413229465485,
+    "ig_sum": -0.03269664943218231,
+    "top16_neurons": [
+      2789,
+      2736,
+      2941,
+      1429,
+      1931,
+      2245,
+      1379,
+      1900,
+      2654,
+      859,
+      453,
+      1110,
+      413,
+      1121,
+      1903,
+      642
+    ],
+    "top16_ig": [
+      0.026260413229465485,
+      0.020597709342837334,
+      0.014685927890241146,
+      0.014335026033222675,
+      0.013571959920227528,
+      0.011934999376535416,
+      0.011630916967988014,
+      0.011621435172855854,
+      0.0087257269769907,
+      0.008584725670516491,
+      0.008260661736130714,
+      0.007817748934030533,
+      0.007716412656009197,
+      0.007649019360542297,
+      0.007465102709829807,
+      0.007294993381947279
+    ],
+    "ig_max": 0.026260413229465485,
+    "ig_min": -0.03503265976905823,
+    "ig_mean_abs": 0.0011727161472663283
+  },
+  "anchor_a_convergence": {
+    "ig_top_by_m": {
+      "10": 0.025068916380405426,
+      "20": 0.026260413229465485,
+      "40": 0.0268295556306839,
+      "80": 0.02711092121899128
+    },
+    "deltas": [
+      0.0011914968490600586,
+      0.0005691424012184143,
+      0.0002813655883073807
+    ],
+    "converging": true
+  },
+  "anchor_b_completeness": {
+    "p_full": 0.03224490210413933,
+    "p_zero": 0.07449956983327866,
+    "completeness_target": -0.04225466772913933,
+    "ig_sum": -0.03269664943218231,
+    "abs_diff": 0.009558018296957016,
+    "rel_diff": 0.22620029479345524,
+    "rel_err_by_m": {
+      "20": 0.22620029479345524,
+      "80": 0.0602050614079406,
+      "320": 0.015228362399223266
+    },
+    "tightens_with_m": true
+  },
+  "anchor_c_top_neuron": {
+    "top_actxgrad_neuron": 628,
+    "ig_top_neuron": 2789,
+    "ig_top_rank_in_actxgrad": 11,
+    "actxgrad_at_ig_top": 0.005277315154671669
+  },
+  "blme_kernel_parity": {
+    "note": "BLME helper vs INDEPENDENT autograd reimpl of BLME's own kernel on SAME model/prompt/neurons.",
+    "task_gini": 0.5540084838867188,
+    "indep_gini": 0.5540084838867188,
+    "gini_abs_diff": 0.0,
+    "task_top1_share": 0.0041952417232096195,
+    "indep_top1_share": 0.0041952417232096195,
+    "top1_abs_diff": 0.0,
+    "task_top1pct_share": 0.13183219730854034,
+    "indep_top1pct_share": 0.13183219730854034,
+    "top1pct_abs_diff": 0.0,
+    "max_abs_diff": 0.0,
+    "tol": 0.001,
+    "parity_ok": true
+  }
+}

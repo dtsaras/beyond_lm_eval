@@ -1,0 +1,49 @@
+{
+  "task": "interpretability_attention_rank",
+  "blme_file": "src/blme/tasks/interpretability/attention_rank.py",
+  "blme_kernel": "_effective_rank (line 33)",
+  "blme_repo_commit": "f8fada60d4d0a928519d046b3562362db1de263a",
+  "reference_primary": "Roy & Vetterli (2007) effective rank: exp(H(p)), p=sigma/||sigma||_1",
+  "reference_secondary_repo": "twistedcubic/attention-rank-collapse @ 38b5df6dc2add25f6d945e48a6baf96862368c20",
+  "reference_secondary_funcs": "paper-plotting/utils.py:compute_low_rank,l1_matrix_norm,linf_matrix_norm,composite_norm; walking_casual_transformers.ipynb cell 19 residual ratio",
+  "tolerance": 1e-12,
+  "verdict": "FORMULA-FAITHFUL to Roy-Vetterli effective rank; Dong (2021) is the motivation, BLME does NOT compute Dong's residual",
+  "results": {
+    "attn6x6_rowstochastic": {
+      "blme_effective_rank": 4.289367028254108,
+      "ref_roy_vetterli": 4.289367028254108,
+      "abs_diff": 0.0,
+      "dong_residual_ratio": 0.8835257236037635
+    },
+    "near_rank1_rowstochastic": {
+      "blme_effective_rank": 1.0079059075284078,
+      "ref_roy_vetterli": 1.0079059075284078,
+      "abs_diff": 0.0,
+      "dong_residual_ratio": 0.0005620470965770644
+    },
+    "exact_rank1": {
+      "blme_effective_rank": 1.0,
+      "ref_roy_vetterli": 1.0000000000000018,
+      "expected_anchor": 1.0,
+      "abs_diff_blme_ref": 1.7763568394002505e-15,
+      "abs_diff_blme_anchor": 0.0,
+      "dong_residual_ratio": 1.6061536775381987e-16
+    },
+    "orthogonal_fullrank": {
+      "blme_effective_rank": 5.999999999999998,
+      "ref_roy_vetterli": 5.999999999999998,
+      "expected_anchor": 6.0,
+      "abs_diff_blme_ref": 0.0,
+      "abs_diff_blme_anchor": 1.7763568394002505e-15,
+      "dong_residual_ratio": 0.9443589542260024
+    },
+    "identity": {
+      "blme_effective_rank": 5.999999999999998,
+      "ref_roy_vetterli": 5.999999999999998,
+      "expected_anchor": 6.0,
+      "abs_diff_blme_ref": 0.0,
+      "abs_diff_blme_anchor": 1.7763568394002505e-15
+    }
+  },
+  "max_roy_vetterli_abs_diff": 1.7763568394002505e-15
+}
