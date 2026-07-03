@@ -38,6 +38,10 @@ nolds = pytest.importorskip("nolds")
 import nolds.measures as nm  # noqa: E402
 from scipy.spatial.distance import pdist  # noqa: E402
 
+from blme.tasks.geometry.correlation_dimension import (  # noqa: E402
+    _gp_correlation_dimension,
+)
+
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2]
@@ -81,9 +85,11 @@ def _blme_corr_dim(H, num_radii=30, rvals=None):
             valid_radii.append(r)
     assert len(valid_radii) >= 3
 
-    log_r = np.log(valid_radii)
-    log_Cr = np.log(C_r)
-    slope, _intercept = np.polyfit(log_r, log_Cr, 1)
+    # Slope via BLME's REAL kernel (imported, not transcribed). Given the same
+    # distances + num_radii + rvals, the helper reconstructs identical radii/C(r),
+    # so its slope equals the transcribed one exactly — but now it is real code.
+    slope, _r2, status = _gp_correlation_dimension(distances, num_radii=num_radii, rvals=rvals)
+    assert status == "ok", status
     return float(slope), np.asarray(valid_radii), np.asarray(C_r)
 
 

@@ -94,7 +94,11 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         try:
             logger.info(f"  Attempting to load SAE: release={sae_release}, id={sae_id}")
             # Loading the SAE requires an internet connection on first run to download from HF
-            sae, _, _ = SAE.from_pretrained(release=sae_release, sae_id=sae_id, device=str(device))
+            loaded = SAE.from_pretrained(release=sae_release, sae_id=sae_id, device=str(device))
+            # sae-lens API drift: older versions return a (sae, cfg_dict, sparsity)
+            # tuple; sae-lens >=6.x returns the SAE object directly. Handle both so
+            # the task runs regardless of the installed sae-lens version.
+            sae = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
             sae.eval()
         except Exception as e:
             msg = f"Failed to load SAE {sae_release}/{sae_id}. This might be due to a mismatch with the model or internet access. Error: {e}"

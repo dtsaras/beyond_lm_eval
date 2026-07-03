@@ -21,6 +21,51 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _gp_correlation_dimension(distances, num_radii=30, rvals=None):
+    """Grassberger-Procaccia (1983) correlation dimension from a 1-D array of
+    pairwise distances (upper triangle, i<j).
+
+    Builds the correlation integral C(r) = fraction of pairs with distance < r
+    over a percentile-spaced (5th..95th) log radius grid, then returns the slope
+    of log C(r) vs log r (the GP dimension estimate).
+
+    Returns ``(slope, r_squared, status)`` where ``status`` is ``"ok"``,
+    ``"degenerate"`` (non-positive / collapsed percentile range) or
+    ``"insufficient"`` (<3 usable radii); ``slope``/``r_squared`` are ``None``
+    unless ``"ok"``. ``rvals`` overrides the percentile grid (used by the
+    reference-parity test to compare on an identical radius grid).
+    """
+    distances = np.asarray(distances, dtype=np.float64)
+    if rvals is None:
+        r_min = np.percentile(distances, 5)
+        r_max = np.percentile(distances, 95)
+        if r_min <= 0 or r_max <= 0 or r_min >= r_max:
+            return None, None, "degenerate"
+        radii = np.logspace(np.log10(r_min), np.log10(r_max), num=num_radii)
+    else:
+        radii = np.asarray(rvals, dtype=np.float64)
+
+    total_pairs = len(distances)
+    C_r, valid_radii = [], []
+    for r in radii:
+        c = np.sum(distances < r) / total_pairs
+        if c > 0:
+            C_r.append(c)
+            valid_radii.append(r)
+
+    if len(valid_radii) < 3:
+        return None, None, "insufficient"
+
+    log_r = np.log(valid_radii)
+    log_Cr = np.log(C_r)
+    slope, intercept = np.polyfit(log_r, log_Cr, 1)
+    predicted = slope * log_r + intercept
+    ss_res = np.sum((log_Cr - predicted) ** 2)
+    ss_tot = np.sum((log_Cr - np.mean(log_Cr)) ** 2)
+    r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return float(slope), float(r_squared), "ok"
+
+
 @register_task("geometry_correlation_dimension")
 class CorrelationDimensionTask(DiagnosticTask):
     """
@@ -88,41 +133,14 @@ class CorrelationDimensionTask(DiagnosticTask):
         # .float() so bf16 models (Gemma 4 etc.) don't crash on .numpy()
         distances = dist_matrix[tri_indices[0], tri_indices[1]].float().cpu().numpy()
 
-        # 2. Grassberger-Procaccia Algorithm
-        r_min = np.percentile(distances, 5)
-        r_max = np.percentile(distances, 95)
-
-        if r_min <= 0 or r_max <= 0 or r_min >= r_max:
-             return {"error": "All distances are identical or degenerate. State totally collapsed."}
-
-        radii = np.logspace(np.log10(r_min), np.log10(r_max), num=num_radii)
-
-        # Compute Correlation Integral C(r): fraction of point pairs closer than r
-        C_r = []
-        valid_radii = []
-
-        total_pairs = len(distances)
-        for r in radii:
-            count = np.sum(distances < r)
-            c = count / total_pairs
-            if c > 0:
-                 C_r.append(c)
-                 valid_radii.append(r)
-
-        if len(valid_radii) < 3:
+        # 2-3. Grassberger-Procaccia: correlation integral C(r) -> log-log slope.
+        # Extracted into _gp_correlation_dimension so the reference-parity test
+        # exercises BLME's real kernel (not a transcription).
+        slope, r_squared, status = _gp_correlation_dimension(distances, num_radii=num_radii)
+        if status == "degenerate":
+            return {"error": "All distances are identical or degenerate. State totally collapsed."}
+        if status == "insufficient":
             return {"error": "Failed to compute correlation integral across scales."}
-
-        # 3. Fit linear regression in log-log space
-        log_r = np.log(valid_radii)
-        log_Cr = np.log(C_r)
-
-        slope, intercept = np.polyfit(log_r, log_Cr, 1)
-
-        # Compute R^2 of the fit as a quality indicator
-        predicted = slope * log_r + intercept
-        ss_res = np.sum((log_Cr - predicted) ** 2)
-        ss_tot = np.sum((log_Cr - np.mean(log_Cr)) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         if pooling == "all_tokens":
             point_space = "token_hidden_states"

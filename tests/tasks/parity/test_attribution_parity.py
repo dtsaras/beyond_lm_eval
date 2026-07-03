@@ -29,7 +29,10 @@ import torch.nn.functional as F
 captum = pytest.importorskip("captum")
 from captum.attr import InputXGradient  # noqa: E402
 
-from blme.tasks.interpretability.attribution import _gini_nonnegative  # noqa: E402
+from blme.tasks.interpretability.attribution import (  # noqa: E402
+    _gini_nonnegative,
+    _input_x_gradient_per_token,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,9 +72,8 @@ def _ce_loss(logits, input_ids):
 
 
 def _blme_pertoken(activation, grad):
-    """BLME's exact per-token reduction (attribution.py lines 105-106)."""
-    token_attr = (grad * activation).abs().sum(dim=-1)
-    return token_attr[:, :-1].detach().reshape(-1)
+    """BLME's REAL per-token reduction kernel (imported, not transcribed)."""
+    return _input_x_gradient_per_token(activation, grad).detach().reshape(-1)
 
 
 def _gini_independent(x):

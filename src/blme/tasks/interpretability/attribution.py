@@ -23,6 +23,19 @@ def _gini_nonnegative(values):
     return float(np.clip(gini, 0.0, 1.0))
 
 
+def _input_x_gradient_per_token(activation, grad):
+    """Per-token input x gradient attribution (Simonyan et al. 2014; equal to
+    captum ``InputXGradient`` reduced per token): ``|grad * activation|`` summed
+    over the hidden dimension, dropping the last token (which carries no
+    next-token cross-entropy term).
+
+    ``activation``, ``grad``: ``(B, T, D)`` tensors. Returns a ``(B, T-1)``
+    tensor. Extracted so the reference-parity test exercises BLME's real kernel.
+    """
+    token_attr = (grad * activation).abs().sum(dim=-1)
+    return token_attr[:, :-1]
+
+
 @register_task("interpretability_attribution")
 class ComponentAttributionTask(DiagnosticTask):
     """
@@ -102,8 +115,8 @@ class ComponentAttributionTask(DiagnosticTask):
                 if not torch.is_tensor(activation) or activation.grad is None:
                     continue
 
-                token_attr = (activation.grad * activation).abs().sum(dim=-1)
-                token_attr = token_attr[:, :-1].detach().float().cpu().reshape(-1)
+                token_attr = _input_x_gradient_per_token(activation, activation.grad)
+                token_attr = token_attr.detach().float().cpu().reshape(-1)
                 attribution_scores.extend(token_attr.tolist())
                 count += 1
         finally:
