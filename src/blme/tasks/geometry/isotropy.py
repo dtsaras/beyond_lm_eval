@@ -13,6 +13,9 @@ def _svd_metrics_for_layer(X):
     X = X[finite_mask]
     if len(X) < 10:
         return None
+    # Keep the RAW (uncentered) states for the Ethayarajh 2019 anisotropy
+    # cosine below; SVD-based isotropy metrics use the centered version.
+    X_raw = X
     X = X - np.mean(X, axis=0)
 
     try:
@@ -41,9 +44,14 @@ def _svd_metrics_for_layer(X):
     participation_ratio = float((sum_eig ** 2) / (sum_eig_sq + 1e-12))
 
     rng = np.random.default_rng(42)
-    indices = rng.choice(len(X), size=(min(1000, len(X)), 2), replace=True)
-    vecs1 = X[indices[:, 0]]
-    vecs2 = X[indices[:, 1]]
+    indices = rng.choice(len(X_raw), size=(min(1000, len(X_raw)), 2), replace=True)
+    # Reject self-pairs (i == j) which trivially give cosine 1.
+    keep = indices[:, 0] != indices[:, 1]
+    indices = indices[keep] if keep.any() else indices
+    # Ethayarajh 2019 Eq. 4 anisotropy uses the RAW representations, NOT the
+    # mean-centered ones (centering forces the average cosine to ~0).
+    vecs1 = X_raw[indices[:, 0]]
+    vecs2 = X_raw[indices[:, 1]]
     norms1 = np.linalg.norm(vecs1, axis=1, keepdims=True)
     norms2 = np.linalg.norm(vecs2, axis=1, keepdims=True)
     vecs1 = vecs1 / (norms1 + 1e-9)

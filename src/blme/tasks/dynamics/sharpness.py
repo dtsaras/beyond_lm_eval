@@ -84,6 +84,29 @@ def _hvp(loss, params, v_list):
     return [h.detach() for h in hv]
 
 
+def _power_iteration_top_eigenvalue(hvp, v, n_iter: int) -> float:
+    """Largest-magnitude Hessian eigenvalue via power iteration, returned WITH
+    its sign — the Rayleigh quotient ``v^T H v`` at the converged eigenvector,
+    matching PyHessian's ``eigenvalues(top_n=1)``. Reporting ``||Hv||`` alone
+    (as the old code did) drops the sign and misreports a dominant negative
+    curvature (a saddle) as positive.
+
+    ``hvp(v)`` returns ``H @ v`` as a list of tensors shaped like ``v``.
+    """
+    flat = _flatten_grads(v)
+    vn = float(flat.norm().item())
+    if vn > 0:
+        v = [vi / vn for vi in v]
+    for _ in range(max(1, n_iter)):
+        hv = hvp(v)
+        mag = float(_flatten_grads(hv).norm().item())
+        if mag <= 0:
+            return 0.0
+        v = [h / mag for h in hv]
+    hv = hvp(v)
+    return float(sum((h * vi).sum() for h, vi in zip(hv, v)).item())
+
+
 def _make_random_vec(params, rademacher: bool = True) -> List[torch.Tensor]:
     out = []
     for p in params:
@@ -192,23 +215,14 @@ class LossSharpnessTask(DiagnosticTask):
             mean_trace = float(np.mean(trace_estimates))
             trace_per_param = mean_trace / max(1, n_params)
 
-            # 2. Top-1 eigenvalue via power iteration
+            # 2. Top-1 eigenvalue via power iteration. Report the SIGNED
+            # largest-magnitude eigenvalue (Rayleigh quotient at the converged
+            # eigenvector), like PyHessian — ||Hv|| alone drops the sign.
             v = _make_random_vec(params, rademacher=False)
-            # Normalise
-            flat_v = _flatten_grads(v)
-            v_norm = float(flat_v.norm().item())
-            if v_norm > 0:
-                v = [vi / v_norm for vi in v]
-            top_eig = 0.0
-            for _ in range(n_power_iter):
-                loss_fresh = compute_loss()
-                hv = _hvp(loss_fresh, params, v)
-                flat_hv = _flatten_grads(hv)
-                top_eig = float(flat_hv.norm().item())
-                if top_eig > 0:
-                    v = [h / top_eig for h in hv]
-                else:
-                    break
+            # Fresh graph per HVP (retain_graph over many calls leaks memory).
+            top_eig = _power_iteration_top_eigenvalue(
+                lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter
+            )
 
             # 3. SAM-style sharpness
             # Compute gradient of loss w.r.t. selected params, perturb in

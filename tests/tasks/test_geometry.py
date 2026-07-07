@@ -10,6 +10,39 @@ import tempfile
 import os
 
 
+def test_svd_avg_cosine_uses_raw_states_not_centered():
+    """Campaign-3 DISCREPANCY: avg_cosine_similarity (the Ethayarajh 2019
+    anisotropy baseline) was computed on MEAN-CENTERED states, which reads ~0
+    by construction. It must be computed on the RAW representations (Eq. 4)."""
+    from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
+
+    rng = np.random.default_rng(0)
+    # Strongly anisotropic cloud: a large shared offset + small noise, so raw
+    # cosines are ~1 while centered cosines are ~0.
+    X = np.ones((200, 16), dtype=np.float64) * 3.0 + rng.standard_normal((200, 16)) * 0.05
+    r = _svd_metrics_for_layer(torch.tensor(X))
+    assert r["avg_cosine_similarity"] > 0.8, (
+        f"avg_cosine_similarity {r['avg_cosine_similarity']:.3f} — computed on "
+        f"centered states (reads ~0) instead of the raw Ethayarajh baseline"
+    )
+
+
+def test_sharpness_top_eigenvalue_is_signed():
+    """Campaign-3 DISCREPANCY: top_eigenvalue_estimate reported ||Hv|| (unsigned
+    magnitude), so a dominant NEGATIVE-curvature direction (saddle) was
+    misreported as positive. Like PyHessian, it must return the SIGNED
+    largest-magnitude eigenvalue (Rayleigh quotient at the eigenvector)."""
+    from blme.tasks.dynamics.sharpness import _power_iteration_top_eigenvalue
+
+    diag = torch.tensor([-5.0, 3.0, 1.5])  # dominant-magnitude eigenvalue is -5
+
+    def hvp(v):
+        return [diag * v[0]]
+
+    lam = _power_iteration_top_eigenvalue(hvp, [torch.tensor([1.0, 1.0, 1.0])], 100)
+    assert abs(lam - (-5.0)) < 1e-3, f"expected signed -5.0 (PyHessian), got {lam}"
+
+
 def test_perplexity_bpc_correct_with_bos_tokenizer():
     """Campaign-3 BUG: BPC re-tokenised with add_special_tokens=False while
     scoring used the default (True), so on a BOS-adding tokenizer the recount
