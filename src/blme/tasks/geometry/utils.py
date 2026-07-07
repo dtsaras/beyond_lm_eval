@@ -92,6 +92,11 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                     text = sample.get("text", "")
                     inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
+                # Skip empty / single-token docs: an empty forward pass crashes
+                # ("cannot reshape tensor of 0 elements").
+                if inputs["input_ids"].shape[1] < 1:
+                    continue
+
                 outputs = model(**inputs, output_hidden_states=True)
                 hidden_states = outputs.hidden_states  # tuple of (1, T, D)
 
@@ -221,6 +226,13 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
                 else:
                     text = sample.get("text", "")
                     inputs = tokenizer(text, return_tensors="pt").to(model.device)
+
+                # Skip empty / single-token docs: they yield no (T-1) labels to
+                # score and an empty forward pass crashes ("cannot reshape tensor
+                # of 0 elements"). Skipping keeps this scoring window aligned with
+                # the BPC recount window in geometry_perplexity.
+                if inputs["input_ids"].shape[1] < 2:
+                    continue
 
                 outputs = model(**inputs, output_hidden_states=True)
                 logits = outputs.logits.float().detach().cpu()

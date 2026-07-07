@@ -82,19 +82,22 @@ class RarePPLTask(DiagnosticTask):
             try:
                 total_chars = 0
                 total_tokens_for_chars = 0
-                count = 0
-                for sample in dataset:
-                    if count >= num_samples:
+                for i, sample in enumerate(dataset):
+                    if i >= num_samples:
                         break
                     text = sample["text"] if isinstance(sample, dict) else str(sample)
-                    if not text:
+                    # Tokenise IDENTICALLY to collect_prediction_stats (default
+                    # add_special_tokens — the old add_special_tokens=False
+                    # dropped the BOS on Llama/Gemma-style tokenizers, so the
+                    # recount undercounted tokens by one per doc and BPC was
+                    # ~13% low) and skip <2-token docs the SAME way, so
+                    # total_tokens_for_chars == cnt_total exactly and BPC reduces
+                    # to nll_total_bits / total_chars.
+                    n_tok = len(tokenizer(text)["input_ids"])
+                    if n_tok < 2:
                         continue
-                    enc = tokenizer(text, truncation=False, add_special_tokens=False)
-                    n_tok = len(enc["input_ids"])
-                    if n_tok > 1:  # match the (T-1) labels-shift from collect_prediction_stats
-                        total_tokens_for_chars += (n_tok - 1)
-                        total_chars += len(text)
-                    count += 1
+                    total_tokens_for_chars += (n_tok - 1)
+                    total_chars += len(text)
 
                 if total_chars > 0 and total_tokens_for_chars > 0:
                     # Average NLL per token (over the same shifted labels)

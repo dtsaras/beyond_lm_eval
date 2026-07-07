@@ -10,6 +10,65 @@ import tempfile
 import os
 
 
+def test_perplexity_bpc_correct_with_bos_tokenizer():
+    """Campaign-3 BUG: BPC re-tokenised with add_special_tokens=False while
+    scoring used the default (True), so on a BOS-adding tokenizer the recount
+    dropped the BOS and undercounted tokens by one per doc -> BPC ~13% low.
+    With aligned tokenisation, BPC must equal the textbook nll_bits / chars."""
+    from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.perplexity import RarePPLTask
+
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    tok.add_bos_token = True  # simulate a Llama/Gemma-style BOS tokenizer
+    model = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+    docs = [
+        "The capital of France is Paris and it is a beautiful city.",
+        "Machine learning models can memorize training data in surprising ways.",
+        "Photosynthesis converts sunlight into chemical energy inside plant cells.",
+    ]
+    dataset = [{"text": d} for d in docs]
+
+    task = RarePPLTask(config={"num_samples": 3, "use_cache": False})
+    r = task.evaluate(model, tok, dataset)
+    bpc = r["bits_per_char"]
+
+    # Independent textbook BPC: total NLL in bits over the same scored tokens,
+    # divided by total characters (BOS-inclusive scoring, T-1 labels per doc).
+    import torch
+    import torch.nn.functional as F
+    nll_bits, total_chars = 0.0, 0
+    with torch.no_grad():
+        for d in docs:
+            ids = tok(d, return_tensors="pt")["input_ids"]
+            logits = model(ids).logits[:, :-1, :]
+            labels = ids[:, 1:]
+            nll = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                                  labels.reshape(-1), reduction="sum").item()
+            nll_bits += nll / np.log(2)
+            total_chars += len(d)
+    expected = nll_bits / total_chars
+    assert abs(bpc - expected) < 1e-3, (
+        f"BPC {bpc:.5f} != textbook {expected:.5f} — recount/scoring token "
+        f"counts misaligned on a BOS tokenizer"
+    )
+
+
+def test_perplexity_survives_empty_text_sample():
+    """Campaign-3 BUG: an empty-text doc crashed the scoring forward pass
+    ('cannot reshape tensor of 0 elements'). Empty rows (common in wikitext)
+    must be skipped, not crash the task."""
+    from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.perplexity import RarePPLTask
+
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    model = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+    dataset = [{"text": ""}, {"text": "A full sentence with several tokens here."},
+               {"text": "Another complete sentence for the perplexity estimate."}]
+    task = RarePPLTask(config={"num_samples": 3, "use_cache": False})
+    r = task.evaluate(model, tok, dataset)
+    assert np.isfinite(r["ppl_overall"]) and r["ppl_overall"] > 1.0
+
+
 def test_weight_norms_handles_3d_fused_params():
     """Campaign-3 BUG: a >2-D parameter (fused MoE experts, shape (E, in, out))
     passed the ndim<2 filter, then float(S[0].item()) crashed on the batched
