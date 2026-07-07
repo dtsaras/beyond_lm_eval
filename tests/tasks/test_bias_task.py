@@ -47,6 +47,43 @@ def test_embed_word_uses_offset_mapping_for_robust_word_position():
     )
 
 
+def test_embed_word_ignores_substring_occurrence_in_earlier_token():
+    """Regression (Campaign-3 BUG): the attribute word 'his' also occurs as a
+    substring inside 'This' in the default template 'This is {}.'. The old
+    text.find('his')==1 embedded the 'This' token, corrupting the
+    gender_science WEAT d. _embed_word must embed the REAL attribute word.
+    """
+    import numpy as np
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.bias import _embed_word
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+    model.eval()
+    device = torch.device("cpu")
+    template = "This is {}."
+
+    # Independently locate the REAL 'his' (after the 8-char prefix "This is ").
+    text = template.format("his")
+    offs = tok(text, return_offsets_mapping=True)["offset_mapping"]
+    insert_off = template.index("{}")  # == 8
+    real_start = text.find("his", insert_off)  # char 8, the standalone word
+    # Token whose character span overlaps the real word (the leading-space
+    # token " his" has span (7, 11), so match on overlap, not s >= 8).
+    true_pos = next(i for i, (s, e) in enumerate(offs)
+                    if s < real_start + 3 and e > real_start)
+    with torch.no_grad():
+        enc = tok(text, return_tensors="pt")
+        h_true = model(**enc, output_hidden_states=True).hidden_states[-1][0, true_pos]
+
+    got = _embed_word(model, tok, "his", device, template=template)
+    assert np.allclose(got, h_true.float().numpy(), atol=1e-5), (
+        "embedded the wrong 'his' (the substring inside 'This') "
+        "instead of the real attribute word"
+    )
+
+
 def test_embed_word_locates_word_not_end_fallback_across_positions():
     """The fix must return the SAME token position for the same word
     across different occurrences, not always the last non-special
