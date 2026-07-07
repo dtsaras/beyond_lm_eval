@@ -7,6 +7,23 @@ import torch
 import numpy as np
 
 
+def test_ablation_pct_label_no_truncation_or_collision():
+    """Campaign-3 BUG: int(k_pct*100) floored 0.29->28 (mislabel) and mapped
+    both 0.145 and 0.149 to 14 (collision, silent key overwrite). The label
+    helper must round-trip fractional percentages faithfully and keep the
+    default integer percentages unchanged."""
+    from blme.tasks.causality.ablation import _pct_label
+
+    # Mislabel: 0.29 must be 29, not 28.
+    assert _pct_label(0.29) == "29"
+    # Collision: 0.145 and 0.149 must produce DISTINCT labels.
+    assert _pct_label(0.145) != _pct_label(0.149)
+    assert _pct_label(0.145) == "14.5"
+    assert _pct_label(0.149) == "14.9"
+    # Default integer percentages unchanged.
+    assert [_pct_label(p) for p in (0.01, 0.05, 0.1, 0.25)] == ["1", "5", "10", "25"]
+
+
 def test_causal_tracing(mock_model, mock_tokenizer):
     """Simplified causal tracing (ROME-style) — corruption and restoration."""
     from blme.tasks.causality.tracing import CausalTracingTask

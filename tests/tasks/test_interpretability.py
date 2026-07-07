@@ -11,6 +11,29 @@ import torch
 import numpy as np
 
 
+def test_prediction_entropy_top5_independent_of_decisiveness_k():
+    """Campaign-3 BUG: mean_top5_prob was computed as topk_p[..., :min(5,k)]
+    where k=decisiveness_top_k, so with decisiveness_top_k<5 it silently
+    reported top-k mass under the top-5 name. mean_top5_prob must always be
+    the true top-5 mass (>= mean_top1_prob), regardless of decisiveness_top_k.
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.prediction_entropy import PredictionEntropyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    dataset = ["The quick brown fox jumps over the lazy dog near the river."]
+
+    task = PredictionEntropyTask(config={"num_samples": 1, "decisiveness_top_k": 1})
+    r = task.evaluate(model, tok, dataset)
+    # top-5 mass strictly exceeds top-1 mass for a real distribution; with the
+    # bug (k=1) mean_top5_prob == mean_top1_prob.
+    assert r["mean_top5_prob"] > r["mean_top1_prob"] + 1e-4, (
+        f"mean_top5_prob {r['mean_top5_prob']} collapsed to top-1 "
+        f"{r['mean_top1_prob']} — top5 wrongly capped at decisiveness_top_k"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (preserved)
 # ---------------------------------------------------------------------------

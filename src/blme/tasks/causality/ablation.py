@@ -8,6 +8,15 @@ from ..common import get_layers
 import logging
 logger = logging.getLogger("blme")
 
+
+def _pct_label(k_pct: float) -> str:
+    """Format an ablation fraction (0.29) as a result-key percentage label
+    ("29"). Uses ``:g`` so non-integer percentages round-trip faithfully
+    (0.145 -> "14.5", 0.149 -> "14.9") instead of the old ``int(k_pct*100)``
+    which floored 0.29 -> 28 and collided 0.145/0.149 -> 14."""
+    return f"{k_pct * 100:g}"
+
+
 @register_task("causality_ablation")
 class AblationRobustnessTask(DiagnosticTask):
     """
@@ -146,10 +155,11 @@ class AblationRobustnessTask(DiagnosticTask):
             loss_increase = mean_ablation_loss - baseline_mean_loss
             
             # Record degradation for residual-feature ablation.
-            results[f"loss_ablate_{int(k_pct*100)}pct"] = float(mean_ablation_loss)
-            results[f"degradation_{int(k_pct*100)}pct"] = float(loss_increase)
-            results[f"loss_residual_features_ablate_{int(k_pct*100)}pct"] = float(mean_ablation_loss)
-            results[f"residual_feature_degradation_{int(k_pct*100)}pct"] = float(loss_increase)
+            _lbl = _pct_label(k_pct)
+            results[f"loss_ablate_{_lbl}pct"] = float(mean_ablation_loss)
+            results[f"degradation_{_lbl}pct"] = float(loss_increase)
+            results[f"loss_residual_features_ablate_{_lbl}pct"] = float(mean_ablation_loss)
+            results[f"residual_feature_degradation_{_lbl}pct"] = float(loss_increase)
             degradation_curve.append(float(loss_increase))
             
         # Summary metrics
