@@ -11,6 +11,70 @@ import torch
 import numpy as np
 
 
+def test_sae_hidden_state_index_rejects_invalid_hooks():
+    """Campaign-3 BUGs: _select_sae_hidden_state_index (1) silently mapped
+    hook_resid_mid to resid_post though HF exposes no such tensor and the
+    docstring claims rejection; (2) mapped the FINAL block's hook_resid_post to
+    hidden_states[num_layers] = ln_f(block output), a post-final-norm tensor;
+    (3) silently clamped an out-of-range block (the gpt2-small blocks.8 SAE on
+    distilgpt2's 6 layers) to the wrong layer. All three must raise."""
+    from blme.tasks.interpretability.sae_features import _select_sae_hidden_state_index
+
+    assert _select_sae_hidden_state_index("blocks.8.hook_resid_pre", 12) == (8, 8)
+    assert _select_sae_hidden_state_index("blocks.5.hook_resid_post", 12) == (5, 6)
+
+    with pytest.raises(ValueError):  # resid_mid has no HF tensor
+        _select_sae_hidden_state_index("blocks.5.hook_resid_mid", 12)
+    with pytest.raises(ValueError):  # final block resid_post is post-ln_f
+        _select_sae_hidden_state_index("blocks.11.hook_resid_post", 12)
+    with pytest.raises(ValueError):  # layer 8 does not exist on a 6-layer model
+        _select_sae_hidden_state_index("blocks.8.hook_resid_pre", 6)
+
+
+def test_sae_input_centered_when_metadata_requests():
+    """Campaign-3 DISCREPANCY: the SAE was fed RAW HF hidden states, but the
+    gpt2-small-res-jb SAE was trained on HookedTransformer activations with
+    center_writing_weights (residual stream mean-centered over d_model per
+    position); the raw feed inflated L0 ~37x. _prepare_sae_input must subtract
+    the per-token mean when the SAE metadata requests centering, and be a no-op
+    otherwise."""
+    from blme.tasks.interpretability.sae_features import _prepare_sae_input
+
+    h = torch.randn(4, 8) + 5.0  # strong non-zero per-token mean
+
+    class _Meta:
+        model_from_pretrained_kwargs = {"center_writing_weights": True}
+        prepend_bos = True
+
+    class _Cfg:
+        metadata = _Meta()
+
+    class _SAE:
+        cfg = _Cfg()
+
+    out = _prepare_sae_input(h, _SAE())
+    assert torch.allclose(out.mean(dim=-1), torch.zeros(4), atol=1e-6), (
+        "centering requested -> per-token mean must be ~0")
+
+    class _SAENoMeta:
+        cfg = None
+
+    assert torch.allclose(_prepare_sae_input(h, _SAENoMeta()), h), (
+        "no centering metadata -> input must be unchanged")
+
+
+def test_sae_gpt2_guard_rejects_distilgpt2():
+    """Campaign-3 BUG: the 'gpt2' substring guard let distilgpt2 through
+    ('gpt2' in 'distilgpt2'), so a gpt2-small SAE was applied to a different
+    model at a clamped layer. Compatibility must be an exact gpt2-small match."""
+    from blme.tasks.interpretability.sae_features import _is_gpt2_small
+
+    assert _is_gpt2_small("gpt2")
+    assert _is_gpt2_small("openai-community/gpt2")
+    assert not _is_gpt2_small("distilgpt2")
+    assert not _is_gpt2_small("gpt2-medium")
+
+
 def test_probing_subsample_is_reproducible():
     """Campaign-3 BUG: the >max_probe_samples subsample used np.random.choice
     (global, unseeded), so the default-config output was non-reproducible across

@@ -15,6 +15,45 @@ except ImportError:
     HAS_SAE_LENS = False
 
 
+def _sae_metadata(sae):
+    return getattr(getattr(sae, "cfg", None), "metadata", None)
+
+
+def _sae_prepend_bos(sae) -> bool:
+    meta = _sae_metadata(sae)
+    return bool(getattr(meta, "prepend_bos", False)) if meta is not None else False
+
+
+def _prepare_sae_input(h, sae):
+    """Match the SAE's training-time activation convention before encoding.
+
+    The gpt2-small-res-jb SAE was trained on HookedTransformer activations with
+    ``center_writing_weights=True`` (the residual stream is mean-centered over
+    d_model at each position). Feeding raw HF hidden states is out-of-
+    distribution and inflates L0 ~37x, so subtract the per-token mean when the
+    SAE metadata requests centering; otherwise pass the input through unchanged.
+    """
+    meta = _sae_metadata(sae)
+    center = False
+    if meta is not None:
+        kw = getattr(meta, "model_from_pretrained_kwargs", None) or {}
+        try:
+            center = bool(kw.get("center_writing_weights", False))
+        except AttributeError:
+            center = False
+    if center:
+        return h - h.mean(dim=-1, keepdim=True)
+    return h
+
+
+def _is_gpt2_small(model_name: str) -> bool:
+    """True only for gpt2-small (the model the default gpt2-small-res-jb SAE was
+    trained on). Uses an exact basename match, so the old substring test that
+    let ``distilgpt2`` (and ``gpt2-medium``, etc.) through no longer passes."""
+    base = (model_name or "").lower().rsplit("/", 1)[-1]
+    return base in ("gpt2", "gpt2-small")
+
+
 def _select_sae_hidden_state_index(sae_id, num_layers):
     """Map a TransformerLens SAE hook name to HF ``hidden_states`` index.
 
@@ -36,21 +75,43 @@ def _select_sae_hidden_state_index(sae_id, num_layers):
 
     parsed_layer = int(m.group(1))
     hook_name = m.group(2)
-    target_layer = max(0, min(num_layers - 1, parsed_layer))
 
-    hook_to_index = {
-        "hook_resid_pre": parsed_layer,
-        "hook_resid_post": parsed_layer + 1,
-        "hook_resid_mid": parsed_layer + 1,
-    }
-    if hook_name not in hook_to_index:
+    # Reject an SAE trained for a block this model does not have (e.g. the
+    # gpt2-small blocks.8 SAE on distilgpt2's 6 layers) instead of silently
+    # clamping to the wrong layer.
+    if parsed_layer >= num_layers:
         raise ValueError(
-            f"Unsupported SAE hook '{hook_name}' in sae_id={sae_id!r}. "
-            "Supported hooks: hook_resid_pre, hook_resid_post, hook_resid_mid."
+            f"SAE parsed layer {parsed_layer} >= model num_layers {num_layers} "
+            f"(sae_id={sae_id!r}); the SAE targets a block this model lacks."
         )
 
-    hidden_state_index = hook_to_index[hook_name]
-    return target_layer, max(0, min(num_layers, hidden_state_index))
+    if hook_name == "hook_resid_pre":
+        # Input to block N == HF hidden_states[N].
+        hidden_state_index = parsed_layer
+    elif hook_name == "hook_resid_post":
+        # resid_post of block N == HF hidden_states[N+1], BUT the last entry
+        # hidden_states[num_layers] is ln_f(block output) — post-final-norm,
+        # not the raw residual TL exposes. Reject the final block.
+        if parsed_layer == num_layers - 1:
+            raise ValueError(
+                f"blocks.{parsed_layer}.hook_resid_post maps to hidden_states"
+                f"[{num_layers}], which HF returns AFTER ln_f (post-final-norm), "
+                "not the raw block output; refusing to feed it to the SAE."
+            )
+        hidden_state_index = parsed_layer + 1
+    elif hook_name == "hook_resid_mid":
+        # Post-attention / pre-MLP residual: HF exposes no such tensor.
+        raise ValueError(
+            f"hook_resid_mid (sae_id={sae_id!r}) has no HF hidden_states tensor "
+            "(post-attention, pre-MLP residual); refusing to map it to resid_post."
+        )
+    else:
+        raise ValueError(
+            f"Unsupported SAE hook '{hook_name}' in sae_id={sae_id!r}. "
+            "Supported hooks: hook_resid_pre, hook_resid_post."
+        )
+
+    return parsed_layer, hidden_state_index
 
 
 @register_task("interpretability_sae_features")
@@ -80,7 +141,7 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
         # warning) on any model the configured SAE wasn't trained for, so
         # that batch runs on heterogeneous model zoos don't get error noise.
         model_name = getattr(getattr(model, "config", None), "_name_or_path", "")
-        if model_name and "gpt2" not in model_name.lower():
+        if model_name and not _is_gpt2_small(model_name):
             if sae_release == "gpt2-small-res-jb":
                 msg = (
                     f"Default SAE config (release={sae_release}, id={sae_id}) "
@@ -129,7 +190,8 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
             )
         except ValueError as e:
             return {"error": str(e)}
-        
+
+        prepend_bos = _sae_prepend_bos(sae)
         active_features_counts = []
         max_active_features = []
         
@@ -141,12 +203,24 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
                     text = str(s)
                     
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
+                # The SAE was trained with a BOS token prepended (prepend_bos);
+                # match that so the encoded activations are in-distribution.
+                if prepend_bos and getattr(tokenizer, "bos_token_id", None) is not None:
+                    bos = torch.full((1, 1), int(tokenizer.bos_token_id),
+                                     dtype=inputs["input_ids"].dtype, device=device)
+                    inputs["input_ids"] = torch.cat([bos, inputs["input_ids"]], dim=1)
+                    if "attention_mask" in inputs:
+                        inputs["attention_mask"] = torch.cat(
+                            [torch.ones_like(bos), inputs["attention_mask"]], dim=1)
                 out = model(**inputs, output_hidden_states=True)
-                
+
                 # Get the target hidden state. For hook_resid_pre this is the
                 # input to the parsed block, i.e. hidden_states[target_layer].
                 h = out.hidden_states[hidden_state_index][0] # shape (seq_len, hidden_dim)
-                
+                # Match the SAE's training-time activation convention
+                # (center_writing_weights) before encoding.
+                h = _prepare_sae_input(h, sae)
+
                 # Try to map hidden state to SAE
                 # sae() returns sae_out, feature_acts, loss, ...
                 try:
