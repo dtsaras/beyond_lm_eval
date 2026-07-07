@@ -58,6 +58,7 @@ class ModelOutputCache:
         # Feature flags — set by populate() or by first get_* call
         self._need_hidden: bool = False
         self._need_attentions: bool = False
+        self._need_logits: bool = False
         self._populated: bool = False
 
     # ------------------------------------------------------------------
@@ -68,18 +69,25 @@ class ModelOutputCache:
         self,
         need_hidden: bool = True,
         need_attentions: bool = False,
+        need_logits: bool = True,
     ) -> None:
         """
         Run the forward pass and populate the cache.
 
         If already populated, this is a no-op (call :meth:`clear` first
         to force re-computation).
+
+        ``need_logits`` defaults to True so direct/standalone use keeps the
+        historic "logits always collected" behaviour; the evaluate() loop passes
+        need_logits=False when no logits-consuming task is in the run, avoiding
+        the memory cost of caching full-vocab (T x V) logits for every sample.
         """
         if self._populated:
             return
 
         self._need_hidden = need_hidden or self._need_hidden
         self._need_attentions = need_attentions or self._need_attentions
+        self._need_logits = need_logits or self._need_logits
         self._run_forward_pass()
 
     def get_hidden_states(
@@ -156,7 +164,8 @@ class ModelOutputCache:
         return {li: attn_list[:max_samples] for li, attn_list in self._attentions.items()}
 
     def get_logits(self, num_samples: Optional[int] = None) -> Optional[List[torch.Tensor]]:
-        """Return cached logits (always collected)."""
+        """Return cached logits, or None if they were not collected
+        (populate(need_logits=False))."""
         if not self._populated:
             self.populate()
         if self._logits is None or num_samples is None:
@@ -374,8 +383,8 @@ class ModelOutputCache:
                                 attn.squeeze(0).float().detach().cpu()
                             )
 
-                # --- Logits (always collected) ---
-                if hasattr(outputs, "logits") and outputs.logits is not None:
+                # --- Logits (only when a logits-consuming task needs them) ---
+                if self._need_logits and hasattr(outputs, "logits") and outputs.logits is not None:
                     logits_accum.append(outputs.logits.detach().cpu())
 
                 # --- Labels ---

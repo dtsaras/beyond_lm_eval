@@ -162,6 +162,7 @@ def evaluate(
         "cache_tasks": [],
         "need_hidden": False,
         "need_attentions": False,
+        "need_logits": False,
     }
 
     # 4. Run diagnostic tasks with error isolation + shared cache
@@ -215,6 +216,7 @@ def evaluate(
         cache_logits_tasks = {
             "geometry_perplexity",
             "consistency_calibration",
+            "geometry_prediction_alignment",
         }
         # Two separate sets:
         #   * ``cache_attn_tasks`` — tasks that actually consume
@@ -274,16 +276,22 @@ def evaluate(
             if cache_num_samples and cache_num_samples > 0:
                 need_hidden = any(t in cache_hidden_tasks for t in cache_tasks)
                 need_attn = any(t in cache_attn_tasks for t in cache_tasks)
+                need_logits = any(t in cache_logits_tasks for t in cache_tasks)
                 cache_settings.update({
                     "cache_num_samples_resolved": cache_num_samples,
                     "cache_tasks": list(cache_tasks),
                     "need_hidden": bool(need_hidden),
                     "need_attentions": bool(need_attn),
+                    "need_logits": bool(need_logits),
                 })
 
                 from .cache import ModelOutputCache
                 cache = ModelOutputCache(model, tokenizer, dataset=dataset, num_samples=cache_num_samples)
-                cache.populate(need_hidden=need_hidden, need_attentions=need_attn)
+                cache.populate(
+                    need_hidden=need_hidden,
+                    need_attentions=need_attn,
+                    need_logits=need_logits,
+                )
 
         # SIGALRM-based per-task timeouts only work on the main thread of a Unix
         # process. Detect this once so the per-task loop never tries (and fails)

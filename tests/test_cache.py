@@ -135,6 +135,21 @@ class TestModelOutputCache:
         assert logits is not None
         assert len(logits) == 2
 
+    def test_logits_skipped_when_not_needed(self):
+        """Campaign-3 release blocker: full-vocab logits (T x V per sample) were
+        accumulated on every run even when no logits-consuming task was present.
+        populate(need_logits=False) must skip them to save memory."""
+        model = _make_mock_model(n_layers=2, vocab_size=100)
+        tokenizer = _make_mock_tokenizer()
+        dataset = [{"text": "logit test"}] * 2
+
+        cache = ModelOutputCache(model, tokenizer, dataset, num_samples=2)
+        cache.populate(need_hidden=True, need_logits=False)
+
+        assert cache.is_populated
+        assert cache.get_hidden_states(layer_idx="all")  # hidden still there
+        assert cache._logits is None, "logits must not be collected when not needed"
+
     def test_lazy_population(self):
         model = _make_mock_model()
         tokenizer = _make_mock_tokenizer()
