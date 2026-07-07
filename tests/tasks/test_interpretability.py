@@ -11,6 +11,45 @@ import torch
 import numpy as np
 
 
+def test_probing_subsample_is_reproducible():
+    """Campaign-3 BUG: the >max_probe_samples subsample used np.random.choice
+    (global, unseeded), so the default-config output was non-reproducible across
+    runs. Two identical evaluate() calls must give identical accuracies."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.probing import LinearProbingTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    dataset = [
+        "The river winds slowly through the ancient green valley below.",
+        "Machine learning systems can memorize surprising amounts of training data.",
+        "A quiet afternoon is perfect for reading a long detailed novel.",
+    ]
+    cfg = {"num_samples": 3, "max_tokens": 24, "max_probe_samples": 30}
+    r1 = LinearProbingTask(config=dict(cfg)).evaluate(model, tok, dataset)
+    r2 = LinearProbingTask(config=dict(cfg)).evaluate(model, tok, dataset)
+    assert r1["probing_accuracy_per_layer"] == r2["probing_accuracy_per_layer"], (
+        "probing accuracies differ across identical runs — subsample is unseeded"
+    )
+
+
+def test_probing_single_class_is_not_fabricated_zero():
+    """Campaign-3 BUG: `except Exception: acc = 0.0` fabricated a 0.0 accuracy
+    whenever the probe could not fit (e.g. a single label class), masking that
+    linear decodability was actually 100%. A degenerate single-class layer must
+    report the majority-class rate (1.0), not a fabricated 0.0."""
+    import numpy as np
+    from blme.tasks.interpretability.probing import _probe_accuracy
+
+    rng = np.random.default_rng(0)
+    X_train = rng.standard_normal((20, 8))
+    X_test = rng.standard_normal((6, 8))
+    y_train = np.zeros(20, dtype=int)   # single class
+    y_test = np.zeros(6, dtype=int)
+    acc = _probe_accuracy(X_train, y_train, X_test, y_test)
+    assert acc == 1.0, f"single-class decodability should be 1.0 (majority), got {acc}"
+
+
 def test_prediction_entropy_top5_independent_of_decisiveness_k():
     """Campaign-3 BUG: mean_top5_prob was computed as topk_p[..., :min(5,k)]
     where k=decisiveness_top_k, so with decisiveness_top_k<5 it silently

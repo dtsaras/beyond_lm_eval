@@ -8,6 +8,33 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _probe_accuracy(X_train, y_train, X_test, y_test) -> float:
+    """Linear-probe test accuracy for one layer.
+
+    A degenerate single-class training split returns the majority-class rate
+    (a constant probe's linear decodability) rather than a fabricated 0.0, and
+    a genuine fit failure returns NaN with a warning rather than a silent 0.0
+    that masks the failure.
+    """
+    from collections import Counter
+
+    y_train = np.asarray(y_train)
+    y_test = np.asarray(y_test)
+    if y_test.size == 0:
+        return float("nan")
+    if np.unique(y_train).size < 2:
+        maj = Counter(y_test.tolist()).most_common(1)[0][1]
+        return float(maj / y_test.size)
+    try:
+        from sklearn.linear_model import SGDClassifier
+        clf = SGDClassifier(loss="log_loss", max_iter=100, random_state=42, n_jobs=-1)
+        clf.fit(X_train, y_train)
+        return float(clf.score(X_test, y_test))
+    except Exception as e:  # narrow, logged — never a silent fabricated 0.0
+        logger.warning(f"linear probe failed: {type(e).__name__}: {e}")
+        return float("nan")
+
+
 @register_task("interpretability_probing")
 class LinearProbingTask(DiagnosticTask):
     """
@@ -79,7 +106,9 @@ class LinearProbingTask(DiagnosticTask):
         # Subsample if too large (probing is expensive)
         max_probe_samples = self.config.get("max_probe_samples", 5000)
         if len(all_labels) > max_probe_samples:
-            idx = np.random.choice(len(all_labels), max_probe_samples, replace=False)
+            # Seeded subsample so the default-config output is reproducible.
+            _rng = np.random.default_rng(int(self.config.get("seed", 42)))
+            idx = _rng.choice(len(all_labels), max_probe_samples, replace=False)
         else:
             idx = np.arange(len(all_labels))
 
@@ -106,25 +135,13 @@ class LinearProbingTask(DiagnosticTask):
             X = np.concatenate(layer_features[layer_idx], axis=0)
             X_train = X[train_idx]
             X_test = X[test_idx]
+            accuracies.append(_probe_accuracy(X_train, train_labels, X_test, test_labels))
 
-            # Use SGD classifier for speed (equivalent to logistic regression)
-            try:
-                clf = SGDClassifier(
-                    loss="log_loss",
-                    max_iter=100,
-                    random_state=42,
-                    n_jobs=-1,
-                )
-                clf.fit(X_train, train_labels)
-                acc = float(clf.score(X_test, test_labels))
-            except Exception:
-                acc = 0.0
-
-            accuracies.append(acc)
-
+        acc_arr = np.asarray(accuracies, dtype=float)
+        has_finite = bool(np.isfinite(acc_arr).any())
         return {
             "probing_accuracy_per_layer": accuracies,
-            "max_probing_accuracy": float(np.max(accuracies)) if accuracies else 0.0,
-            "best_layer": int(np.argmax(accuracies)) if accuracies else -1,
+            "max_probing_accuracy": float(np.nanmax(acc_arr)) if has_finite else 0.0,
+            "best_layer": int(np.nanargmax(acc_arr)) if has_finite else -1,
             "num_classes": int(len(np.unique(all_labels))),
         }
