@@ -7,6 +7,29 @@ import torch
 import numpy as np
 
 
+def test_paraphrase_does_not_call_broken_mpararel(monkeypatch):
+    """Campaign-3 BUG: the dataset=None fallback tried load_dataset(
+    'coastalcph/mpararel','en') which always fails (wrong config + columns), so
+    every run made a failing network call before silently using bundled triples.
+    The dead branch is gone: no load_dataset call, real metrics from bundled."""
+    import datasets
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.paraphrase import ParaphraseInvarianceTask
+
+    called = {"n": 0}
+
+    def _spy(*a, **k):
+        called["n"] += 1
+        raise RuntimeError("load_dataset should not be called")
+
+    monkeypatch.setattr(datasets, "load_dataset", _spy)
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    r = ParaphraseInvarianceTask(config={"num_samples": 2}).evaluate(model, tok, dataset=None)
+    assert called["n"] == 0, "dead mpararel load_dataset branch still runs"
+    assert "error" not in r
+
+
 def test_contrastive_all_failed_returns_error_not_nan(monkeypatch):
     """Campaign-3 BUG: when every triple fails to score, np.mean([]) returned
     NaN metrics that look like a real measurement. It must return an error
