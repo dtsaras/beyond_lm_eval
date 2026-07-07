@@ -27,6 +27,26 @@ def test_self_consistency_seed_does_not_crash_generation():
     assert "mean_first_token_agreement" in r and r["generation_seed"] == 1234
 
 
+def test_calibration_default_bins_is_15(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 DISCREPANCY: default n_bins was 10, but Guo 2017 and the
+    official _ECELoss (temperature_scaling) use M=15. Capture the n_bins the
+    task passes by default and assert it is 15."""
+    import blme.tasks.consistency.calibration as cal
+
+    captured = {}
+    orig = cal._calibration_from_confidences
+
+    def spy(*args, **kwargs):
+        captured["n_bins"] = kwargs.get("n_bins")
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(cal, "_calibration_from_confidences", spy)
+    cal.CalibrationTask(config={"num_samples": 8}).evaluate(mock_model, mock_tokenizer, None)
+    if "n_bins" not in captured:
+        pytest.skip("mock produced no calibration predictions")
+    assert captured["n_bins"] == 15, "default n_bins must be 15 (Guo M=15)"
+
+
 def test_calibration(mock_model, mock_tokenizer):
     """Expected Calibration Error (ECE) computation."""
     from blme.tasks.consistency.calibration import CalibrationTask

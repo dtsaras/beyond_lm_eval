@@ -129,7 +129,9 @@ class CalibrationTask(DiagnosticTask):
         accuracies = accuracies[finite]
         labels = labels[finite]
 
-        n_bins = self.config.get("n_bins", 10)
+        # Default M=15 to match Guo et al. 2017 and the official _ECELoss
+        # (temperature_scaling); ECE formula parity is exact at matched bins.
+        n_bins = self.config.get("n_bins", 15)
         metrics = _calibration_from_confidences(
             confidences.float().cpu().numpy(),
             accuracies.float().cpu().numpy(),
