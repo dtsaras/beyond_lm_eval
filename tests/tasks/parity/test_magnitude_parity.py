@@ -115,6 +115,7 @@ def _load_magnipy_refs(magnipy_dir):
 from blme.tasks.geometry.magnitude import (  # noqa: E402
     _magnitude,
     _magnitude_dimension,
+    _magnitude_summary,
     _median_heuristic_scale,
 )
 
@@ -127,6 +128,45 @@ def _dist_matrix(X):
     D = np.sqrt(d2)
     np.fill_diagonal(D, 0.0)
     return D
+
+
+def test_median_heuristic_includes_zero_distances():
+    """Campaign-3 DISCREPANCY: _median_heuristic_scale pre-filtered d>0, but
+    magnipy's median_heuristic_from_distances medians ALL upper-triangle
+    entries (including zeros between duplicate points). On a duplicate-heavy
+    cloud the two disagree; BLME must match magnipy."""
+    rng = np.random.default_rng(1)
+    base = rng.standard_normal((6, 3))
+    # 12-point cloud where half the points are exact duplicates -> zero
+    # off-diagonal distances appear in the upper triangle.
+    X = np.vstack([base, base])
+    D = _dist_matrix(X)
+    iu = np.triu_indices(D.shape[0], k=1)
+    magnipy_scale = 1.0 / np.sqrt(np.median(D[iu]) / 2.0)  # ALL off-diagonal
+    got = _median_heuristic_scale(D)
+    assert got == pytest.approx(magnipy_scale, rel=1e-12)
+    # and it must DIFFER from the old d>0-filtered median on this cloud
+    pos = D[iu][D[iu] > 0]
+    old = 1.0 / np.sqrt(np.median(pos) / 2.0)
+    assert abs(got - old) > 1e-6, "test cannot discriminate on this cloud"
+
+
+def test_magnitude_med_scale_evaluated_at_t_med():
+    """Campaign-3 DISCREPANCY: magnitude_med_scale was |tX| at the nearest
+    SAMPLED ladder scale (~0.774*t_med at defaults), not at the median-
+    heuristic scale t_med it is documented as. It must be _magnitude(D, t_med)."""
+    rng = np.random.default_rng(2)
+    D = _dist_matrix(rng.standard_normal((30, 5)))
+    n_scales, scale_span = 10, 10.0
+    summary = _magnitude_summary(D, n_scales, scale_span)
+    t_med = summary["magnitude_median_scale"]
+    assert summary["magnitude_med_scale"] == pytest.approx(_magnitude(D, t_med), rel=1e-12)
+    # and it must differ from the old nearest-ladder value
+    ts = np.geomspace(t_med / scale_span, t_med * scale_span, n_scales)
+    nearest = float(ts[int(np.argmin(np.abs(ts - t_med)))])
+    assert abs(summary["magnitude_med_scale"] - _magnitude(D, nearest)) > 1e-6, (
+        "test cannot discriminate t_med from the nearest ladder scale"
+    )
 
 
 needs_magnipy = pytest.mark.skipif(

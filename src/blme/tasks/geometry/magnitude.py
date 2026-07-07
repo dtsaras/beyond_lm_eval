@@ -150,12 +150,14 @@ def _pairwise_distance_matrix(X: np.ndarray) -> np.ndarray:
 def _median_heuristic_scale(D: np.ndarray) -> float:
     """magnipy's median-heuristic scale: ``1 / sqrt(median_offdiag / 2)``.
 
-    (``scales.median_heuristic_from_distances``.) Returns ``nan`` if there is
-    no positive off-diagonal distance.
+    (``scales.median_heuristic_from_distances``.) Medians ALL upper-triangle
+    distances — including zero distances between duplicate points, exactly like
+    magnipy — and returns ``nan`` only when that median is non-positive. The old
+    code pre-filtered ``d > 0``, which shifted the scale on duplicate-heavy
+    clouds away from magnipy's value.
     """
     iu = np.triu_indices(D.shape[0], k=1)
     d = D[iu]
-    d = d[d > 0]
     if d.size == 0:
         return float("nan")
     median = np.median(d)
@@ -186,6 +188,53 @@ def _magnitude_dimension(ts: np.ndarray, mags: np.ndarray) -> float:
         return float("nan")
     slopes = np.diff(lm)[good] / dlt[good]
     return float(np.max(slopes))
+
+
+def _magnitude_summary(D: np.ndarray, n_scales: int, scale_span: float) -> dict:
+    """Magnitude-function summary metrics for one distance matrix ``D``.
+
+    ``magnitude_med_scale`` is ``|tX|`` evaluated at the median-heuristic scale
+    ``t_med`` EXACTLY (a direct solve), not at whichever sampled ladder point
+    happened to be nearest ``t_med`` (~0.774·t_med at defaults), which is what
+    the old code reported.
+    """
+    n = D.shape[0]
+    t_med = _median_heuristic_scale(D)
+    if not np.isfinite(t_med) or t_med <= 0:
+        return {"error": "Degenerate cloud (no positive distances)"}
+
+    if n_scales < 2:
+        n_scales = 2
+    ts = np.geomspace(t_med / scale_span, t_med * scale_span, n_scales)
+    mags = np.array([_magnitude(D, float(t)) for t in ts], dtype=np.float64)
+
+    finite = np.isfinite(mags)
+    if finite.sum() < 2:
+        return {"error": "Magnitude function ill-conditioned at all scales"}
+
+    mag_dim = _magnitude_dimension(ts, mags)
+
+    # Area under log|tX| vs log t (trapezoid over finite scales).
+    lt = np.log(ts[finite])
+    lm = np.log(np.clip(mags[finite], 1e-12, None))
+    auc = float(np.trapezoid(lm, lt)) if lt.size >= 2 else float("nan")
+
+    mag_high = float(mags[finite][-1])
+    med_scale = _magnitude(D, float(t_med))  # |tX| AT t_med, not the nearest ladder point
+
+    return {
+        "magnitude_low_scale": float(mags[finite][0]),
+        "magnitude_med_scale": float(med_scale) if np.isfinite(med_scale) else float("nan"),
+        "magnitude_high_scale": mag_high,
+        "magnitude_ratio": float(mag_high / n),
+        "magnitude_auc": auc,
+        "magnitude_dimension": float(mag_dim),
+        "magnitude_median_scale": float(t_med),
+        # _meta_ prefix => excluded from the analysis feature matrix so raw
+        # sampling counts cannot leak in as size proxies (Audit-V2).
+        "_meta_n_points": int(n),
+        "_meta_n_scales": int(int(np.sum(finite))),
+    }
 
 
 @register_task("geometry_magnitude")
@@ -250,46 +299,6 @@ class MagnitudeTask(DiagnosticTask):
         X = np.asarray(X, dtype=np.float64)
         n = X.shape[0]
 
-        # --- 3. Distance matrix + scale ladder -----------------------------
+        # --- 3-4. Distance matrix + magnitude summary ----------------------
         D = _pairwise_distance_matrix(X)
-        t_med = _median_heuristic_scale(D)
-        if not np.isfinite(t_med) or t_med <= 0:
-            return {"error": "Degenerate cloud (no positive distances)"}
-
-        if n_scales < 2:
-            n_scales = 2
-        ts = np.geomspace(t_med / scale_span, t_med * scale_span, n_scales)
-
-        # --- 4. Magnitude function -----------------------------------------
-        mags = np.array([_magnitude(D, float(t)) for t in ts], dtype=np.float64)
-
-        finite = np.isfinite(mags)
-        if finite.sum() < 2:
-            return {"error": "Magnitude function ill-conditioned at all scales"}
-
-        # Index of the scale nearest t_med (median-heuristic anchor).
-        med_i = int(np.argmin(np.abs(ts - t_med)))
-
-        mag_dim = _magnitude_dimension(ts, mags)
-
-        # Area under log|tX| vs log t (trapezoid over finite scales).
-        lt = np.log(ts[finite])
-        lm = np.log(np.clip(mags[finite], 1e-12, None))
-        auc = float(np.trapezoid(lm, lt)) if lt.size >= 2 else float("nan")
-
-        mag_high = float(mags[finite][-1])
-
-        return {
-            "magnitude_low_scale": float(mags[finite][0]),
-            "magnitude_med_scale": float(mags[med_i])
-            if np.isfinite(mags[med_i]) else float("nan"),
-            "magnitude_high_scale": mag_high,
-            "magnitude_ratio": float(mag_high / n),
-            "magnitude_auc": auc,
-            "magnitude_dimension": float(mag_dim),
-            "magnitude_median_scale": float(t_med),
-            # _meta_ prefix => excluded from the analysis feature matrix so raw
-            # sampling counts cannot leak in as size proxies (Audit-V2).
-            "_meta_n_points": int(n),
-            "_meta_n_scales": int(int(np.sum(finite))),
-        }
+        return _magnitude_summary(D, n_scales, scale_span)
