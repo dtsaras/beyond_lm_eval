@@ -87,7 +87,10 @@ def _count_betti(data, maxdim=1, n_neighbors=5, persistence_frac=0.3):
 
     rows = np.repeat(np.arange(n), k)
     cols = idx[:, 1:].ravel()
-    vals = dists[:, 1:].ravel()
+    # Keep zero-distance edges (duplicate points) as real edges: scipy's csgraph
+    # treats an explicit-zero entry as "no edge", so duplicates would otherwise
+    # be disconnected and inflate beta_0. Floor at a tiny epsilon.
+    vals = np.maximum(dists[:, 1:].ravel(), 1e-12)
     graph = csr_matrix((vals, (rows, cols)), shape=(n, n))
     graph = graph.maximum(graph.T)  # symmetrize (mutual + one-directional kNN)
 

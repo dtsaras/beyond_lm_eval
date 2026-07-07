@@ -86,8 +86,10 @@ class PersistentHomologyTask(DiagnosticTask):
         layers = get_layers(model)
         num_layers = len(layers)
         
-        # We'll analyze the space at specific layers (early, middle, late)
-        target_layers = [0, num_layers // 2, num_layers - 1]
+        # We'll analyze the space at specific layers (early, middle, late).
+        # Dedupe so models with <=2 layers don't feed ripser the same layer
+        # multiple times (which diluted the point cloud).
+        target_layers = sorted({0, num_layers // 2, num_layers - 1})
         layer_representations = {l: [] for l in target_layers}
         
         with torch.no_grad():

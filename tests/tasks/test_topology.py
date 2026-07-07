@@ -10,6 +10,25 @@ import torch
 import numpy as np
 
 
+def test_betti_zero_distance_edges_do_not_inflate_beta0():
+    """Campaign-3 BUG: zero-weight kNN edges (between duplicate points) were
+    stored as explicit zeros, which scipy's csgraph treats as "no edge", so a
+    cluster of duplicates disconnected and inflated beta_0. Duplicate points
+    must stay one connected component."""
+    pytest.importorskip("ripser")
+    from blme.tasks.topology.betti_curve import _count_betti
+
+    dup = np.zeros((8, 2))  # 8 EXACT duplicates -> all kNN distances are 0
+    far = np.array([[100.0, 0.0], [100.1, 0.0], [100.0, 0.1],
+                    [100.1, 0.1], [100.2, 0.0]])
+    X = np.vstack([dup, far])
+    beta_0, _ = _count_betti(X, maxdim=1, n_neighbors=4)
+    assert beta_0 == 2, (
+        f"beta_0={beta_0}: the duplicate cluster (1 component) + far blob (1) "
+        f"should give 2, not inflate when zero-distance edges are dropped"
+    )
+
+
 def test_persistent_homology(mock_model, mock_tokenizer):
     """Persistent homology via Vietoris-Rips complex."""
     from blme.tasks.topology.homology import PersistentHomologyTask
