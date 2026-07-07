@@ -32,6 +32,34 @@ from ..common import get_layers
 logger = logging.getLogger("blme")
 
 
+def _weight_matrix_stats(W):
+    """Frobenius norm, spectral norm (sigma_max) and stable rank for a weight
+    tensor. A >2-D parameter (e.g. fused MoE experts, shape (E, in, out)) is a
+    stack of independent 2-D matrices; each is measured separately. The old code
+    ran svdvals on the whole >2-D tensor and then crashed float(S[0].item()) on
+    the batched singular-value vector, falling back to spectral=Frobenius (too
+    high) and a fabricated stable_rank=1.0. Returns (frobs, specs, sranks) lists.
+    """
+    mats = W.reshape(-1, W.shape[-2], W.shape[-1]) if W.ndim > 2 else W.unsqueeze(0)
+    frobs, specs, sranks = [], [], []
+    for M in mats:
+        frob = float(M.norm().item())
+        frobs.append(frob)
+        try:
+            S = torch.linalg.svdvals(M)
+            spectral = float(S[0].item())
+            specs.append(spectral)
+            if spectral > 0:
+                raw_srank = frob ** 2 / spectral ** 2
+                sranks.append(min(raw_srank, float(min(M.shape))))
+            else:
+                sranks.append(0.0)
+        except Exception:
+            specs.append(frob)  # fallback
+            sranks.append(1.0)
+    return frobs, specs, sranks
+
+
 @register_task("geometry_weight_norms")
 class WeightNormProfileTask(DiagnosticTask):
     """Per-layer weight matrix norm profiles (Tier 1, weight-only)."""
@@ -63,31 +91,15 @@ class WeightNormProfileTask(DiagnosticTask):
                     continue  # skip biases and norms
                 W = param.detach().float()
                 # For Conv1D (GPT-2), weight is (in, out); for Linear, (out, in).
-                # SVD works on either shape — just compute norms directly.
-                frob = float(W.norm().item())
-                frob_vals.append(frob)
-
-                # Spectral norm = largest singular value. Stable rank
-                # ``||W||_F² / ||W||_2²`` is bounded above by the matrix
-                # rank ``min(W.shape)`` by construction — any value
-                # above that is a numerical artefact (has been observed
-                # at 10⁴ on Qwen3.5 shared-embedding matrices where
-                # SVD-on-bf16 returned a tiny ``S[0]`` relative to the
-                # Frobenius norm). Clip explicitly so one outlier
-                # module doesn't dominate the per-layer average.
-                try:
-                    S = torch.linalg.svdvals(W)
-                    spectral = float(S[0].item())
-                    spec_vals.append(spectral)
-                    if spectral > 0:
-                        raw_srank = frob ** 2 / spectral ** 2
-                        max_rank = int(min(W.shape))
-                        srank_vals.append(min(raw_srank, float(max_rank)))
-                    else:
-                        srank_vals.append(0.0)
-                except Exception:
-                    spec_vals.append(frob)  # fallback
-                    srank_vals.append(1.0)
+                # A >2-D param (fused MoE experts) is a stack of matrices, each
+                # measured separately. Stable rank ``||W||_F²/||W||_2²`` is
+                # clipped to the matrix rank ``min(W.shape)`` inside the helper
+                # (values above are numerical artefacts, e.g. SVD-on-bf16 on
+                # shared-embedding matrices returning a tiny sigma_max).
+                fr, sp, sr = _weight_matrix_stats(W)
+                frob_vals.extend(fr)
+                spec_vals.extend(sp)
+                srank_vals.extend(sr)
 
             frob_per_layer.append(float(np.mean(frob_vals)) if frob_vals else 0.0)
             spec_per_layer.append(float(np.mean(spec_vals)) if spec_vals else 0.0)

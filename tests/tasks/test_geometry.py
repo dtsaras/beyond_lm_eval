@@ -10,6 +10,29 @@ import tempfile
 import os
 
 
+def test_weight_norms_handles_3d_fused_params():
+    """Campaign-3 BUG: a >2-D parameter (fused MoE experts, shape (E, in, out))
+    passed the ndim<2 filter, then float(S[0].item()) crashed on the batched
+    singular-value vector and fell back to spectral=Frobenius (3x high) and
+    stable_rank=1.0. Each expert must be treated as its own matrix."""
+    from blme.tasks.geometry.weight_norms import _weight_matrix_stats
+
+    torch.manual_seed(0)
+    W = torch.randn(4, 8, 8)  # 4 experts, 8x8 each
+    frobs, specs, sranks = _weight_matrix_stats(W)
+    assert len(specs) == 4, "each fused expert must yield its own spectral norm"
+    for i in range(4):
+        true_sigma = float(torch.linalg.svdvals(W[i])[0])
+        assert abs(specs[i] - true_sigma) < 1e-4, "spectral must be the real sigma_max"
+        assert specs[i] < frobs[i], "sigma_max < Frobenius for this matrix"
+        assert sranks[i] > 1.5, f"stable_rank must be real, not the fabricated 1.0 ({sranks[i]})"
+
+    # 2-D input is unchanged (single matrix)
+    W2 = torch.randn(6, 10)
+    f2, s2, r2 = _weight_matrix_stats(W2)
+    assert len(s2) == 1 and abs(s2[0] - float(torch.linalg.svdvals(W2)[0])) < 1e-4
+
+
 def test_mahalanobis_default_id_pool_is_distinct():
     """Campaign-3 BUG: the dataset=None fallback built dataset_id by cycling
     5 sentences (id_texts[i % 5]), so the index-split 'held-out' ID score rows
