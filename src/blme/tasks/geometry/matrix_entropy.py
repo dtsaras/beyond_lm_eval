@@ -148,7 +148,11 @@ class MatrixEntropyTask(DiagnosticTask):
         logger.info("Running Matrix Entropy (Wei et al. 2024)...")
         num_samples = int(self.config.get("num_samples", 10))
         use_cache = self.config.get("use_cache", True)
-        max_length = int(self.config.get("max_length", 128))
+        # Default 512 to match the shared prediction cache's truncation
+        # (cache.py:352) so the fresh and cached paths produce the same entropy
+        # for the same config. (The official Wei et al. protocol used 2048; the
+        # cache fixes 512 for all consumers, so we align to it.)
+        max_length = int(self.config.get("max_length", 512))
 
         per_layer_tokens = _collect_per_sample_layer_tokens(
             cache, num_samples, use_cache,

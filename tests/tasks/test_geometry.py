@@ -10,6 +10,26 @@ import tempfile
 import os
 
 
+def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 DISCREPANCY: the fresh path truncated at config max_length
+    (default 128) while the shared-cache path truncates at 512 (cache.py:352),
+    so the SAME config gave different entropy depending on whether a cache was
+    populated. The fresh default must match the cache's 512."""
+    import blme.tasks.geometry.matrix_entropy as me
+
+    captured = {}
+
+    def spy(model, tokenizer, samples, max_length):
+        captured["max_length"] = max_length
+        return {}
+
+    monkeypatch.setattr(me, "_collect_per_sample_layer_tokens_fresh", spy)
+    me.MatrixEntropyTask(config={"num_samples": 2}).evaluate(
+        mock_model, mock_tokenizer, dataset=[{"text": "hello world"}])
+    assert captured.get("max_length") == 512, (
+        "fresh-path default max_length must be 512 to match the shared cache")
+
+
 def test_trajectory_curvature_is_mean_of_per_sentence_means():
     """Campaign-3 DISCREPANCY: layer curvature pooled ALL angles across samples
     (length-weighted), over-weighting longer sentences. The paper (Hosseini &
