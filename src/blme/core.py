@@ -33,6 +33,24 @@ def _timeout_handler(signum, frame):
     raise TaskTimeout("Task execution timed out")
 
 
+# Tasks that read raw attention weights (their own forward pass and/or the
+# shared attention cache). On modern transformers, SDPA/Flash attention silently
+# return None for ``outputs.attentions``, so these MUST run with eager attention
+# or they fail on a default model load. Keep in sync with every task that reads
+# ``outputs.attentions`` / ``cache.get_attentions()`` — enforced by
+# test_infrastructure::test_force_eager_covers_all_attention_tasks.
+_ATTENTION_TASKS = frozenset({
+    "interpretability_attention_entropy",
+    "interpretability_attention_graph",
+    "interpretability_attention_rank",
+    "interpretability_attention_rollout",
+    "interpretability_head_roles",
+    "interpretability_induction_heads",
+    "interpretability_activation_sinks",
+    "geometry_positional_decay",
+})
+
+
 # ---------------------------------------------------------------------------
 # Task registration — import all task modules so @register_task fires
 # ---------------------------------------------------------------------------
@@ -196,13 +214,7 @@ def evaluate(
         cache_attn_tasks = {
             "interpretability_attention_entropy",
         }
-        force_eager_tasks = cache_attn_tasks | {
-            "interpretability_attention_graph",
-            "interpretability_attention_rank",
-            "interpretability_head_roles",
-            "interpretability_induction_heads",
-            "interpretability_activation_sinks",
-        }
+        force_eager_tasks = _ATTENTION_TASKS
         cache_candidates = (
             set(cache_hidden_tasks)
             | set(cache_logits_tasks)

@@ -121,6 +121,33 @@ class TestLoadModelAndTokenizer:
         assert tokenizer.pad_token == "<eos>"
 
 
+def test_force_eager_covers_all_attention_tasks():
+    """Campaign-3 release blocker: the force-eager list was incomplete
+    (missing geometry_positional_decay and interpretability_attention_rollout),
+    so those tasks got SDPA's all-None attentions and silently failed on a
+    default model load. Every task that reads outputs.attentions /
+    cache.get_attentions() must be in _ATTENTION_TASKS."""
+    import re
+    from pathlib import Path
+    from blme.core import _ATTENTION_TASKS
+
+    tasks_root = Path(__file__).resolve().parents[1] / "src" / "blme" / "tasks"
+    consuming = set()
+    for py in tasks_root.rglob("*.py"):
+        src = py.read_text()
+        if "output_attentions=True" in src or ".attentions" in src or "get_attentions" in src:
+            for name in re.findall(r'register_task\(\s*"([a-z_]+)"', src):
+                consuming.add(name)
+
+    missing = consuming - set(_ATTENTION_TASKS)
+    assert not missing, (
+        f"attention-consuming tasks not forced to eager attention: {sorted(missing)}"
+    )
+    # the two the finding flagged must be present
+    assert "geometry_positional_decay" in _ATTENTION_TASKS
+    assert "interpretability_attention_rollout" in _ATTENTION_TASKS
+
+
 def test_task_timeout_survives_broad_except():
     """Campaign-3 release blocker: the SIGALRM handler raised TimeoutError, which
     a task's own `except Exception` swallowed, silently defeating the per-task
