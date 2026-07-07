@@ -11,8 +11,11 @@ changes cause large output changes), while a low constant means the
 layer is contractive (smoothing). This is closely related to training 
 stability, gradient flow, and the model's sensitivity to perturbations.
 
-We estimate this empirically by computing:
-    L_hat(layer) = max_i ||h_{l+1}(x_i) - h_l(x_i)|| / ||h_l(x_i)||
+We estimate this empirically per layer as the MEAN over tokens of the
+relative change, and report the maximum of these per-layer means:
+    ratio(layer, x_i) = ||h_{l+1}(x_i) - h_l(x_i)|| / ||h_l(x_i)||
+    L_hat(layer)      = mean_i ratio(layer, x_i)
+    lipschitz_max     = max_layer L_hat(layer)
 
 References:
 - "Spectral Normalization for Generative Adversarial Networks"
@@ -41,7 +44,8 @@ class LipschitzContinuityTask(DiagnosticTask):
 
     For each pair of adjacent layers (l, l+1), computes:
       - The ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)|| for each token x
-      - Takes the mean and max over all tokens as estimates
+      - Takes the MEAN over tokens as the per-layer estimate; ``lipschitz_max``
+        is the maximum of these per-layer means across depth
 
     A model with uniform, moderate ratios across layers has smoother, more
     stable transformations. Spike patterns indicate layers where
@@ -73,7 +77,6 @@ class LipschitzContinuityTask(DiagnosticTask):
             return {"error": "Need at least 2 layers for Lipschitz analysis"}
         
         lipschitz_means = []
-        lipschitz_maxes = []
         contraction_rates = []  # ratio < 1 = contractive, > 1 = expansive
         
         for i in range(n_layers - 1):
@@ -93,14 +96,12 @@ class LipschitzContinuityTask(DiagnosticTask):
             valid = input_norms > 1e-8
             if not np.any(valid):
                 lipschitz_means.append(0.0)
-                lipschitz_maxes.append(0.0)
                 contraction_rates.append(1.0)
                 continue
                 
             ratios = diff_norms[valid] / input_norms[valid]
             
             lipschitz_means.append(float(np.mean(ratios)))
-            lipschitz_maxes.append(float(np.max(ratios)))
             
             # Contraction rate: ||h_{l+1}(x)|| / ||h_l(x)||
             output_norms = np.linalg.norm(h_next, axis=1)
