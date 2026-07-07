@@ -56,13 +56,6 @@ def _find_magnipy_dir():
     cand = os.environ.get("BLME_MAGNIPY_DIR")
     if cand and (Path(cand) / "magnipy" / "magnitude" / "compute.py").exists():
         return cand
-    # scratchpad clone used during development
-    scratch = (
-        "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/"
-        "42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/refrepos/magnipy"
-    )
-    if (Path(scratch) / "magnipy" / "magnitude" / "compute.py").exists():
-        return scratch
     return None
 
 

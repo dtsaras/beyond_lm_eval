@@ -46,8 +46,6 @@ import torch
 # ---------------------------------------------------------------------------
 _REF_CANDIDATES = [
     os.environ.get("LIPESTIMATION_DIR", ""),
-    "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/"
-    "42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/refrepos/lipEstimation",
 ]
 _REF_DIR = next((d for d in _REF_CANDIDATES if d and
                  os.path.isfile(os.path.join(d, "max_eigenvalue.py"))), None)
