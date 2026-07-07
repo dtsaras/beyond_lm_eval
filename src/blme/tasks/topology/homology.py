@@ -76,8 +76,12 @@ class PersistentHomologyTask(DiagnosticTask):
                 dataset = []
                 for i in range(min(num_samples, len(dset))):
                     dataset.append({"text": dset[i]["text"]})
-            except ImportError:
-                logger.info("Warning: `datasets` library not found. Falling back to default examples.")
+            except Exception as e:
+                logger.info(
+                    f"Warning: could not load lambada_openai ({type(e).__name__}: "
+                    "missing `datasets`, offline, or download error); falling back "
+                    "to default examples."
+                )
                 dataset = [{"text": f"Random sample {i} for topological analysis of language models."} for i in range(num_samples)]
         samples = list(dataset)[:num_samples]
         if len(samples) < 3:

@@ -10,6 +10,32 @@ import torch
 import numpy as np
 
 
+@pytest.mark.parametrize("mod_path,cls_name", [
+    ("blme.tasks.topology.homology", "PersistentHomologyTask"),
+    ("blme.tasks.topology.betti_curve", "BettiCurveTask"),
+    ("blme.tasks.topology.persistence_entropy", "PersistenceEntropyTask"),
+])
+def test_topology_falls_back_on_dataset_network_error(mod_path, cls_name, monkeypatch):
+    """Campaign-3 release blocker: the dataset=None path caught only ImportError
+    around load_dataset('EleutherAI/lambada_openai'), so a network/offline OSError
+    crashed the task instead of falling back to the bundled examples."""
+    pytest.importorskip("ripser")
+    import importlib
+    import datasets
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    def _boom(*a, **k):
+        raise OSError("Couldn't reach the Hugging Face Hub (offline)")
+
+    monkeypatch.setattr(datasets, "load_dataset", _boom)
+    cls = getattr(importlib.import_module(mod_path), cls_name)
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    # Must NOT raise OSError — falls back to bundled examples and returns a dict.
+    r = cls(config={"num_samples": 5}).evaluate(model, tok, dataset=None)
+    assert isinstance(r, dict)
+
+
 def test_count_betti_raises_clear_error_without_ripser(monkeypatch):
     """Campaign-3 release blocker: _count_betti called ripser() even when the
     optional dep is missing, crashing with a bare NameError. It must raise a
