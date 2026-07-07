@@ -329,31 +329,35 @@ class CausalTracingTask(DiagnosticTask):
                         # Noise didn't hurt — nothing to restore.
                         continue
 
-                    # Cache row-0 (clean) hidden states for patching.
-                    clean_states = [h.detach() for h in out0.hidden_states]
-
                     # --- Restoration sweep: one forward per layer ---
-                    # The patch hook replaces rows 1..N's hidden state
-                    # at the subject slice with row 0's (clean).
-                    def get_patch_hook(clean_state_to_patch):
+                    # The patch hook restores rows 1..N's block output at the
+                    # subject slice by copying row 0 of the SAME forward — row 0
+                    # is the clean run (never noised), so its block output is the
+                    # clean activation in the layer's native (raw, pre-ln_f)
+                    # representation. This is ROME's live-copy semantics
+                    # (h[1:, t] = h[0, t]). The old code copied
+                    # out0.hidden_states[layer+1], whose LAST entry is
+                    # ln_f(block output) not the raw block output, giving a wrong
+                    # final-layer AIE whenever the subject ends the prompt.
+                    def get_patch_hook():
                         def patch_hook(module, inputs, output):
                             if isinstance(output, tuple):
                                 out_tensor = output[0].clone()
                                 out_tensor[1:, corrupt_idx_start:corrupt_idx_end, :] = (
-                                    clean_state_to_patch[0:1, corrupt_idx_start:corrupt_idx_end, :]
+                                    out_tensor[0:1, corrupt_idx_start:corrupt_idx_end, :]
                                 )
                                 return (out_tensor,) + output[1:]
                             else:
                                 out_tensor = output.clone()
                                 out_tensor[1:, corrupt_idx_start:corrupt_idx_end, :] = (
-                                    clean_state_to_patch[0:1, corrupt_idx_start:corrupt_idx_end, :]
+                                    out_tensor[0:1, corrupt_idx_start:corrupt_idx_end, :]
                                 )
                                 return out_tensor
                         return patch_hook
 
                     for layer_idx in trace_layers:
                         hook = layers[layer_idx].register_forward_hook(
-                            get_patch_hook(clean_states[layer_idx + 1])
+                            get_patch_hook()
                         )
                         try:
                             restored_out = model(batched_ids)

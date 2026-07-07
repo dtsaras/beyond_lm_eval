@@ -118,6 +118,110 @@ def _rome_trace_with_patch(model, layers, input_ids, states_to_patch,
             h.remove()
 
 
+def test_causality_tracing_final_layer_end_subject_matches_rome():
+    """Campaign-3 BUG: the restoration hook patched the last layer from
+    clean_states[layer+1] == HF hidden_states[N] == ln_f(block output), not the
+    RAW block output that ROME copies live from row 0. Invisible for mid-prompt
+    subjects (final-layer AIE is structurally ~0), but wrong when the subject
+    ends the prompt. Drive the REAL task with an end-of-prompt subject and
+    compare its final-layer AIE to the vetted ROME live-copy reference.
+    """
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    import torch.nn.functional as F
+    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+    from blme.tasks.causality.tracing import (
+        CausalTracingTask, _find_subject_token_range,
+        _resolve_noise_std, _stable_prompt_seed,
+    )
+    from blme.tasks.common import get_layers
+
+    tok = GPT2Tokenizer.from_pretrained("gpt2")
+    model = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+    layers = get_layers(model)
+    num_layers = int(model.config.n_layer)
+    last = num_layers - 1
+
+    prompt, subject = "The capital of Italy", "Italy"  # subject ends the prompt
+    ids = tok.encode(prompt, return_tensors="pt")
+    seqlen = ids.shape[1]
+    D = int(model.config.n_embd)
+    N, seed = 10, 1
+
+    # Subject token range (ends the prompt), matching the task's own logic.
+    s, e = _find_subject_token_range(tok, prompt, subject)
+    base = tok(prompt, add_special_tokens=False)["input_ids"]
+    off = seqlen - len(base)
+    if off > 0:
+        s += off
+        e += off
+    e = min(e, seqlen)
+    assert e == seqlen, f"subject must end the prompt for this regression: {(s, e, seqlen)}"
+    span = e - s
+
+    # Reproduce the task's EXACT corruption noise (same seed + sigma).
+    noise_std = _resolve_noise_std(model, user_value=None,
+                                   subject_strings=[subject], tokenizer=tok)
+    gen = torch.Generator(device="cpu").manual_seed(
+        _stable_prompt_seed(prompt, base_seed=seed))
+    shared_noise = torch.randn((N, span, D), generator=gen, dtype=torch.float32) * noise_std
+    batched = ids.repeat(N + 1, 1)
+
+    # Clean vs corrupted next-token distributions, then pick the target as a
+    # SPACE-PREFIXED token with a strong causal dependence on the subject (so
+    # the task's " "-prepend leaves it unchanged and both paths score the same
+    # token id).
+    embed = model.get_input_embeddings()
+
+    def _noise_hook(m, i, o):
+        o = o.clone()
+        o[1:N + 1, s:e, :] = o[1:N + 1, s:e, :] + shared_noise.to(o.dtype)
+        return o
+
+    hh = embed.register_forward_hook(_noise_hook)
+    try:
+        with torch.no_grad():
+            out = model(batched)
+    finally:
+        hh.remove()
+    clean_dist = F.softmax(out.logits[0, -1], dim=-1)
+    corr_dist = F.softmax(out.logits[1:, -1], dim=-1).mean(0)
+    gap = clean_dist - corr_dist
+    order = torch.argsort(gap, descending=True)
+    target_t = next(int(t) for t in order.tolist()
+                    if tok.decode([int(t)]).startswith(" "))
+    target_str = tok.decode([target_t])          # starts with " " -> no re-prepend
+    assert float(gap[target_t]) > 0.05, "chosen target has no strong causal effect"
+
+    # --- REAL task ---
+    res = CausalTracingTask(
+        config={"num_samples": 1, "n_noise_samples": N, "seed": seed}
+    ).evaluate(model, tok, dataset=[{"prompt": prompt, "subject": subject,
+                                     "target_true": target_str}])
+    key = f"layer_{last}_aie"
+    assert key in res, f"task recorded no AIE (corruption had no effect?): {res}"
+    blme_last_aie = res[key]
+
+    # --- independent ROME live-copy reference for the final layer ---
+    answer_t = torch.tensor(target_t)
+    rome_low = _rome_trace_with_patch(
+        model, layers, batched, states_to_patch=[], answer_t=answer_t,
+        tokens_to_mix=(s, e), shared_noise=shared_noise, n_corrupt=N)
+    rome_restored = _rome_trace_with_patch(
+        model, layers, batched,
+        states_to_patch=[(t, last) for t in range(s, e)], answer_t=answer_t,
+        tokens_to_mix=(s, e), shared_noise=shared_noise, n_corrupt=N)
+    rome_last_aie = rome_restored - rome_low
+
+    assert abs(blme_last_aie - rome_last_aie) < 1e-3, (
+        f"final-layer AIE diverges from ROME live-copy reference: "
+        f"BLME={blme_last_aie:.6f} ROME={rome_last_aie:.6f} "
+        f"(old cached-states path patched post-ln_f into the raw stream)"
+    )
+
+
 def test_causality_tracing_rome_numeric_parity():
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     torch = pytest.importorskip("torch")
