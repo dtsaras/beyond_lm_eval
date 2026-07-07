@@ -10,6 +10,47 @@ import tempfile
 import os
 
 
+def test_mp_ks_distance_handles_zero_atom():
+    """Campaign-3 BUG: for gamma>1 the empirical spectrum has ~(D-N) zero
+    eigenvalues (the rank-deficiency atom). _ks_distance compared F(0)=point
+    mass 1-1/gamma against 0 at each of them and returned ~1-1/gamma regardless
+    of fit. iid-MP data must yield a SMALL KS distance."""
+    from blme.tasks.geometry.rmt_bulk import _ks_distance
+
+    rng = np.random.default_rng(0)
+    N, D = 200, 600  # gamma = D/N = 3  -> ~400 zero eigenvalues
+    X = rng.standard_normal((N, D))
+    Z = (X - X.mean(0)) / X.std(0)
+    C = Z.T @ Z / N
+    eigs = np.linalg.eigvalsh(C)
+    ks = _ks_distance(eigs, gamma=D / N)
+    assert ks < 0.06, (
+        f"KS distance {ks:.4f} for iid-MP data — the zero atom is mishandled "
+        f"(old code returns ~1-1/gamma = {1 - 1/3:.4f})"
+    )
+
+
+def test_mp_cdf_accurate_at_gamma_one():
+    """Campaign-3 BUG: at gamma==1 the MP density ~ t^-1/2 at t=0; the uniform
+    trapezoid grid put a huge spurious spike at the first node (max CDF error
+    0.593). The CDF must match a direct scipy.quad integration."""
+    from scipy.integrate import quad
+
+    from blme.tasks.geometry.rmt_bulk import _mp_cdf, _mp_bulk_edge, _mp_lower_edge
+
+    gamma = 1.0
+    a, b = _mp_lower_edge(gamma), _mp_bulk_edge(gamma)  # 0, 4
+
+    def dens(t):
+        return np.sqrt(max((b - t) * (t - a), 0.0)) / (2 * np.pi * gamma * t) if t > 1e-15 else 0.0
+
+    xs = np.linspace(0.05, b, 40)
+    ref = np.array([quad(dens, a, x, limit=400)[0] for x in xs])
+    got = _mp_cdf(xs, gamma)
+    err = float(np.max(np.abs(got - ref)))
+    assert err < 1e-3, f"gamma=1 MP CDF max error {err:.4f} (singularity mishandled)"
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (preserved)
 # ---------------------------------------------------------------------------

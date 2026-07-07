@@ -92,22 +92,30 @@ def _mp_cdf(x, gamma: float, n_grid: int = 4096) -> np.ndarray:
     cont_mass = 1.0 if gamma <= 1.0 else 1.0 / gamma
     point_mass = 0.0 if gamma <= 1.0 else 1.0 - 1.0 / gamma
 
-    # Integrable inverse-sqrt singularities can sit at both edges
-    # (gamma = 1 puts t_- at 0); nudge the grid inward.
-    eps = max((hi - lo) * 1e-9, 1e-12)
-    grid = np.linspace(lo + eps, hi - eps, n_grid)
-    dens = np.sqrt(np.maximum((hi - grid) * (grid - lo), 0.0)) / (
-        2.0 * np.pi * gamma * grid
-    )
+    # Trigonometric substitution t = (lo+hi)/2 - (hi-lo)/2 cos(theta),
+    # theta in [0, pi]. Then sqrt((hi-t)(t-lo)) = (hi-lo)/2 |sin theta| and
+    # dt = (hi-lo)/2 sin(theta) dtheta, so the integrand
+    #   g(theta) = f(t) dt/dtheta = (hi-lo)^2/4 * sin^2(theta) / (2 pi gamma t)
+    # is BOUNDED across the whole interval, including t -> 0 at gamma == 1
+    # (where the old uniform-t grid produced a huge spurious spike). The
+    # limit as theta -> 0 with lo == 0 is (hi-lo)/(2 pi gamma).
+    theta = np.linspace(0.0, np.pi, n_grid)
+    t = 0.5 * (lo + hi) - 0.5 * (hi - lo) * np.cos(theta)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = ((hi - lo) ** 2 / 4.0) * np.sin(theta) ** 2 / (2.0 * np.pi * gamma * t)
+    g = np.where(np.isfinite(g), g, (hi - lo) / (2.0 * np.pi * gamma))
     cum = np.concatenate(
-        [[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]) * np.diff(grid))]
+        [[0.0], np.cumsum(0.5 * (g[1:] + g[:-1]) * np.diff(theta))]
     )
-    # Normalize the numeric integral to the exact continuous mass to
-    # kill trapezoid truncation error at the edge singularities.
+    # Normalize the numeric integral to the exact continuous mass.
     if cum[-1] > 0:
         cum *= cont_mass / cum[-1]
 
-    cdf = np.interp(x, grid, cum, left=0.0, right=cont_mass)
+    cos_arg = np.clip((lo + hi - 2.0 * x) / (hi - lo), -1.0, 1.0)
+    theta_x = np.arccos(cos_arg)
+    cdf = np.interp(theta_x, theta, cum)
+    cdf = np.where(x <= lo, 0.0, cdf)
+    cdf = np.where(x >= hi, cont_mass, cdf)
     cdf = cdf + point_mass * (x >= 0.0)
     return np.clip(cdf, 0.0, 1.0)
 
@@ -119,9 +127,24 @@ def _ks_distance(eigs: np.ndarray, gamma: float) -> float:
     n = eigs.size
     if n == 0:
         return float("nan")
-    F = _mp_cdf(eigs, gamma)
-    i = np.arange(1, n + 1, dtype=np.float64)
-    return float(np.max(np.maximum(np.abs(F - i / n), np.abs(F - (i - 1) / n))))
+    lo = _mp_lower_edge(gamma)
+    point_mass = 0.0 if gamma <= 1.0 else 1.0 - 1.0 / gamma
+    # For gamma > 1 the spectrum has ~(D-N) rank-deficiency eigenvalues at ~0.
+    # Snap those (below the lower bulk edge) onto the atom location 0 so they
+    # group as ties; otherwise each is compared against F(0) = point mass and
+    # the KS statistic collapses to ~1-1/gamma regardless of fit.
+    if gamma > 1.0:
+        eigs = np.where(eigs < lo, 0.0, eigs)
+    uniq, counts = np.unique(eigs, return_counts=True)
+    csum = np.cumsum(counts)
+    after = csum / n                     # empirical CDF at / after each value
+    before = (csum - counts) / n         # empirical CDF just before each value
+    F = _mp_cdf(uniq, gamma)             # theoretical CDF (includes atom at 0)
+    # Theoretical LEFT limit: the atom at 0 hasn't been crossed yet.
+    F_left = F.copy()
+    F_left[uniq <= 0.0] = F[uniq <= 0.0] - point_mass
+    d = np.maximum(np.abs(after - F), np.abs(before - F_left))
+    return float(np.max(d))
 
 
 def _mp_layer_metrics(
