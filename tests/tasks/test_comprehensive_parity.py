@@ -1737,10 +1737,13 @@ def test_consistency_logical():
             nlls.append(-logp[ids[t]].item())
         return float(np.mean(nlls))
 
+    # Unconditional prompt is BOS + " " (the task prepends the BOS token so the
+    # prompt is non-degenerate on non-BOS tokenizers; kept identical here).
+    _bos = tokenizer.bos_token or ""
     ref_cond, ref_uncond = [], []
     for s in pairs:
         c = ref_mean_nll(s["premise"] + " ", s["conclusion"])
-        u = ref_mean_nll(" ", s["conclusion"])
+        u = ref_mean_nll(_bos + " ", s["conclusion"])
         assert c is not None and u is not None, "ref path degenerated"
         ref_cond.append(-c)
         ref_uncond.append(-u)

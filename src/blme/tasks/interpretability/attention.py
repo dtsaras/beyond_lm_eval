@@ -79,7 +79,10 @@ class AttentionEntropyTask(DiagnosticTask):
                         sample if isinstance(sample, str)
                         else sample.get("text", "")
                     )
-                    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+                    inputs = tokenizer(
+                        text, return_tensors="pt",
+                        truncation=True, max_length=512,
+                    ).to(model.device)
                     outputs = model(**inputs, output_attentions=True)
                     attentions = outputs.attentions
                     if not attentions:

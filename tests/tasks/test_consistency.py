@@ -7,6 +7,57 @@ import torch
 import numpy as np
 
 
+def test_contrastive_all_failed_returns_error_not_nan(monkeypatch):
+    """Campaign-3 BUG: when every triple fails to score, np.mean([]) returned
+    NaN metrics that look like a real measurement. It must return an error
+    dict (mirroring the empty-dataset case)."""
+    import blme.tasks.common as common
+    from blme.tasks.consistency.contrastive import ContrastiveConsistencyTask
+
+    monkeypatch.setattr(common, "score_continuation", lambda *a, **k: None)
+
+    class _M:
+        device = torch.device("cpu")
+
+        def parameters(self):
+            return iter([torch.zeros(1)])
+    r = ContrastiveConsistencyTask(config={"num_samples": 2}).evaluate(_M(), object(), dataset=None)
+    assert isinstance(r, dict) and "error" in r
+
+
+def test_icl_slope_skips_k_greater_than_available_demos():
+    """Campaign-3 BUG: demos[:k] silently truncated when k > n_demos, so an
+    8-shot metric with only 4 demos duplicated the 4-shot NLL and flattened the
+    slope. k > n_demos must yield NaN (unmeasurable), not a duplicate."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.icl_slope import ICLSlopeTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    item = {
+        "demos": [("a", "1"), ("b", "2"), ("c", "3"), ("d", "4")],  # only 4 demos
+        "query": "e", "target": " 5",
+        "template": "{inp} = {out}", "query_template": "{inp} =",
+    }
+    r = ICLSlopeTask(config={"shot_counts": [0, 4, 8]}).evaluate(model, tok, dataset=[item])
+    assert np.isnan(r["mean_nll_8shot"]), "8-shot with 4 demos must be NaN, not truncated"
+    assert np.isfinite(r["mean_nll_4shot"])
+
+
+def test_logical_unconditional_prompt_works_on_non_bos_tokenizer():
+    """Campaign-3 BUG: the unconditional " " prompt degenerated to prompt_len=0
+    on non-BOS tokenizers (gpt2), so score_continuation returned None and EVERY
+    pair was skipped -> the task errored. A BOS-prefixed prompt must let it run."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.logical import LogicalConsistencyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    r = LogicalConsistencyTask(config={"num_samples": 4}).evaluate(model, tok, dataset=None)
+    assert "error" not in r, f"task errored on a non-BOS tokenizer: {r}"
+    assert "conditional_likelihood_lift" in r
+
+
 def test_self_consistency_seed_does_not_crash_generation():
     """Campaign-3 BUG: with a seed set, self_consistency passed a
     generate(generator=...) kwarg that transformers rejects with ValueError;
@@ -81,9 +132,12 @@ def test_contrastive_consistency(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
 
     assert isinstance(results, dict)
-    assert "mean_factual_prob" in results
-    assert "mean_exclusive_prob" in results
-    assert "mean_rejection_ratio" in results
+    # On mocks where no triple can be scored the task now returns an error dict
+    # (rather than silent NaN metrics).
+    if "error" not in results:
+        assert "mean_factual_prob" in results
+        assert "mean_exclusive_prob" in results
+        assert "mean_rejection_ratio" in results
 
 
 def test_logical_consistency(mock_model, mock_tokenizer):

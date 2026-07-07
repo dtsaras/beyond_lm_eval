@@ -69,12 +69,15 @@ class LogicalConsistencyTask(DiagnosticTask):
                 # inconsistent boundaries under BPE merges.
                 cond = score_continuation(model, tokenizer, premise + " ", conclusion)
 
-                # P(conclusion) alone — same helper with empty prompt
-                # (the "log-prob of the sentence itself"). We prefix a
-                # single space so the tokenised "start of sentence"
-                # condition is identical to how the conclusion is
-                # tokenised inside the conditional prompt.
-                uncond = score_continuation(model, tokenizer, " ", conclusion)
+                # P(conclusion) alone — same helper with a minimal prompt.
+                # A bare " " degenerates on non-BOS tokenizers: the first BPE
+                # token absorbs the space, prompt_len becomes 0 and
+                # score_continuation returns None, so EVERY pair is skipped and
+                # the task errors on gpt2/pythia/Qwen/etc. Prepend the BOS token
+                # (kept + a trailing space so the conclusion still tokenises the
+                # same way as inside the conditional prompt).
+                _bos = getattr(tokenizer, "bos_token", None) or ""
+                uncond = score_continuation(model, tokenizer, _bos + " ", conclusion)
 
                 if cond is None or uncond is None:
                     continue

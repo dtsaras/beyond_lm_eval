@@ -34,6 +34,23 @@ def test_superposition_bc_includes_finite_sample_correction():
     )
 
 
+def test_attention_entropy_truncates_long_inputs():
+    """Campaign-3 BUG: the direct forward path tokenized without truncation, so
+    an input longer than the model context raised IndexError. It must truncate
+    (to 512, matching the cache path) and produce a finite result."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.attention import AttentionEntropyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained(
+        "distilgpt2", attn_implementation="eager").eval()  # so attentions are returned
+    long_text = "the cat sat on the mat . " * 300  # ~2100 tokens >> 1024 context
+    r = AttentionEntropyTask(config={"num_samples": 1}).evaluate(
+        model, tok, dataset=[long_text])
+    assert "error" not in r
+    assert np.isfinite(r["avg_entropy_total"])
+
+
 def test_sparsity_handles_none_layers(mock_model, mock_tokenizer, monkeypatch):
     """Campaign-3 BUG: get_layers(model) can return None on unrecognized
     architectures; len(None) then crashed with TypeError. Must return an error
