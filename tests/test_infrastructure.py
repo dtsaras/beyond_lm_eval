@@ -120,6 +120,17 @@ class TestLoadModelAndTokenizer:
         mock_model.eval.assert_called_once()
         assert tokenizer.pad_token == "<eos>"
 
+
+def test_load_model_rejects_bare_name_instead_of_loading_gpt2():
+    """Campaign-3 release blocker: a bare model name (no 'pretrained=') was
+    dropped by the parser and silently fell back to gpt2 — evaluating the wrong
+    model. It must raise instead."""
+    import pytest
+    from blme.models.wrapper import load_model_and_tokenizer
+
+    with pytest.raises(ValueError, match="pretrained"):
+        load_model_and_tokenizer("meta-llama/Llama-3-8B", device="cpu")
+
     @patch("blme.models.wrapper.AutoTokenizer")
     @patch("blme.models.wrapper._load_model")
     def test_dtype_passed_through(self, mock_load, mock_tok_cls):

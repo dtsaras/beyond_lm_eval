@@ -113,7 +113,18 @@ def load_model_and_tokenizer(
     """
     args = parse_model_args(model_args_str)
 
-    model_name = args.get("pretrained", "gpt2")
+    if "pretrained" not in args:
+        if model_args_str:
+            # A bare model name (e.g. "meta-llama/Llama-3-8B") or a typo has no
+            # '=', so parse_model_args drops it and we would silently load gpt2 —
+            # evaluating the wrong model. Fail loudly instead.
+            raise ValueError(
+                f"model_args={model_args_str!r} does not specify 'pretrained='. "
+                "Pass 'pretrained=<hf-id-or-path>' (a bare model name is ignored)."
+            )
+        model_name = "gpt2"  # explicit no-args default (demos/tests)
+    else:
+        model_name = args["pretrained"]
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 

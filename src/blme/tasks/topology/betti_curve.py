@@ -47,6 +47,8 @@ except ImportError:
 
 def _count_betti(data, maxdim=1, n_neighbors=5, persistence_frac=0.3):
     """Count Betti numbers from a point cloud via graph-geodesic homology.
+    Raises a clear ImportError (not a bare NameError on ``ripser``) when the
+    optional ripser dependency is missing.
 
     Follows Naitzat et al. (JMLR 2020) and the reference topnn_framework:
     build a kNN graph, take graph-geodesic (shortest-path) distances, and
@@ -69,6 +71,11 @@ def _count_betti(data, maxdim=1, n_neighbors=5, persistence_frac=0.3):
     Returns:
         (betti_0, betti_1): connected components and significant loops.
     """
+    if not HAS_RIPSER:
+        raise ImportError(
+            "geometry/topology Betti-curve analysis requires the optional "
+            "'ripser' package. Install it with: pip install ripser"
+        )
     from scipy.spatial import cKDTree
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import shortest_path, connected_components

@@ -10,6 +10,17 @@ import torch
 import numpy as np
 
 
+def test_count_betti_raises_clear_error_without_ripser(monkeypatch):
+    """Campaign-3 release blocker: _count_betti called ripser() even when the
+    optional dep is missing, crashing with a bare NameError. It must raise a
+    clear ImportError with an install hint."""
+    import blme.tasks.topology.betti_curve as bc
+
+    monkeypatch.setattr(bc, "HAS_RIPSER", False)
+    with pytest.raises(ImportError, match="ripser"):
+        bc._count_betti(np.random.default_rng(0).standard_normal((5, 2)))
+
+
 def test_betti_zero_distance_edges_do_not_inflate_beta0():
     """Campaign-3 BUG: zero-weight kNN edges (between duplicate points) were
     stored as explicit zeros, which scipy's csgraph treats as "no edge", so a
