@@ -32,6 +32,15 @@ dev = [
     "black",
     "isort",
 ]
+test = [
+    # Everything the FULL test suite needs so CI can run tests/ without
+    # collection errors or network-only failures.
+    "pytest",
+    "scikit-learn",  # probing tasks
+    "ripser",        # topology tasks
+    "nltk",          # diversity (Self-BLEU) tasks
+    "vendi-score",   # geometry_vendi parity tests
+]
 benchmarks = [
     "lm-eval",
 ]
@@ -63,6 +72,7 @@ all = [
     "wandb",
     "datasets",
     "nltk",
+    "vendi-score",
 ]
 
 [project.urls]
