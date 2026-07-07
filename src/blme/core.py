@@ -319,8 +319,15 @@ def evaluate(
             logger.error(f"lm_eval tasks failed: {e}")
             task_errors["_lm_eval"] = str(e)
 
-    if fail_on_task_error and task_errors:
-        raise RuntimeError(f"BLME task errors under strict mode: {task_errors}")
+    # Tasks that returned {"error": ...} are failures too (they didn't raise,
+    # but they did not succeed), so --strict must fail on them as well.
+    errored_results = {
+        name: r["error"] for name, r in task_results.items()
+        if isinstance(r, dict) and "error" in r
+    }
+    all_failures = {**task_errors, **errored_results}
+    if fail_on_task_error and all_failures:
+        raise RuntimeError(f"BLME task errors under strict mode: {all_failures}")
 
     # 6. Build results envelope
     envelope = build_results_envelope(

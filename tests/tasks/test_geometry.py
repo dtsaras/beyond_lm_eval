@@ -10,6 +10,19 @@ import tempfile
 import os
 
 
+def test_positional_decay_annotations_are_py39_safe():
+    """Campaign-3 release blocker: `float | None` (PEP 604) is evaluated eagerly
+    at def-time and raises TypeError on Python 3.9 (the advertised minimum),
+    crashing task registration. `from __future__ import annotations` keeps
+    annotations lazy (strings), so the union is never evaluated."""
+    from blme.tasks.geometry.positional_decay import _row_distance_correlation
+
+    assert _row_distance_correlation.__annotations__.get("return") == "float | None", (
+        "annotation must be a lazy string (from __future__ import annotations) "
+        "so the PEP-604 union does not evaluate at import on py3.9"
+    )
+
+
 def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokenizer, monkeypatch):
     """Campaign-3 DISCREPANCY: the fresh path truncated at config max_length
     (default 128) while the shared-cache path truncates at 512 (cache.py:352),

@@ -224,6 +224,23 @@ class TestBuildResultsEnvelope:
         )
         assert env["errors"] is None
 
+    def test_error_dict_result_counted_as_failure(self):
+        """Campaign-3 release blocker: a task returning {"error": ...} was
+        stored in task_results and counted as completed, so failed_tasks=0 and
+        errors=None despite the failure. It must count as a failure and surface
+        in errors."""
+        env = build_results_envelope(
+            model_args="pretrained=gpt2",
+            tasks_requested=["good", "bad", "raised"],
+            task_results={"good": {"metric": 1.0}, "bad": {"error": "boom"}},
+            task_errors={"raised": "exception text"},
+            device="cpu",
+        )
+        assert env["summary"]["completed_tasks"] == 1, "only 'good' truly completed"
+        assert env["summary"]["failed_tasks"] == 2, "'bad' (error dict) + 'raised'"
+        assert env["errors"]["bad"] == "boom"
+        assert env["errors"]["raised"] == "exception text"
+
 
 class TestPrintResultsTable:
     def test_no_crash(self, capsys):

@@ -14,6 +14,8 @@ References:
 - 2024-2025 Long-Context Extrapolation and RoPE literature.
 """
 
+from __future__ import annotations  # PEP 563: keep `float | None` lazy on py3.9
+
 import torch
 import numpy as np
 from scipy.stats import spearmanr

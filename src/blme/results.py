@@ -77,6 +77,16 @@ def build_results_envelope(
     timings = task_timings or {}
     total_elapsed = round(sum(timings.values()), 2) if timings else None
 
+    # Tasks that returned {"error": ...} did not raise but did not succeed —
+    # count them as failures (not completed) and surface them in the errors
+    # field, alongside tasks that raised (task_errors).
+    errored_results = {
+        name: r["error"] for name, r in task_results.items()
+        if isinstance(r, dict) and "error" in r
+    }
+    completed_names = [name for name in task_results if name not in errored_results]
+    all_errors = {**task_errors, **errored_results}
+
     return {
         "blme_version": _get_blme_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -95,12 +105,12 @@ def build_results_envelope(
         },
         "summary": {
             "total_tasks": len(tasks_requested),
-            "completed_tasks": len(task_results),
-            "failed_tasks": len(task_errors),
+            "completed_tasks": len(completed_names),
+            "failed_tasks": len(all_errors),
             "total_elapsed": total_elapsed,
         },
         "results": task_results,
-        "errors": task_errors if task_errors else None,
+        "errors": all_errors if all_errors else None,
         "task_timings": timings if timings else None,
     }
 
