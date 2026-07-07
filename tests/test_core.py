@@ -124,6 +124,62 @@ def test_evaluate_accepts_float_timeout(mock_get_task, mock_load, mock_model, mo
 
 @patch("blme.core.load_model_and_tokenizer")
 @patch("blme.core.get_task")
+def test_pure_benchmark_run_does_not_load_diagnostic_model(mock_get_task, mock_load):
+    """Campaign-3 release blocker: a pure lm_eval run loaded the diagnostic model
+    for nothing (run_lm_eval loads its own via model_args). No diagnostic tasks
+    -> no diagnostic model load."""
+    mock_get_task.return_value = None  # nothing is a diagnostic task
+    with patch("blme.tasks.benchmarks.is_lm_eval_task", return_value=True), \
+         patch("blme.tasks.benchmarks.run_lm_eval", return_value={"acc": 0.5}):
+        results = evaluate(model_args="pretrained=test", tasks=["hellaswag"])
+    mock_load.assert_not_called()
+    assert results["results"]["_lm_eval"] == {"acc": 0.5}
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
+def test_corpus_sized_to_largest_task_num_samples(mock_get_task, mock_load, mock_model, mock_tokenizer):
+    """Campaign-3 release blocker: the default corpus was loaded (cap 200)
+    before per-task configs were resolved, so a task requesting num_samples>200
+    was silently starved. The corpus must be sized to the largest request."""
+    mock_load.return_value = (mock_model, mock_tokenizer)
+    inst = MagicMock()
+    inst.evaluate.return_value = {"m": 1.0}
+    cls = MagicMock(return_value=inst)
+    mock_get_task.side_effect = lambda n: cls if n == "my_diag" else None
+
+    with patch("blme.cache.load_default_corpus", return_value=[{"text": "x"}]) as mock_corpus:
+        evaluate(
+            model_args="pretrained=test",
+            tasks=["my_diag"],
+            task_configs={"my_diag": {"num_samples": 500}},
+        )
+    requested = mock_corpus.call_args[0][0]
+    assert requested >= 500, f"corpus sized {requested}, expected >= 500"
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
+def test_mixed_run_frees_model_before_lm_eval(mock_get_task, mock_load, mock_model, mock_tokenizer):
+    """Campaign-3 release blocker: a mixed diagnostic+lm_eval run held two full
+    model copies. The diagnostic model is freed before run_lm_eval; the cleanup
+    path must run without error and both result sets survive."""
+    mock_load.return_value = (mock_model, mock_tokenizer)
+    inst = MagicMock()
+    inst.evaluate.return_value = {"m": 1.0}
+    cls = MagicMock(return_value=inst)
+    mock_get_task.side_effect = lambda n: cls if n == "my_diag" else None
+
+    with patch("blme.tasks.benchmarks.is_lm_eval_task", side_effect=lambda n: n == "hellaswag"), \
+         patch("blme.tasks.benchmarks.run_lm_eval", return_value={"acc": 0.5}) as mock_run:
+        results = evaluate(model_args="pretrained=test", tasks=["my_diag", "hellaswag"])
+    mock_run.assert_called_once()
+    assert results["results"]["my_diag"] == {"m": 1.0}
+    assert results["results"]["_lm_eval"] == {"acc": 0.5}
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
 def test_evaluate_saves_json(mock_get_task, mock_load, mock_model, mock_tokenizer, tmp_path):
     """Test that results.json is saved when output_dir is provided."""
     import json

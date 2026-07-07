@@ -152,11 +152,7 @@ def evaluate(
             raise ValueError(msg)
         logger.warning(msg + " Skipping.")
 
-    # 3. Load Model
-    logger.info("Loading model...")
-    model, tokenizer = load_model_and_tokenizer(model_args, device=device)
-
-    # 4. Run diagnostic tasks with error isolation + shared cache
+    # 3. Init result accumulators
     task_results: Dict[str, Any] = {}
     task_errors: Dict[str, str] = {}
     task_timings: Dict[str, float] = {}
@@ -168,22 +164,40 @@ def evaluate(
         "need_attentions": False,
     }
 
-    if diagnostic_tasks:
-        # Load a shared evaluation corpus if none was provided
-        if dataset is None:
-            from .cache import load_default_corpus
-            dataset = load_default_corpus(cache_num_samples or 200)
+    # 4. Run diagnostic tasks with error isolation + shared cache
+    model, tokenizer, cache = None, None, None
 
-        # Resolve configs once (defaults + user overrides)
+    if diagnostic_tasks:
+        # Load the model only when there are diagnostic tasks — a pure-benchmark
+        # (lm_eval-only) run loads its own model inside run_lm_eval, so loading
+        # it here as well would waste a whole model copy.
+        logger.info("Loading model...")
+        model, tokenizer = load_model_and_tokenizer(model_args, device=device)
+
+        # Resolve configs FIRST (defaults + user overrides) so the shared corpus
+        # can be sized to the largest per-task num_samples. Loading the corpus
+        # before this capped it at the 200-sample default and silently starved
+        # any task requesting more.
         from .tasks.config_loader import resolve_task_config
         for task_name in diagnostic_tasks:
             user_override = task_configs.get(task_name, {}) if task_configs else {}
             resolved_task_configs[task_name] = resolve_task_config(task_name, user_override)
 
+        # Load a shared evaluation corpus if none was provided, sized to the
+        # largest requested sample count (never below the 200-sample default).
+        if dataset is None:
+            from .cache import load_default_corpus
+            task_sample_counts = [
+                resolved_task_configs[t].get("num_samples")
+                for t in diagnostic_tasks
+                if resolved_task_configs[t].get("num_samples") is not None
+            ]
+            corpus_size = max([cache_num_samples or 0, 200] + task_sample_counts)
+            dataset = load_default_corpus(corpus_size)
+
         # Shared cache: only tasks known to consume cached hidden states or
         # logits are listed here so we avoid the memory cost of caching when
-        # no requesting task is in the run.
-        cache = None
+        # no requesting task is in the run. (cache is initialised to None above.)
         cache_hidden_tasks = {
             "geometry_svd",
             "geometry_lid",
@@ -324,6 +338,16 @@ def evaluate(
 
     # 5. Run lm_eval benchmark tasks (optional)
     if lm_eval_tasks:
+        # Free the diagnostic model + shared cache before lm_eval loads its own
+        # HFLM copy, so a mixed diagnostic+benchmark run never holds two full
+        # models (plus the cache) in memory at once.
+        if model is not None:
+            import gc
+            model = tokenizer = cache = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         logger.info(f"Running {len(lm_eval_tasks)} lm_eval benchmark tasks...")
         try:
             from .tasks.benchmarks import run_lm_eval
