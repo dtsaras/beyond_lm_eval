@@ -121,6 +121,63 @@ class TestLoadModelAndTokenizer:
         assert tokenizer.pad_token == "<eos>"
 
 
+class TestModelKwargsCompat:
+    """Campaign-3 release blockers in the model loader (transformers v5)."""
+
+    def _model_kwargs_for(self, model_args):
+        with patch("blme.models.wrapper.AutoTokenizer") as mock_tok_cls, \
+             patch("blme.models.wrapper._load_model") as mock_load:
+            mock_model = MagicMock()
+            mock_param = MagicMock()
+            mock_param.dtype = torch.float32
+            mock_param.device = torch.device("cpu")
+            mock_model.parameters.return_value = iter([mock_param])
+            mock_model.to.return_value = mock_model
+            mock_load.return_value = mock_model
+            tok = MagicMock()
+            tok.pad_token = None
+            tok.eos_token = "<eos>"
+            tok.eos_token_id = 2
+            mock_tok_cls.from_pretrained.return_value = tok
+            from blme.models.wrapper import load_model_and_tokenizer
+            load_model_and_tokenizer(model_args, device="cpu")
+            return mock_load.call_args[0][1]  # the model_kwargs dict
+
+    def test_dtype_kwarg_replaces_deprecated_torch_dtype(self):
+        """transformers v5 deprecates torch_dtype= in favour of dtype=; passing
+        torch_dtype prints a deprecation warning on every load."""
+        kw = self._model_kwargs_for("pretrained=gpt2,dtype=bfloat16")
+        assert kw.get("dtype") == torch.bfloat16
+        assert "torch_dtype" not in kw
+
+    def test_dtype_auto_uses_dtype_kwarg(self):
+        kw = self._model_kwargs_for("pretrained=gpt2,dtype=auto")
+        assert kw.get("dtype") == "auto"
+        assert "torch_dtype" not in kw
+
+    def test_max_memory_semicolon_survives_as_multi_device(self):
+        """Comma-delimited max_memory is mangled by parse_model_args (which
+        splits on ','); the documented semicolon form must survive intact."""
+        kw = self._model_kwargs_for("pretrained=gpt2,max_memory=0:20GiB;cpu:40GiB")
+        assert kw["max_memory"] == {0: "20GiB", "cpu": "40GiB"}
+
+    def test_load_in_8bit_uses_quantization_config(self):
+        """Passing load_in_8bit= directly to from_pretrained raises TypeError on
+        transformers v5; it must be wrapped in a BitsAndBytesConfig."""
+        from transformers import BitsAndBytesConfig
+        kw = self._model_kwargs_for("pretrained=gpt2,load_in_8bit=true")
+        assert "load_in_8bit" not in kw
+        assert isinstance(kw.get("quantization_config"), BitsAndBytesConfig)
+        assert kw["quantization_config"].load_in_8bit is True
+
+    def test_load_in_4bit_uses_quantization_config(self):
+        from transformers import BitsAndBytesConfig
+        kw = self._model_kwargs_for("pretrained=gpt2,load_in_4bit=true")
+        assert "load_in_4bit" not in kw
+        assert isinstance(kw.get("quantization_config"), BitsAndBytesConfig)
+        assert kw["quantization_config"].load_in_4bit is True
+
+
 def test_force_eager_covers_all_attention_tasks():
     """Campaign-3 release blocker: the force-eager list was incomplete
     (missing geometry_positional_decay and interpretability_attention_rollout),
