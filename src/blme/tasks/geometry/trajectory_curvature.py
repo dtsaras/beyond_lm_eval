@@ -108,7 +108,13 @@ def _mean_curvature(X) -> float:
 
 
 def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
-    """Mean curvature pooled over t and over samples for one layer.
+    """Mean curvature for one layer: the mean of PER-SENTENCE mean angles.
+
+    Follows Hosseini & Fedorenko (2023): each sentence's curvature is
+    ``C_sn = (1/k) sum_i c_i`` (mean over its own angles), then the layer
+    curvature is the mean over sentences (1/N). This gives every sentence
+    equal weight — NOT a length-weighted pool over all angles concatenated
+    together, which over-weights longer sentences.
 
     Args:
         chunks: list of (T_i, D) tensors/arrays — per-sample hidden
@@ -116,11 +122,11 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
         skip_first: number of leading tokens to drop per sample (BOS).
 
     Returns:
-        Pooled mean angle in radians, or NaN if no sample yields a
-        valid angle. Samples with fewer than ``skip_first + 3`` tokens
-        are skipped (two difference vectors are needed for one angle).
+        Mean of per-sentence mean angles in radians, or NaN if no sample
+        yields a valid angle. Samples with fewer than ``skip_first + 3``
+        tokens are skipped (two difference vectors are needed for one angle).
     """
-    all_angles = []
+    per_sentence_means = []
     for chunk in chunks:
         if chunk is None:
             continue
@@ -131,10 +137,10 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
             continue
         angles = _trajectory_angles(chunk[skip_first:])
         if angles.size:
-            all_angles.append(angles)
-    if not all_angles:
+            per_sentence_means.append(float(np.mean(angles)))
+    if not per_sentence_means:
         return float("nan")
-    return float(np.mean(np.concatenate(all_angles)))
+    return float(np.mean(per_sentence_means))
 
 
 @register_task("geometry_trajectory_curvature")

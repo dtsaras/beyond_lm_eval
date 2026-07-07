@@ -5685,22 +5685,33 @@ def test_interpretability_superposition():
         _multimodality_score,
     )
 
-    # --- independent reference: textbook Sarle bimodality coefficient -------
+    # --- independent reference: SAS / Pfister 2013 bimodality coefficient ----
+    # BC = (G1^2 + 1) / (G2 + 3(n-1)^2/((n-2)(n-3))), where G1 is the bias-
+    # corrected sample skewness and G2 the bias-corrected sample EXCESS
+    # kurtosis (the correction term in the denominator is the finite-sample
+    # form the BLME docstring states; the old code dropped it). G1/G2 are
+    # hand-derived from central moments (Joanes & Gill 1998 type-2 estimators,
+    # matching scipy skew/kurtosis bias=False) so this reference calls neither
+    # scipy nor BLME.
     def ref_bc(x):
         x = np.asarray(x, dtype=np.float64)
-        if len(x) < 4:
+        n = len(x)
+        if n < 4:
             return 0.0
         m = x.mean()
         m2 = ((x - m) ** 2).mean()
         if m2 == 0:
-            return 0.0
+            return float("nan")
         m3 = ((x - m) ** 3).mean()
         m4 = ((x - m) ** 4).mean()
-        s = m3 / m2 ** 1.5
-        k = m4 / m2 ** 2
-        if k == 0:
+        b1 = m3 / m2 ** 1.5           # biased skewness
+        b2 = m4 / m2 ** 2 - 3.0       # biased excess kurtosis
+        G1 = np.sqrt(n * (n - 1)) / (n - 2) * b1
+        G2 = (n - 1) / ((n - 2) * (n - 3)) * ((n + 1) * b2 + 6)
+        denom = G2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))
+        if denom == 0:
             return 0.0
-        bc = (s ** 2 + 1.0) / k
+        bc = (G1 ** 2 + 1.0) / denom
         return float(min(max(bc, 0.0), 1.0))
 
     # === (A) helper parity on distributions with distinct, known shapes =====

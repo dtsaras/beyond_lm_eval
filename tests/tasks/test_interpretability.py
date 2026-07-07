@@ -11,6 +11,29 @@ import torch
 import numpy as np
 
 
+def test_superposition_bc_includes_finite_sample_correction():
+    """Campaign-3 DISCREPANCY: the bimodality coefficient dropped the finite-
+    sample correction term its own docstring states, computing the asymptotic
+    form (~10% off at n=50). It must equal the SAS/Pfister formula with the
+    3(n-1)^2/((n-2)(n-3)) correction in the denominator."""
+    from scipy.stats import skew, kurtosis
+    from blme.tasks.interpretability.superposition import _multimodality_score
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(50)  # small n where the correction matters
+    n = 50
+    g1 = skew(x, bias=False)
+    g2 = kurtosis(x, fisher=True, bias=False)
+    expected = min(max((g1 ** 2 + 1) / (g2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))), 0.0), 1.0)
+    asymptotic = min(max((skew(x) ** 2 + 1) / kurtosis(x, fisher=False), 0.0), 1.0)
+
+    assert abs(expected - asymptotic) > 1e-3, "test cannot discriminate at this n"
+    got = _multimodality_score(x)
+    assert abs(got - expected) < 1e-9, (
+        f"BC {got:.6f} != SAS finite-sample {expected:.6f} (asymptotic {asymptotic:.6f})"
+    )
+
+
 def test_sae_hidden_state_index_rejects_invalid_hooks():
     """Campaign-3 BUGs: _select_sae_hidden_state_index (1) silently mapped
     hook_resid_mid to resid_post though HF exposes no such tensor and the

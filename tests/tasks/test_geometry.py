@@ -10,6 +10,31 @@ import tempfile
 import os
 
 
+def test_trajectory_curvature_is_mean_of_per_sentence_means():
+    """Campaign-3 DISCREPANCY: layer curvature pooled ALL angles across samples
+    (length-weighted), over-weighting longer sentences. The paper (Hosseini &
+    Fedorenko) means each sentence's angles first, then means over sentences."""
+    from blme.tasks.geometry.trajectory_curvature import (
+        _pooled_layer_curvature, _trajectory_angles,
+    )
+
+    rng = np.random.default_rng(3)
+    long_chunk = np.vstack([[9.0, 9.0], rng.standard_normal((20, 2))])   # BOS + long
+    short_chunk = np.vstack([[9.0, 9.0], rng.standard_normal((4, 2))])   # BOS + short
+    aL = _trajectory_angles(long_chunk[1:])
+    aS = _trajectory_angles(short_chunk[1:])
+    pooled = float(np.mean(np.concatenate([aL, aS])))
+    per_sentence = float(np.mean([np.mean(aL), np.mean(aS)]))
+    assert abs(pooled - per_sentence) > 1e-3, "test cannot discriminate the two"
+
+    got = _pooled_layer_curvature([torch.tensor(long_chunk), torch.tensor(short_chunk)],
+                                  skip_first=1)
+    assert abs(got - per_sentence) < 1e-6, (
+        f"got {got:.6f} — expected per-sentence mean {per_sentence:.6f}, "
+        f"not the length-weighted pool {pooled:.6f}"
+    )
+
+
 def test_svd_avg_cosine_uses_raw_states_not_centered():
     """Campaign-3 DISCREPANCY: avg_cosine_similarity (the Ethayarajh 2019
     anisotropy baseline) was computed on MEAN-CENTERED states, which reads ~0
