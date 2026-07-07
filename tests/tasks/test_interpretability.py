@@ -11,6 +11,45 @@ import torch
 import numpy as np
 
 
+def _perturb_global_rng():
+    """Advance the global torch + numpy RNG by an arbitrary amount, simulating
+    an earlier task in the same evaluate() run consuming RNG state."""
+    torch.manual_seed(999)
+    _ = torch.rand(1000)
+    np.random.seed(999)
+    _ = np.random.rand(1000)
+
+
+@pytest.mark.parametrize("task_path,cls_name,cfg,eager", [
+    ("blme.tasks.interpretability.head_roles", "HeadRolesTask",
+     {"num_samples": 3, "seq_len": 16}, True),
+    ("blme.tasks.interpretability.induction", "InductionHeadTask",
+     {"num_samples": 3, "seq_len": 16}, True),
+    ("blme.tasks.interpretability.superposition", "SuperpositionIndexTask",
+     {"num_samples": 2, "max_neurons": 8}, False),  # small so the subsample fires
+])
+def test_task_results_independent_of_global_rng(task_path, cls_name, cfg, eager):
+    """Campaign-3 release blocker: these tasks drew random inputs / subsampled
+    neurons from the GLOBAL RNG, so their results depended on how much RNG state
+    earlier tasks in the same evaluate() run had consumed. With a local seeded
+    generator, results must be identical regardless of global RNG state."""
+    import importlib
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    cls = getattr(importlib.import_module(task_path), cls_name)
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    kw = {"attn_implementation": "eager"} if eager else {}
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2", **kw).eval()
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    r1 = cls(config=cfg).evaluate(model, tok, None)
+    _perturb_global_rng()  # different global torch + numpy state for run 2
+    r2 = cls(config=cfg).evaluate(model, tok, None)
+
+    assert str(r1) == str(r2), f"{cls_name} results depend on global RNG state"
+
+
 def test_superposition_bc_includes_finite_sample_correction():
     """Campaign-3 DISCREPANCY: the bimodality coefficient dropped the finite-
     sample correction term its own docstring states, computing the asymptotic

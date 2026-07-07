@@ -182,7 +182,12 @@ def evaluate(
         from .tasks.config_loader import resolve_task_config
         for task_name in diagnostic_tasks:
             user_override = task_configs.get(task_name, {}) if task_configs else {}
-            resolved_task_configs[task_name] = resolve_task_config(task_name, user_override)
+            resolved = resolve_task_config(task_name, user_override)
+            # Propagate the run seed so tasks that build local RNGs are seeded
+            # from it (and stay reproducible / order-independent), unless a task
+            # config overrides it explicitly.
+            resolved.setdefault("seed", seed)
+            resolved_task_configs[task_name] = resolved
 
         # Load a shared evaluation corpus if none was provided, sized to the
         # largest requested sample count (never below the 200-sample default).

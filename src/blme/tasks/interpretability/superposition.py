@@ -69,6 +69,9 @@ class SuperpositionIndexTask(DiagnosticTask):
         logger.info("Running Superposition Index Analysis...")
         num_samples = self.config.get("num_samples", 5)
         max_neurons = self.config.get("max_neurons", 256)
+        # Local RNG for the neuron subsample so results don't depend on global
+        # RNG state consumed by earlier tasks in the same evaluate() run.
+        rng = np.random.default_rng(int(self.config.get("seed", 42)))
 
         device = next(model.parameters()).device
 
@@ -148,7 +151,7 @@ class SuperpositionIndexTask(DiagnosticTask):
             # Subsample neurons if dim is large
             neuron_indices = np.arange(dim)
             if dim > max_neurons:
-                neuron_indices = np.random.choice(dim, max_neurons, replace=False)
+                neuron_indices = rng.choice(dim, max_neurons, replace=False)
 
             # 1. Multimodality scores per neuron
             bimodality_scores = []

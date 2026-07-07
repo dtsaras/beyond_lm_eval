@@ -49,6 +49,10 @@ class HeadRolesTask(DiagnosticTask):
 
         device = next(model.parameters()).device
 
+        # Local RNG so results don't depend on how much global-RNG state earlier
+        # tasks consumed in the same evaluate() run (order-independence).
+        gen = torch.Generator().manual_seed(int(self.config.get("seed", 42)))
+
         prev_scores_all = []  # (L, H)
         dup_scores_all = []   # (L, H)
 
@@ -56,12 +60,12 @@ class HeadRolesTask(DiagnosticTask):
             for _ in range(num_samples):
                 # Build a sequence with some repeated tokens to let
                 # duplicate-token heads fire.
-                base = torch.randint(0, vocab_size, (1, seq_len))
+                base = torch.randint(0, vocab_size, (1, seq_len), generator=gen)
                 # Force some duplicates by copying a few tokens from the
                 # first half into the second half.
                 n_dup = seq_len // 5
-                src_idx = torch.randint(0, seq_len // 2, (n_dup,))
-                dst_idx = torch.randint(seq_len // 2, seq_len, (n_dup,))
+                src_idx = torch.randint(0, seq_len // 2, (n_dup,), generator=gen)
+                dst_idx = torch.randint(seq_len // 2, seq_len, (n_dup,), generator=gen)
                 base[0, dst_idx] = base[0, src_idx]
                 input_ids = base.to(device)
 
