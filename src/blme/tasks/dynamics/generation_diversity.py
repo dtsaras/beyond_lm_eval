@@ -187,9 +187,10 @@ class GenerationDiversityTask(DiagnosticTask):
                         "return_dict_in_generate": True,
                     }
                     if seed is not None:
-                        generator = torch.Generator(device=device)
-                        generator.manual_seed(int(seed))
-                        generate_kwargs["generator"] = generator
+                        # transformers' generate() has no per-call generator
+                        # kwarg; seed the global RNG (which drives sampling)
+                        # for determinism instead.
+                        torch.manual_seed(int(seed))
                     outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed: {e}")

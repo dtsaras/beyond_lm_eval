@@ -7,6 +7,26 @@ import torch
 import numpy as np
 
 
+def test_self_consistency_seed_does_not_crash_generation():
+    """Campaign-3 BUG: with a seed set, self_consistency passed a
+    generate(generator=...) kwarg that transformers rejects with ValueError;
+    only TypeError was caught for the fallback, so the broad except skipped
+    every prompt and the task returned {"error": ...}. A seeded run must
+    still produce real agreement metrics."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.self_consistency import SelfConsistencyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    task = SelfConsistencyTask(config={
+        "seed": 1234, "num_prompts": 2, "n_samples_per_prompt": 4,
+        "max_new_tokens": 4,
+    })
+    r = task.evaluate(model, tok, dataset=None)
+    assert "error" not in r, f"seeded run returned error dict: {r}"
+    assert "mean_first_token_agreement" in r and r["generation_seed"] == 1234
+
+
 def test_calibration(mock_model, mock_tokenizer):
     """Expected Calibration Error (ECE) computation."""
     from blme.tasks.consistency.calibration import CalibrationTask

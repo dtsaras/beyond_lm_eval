@@ -66,15 +66,9 @@ class SelfConsistencyTask(DiagnosticTask):
             prompts = _SELFC_PROMPTS[:num_prompts]
 
         device = next(model.parameters()).device
-        generator = None
         if seed is not None:
             seed = int(seed)
             torch.manual_seed(seed)
-            try:
-                generator = torch.Generator(device=device)
-            except Exception:
-                generator = torch.Generator()
-            generator.manual_seed(seed)
 
         # Per-prompt agreement rates
         per_prompt_top1_rate = []
@@ -96,17 +90,10 @@ class SelfConsistencyTask(DiagnosticTask):
                     "top_p": 1.0,
                     "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
                 }
-                if generator is not None:
-                    generate_kwargs["generator"] = generator
-
+                # transformers' generate() has no per-call generator kwarg;
+                # determinism comes from the torch.manual_seed(seed) above
+                # (the global RNG drives sampling).
                 try:
-                    outputs = model.generate(**generate_kwargs)
-                except TypeError:
-                    # Some generate implementations do not accept a
-                    # generator kwarg; keep deterministic global seeding.
-                    generate_kwargs.pop("generator", None)
-                    if seed is not None:
-                        torch.manual_seed(seed)
                     outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed for prompt '{prompt[:40]}': {e}")

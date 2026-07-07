@@ -7,6 +7,26 @@ import numpy as np
 import torch
 
 
+def test_generation_diversity_seed_does_not_crash_generation():
+    """Campaign-3 BUG: a seed config created a torch.Generator and passed it
+    as generate(generator=...), which transformers rejects with ValueError;
+    the broad except swallowed it per-prompt so the task returned
+    {"error": "No completions generated"}. With a seed set the task must
+    still produce real diversity metrics."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.dynamics.generation_diversity import GenerationDiversityTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    task = GenerationDiversityTask(config={
+        "seed": 123, "num_prompts": 2, "n_samples_per_prompt": 3,
+        "max_new_tokens": 8,
+    })
+    r = task.evaluate(model, tok, dataset=None)
+    assert "error" not in r, f"seeded run returned error dict: {r}"
+    assert "mean_distinct_1" in r and r["seed"] == 123
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (preserved)
 # ---------------------------------------------------------------------------
@@ -281,7 +301,12 @@ def test_generation_diversity_seed_and_trims_special_tokens():
         "seed": 123,
     }).evaluate(model, Tok(), dataset=["prompt"])
 
-    assert model.generator_was_passed
+    # Corrected contract (Campaign-3): transformers' generate() has no
+    # per-call generator kwarg — passing it raised ValueError and the task
+    # silently returned an error dict. Determinism now comes from
+    # torch.manual_seed(seed), so generate() must NOT receive a generator.
+    assert not model.generator_was_passed
+    assert result["seed"] == 123
     assert result["completion_filter"] == "trim_at_eos_drop_special"
     assert result["distinct_n_scope"] == "per_completion_mean"
     assert result["mean_distinct_1"] == pytest.approx(1.0)
