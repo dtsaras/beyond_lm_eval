@@ -20,8 +20,17 @@ from .results import build_results_envelope, print_results_table, save_results
 logger = logging.getLogger("blme")
 
 
+class TaskTimeout(BaseException):
+    """Raised by the SIGALRM handler when a task exceeds its timeout.
+
+    Derives from BaseException (NOT Exception) so a task's own broad
+    ``except Exception`` cannot swallow the alarm and silently defeat the
+    per-task timeout (a timed-out task would then be reported as OK).
+    """
+
+
 def _timeout_handler(signum, frame):
-    raise TimeoutError("Task execution timed out")
+    raise TaskTimeout("Task execution timed out")
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +293,7 @@ def evaluate(
                 task = task_cls(config=t_config)
                 result = task.evaluate(model, tokenizer, dataset=dataset, cache=cache)
                 task_results[task_name] = result
-            except TimeoutError:
+            except TaskTimeout:
                 logger.error(f"Task '{task_name}' timed out after {timeout_sec}s")
                 task_errors[task_name] = f"Timeout after {timeout_sec}s"
             except torch.cuda.OutOfMemoryError:

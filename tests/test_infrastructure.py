@@ -121,6 +121,27 @@ class TestLoadModelAndTokenizer:
         assert tokenizer.pad_token == "<eos>"
 
 
+def test_task_timeout_survives_broad_except():
+    """Campaign-3 release blocker: the SIGALRM handler raised TimeoutError, which
+    a task's own `except Exception` swallowed, silently defeating the per-task
+    timeout (the timed-out task was then reported OK). TaskTimeout must derive
+    from BaseException so `except Exception` cannot catch it."""
+    from blme.core import TaskTimeout
+
+    assert issubclass(TaskTimeout, BaseException)
+    assert not issubclass(TaskTimeout, Exception)
+
+    swallowed = False
+    try:
+        try:
+            raise TaskTimeout("timeout")  # as the SIGALRM handler now raises
+        except Exception:                 # a task's broad handler
+            swallowed = True
+    except TaskTimeout:
+        pass  # the core loop catches it here
+    assert not swallowed, "TaskTimeout must not be catchable by `except Exception`"
+
+
 def test_load_model_rejects_bare_name_instead_of_loading_gpt2():
     """Campaign-3 release blocker: a bare model name (no 'pretrained=') was
     dropped by the parser and silently fell back to gpt2 — evaluating the wrong
