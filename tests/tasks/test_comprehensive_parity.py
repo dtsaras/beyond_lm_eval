@@ -589,13 +589,28 @@ def test_causality_circuit_quality():
     enc = [tok.encode(d["text"], return_tensors="pt", truncation=True, max_length=128)
            for d in dataset]
     enc = [e for e in enc if e.shape[1] > 1]
+    # Dataset-mean of RAW block outputs (captured via forward hooks) — matches
+    # the mean-ablation representation the task replaces. hidden_states[l+1] is
+    # WRONG for the last layer (it is ln_f(block output), post-final-norm).
     sums = {l: None for l in range(N)}
     counts = {l: 0 for l in range(N)}
+    _cap = {}
+
+    def _mk_cap(l):
+        def _h(m, i, o):
+            _cap[l] = (o[0] if isinstance(o, tuple) else o).detach()
+        return _h
+
     with torch.no_grad():
         for ids in enc:
-            hs = model(ids, output_hidden_states=True).hidden_states
+            _hs = [layer_mods[l].register_forward_hook(_mk_cap(l)) for l in range(N)]
+            try:
+                model(ids)
+            finally:
+                for _hh in _hs:
+                    _hh.remove()
             for l in range(N):
-                h = hs[l + 1]
+                h = _cap[l]
                 sums[l] = h.sum(dim=1) if sums[l] is None else sums[l] + h.sum(dim=1)
                 counts[l] += h.shape[1]
     mean_state = {l: (sums[l] / counts[l]).unsqueeze(1) for l in range(N)}

@@ -24,6 +24,67 @@ def test_ablation_pct_label_no_truncation_or_collision():
     assert [_pct_label(p) for p in (0.01, 0.05, 0.1, 0.25)] == ["1", "5", "10", "25"]
 
 
+def test_circuit_quality_last_layer_mean_is_raw_block_output():
+    """Campaign-3 BUG: the per-layer dataset mean was taken from
+    hidden_states[l+1]; HF's last entry is ln_f(block output), so the final
+    layer's mean was post-final-norm while the ablation hook replaces the RAW
+    block output. The computed mean for the last layer must match the raw
+    block-output mean (cos~1), not the post-ln_f mean (cos~0.30)."""
+    import torch
+    import torch.nn.functional as F
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    from blme.tasks.causality.circuit_quality import _dataset_mean_states
+    from blme.tasks.common import get_layers
+
+    torch.manual_seed(0)
+    model = GPT2LMHeadModel(GPT2Config(
+        vocab_size=64, n_positions=32, n_embd=32, n_layer=4, n_head=2)).eval()
+    layers = get_layers(model)
+    num_layers = len(layers)
+    encodings = [torch.tensor([[3, 9, 14, 2, 7]]), torch.tensor([[5, 1, 8, 4]])]
+    last = num_layers - 1
+
+    means = _dataset_mean_states(model, layers, encodings, num_layers)
+
+    # Independent RAW block-output mean and POST-ln_f mean for the last layer.
+    raw_sum = torch.zeros(model.config.n_embd)
+    raw_cnt = 0
+    cap = {}
+
+    def hook(m, i, o):
+        cap["h"] = (o[0] if isinstance(o, tuple) else o).detach()
+
+    with torch.no_grad():
+        for ids in encodings:
+            hd = layers[last].register_forward_hook(hook)
+            try:
+                out = model(ids, output_hidden_states=True)
+            finally:
+                hd.remove()
+            raw_sum += cap["h"][0].sum(0)
+            raw_cnt += cap["h"].shape[1]
+        raw_mean = raw_sum / raw_cnt
+        # post-ln_f mean (the buggy source = hidden_states[num_layers])
+        pln_sum = torch.zeros(model.config.n_embd)
+        pln_cnt = 0
+        for ids in encodings:
+            out = model(ids, output_hidden_states=True)
+            h = out.hidden_states[num_layers][0]
+            pln_sum += h.sum(0)
+            pln_cnt += h.shape[0]
+        pln_mean = pln_sum / pln_cnt
+
+    got = means[last].reshape(-1)
+    # Matches the RAW block-output mean exactly; differs from the post-ln_f
+    # mean the old code used (they stay correlated on an untrained model but
+    # are not equal — ln_f still rescales).
+    assert torch.allclose(got, raw_mean, atol=1e-5), (
+        "last-layer mean should equal the raw block-output mean")
+    assert not torch.allclose(got, pln_mean, atol=1e-3), (
+        "last-layer mean must NOT be the post-ln_f (hidden_states[N]) mean")
+
+
 def test_causal_tracing(mock_model, mock_tokenizer):
     """Simplified causal tracing (ROME-style) — corruption and restoration."""
     from blme.tasks.causality.tracing import CausalTracingTask
