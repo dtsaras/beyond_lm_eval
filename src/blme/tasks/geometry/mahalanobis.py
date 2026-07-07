@@ -28,6 +28,56 @@ import logging
 logger = logging.getLogger("blme")
 
 
+# A pool of topically DISTINCT in-distribution English sentences for the
+# dataset=None structural fallback. They must be genuinely diverse (not
+# near-duplicates) so a train/held-out split produces distinct hidden-state
+# rows — the old fallback cycled 5 sentences, so the "held-out" ID score
+# rows were exact duplicates of the fit rows (artificial ~0 ID Mahalanobis
+# and a spurious AUROC = 1.0).
+_DEFAULT_ID_TEXTS = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Machine learning models learn patterns from data.",
+    "Natural language processing is a subfield of artificial intelligence.",
+    "The weather forecast predicts rain for tomorrow.",
+    "Scientists discovered a new species in the deep ocean.",
+    "The ancient library held thousands of fragile manuscripts.",
+    "She planted tomatoes and basil in the garden this spring.",
+    "The orchestra tuned their instruments before the concert began.",
+    "Electric cars are becoming more common on city streets.",
+    "The mountain trail offered a stunning view of the valley.",
+    "He repaired the old bicycle in the garage over the weekend.",
+    "Coffee prices rose sharply after the unexpected frost.",
+    "The children built an elaborate sandcastle near the tide.",
+    "A gentle breeze carried the scent of pine through the forest.",
+    "The startup released its new mobile app to enthusiastic reviews.",
+    "Historians debated the true cause of the empire's collapse.",
+    "The chef simmered the sauce for hours to deepen its flavor.",
+    "Astronomers detected a faint signal from a distant galaxy.",
+    "The marathon runners trained through the cold winter months.",
+    "Rain tapped softly against the windows all afternoon.",
+    "The museum unveiled a rare collection of Renaissance paintings.",
+    "Bees pollinate a large share of the world's food crops.",
+    "The lawyer reviewed the contract line by line before signing.",
+    "Fresh snow blanketed the quiet village overnight.",
+    "The engineer tested the bridge design under simulated load.",
+    "A curious cat watched the birds from the kitchen sill.",
+    "The novelist wrote every morning before the sun came up.",
+    "Volunteers cleaned the riverbank and sorted the recycling.",
+    "The satellite adjusted its orbit to avoid the debris field.",
+    "Warm bread and butter waited on the wooden table.",
+]
+
+
+def _default_id_dataset(num_samples: int):
+    """Distinct in-distribution samples for the dataset=None fallback.
+
+    Returns up to ``num_samples`` topically-distinct sentences WITHOUT cycling,
+    so an index-based train/held-out split is genuinely text-disjoint.
+    """
+    n = max(1, min(num_samples, len(_DEFAULT_ID_TEXTS)))
+    return [{"text": _DEFAULT_ID_TEXTS[i]} for i in range(n)]
+
+
 def _compute_mahalanobis_distances(X_train, X_test):
     """
     Computes Mahalanobis distances for X_test relative to the distribution of X_train.
@@ -146,14 +196,9 @@ class MahalanobisOODTask(DiagnosticTask):
         # 1. ID: Normal English
         # 2. OOD: Depends on ood_strategy
         if dataset is None:
-             id_texts = [
-                 "The quick brown fox jumps over the lazy dog.",
-                 "Machine learning models learn patterns from data.",
-                 "Natural language processing is a subfield of artificial intelligence.",
-                 "The weather forecast predicts rain for tomorrow.",
-                 "Scientists discovered a new species in the deep ocean.",
-             ]
-             dataset_id = [{"text": id_texts[i % len(id_texts)]} for i in range(num_samples)]
+             # Distinct (non-cycled) ID sentences so the held-out split below
+             # scores genuinely new texts, not duplicates of the fit set.
+             dataset_id = _default_id_dataset(num_samples)
              if ood_strategy == "random":
                  # Generate random token sequences
                  import string

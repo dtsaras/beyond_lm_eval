@@ -10,6 +10,22 @@ import tempfile
 import os
 
 
+def test_mahalanobis_default_id_pool_is_distinct():
+    """Campaign-3 BUG: the dataset=None fallback built dataset_id by cycling
+    5 sentences (id_texts[i % 5]), so the index-split 'held-out' ID score rows
+    were exact duplicates of the fit rows -> artificial ~0 ID Mahalanobis and a
+    spurious AUROC=1.0. The default ID pool must supply enough DISTINCT
+    sentences that a 50/50 split is genuinely held out (no duplicated rows)."""
+    from blme.tasks.geometry.mahalanobis import _default_id_dataset
+
+    texts = [d["text"] for d in _default_id_dataset(40)]
+    assert len(texts) >= 20, "need >=20 samples for a stable held-out split"
+    assert len(set(texts)) == len(texts), (
+        "default ID texts must be distinct (cycling duplicates fit into the "
+        "held-out score split)"
+    )
+
+
 def test_mp_ks_distance_handles_zero_atom():
     """Campaign-3 BUG: for gamma>1 the empirical spectrum has ~(D-N) zero
     eigenvalues (the rank-deficiency atom). _ks_distance compared F(0)=point
