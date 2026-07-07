@@ -34,6 +34,18 @@ def test_superposition_bc_includes_finite_sample_correction():
     )
 
 
+def test_sparsity_handles_none_layers(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 BUG: get_layers(model) can return None on unrecognized
+    architectures; len(None) then crashed with TypeError. Must return an error
+    dict instead of crashing."""
+    import blme.tasks.interpretability.sparsity as sp
+
+    monkeypatch.setattr(sp, "get_layers", lambda model: None)
+    r = sp.ActivationSparsityTask(config={"num_samples": 1}).evaluate(
+        mock_model, mock_tokenizer, dataset=[{"text": "hi there"}])
+    assert isinstance(r, dict) and "error" in r
+
+
 def test_sae_hidden_state_index_rejects_invalid_hooks():
     """Campaign-3 BUGs: _select_sae_hidden_state_index (1) silently mapped
     hook_resid_mid to resid_post though HF exposes no such tensor and the

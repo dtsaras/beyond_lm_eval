@@ -74,8 +74,14 @@ class LatentInterpolationTask(DiagnosticTask):
         import random as _random
         _rng = _random.Random(0)
         count = 0
+        attempts = 0
+        # Cap attempts so unusable samples (rows lacking text/input_ids, or
+        # whose forward yields <2 hidden states) can't spin the loop forever —
+        # the old `while count < num_pairs` never progressed on such rows.
+        max_attempts = max(20, num_pairs * 20)
         with torch.no_grad():
-            while count < num_pairs:
+            while count < num_pairs and attempts < max_attempts:
+                attempts += 1
                 s1, s2 = _rng.sample(samples, 2)
 
                 h_states = []
@@ -128,6 +134,9 @@ class LatentInterpolationTask(DiagnosticTask):
                     slerp_entropies[alpha_key].append(entropy_s)
 
                 count += 1
+
+        if count == 0:
+            return {"error": "No usable interpolation pairs (samples lack text/input_ids)"}
 
         results = {}
         for alpha_key, vals in entropies.items():

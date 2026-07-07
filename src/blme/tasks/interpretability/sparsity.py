@@ -86,6 +86,8 @@ class ActivationSparsityTask(DiagnosticTask):
             return {"error": "Need at least 1 sample"}
 
         layers = get_layers(model)
+        if not layers:
+            return {"error": "Could not locate transformer layers for this architecture"}
         num_layers = len(layers)
 
         activation_stats = defaultdict(lambda: {"l0_rates": [], "kurtosis_vals": []})

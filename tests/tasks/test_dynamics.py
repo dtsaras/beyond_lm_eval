@@ -7,6 +7,23 @@ import numpy as np
 import torch
 
 
+def test_interpolation_does_not_hang_on_unusable_samples():
+    """Campaign-3 BUG: `while count < num_pairs` only advanced after a fully
+    usable pair, so rows lacking text/input_ids spun the loop forever. Such a
+    dataset must terminate with an error dict, not hang."""
+    import torch
+    from blme.tasks.dynamics.trajectories import LatentInterpolationTask
+
+    class _M:
+        def parameters(self):
+            return iter([torch.zeros(1)])
+
+    # rows match neither str / 'text' / 'input_ids' -> every pair is unusable
+    dataset = [{"tokens": [1, 2]}, {"tokens": [3, 4]}, {"tokens": [5, 6]}]
+    r = LatentInterpolationTask(config={"num_pairs": 5}).evaluate(_M(), None, dataset)
+    assert isinstance(r, dict) and "error" in r
+
+
 def test_generation_diversity_seed_does_not_crash_generation():
     """Campaign-3 BUG: a seed config created a torch.Generator and passed it
     as generate(generator=...), which transformers rejects with ValueError;

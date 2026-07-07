@@ -7,6 +7,26 @@ import torch
 import numpy as np
 
 
+def test_attention_knockout_head_dim_none_does_not_crash():
+    """Campaign-3 BUG: getattr(config, 'head_dim', default) returns None when
+    the attribute exists but is None, then `head_dim <= 0` raised TypeError on
+    the non-divisible out-proj fallback path. _resolve_head_dim must fall back
+    to in_features//num_heads instead of crashing."""
+    from blme.tasks.causality.attention_knockout import _resolve_head_dim
+
+    class _Cfg:
+        head_dim = None  # exists but None -> the crash trigger
+
+    # non-divisible in_features (100) / num_heads (12) -> fallback branch
+    assert _resolve_head_dim(_Cfg(), in_features=100, num_heads=12) == 100 // 12
+    # divisible case is unchanged
+    assert _resolve_head_dim(_Cfg(), in_features=96, num_heads=12) == 8
+    # a real head_dim is honoured
+    class _Cfg2:
+        head_dim = 7
+    assert _resolve_head_dim(_Cfg2(), in_features=100, num_heads=12) == 7
+
+
 def test_ablation_pct_label_no_truncation_or_collision():
     """Campaign-3 BUG: int(k_pct*100) floored 0.29->28 (mislabel) and mapped
     both 0.145 and 0.149 to 14 (collision, silent key overwrite). The label
