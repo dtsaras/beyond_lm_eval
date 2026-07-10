@@ -501,3 +501,45 @@ HF_HUB_OFFLINE): all 8 metrics finite & plausible. Citations web-verified
 2026-07-10 (incl. corrections: Kalra author list, Fay title). defaults.yaml,
 task_metadata.py, docs/tasks_{geometry,dynamics,topology}.md §§33-34/7-8 +
 extension bullets, PAPERS.md rows — all updated.
+
+## Campaign 4 — post-B8 completeness audit (2026-07-10, user-requested)
+
+Triggered by "are we certain nothing is missed / all correct?". Mechanical
+cross-checks run: paper task inventory vs registry (both directions), study
+configs vs the 47-task structural set, skip-reason identification for the
+category sweeps, CLI-pipeline e2e of the 4 new tasks.
+
+**Found & fixed:**
+1. `geometry_lipschitz` was counted in the paper's geometry tally but had
+   NEITHER a full appendix entry NOR a catalogue row (pre-B8 scope-reset
+   artifact: the SVD entry folded it in as "not a separate metric" while the
+   count included it). Fixed: catalogue row added (now 29 compact entries),
+   SVD-entry wording corrected. Inventory now closes exactly: 47/47 named,
+   0 paper-names missing from registry, 0 structural registry tasks missing
+   from the paper. Recompiled clean.
+2. The 3 sweep skips were all `test_sharpness_evaluate_end_to_end_deterministic`
+   silently skipping on gpt2/llama/bert — the only 3 conftest builders
+   without `attn_implementation="eager"` (SDPA cannot double-backward), so
+   the sharpness e2e NEVER ran on those architectures. Fixed: the 3 builders
+   now match the other 6 (eager); test passes 11/11 architectures, 0 skips.
+   Full 5-file sweep re-run green after the fixture change.
+3. CLI-pipeline e2e (blme evaluate, gpt2, CPU): all 4 new tasks OK through
+   the real pipeline/cache path; values match direct evaluate() calls
+   (centered MSO 0.00249, H=0.634, BI=0.158, growth_slope=1.122).
+
+**Found & reported (beyond_benchmarks repo; needs user direction):**
+- BOTH study-side task lists are stale vs the paper's 47 structural tasks:
+  `scripts/run_study.py` BLME_RESEARCH_TASKS misses 21/47 (incl. ALL 5
+  topology tasks — "excludes tasks needing ripser" — and every campaign-2
+  addition) + repe_steering; `configs/tasks.yaml` (run_blme.py) misses 26/47.
+  Local results/blme snapshots confirm: ~19-28 tasks per model, no
+  trajectory_curvature/vendi/magnitude/cknna/phd/procrustes/mp_bulk/
+  stability/interpolation/generation_diversity anywhere. The pending
+  regeneration MUST use a rebuilt 47+4 task list or the paper's X-variable
+  claim is false for ~half the suite.
+- Survey must-cite related-work batch (Yang KDD 2023, Skean ICML 2025,
+  Schaeffer ICML 2025, alpha-ReQ/LiDAR/Tsitsulin lineage, EmbedLLM, CPP,
+  Doimo, Cheng, weight-space-learning contrast) NOT yet in references.bib —
+  was outside B8's metric-citation scope. Survey §3 open decisions likewise
+  pending: Tier-B implementations, re-scoping sinks/kurtosis/compression-
+  valley into geometry, length-confound statement.

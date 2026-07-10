@@ -83,6 +83,7 @@ except ImportError:
 def _build_gpt2():
     config = GPT2Config(
         vocab_size=1000, n_positions=128, n_embd=32, n_layer=2, n_head=2,
+        attn_implementation="eager",
     )
     return GPT2LMHeadModel(config), config.vocab_size
 
@@ -90,7 +91,7 @@ def _build_llama():
     config = LlamaConfig(
         vocab_size=1000, hidden_size=32, intermediate_size=64,
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=2,
-        max_position_embeddings=128,
+        max_position_embeddings=128, attn_implementation="eager",
     )
     return LlamaForCausalLM(config), config.vocab_size
 
@@ -99,6 +100,7 @@ def _build_bert():
         vocab_size=1000, hidden_size=32, num_hidden_layers=2,
         num_attention_heads=2, intermediate_size=64,
         max_position_embeddings=128, is_decoder=True,
+        attn_implementation="eager",
     )
     return BertLMHeadModel(config), config.vocab_size
 
