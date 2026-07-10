@@ -1,8 +1,9 @@
 """
 Loss-landscape sharpness metrics:
 
-  - **Hutchinson trace estimate** of the Hessian (Bai & Demmel 1996;
-    Yao et al. 2020 PyHessian) — average curvature of the loss surface.
+  - **Hutchinson trace estimate** of the Hessian (Hutchinson 1990;
+    Bai, Fahey & Golub 1996; Yao et al. 2020 PyHessian) — average
+    curvature of the loss surface.
   - **Top-1 Hessian eigenvalue** via power iteration (Yao et al. 2020) —
     the dominant direction of curvature.
   - **SAM-style sharpness** — Foret et al. 2021, arXiv:2010.01412 —
@@ -25,6 +26,10 @@ References:
     Efficiently Improving Generalization", ICLR 2021. arXiv:2010.01412.
   - Yao, Gholami, Keutzer, Mahoney, "PyHessian: Neural Networks Through
     the Lens of the Hessian", IEEE Big Data 2020. arXiv:1912.07145.
+  - Hutchinson, "A stochastic estimator of the trace of the influence
+    matrix for Laplacian smoothing splines", Commun. Stat. Simul.
+    Comput. 19(2), 1990. Bai, Fahey & Golub, "Some large-scale matrix
+    computation problems", J. Comput. Appl. Math. 74, 1996.
 """
 
 import logging
@@ -107,14 +112,50 @@ def _power_iteration_top_eigenvalue(hvp, v, n_iter: int) -> float:
     return float(sum((h * vi).sum() for h, vi in zip(hv, v)).item())
 
 
-def _make_random_vec(params, rademacher: bool = True) -> List[torch.Tensor]:
+def _sam_sharpness(compute_loss, params, sam_rho: float,
+                   baseline_loss: float) -> Tuple[float, float, float]:
+    """SAM-style sharpness (Foret et al. 2021, Eq. 2 with p=2):
+    ``L(theta + rho * g/||g||_2) - L(theta)`` along the normalized
+    full-batch gradient direction. Perturbs the selected parameters in
+    place, measures the perturbed loss, and restores them exactly.
+
+    Returns ``(sam_sharpness, perturbed_loss, grad_norm)``; NaNs when the
+    gradient is exactly zero (no ascent direction).
+    """
+    loss_for_grad = compute_loss()
+    grads = torch.autograd.grad(loss_for_grad, params, create_graph=False)
+    grad_flat = _flatten_grads(list(grads))
+    grad_norm = float(grad_flat.norm().item())
+
+    if grad_norm > 0:
+        with torch.no_grad():
+            saved = [p.detach().clone() for p in params]
+            for p, g in zip(params, grads):
+                p.add_(g.detach() * (sam_rho / grad_norm))
+            perturbed_loss = float(compute_loss().item())
+            # Restore
+            for p, s in zip(params, saved):
+                p.copy_(s)
+        return perturbed_loss - baseline_loss, perturbed_loss, grad_norm
+    return float("nan"), float("nan"), grad_norm
+
+
+def _make_random_vec(params, rademacher: bool = True,
+                     generator: "torch.Generator | None" = None,
+                     ) -> List[torch.Tensor]:
+    """Random probe vectors shaped like ``params``. Pass a seeded
+    ``generator`` (on the params' device) for reproducible Hutchinson /
+    power-iteration estimates — unseeded draws made the trace and
+    top-eigenvalue estimates vary run to run."""
     out = []
     for p in params:
         if rademacher:
-            v = torch.randint(0, 2, p.shape, device=p.device, dtype=p.dtype) * 2 - 1
+            v = torch.randint(0, 2, p.shape, device=p.device,
+                              generator=generator) * 2 - 1
             v = v.to(p.dtype)
         else:
-            v = torch.randn_like(p)
+            v = torch.randn(p.shape, device=p.device, dtype=p.dtype,
+                            generator=generator)
         out.append(v)
     return out
 
@@ -131,6 +172,7 @@ class LossSharpnessTask(DiagnosticTask):
         n_power_iter = self.config.get("n_power_iter", 8)
         sam_rho = self.config.get("sam_rho", 0.05)
         num_samples = self.config.get("num_samples", 4)
+        seed = int(self.config.get("seed", 42))
 
         if dataset is None:
             dataset = [
@@ -203,9 +245,13 @@ class LossSharpnessTask(DiagnosticTask):
             baseline_loss = float(loss.item())
 
             # 1. Hutchinson trace estimator
+            # Seeded generator on the params' device: Hutchinson and
+            # power-iteration probes are otherwise irreproducible run to run.
+            gen = torch.Generator(device=params[0].device)
+            gen.manual_seed(seed)
             trace_estimates = []
             for _ in range(n_hutchinson):
-                v = _make_random_vec(params, rademacher=True)
+                v = _make_random_vec(params, rademacher=True, generator=gen)
                 # Build a fresh graph for each HVP because retain_graph
                 # over many calls leaks memory.
                 loss_fresh = compute_loss()
@@ -218,34 +264,17 @@ class LossSharpnessTask(DiagnosticTask):
             # 2. Top-1 eigenvalue via power iteration. Report the SIGNED
             # largest-magnitude eigenvalue (Rayleigh quotient at the converged
             # eigenvector), like PyHessian — ||Hv|| alone drops the sign.
-            v = _make_random_vec(params, rademacher=False)
+            v = _make_random_vec(params, rademacher=False, generator=gen)
             # Fresh graph per HVP (retain_graph over many calls leaks memory).
             top_eig = _power_iteration_top_eigenvalue(
                 lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter
             )
 
-            # 3. SAM-style sharpness
-            # Compute gradient of loss w.r.t. selected params, perturb in
-            # the gradient direction with size sam_rho, measure loss
-            # increase, then restore the parameters.
-            loss_for_grad = compute_loss()
-            grads = torch.autograd.grad(loss_for_grad, params, create_graph=False)
-            grad_flat = _flatten_grads(list(grads))
-            grad_norm = float(grad_flat.norm().item())
-
-            if grad_norm > 0:
-                with torch.no_grad():
-                    saved = [p.detach().clone() for p in params]
-                    for p, g in zip(params, grads):
-                        p.add_(g.detach() * (sam_rho / grad_norm))
-                    perturbed_loss = float(compute_loss().item())
-                    # Restore
-                    for p, s in zip(params, saved):
-                        p.copy_(s)
-                sam_sharpness = perturbed_loss - baseline_loss
-            else:
-                sam_sharpness = float("nan")
-                perturbed_loss = float("nan")
+            # 3. SAM-style sharpness (module-level helper so parity tests
+            # drive the exact code evaluate() runs, not a transcription).
+            sam_sharpness, perturbed_loss, grad_norm = _sam_sharpness(
+                compute_loss, params, sam_rho, baseline_loss
+            )
 
         finally:
             # Restore original requires_grad state and training mode.

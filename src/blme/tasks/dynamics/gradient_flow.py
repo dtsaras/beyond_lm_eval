@@ -1,26 +1,31 @@
 """
-Gradient flow per layer — per-layer Jacobian norms measuring how strongly
-each layer's hidden state influences the final prediction.
+Gradient flow per layer — per-layer gradient norms measuring how strongly
+each layer's hidden state influences the prediction loss.
 
-For each layer l, computes ||d logit(y*) / d h_l||_F where y* is the
-predicted token at the final position. This is the "signal strength"
-reaching the output from each layer. Smooth, monotonically decreasing
-flow indicates healthy gradient propagation; sharp drops indicate
-vanishing gradients; spikes indicate exploding gradients.
+For each layer l, computes ||d L_CE / d h_l||_F where L_CE is the shifted
+next-token cross-entropy loss averaged over positions (the same objective
+the model was trained on). This is the "signal strength" reaching the
+output from each layer. Smooth, monotonically decreasing flow indicates
+healthy gradient propagation; sharp drops indicate vanishing gradients;
+spikes indicate exploding gradients.
 
 Reported metrics:
-  - **gradient_norm_per_layer**: per-layer Frobenius norm of the Jacobian.
+  - **gradient_norm_per_layer**: per-layer Frobenius norm of dL/dh_l.
   - **gradient_flow_entropy**: Shannon entropy of the normalised per-layer
     norms. High = signal distributed across layers; low = concentrated.
-  - **gradient_flow_slope**: linear regression slope of log(norm) vs. layer
-    index. Negative = gradients decay with depth (vanishing); positive =
-    gradients grow (exploding).
+  - **gradient_flow_slope**: linear regression slope of log(norm) vs.
+    NORMALIZED depth (layer index / (n_layers - 1)), so the slope is
+    comparable across models with different layer counts. Negative =
+    gradients decay with depth (vanishing); positive = gradients grow
+    (exploding).
   - **gradient_vanishing_ratio**: fraction of layers where the norm is
     < 10% of the maximum norm.
 
 Implementation: registers forward pre-hooks on each transformer block to
 capture the residual-stream input, calls `.retain_grad()`, then
-backpropagates a single logit.
+backpropagates the shifted next-token cross-entropy loss. (An earlier
+variant backpropagated the single argmax logit; the CE-loss form is what
+ships and what the tests pin — result key ``loss: 'cross_entropy'``.)
 """
 
 import logging

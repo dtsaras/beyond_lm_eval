@@ -5,8 +5,11 @@ Given the chain of hidden states
 embedding output, ``h^(L)`` is the final transformer block output),
 CoE measures how the representation *changes* between adjacent layers:
 
-  * Magnitude change   ``M(h_l, h_{l+1}) = ‖h_{l+1} − h_l‖₂``               (Eq. 1)
+  * Magnitude change   ``M(h_l, h_{l+1}) = ‖h_{l+1} − h_l‖₂``               (Eq. 2)
   * Angle change       ``A(h_l, h_{l+1}) = arccos(<h_{l+1}, h_l>/(‖.‖·‖.‖))`` (Eq. 2)
+
+(The paper defines M and A together in its Eq. 2; its Eq. 1 is the
+layer-composition ``f = f_head ∘ … ∘ f_emb``.)
 
 The paper's headline "output-free" scores:
 
@@ -14,7 +17,12 @@ The paper's headline "output-free" scores:
   * ``Ãng = (1/L) Σ A(h_l,h_{l+1}) / A(h_0, h_L)``                          (Eq. 3)
   * ``CoE-R = (1/L) Σ [M(h_l,h_{l+1})/M(h_0,h_L) − A(h_l,h_{l+1})/A(h_0,h_L)]`` (Eq. 5)
   * ``CoE-C = |(1/L) Σ C(h_l,h_{l+1})|`` where
-              ``C(h_l,h_{l+1}) = M · exp(i · A)``                             (Eq. 7)
+              ``C = (M/Z_Mag) · exp(i · A/Z_Ang)`` — the NORMALIZED form
+              of the official code (score.py compute_CoE_C). NOTE: the
+              paper's printed Eq. 6/7 uses RAW ``M · exp(i·A)`` and its
+              Algorithm 2 normalizes only the magnitude; the original
+              work is internally inconsistent, and BLME follows the
+              official implementation.
 
 Note on token position (departure from the paper): Wang et al. run
 ``model.generate`` and mean-pool ``h^(l)`` across every generated
@@ -98,8 +106,11 @@ def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
     # exactly matching the reference score.py compute_CoE_C
     # (Alsace08/Chain-of-Embedding): x = Mag̃·cos(Ãng), y = Mag̃·sin(Ãng),
     # CoE-C = sqrt(mean(x)^2 + mean(y)^2).
-    # (Fixed 2026-06-22: previously used RAW magnitude and RAW angle, which
-    # matched neither the paper code nor the paper prose.)
+    # (Fixed 2026-06-22: previously used RAW magnitude and RAW angle — which
+    # IS the paper's printed Eq. 6/7 form — but does not match the official
+    # score.py (normalized/normalized). The original work is 3-way
+    # inconsistent (prose raw/raw; Algorithm 2 normalized-mag/raw-angle;
+    # official code normalized/normalized); we follow the official code.)
     if np.all(np.isfinite(mag_norm_pair)) and np.all(np.isfinite(ang_norm_pair)):
         x = np.array([mn * np.cos(an) for mn, an in zip(mag_norm_pair, ang_norm_pair)])
         y = np.array([mn * np.sin(an) for mn, an in zip(mag_norm_pair, ang_norm_pair)])

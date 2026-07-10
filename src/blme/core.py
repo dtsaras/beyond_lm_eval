@@ -50,6 +50,14 @@ _ATTENTION_TASKS = frozenset({
     "geometry_positional_decay",
 })
 
+# Tasks that need SECOND-order autograd (Hessian-vector products). SDPA /
+# Flash attention kernels have no double-backward, so these also require
+# eager attention — otherwise the task always returns its SDPA error on a
+# default model load and the study gets no sharpness features.
+_DOUBLE_BACKWARD_TASKS = frozenset({
+    "dynamics_sharpness",
+})
+
 
 # ---------------------------------------------------------------------------
 # Task registration — import all task modules so @register_task fires
@@ -235,7 +243,7 @@ def evaluate(
         cache_attn_tasks = {
             "interpretability_attention_entropy",
         }
-        force_eager_tasks = _ATTENTION_TASKS
+        force_eager_tasks = _ATTENTION_TASKS | _DOUBLE_BACKWARD_TASKS
         cache_candidates = (
             set(cache_hidden_tasks)
             | set(cache_logits_tasks)

@@ -126,7 +126,7 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `dynamics_gradient_flow` | PROXY_OK | refined-adaptation | 1211.5063 | (Pascanu et al. 2013) | MATCH |
 | `dynamics_interpolation` | CITATION_FIX | proxy-only | 1609.04468 ⚠ | scipy/Shoemake 1985 | MATCH |
 | `dynamics_sharpness` | FAITHFUL | refined-adaptation | 2010.01412 | amirgholami/PyHessian | MATCH |
-| `dynamics_stability` | CITATION_FIX | refined-adaptation | 1804.09692 ⚠ | (Wendlandt et al. 2018) | MATCH |
+| `dynamics_stability` | CITATION_FIX | proxy-only (label corrected 2026-07, was recorded refined-adaptation at audit time) | 1804.09692 ⚠ | (Wendlandt et al. 2018) | MATCH |
 | `geometry_categories` | PROXY_OK | proxy-only | — | scipy.spatial.distance | MATCH |
 | `geometry_cka` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_collapse` | CITATION_FIX | refined-adaptation | 2110.09348 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
@@ -343,3 +343,38 @@ columns for the first time) and `repe_task_vectors` gains `*_normalized` keys. S
 passed (test_repe + 3 repe parity files) before the normalized-norms addition; rerun after.
 Paper-side: `metrics_repe.tex` all four entries reconciled; `turner2023steering` added to
 references.bib; AUC range row fixed in `appendix_normalization.tex`.
+
+### B3 — Dynamics (6/6 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `dynamics_sharpness` | power iter == exact eigh <1e-9 (f64), == pip PyHessian <1e-5; NEW negative-dominant anchor (diag(-5,3) → **-5**, pins the signed-Rayleigh fix `2d01ae0`); SAM == analytic ρ‖θ‖+ρ²/2 exactly | Hutchinson citation fixed ('Bai & Demmel 1996' doesn't exist → Hutchinson 1990; Bai, Fahey & Golub 1996); SAM extracted to `_sam_sharpness` helper; parity tests now import the REAL helpers (were transcriptions of the pre-fix loop); **probe vectors now seeded** (config `seed`) — trace/top-eig were irreproducible run-to-run; real-evaluate() determinism test added |
+| `dynamics_gradient_flow` | norms == f64 central finite differences 1.1e-7 rel; entropy == scipy exact; slope == linregress 3e-17; analytic anchors | module docstring corrected (described the legacy argmax-logit metric and raw-index slope; code ships CE-loss + normalized depth); Pascanu section ref fixed in test docstring (Sec 1.1/2, not 3.1) |
+| `dynamics_coe` | == verbatim official CoEScoreInfo ≤1.9e-9 on Z_Mag≠1 chains | docstring corrected: M/A are the paper's Eq. 2 (not Eq. 1); CoE-C stated as the OFFICIAL normalized form, noting the paper is 3-way inconsistent (prose raw/raw, Alg-2 norm-mag/raw-ang, code norm/norm); false inline claim ('matched neither...') reworded; NEW Z_Mag≠1 regression test (old fixture had Z_Mag=1, masking the Eq. 3 normalization) |
+| `dynamics_interpolation` | _slerp == official dribnet/plat 8.9e-16 / 140 cases; e2e entropies == independent f64 ≤8.1e-6 | hang fixed previously (`c2911bf`); NEW endpoint-invariant test (lerp≡slerp entropy at α=0,1) pins the entropy kernel; White 2016 slerp provenance recorded in metadata/docs |
+| `dynamics_stability` | 3 independent numeric routes diff 0.0; self-reference analytic anchor exactly 1.0/0.0 | NEW reference_model-branch test (was zero coverage); ledger cert label corrected (proxy-only, not refined-adaptation); Wendlandt 2018 inspiration recorded; HELM date fixed in PAPERS.md (2022, not 2024) |
+| `dynamics_generation_diversity` | Self-BLEU == verbatim Texygen calc_bleu 2.8e-17; distinct-n == Li formula, 600 checks diff 0.0 | seed crash fixed previously (`7f9ba4c`) + FakeModel now rejects unknown generate() kwargs; Texygen author list fixed in PAPERS.md (last author Yong Yu, + SIGIR 2018) |
+
+Additional B3 finding (fixed): `dynamics_sharpness` was DEAD in the default
+pipeline — it needs second-order autograd (eager attention), but core's
+force-eager set only covered attention-reading tasks, so on a default (SDPA)
+model load the task always returned its SDPA error. `_DOUBLE_BACKWARD_TASKS`
+added to the force-eager union (+ infrastructure regression test); verified
+end-to-end on gpt2 via the default pipeline.
+
+Test-infra note (B3): conftest `DummyTokenizer` produced RANDOM ids on every call,
+making any output that depends on tokenized inputs irreproducible in tests — now
+deterministic (crc32-of-text-seeded local generator; also stops the tokenizer from
+consuming the global RNG). Paper-side: dynamics catalogue one-liners corrected
+(gradient_flow was described as an input-output Jacobian norm; stability as
+hidden-state noise injection — both wrong). Feature-value impact: sharpness
+trace/top-eig now deterministic per seed (values will shift once at regen, then be
+stable); everything else unchanged.
+
+Known pre-existing failure (out of campaign scope, per user 2026-07-10):
+`tests/tasks/test_interpretability.py::test_superposition_index` fails on 11
+mock architectures at HEAD (numpy 'safe' cast TypeError in
+`superposition.py:47 _multimodality_score`, float64 vals into float32 arr via
+np.place) — interpretability family, deferred to the follow-up mech-interp
+paper. Full-suite status at B3 commit: 1217 passed, 11 failed (all this one
+test), 4 skipped.

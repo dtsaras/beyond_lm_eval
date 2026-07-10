@@ -582,3 +582,18 @@ class TestNumpyTrapezoidCompat:
         from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
         m = _svd_metrics_for_layer(torch.randn(50, 8))
         assert m is not None and np.isfinite(m["svd_auc"])
+
+
+def test_force_eager_covers_double_backward_tasks():
+    """Regression (campaign-4 B3): dynamics_sharpness needs SECOND-order
+    autograd (HVPs), which SDPA/Flash kernels don't implement — on a default
+    model load the task always returned its SDPA error and the study got no
+    sharpness features. The diagnostic loop must force eager for it."""
+    from blme.core import _ATTENTION_TASKS, _DOUBLE_BACKWARD_TASKS
+
+    assert "dynamics_sharpness" in _DOUBLE_BACKWARD_TASKS
+    # And the union actually reaches the force-eager check.
+    import inspect
+    from blme import core
+    src = inspect.getsource(core)
+    assert "_ATTENTION_TASKS | _DOUBLE_BACKWARD_TASKS" in src

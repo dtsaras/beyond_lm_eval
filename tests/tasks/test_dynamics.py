@@ -375,3 +375,121 @@ def test_generation_diversity_entropy_masks_post_eos_positions():
     }).evaluate(FakeModel(), Tok(), dataset=["prompt"])
 
     assert result["entropy_collapse_delta"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_chain_of_embedding_zmag_not_one_pins_normalization():
+    """Regression (campaign-4 B3): the original fixture chain had
+    Z_Mag = ||h_L - h_0|| exactly 1, so dropping the Eq. 3 magnitude
+    normalization was invisible to every pinned test. This chain has
+    Z_Mag = sqrt(13); the reference values are computed in-test with a
+    verbatim transcription of the official Alsace08/Chain-of-Embedding
+    score.py (compute_CoE_Mag/Ang/R/C @ eef2d8f)."""
+    from blme.tasks.dynamics.coe import _coe_from_chain
+
+    chain = [
+        torch.tensor([1.0, 0.0], dtype=torch.float64),
+        torch.tensor([0.0, 2.0], dtype=torch.float64),
+        torch.tensor([3.0, 3.0], dtype=torch.float64),
+    ]
+    h = [c.numpy() for c in chain]
+    L = len(h) - 1
+
+    # --- verbatim-official reference (numpy float64) ---
+    def mag(a, b):
+        return float(np.linalg.norm(b - a))
+
+    def ang(a, b):
+        cos = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+        return float(np.arccos(np.clip(cos, -1.0, 1.0)))
+
+    z_mag = mag(h[0], h[-1])
+    z_ang = ang(h[0], h[-1])
+    assert abs(z_mag - 1.0) > 0.5, "scenario must have Z_Mag far from 1"
+
+    mags_n = [mag(h[i], h[i + 1]) / z_mag for i in range(L)]
+    angs_n = [ang(h[i], h[i + 1]) / z_ang for i in range(L)]
+    ref_mag_norm_mean = float(np.mean(mags_n))
+    ref_coe_r = float(np.mean([m - a for m, a in zip(mags_n, angs_n)]))
+    xs = [m * np.cos(a) for m, a in zip(mags_n, angs_n)]
+    ys = [m * np.sin(a) for m, a in zip(mags_n, angs_n)]
+    ref_coe_c = float(np.sqrt(np.mean(xs) ** 2 + np.mean(ys) ** 2))
+
+    got = _coe_from_chain(chain)
+    assert got["mag_norm_mean"] == pytest.approx(ref_mag_norm_mean, abs=1e-9)
+    assert got["coe_r"] == pytest.approx(ref_coe_r, abs=1e-9)
+    assert got["coe_c"] == pytest.approx(ref_coe_c, abs=1e-9)
+    # Removing the magnitude normalization must NOT go unnoticed here:
+    raw_mag_mean = float(np.mean([mag(h[i], h[i + 1]) for i in range(L)]))
+    assert abs(raw_mag_mean - ref_mag_norm_mean) > 0.1
+
+
+def test_sharpness_evaluate_end_to_end_deterministic(mock_model, mock_tokenizer):
+    """Drive the REAL LossSharpnessTask.evaluate() (no test previously did):
+    finite outputs and bitwise determinism across two runs."""
+    from blme.tasks.dynamics.sharpness import LossSharpnessTask
+
+    cfg = {"n_hutchinson": 2, "n_power_iter": 3, "num_samples": 2,
+           "param_scope": "last_layer", "seed": 0}
+    r1 = LossSharpnessTask(config=dict(cfg)).evaluate(
+        mock_model, mock_tokenizer, dataset=None)
+    if "error" in r1:
+        pytest.skip(f"unsupported architecture: {r1['error']}")
+    for key in ("baseline_loss", "hutchinson_trace_estimate",
+                "top_eigenvalue_estimate", "sam_sharpness",
+                "sam_perturbed_loss"):
+        assert key in r1
+        assert np.isfinite(r1[key]), key
+    # SAM identity holds inside the result dict itself.
+    assert r1["sam_perturbed_loss"] - r1["baseline_loss"] == pytest.approx(
+        r1["sam_sharpness"], abs=1e-9)
+
+    r2 = LossSharpnessTask(config=dict(cfg)).evaluate(
+        mock_model, mock_tokenizer, dataset=None)
+    for key in ("baseline_loss", "hutchinson_trace_estimate",
+                "top_eigenvalue_estimate", "sam_sharpness"):
+        assert r1[key] == pytest.approx(r2[key], abs=0.0), (
+            f"{key} not deterministic")
+
+
+def test_interpolation_endpoints_lerp_equals_slerp(mock_model, mock_tokenizer):
+    """Analytic invariant pinning the entropy kernel: at alpha = 0 and 1 the
+    norm-corrected lerp and slerp trajectories are the SAME point (the raw
+    endpoint), so the two entropy curves must coincide there exactly. A
+    wrong softmax axis or entropy kernel would break this equality."""
+    from blme.tasks.dynamics.trajectories import LatentInterpolationTask
+
+    task = LatentInterpolationTask(config={"num_pairs": 2, "steps": 3})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    if "error" in results:
+        pytest.skip(f"unsupported architecture: {results['error']}")
+
+    for a in ("0.0", "1.0"):
+        li, sl = results[f"interp_entropy_{a}"], results[f"slerp_entropy_{a}"]
+        assert li == pytest.approx(sl, rel=1e-6), (
+            f"lerp/slerp entropies differ at endpoint alpha={a}")
+        assert np.isfinite(li) and li >= 0.0
+
+
+def test_stability_reference_model_self_reference_is_perfect(
+        mock_model, mock_tokenizer, tmp_path):
+    """Regression (campaign-4 B3): the reference_model branch had zero test
+    coverage. Self-reference (the model compared to a saved copy of itself)
+    has the analytic answer: Jaccard exactly 1.0 with std 0.0."""
+    from blme.tasks.dynamics.stability import NeighborhoodStabilityTask
+
+    save_dir = tmp_path / "ref_model"
+    try:
+        mock_model.save_pretrained(save_dir)
+    except Exception as exc:
+        pytest.skip(f"save_pretrained unsupported: {exc}")
+
+    task = NeighborhoodStabilityTask(config={
+        "reference_model_path": str(save_dir), "k": 10, "num_samples": 100,
+    })
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    if "error" in results:
+        pytest.skip(f"reference load unsupported here: {results['error']}")
+
+    assert results["stability_mode"] == "reference_model"
+    assert results["stability_mean"] == 1.0
+    assert results["stability_std"] == 0.0

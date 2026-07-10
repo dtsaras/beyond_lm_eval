@@ -91,7 +91,7 @@ it's cited. Sorted alphabetically by first author.
 | **Xiao, Tian, Chen, Han, Han 2023** — *Efficient Streaming Language Models with Attention Sinks* | attention-sink motivation, cited in `activation_sinks.py` | arXiv:2309.17453 | `interpretability/activation_sinks.py` |
 | **Yao, Gholami, Keutzer, Mahoney 2020** — *PyHessian: Neural Networks Through the Lens of the Hessian* | `dynamics_sharpness` (Hutchinson trace) | arXiv:1912.07145 | `dynamics/sharpness.py` |
 | **Yeom, Giacomelli, Fredrikson, Jha 2018** — *Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting* | `consistency_membership_inference` | arXiv:1709.01604 | `consistency/membership_inference.py` |
-| **Zhu, Lu, Zheng, Guo, Zhang, Wang, Zhang 2018** — *Texygen: A Benchmarking Platform for Text Generation Models* (Self-BLEU) | `dynamics_generation_diversity` | arXiv:1802.01886 | `dynamics/generation_diversity.py` |
+| **Zhu, Lu, Zheng, Guo, Zhang, Wang, Yu 2018** — *Texygen: A Benchmarking Platform for Text Generation Models* (Self-BLEU) | `dynamics_generation_diversity` | arXiv:1802.01886 | `dynamics/generation_diversity.py` |
 | **Zou, Phan, Chen, Campbell, Guo, Ren, Pan, Yin, Mazeika, Dombrowski, Goel, Li, Byun, Wang, Mallen, Basart, Koyejo, Song, Fredrikson, Kolter, Hendrycks 2023** — *Representation Engineering: A Top-Down Approach to AI Transparency* | `repe_concept_separability`, `repe_refusal_direction`, `repe_steering_effectiveness` | arXiv:2310.01405 | `representation_engineering.py` |
 
 ### Topology
@@ -304,7 +304,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `dynamics_gradient_flow` ✅ Pascanu 2013
 - `dynamics_interpolation` (alias `trajectories.py`) 📝 slerp = Shoemake 1985 (SIGGRAPH); latent interpolation White 2016 (arXiv:1609.04468)
 - `dynamics_sharpness` ✅ Foret 2021; Yao 2020
-- `dynamics_stability` 📝 BLME-custom; add Liang et al. 2024 *Holistic Evaluation of Language Models* if comparable
+- `dynamics_stability` 📝 BLME-custom; add Liang et al. 2022 (arXiv:2211.09110, TMLR 2023) *Holistic Evaluation of Language Models* if comparable
 
 **Consistency (12 tasks)**:
 - `consistency_bias_weat` ✅ Caliskan 2017; May 2019

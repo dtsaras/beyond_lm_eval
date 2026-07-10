@@ -16,12 +16,16 @@ PyHessian.eigenvalues() runs power iteration on the Hessian-vector product
 (double backward) and returns the Rayleigh quotient <Hv, v> for the dominant
 eigenvalue.
 
-BLME kernel under test (src/blme/tasks/dynamics/sharpness.py):
-    - _hvp (line ~69): Hessian-vector product via double backward.
-    - _make_random_vec (line ~87): Gaussian init for power iteration.
-    - power-iteration loop in compute() (lines ~195-211): normalize v, then
-      n_power_iter steps of v <- Hv/||Hv||; reports top_eig = ||Hv|| from the
-      final iteration.
+BLME kernel under test (src/blme/tasks/dynamics/sharpness.py) — the REAL
+module-level helpers evaluate() calls, imported (not transcribed):
+    - _hvp: Hessian-vector product via double backward.
+    - _make_random_vec: Gaussian init for power iteration.
+    - _power_iteration_top_eigenvalue: power iteration returning the SIGNED
+      Rayleigh quotient <Hv, v> at the converged eigenvector, matching
+      PyHessian's eigenvalues(top_n=1). (The old code reported ||Hv||,
+      which drops the sign; the negative-dominant test below pins the fix.)
+    - _sam_sharpness: SAM delta L(theta + rho*g/||g||) - L(theta) with
+      exact parameter restore (Foret et al. 2021, Eq. 2, p=2).
 
 We run BOTH on the SAME tiny float64 model + fixed MSE batch + seed, and ALSO
 compute the EXACT Hessian (torch.autograd.functional.hessian) and its true
@@ -48,6 +52,8 @@ from blme.tasks.dynamics.sharpness import (  # noqa: E402
     _hvp,
     _make_random_vec,
     _flatten_grads,
+    _power_iteration_top_eigenvalue,
+    _sam_sharpness,
 )
 
 TOL_EXACT = 1e-9
@@ -101,7 +107,7 @@ def _pyhessian_lambda_max(model, criterion, x, y):
 
 
 def _blme_lambda_max(model, criterion, x, y, n_power_iter=200):
-    """Replicate compute()'s top-eigenvalue power iteration using BLME helpers."""
+    """Drive the REAL evaluate() kernel: _power_iteration_top_eigenvalue."""
     torch.manual_seed(999)
     params = [p for p in model.parameters() if p.requires_grad]
 
@@ -109,21 +115,9 @@ def _blme_lambda_max(model, criterion, x, y, n_power_iter=200):
         return criterion(model(x), y)
 
     v = _make_random_vec(params, rademacher=False)  # Gaussian init, as BLME
-    flat_v = _flatten_grads(v)
-    v_norm = float(flat_v.norm().item())
-    if v_norm > 0:
-        v = [vi / v_norm for vi in v]
-    top_eig = 0.0
-    for _ in range(n_power_iter):
-        loss_fresh = compute_loss()
-        hv = _hvp(loss_fresh, params, v)
-        flat_hv = _flatten_grads(hv)
-        top_eig = float(flat_hv.norm().item())
-        if top_eig > 0:
-            v = [h / top_eig for h in hv]
-        else:
-            break
-    return top_eig
+    return _power_iteration_top_eigenvalue(
+        lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter
+    )
 
 
 def test_blme_matches_exact_lambda_max():
@@ -154,6 +148,57 @@ def test_blme_matches_pyhessian():
     blme = _blme_lambda_max(model, criterion, x, y)
     rel = abs(blme - py) / abs(py)
     assert rel < TOL_REF, f"BLME={blme} PyHessian={py} rel={rel:.3e}"
+
+
+class _Quad(nn.Module):
+    """Quadratic loss L(theta) = 0.5 * sum(diag_i * theta_i^2) with a KNOWN
+    Hessian diag(diag) — analytic ground truth for sign and SAM tests."""
+
+    def __init__(self, theta, diag):
+        super().__init__()
+        self.theta = nn.Parameter(torch.tensor(theta, dtype=torch.float64))
+        self.register_buffer(
+            "diag", torch.tensor(diag, dtype=torch.float64)
+        )
+
+    def loss(self):
+        return 0.5 * (self.diag * self.theta ** 2).sum()
+
+
+def test_signed_eigenvalue_on_negative_dominant_hessian():
+    """When the dominant-magnitude curvature is NEGATIVE (a saddle), the
+    kernel must report the SIGNED Rayleigh quotient (-5), matching
+    PyHessian — not ||Hv|| = +5 (the pre-fix behavior). Hessian
+    diag(-5, 3): |−5| > |3|, true lambda_max = +3."""
+    torch.manual_seed(0)
+    m = _Quad([1.0, 1.0], [-5.0, 3.0])
+    params = [m.theta]
+    v = _make_random_vec(params, rademacher=False)
+    eig = _power_iteration_top_eigenvalue(
+        lambda vv: _hvp(m.loss(), params, vv), v, 200
+    )
+    assert eig == pytest.approx(-5.0, abs=1e-9), (
+        f"expected signed -5.0 (PyHessian convention), got {eig}"
+    )
+
+
+def test_sam_sharpness_matches_analytic_quadratic():
+    """For L = 0.5*||theta||^2: g = theta, so the SAM perturbation moves
+    theta to theta*(1 + rho/||theta||) and the delta is EXACTLY
+    rho*||theta|| + rho^2/2. Also pins that parameters are restored."""
+    m = _Quad([3.0, 4.0], [1.0, 1.0])  # ||theta|| = 5
+    params = [m.theta]
+    baseline = float(m.loss().item())
+    assert baseline == pytest.approx(12.5, abs=1e-12)
+
+    rho = 0.1
+    before = m.theta.detach().clone()
+    delta, perturbed, grad_norm = _sam_sharpness(m.loss, params, rho, baseline)
+
+    assert grad_norm == pytest.approx(5.0, abs=1e-12)
+    assert delta == pytest.approx(rho * 5.0 + rho ** 2 / 2.0, abs=1e-12)
+    assert perturbed == pytest.approx(baseline + delta, abs=1e-12)
+    assert torch.equal(m.theta.detach(), before), "params not restored"
 
 
 if __name__ == "__main__":

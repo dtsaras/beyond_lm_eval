@@ -2302,7 +2302,7 @@ def test_dynamics_gradient_flow():
     residual-stream INPUT h_l of that block:  ||dL/dh_l||_F. This is exactly
     the per-layer gradient-norm "flow" of Pascanu, Mikolov & Bengio 2013,
     "On the difficulty of training recurrent neural networks" (ICML 2013),
-    Sec. 3.1 / Eq. (3)-(4): the depth components ||dE/dx_t|| whose decay
+    Sec. 1.1 Eq. (3)-(4); Sec. 2 (vanishing/exploding): the depth components ||dE/dx_t|| whose decay
     (vanishing) or growth (exploding) characterizes training health.
 
     Reference (INDEPENDENT of BLME's code path): we register our OWN forward

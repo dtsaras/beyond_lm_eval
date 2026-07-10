@@ -202,19 +202,31 @@ def _available_archs():
 # ── Dummy tokenizer ─────────────────────────────────────────────────────
 
 class DummyTokenizer:
-    """Minimal tokenizer that produces valid tensor shapes for any model."""
+    """Minimal tokenizer that produces valid tensor shapes for any model.
+
+    DETERMINISTIC: ids are derived from the text content (crc32-seeded
+    local generator), so the same text always tokenizes identically and
+    the tokenizer neither consumes nor perturbs the global RNG. The old
+    torch.randint-per-call behavior made every task output that depends
+    on the tokenized ids irreproducible across runs, which masked (and
+    then falsely implicated) task-level determinism."""
 
     def __init__(self, vocab_size):
         self.vocab_size = vocab_size
         self.pad_token_id = 0
         self.eos_token_id = 1
 
+    def _ids_for(self, text, length=8):
+        import zlib
+        gen = torch.Generator()
+        gen.manual_seed(zlib.crc32(str(text).encode("utf-8")))
+        return torch.randint(0, self.vocab_size, (length,), generator=gen)
+
     def __call__(self, text, return_tensors="pt", **kwargs):
         is_list = isinstance(text, (list, tuple))
-        batch_size = len(text) if is_list else 1
-        length = 8
+        texts = list(text) if is_list else [text]
 
-        ids = torch.randint(0, self.vocab_size, (batch_size, length))
+        ids = torch.stack([self._ids_for(t) for t in texts])
         mask = torch.ones_like(ids)
 
         if return_tensors == "pt":
@@ -229,7 +241,7 @@ class DummyTokenizer:
         return {"input_ids": ids.tolist(), "attention_mask": mask.tolist()}
 
     def encode(self, text, return_tensors=None, **kwargs):
-        ids = torch.randint(0, self.vocab_size, (1, 8))
+        ids = self._ids_for(text).unsqueeze(0)
         if return_tensors == "pt":
             return ids
         return ids[0].tolist()

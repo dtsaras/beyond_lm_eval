@@ -178,7 +178,10 @@ def test_self_consistency_uses_seeded_sampling_stability_semantics():
 
     assert result["diagnostic_semantics"] == "sampling_stability"
     assert result["generation_seed"] == 123
-    assert model.generators[0] is not None
+    # transformers' generate() has no per-call generator kwarg (7f9ba4c):
+    # determinism comes from torch.manual_seed(seed), so the task must NOT
+    # pass a generator (real HF models raise ValueError on unknown kwargs).
+    assert model.generators[0] is None
     assert "Wang" not in result["diagnostic_method"]
 
 
