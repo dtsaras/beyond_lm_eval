@@ -72,11 +72,11 @@ TASK_CERTIFICATION: Dict[str, TaskCertification] = {
     "geometry_trajectory_curvature": _entry("parity-ready", "Hosseini & Fedorenko 2023"),
     "geometry_unembedding": _entry("proxy-only", "Unembedding-geometry literature"),
     "geometry_weight_norms": _entry("proxy-only", "Standard weight norm diagnostics"),
-    # Topology
-    "topology_betti_curve": _entry("refined-adaptation", "Naitzat et al. 2020", "topnn/topnn_framework"),
-    "topology_homology": _entry("parity-ready", "Zomorodian & Carlsson 2005; Edelsbrunner & Harer 2008", "ripser.py; GUDHI", "Persistence-summary reference test vs analytic unit-square + GUDHI."),
-    "topology_persistence_entropy": _entry("parity-ready", "Rucco et al. 2016; Chintakunta et al. 2015", "giotto-tda"),
-    "topology_persistence_landscape": _entry("parity-ready", "Bubenik 2015", "persim"),
+    # Topology — campaign-B1 (2026-07) verified: see docs/tasks_topology.md
+    "topology_betti_curve": _entry("refined-adaptation", "Naitzat et al. 2020 (JMLR 21(184))", "topnn/topnn_framework", "Geodesic-kNN adaptation (ripser, not Eirene; normalized-persistence beta_1) — deviation disclosed. Triple-engine cross-check (networkx/GF(2)/GUDHI) + ground-truth anchors; derived stats numerically pinned (test_topology.py::test_betti_curve)."),
+    "topology_homology": _entry("parity-ready", "Zomorodian & Carlsson 2005; Edelsbrunner & Harer 2008; Naitzat et al. 2020 (JMLR)", "ripser.py; GUDHI", "Persistence-summary reference test vs analytic unit-square + GUDHI; also emits mean-pairwise-distance-normalized summaries (paper tab:normalization)."),
+    "topology_persistence_entropy": _entry("parity-ready", "Rucco et al. 2016 (ECCS 2014); Chintakunta et al. 2015; Atienza et al. 2020 (Pattern Recognition 107:107509)", "giotto-tda", "log2 Def 3.1; executed-gtda-0.6.2 parity 2.7e-15 over 203 cases (campaign 3); live guard = scipy.stats.entropy(base=2), gtda's own kernel. Also emits relative PE (/log2 m)."),
+    "topology_persistence_landscape": _entry("parity-ready", "Bubenik 2015 (JMLR 16:77-102)", "persim", "persim parity incl. multi-bar K=4 case (k-selection exercised) at ~9e-16; analytic single/two-bar anchors exact."),
     # Interpretability
     "interpretability_activation_sinks": _entry("refined-adaptation", "Xiao 2023; Gu 2025; Sun 2024; Arroyo 2025", "sail-sg/Attention-Sink; locuslab/massive-activations"),
     "interpretability_attention_effective_rank": _entry("proxy-only", "Elhage 2022; Templeton 2024 inspiration"),

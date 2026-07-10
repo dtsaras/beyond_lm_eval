@@ -15,11 +15,11 @@ value at each t: sort all tent function values at t in decreasing order,
 then L_k = the k-th value (1-indexed). L_1 captures the most prominent
 topological feature, L_2 the second, etc.
 
-Reported metrics (per layer, per homology dimension H0/H1):
-  - **landscape_integral_k**: integral of L_k over t, for k = 1..K
-  - **landscape_max_k**: max of L_k over t
-  - **landscape_norm_k**: L2 norm of L_k
-  - **landscape_mean_integral**: mean integral across k = 1..K
+Reported metrics (per layer prefix ``layer_{l}_{h0|h1}_``):
+  - **landscape_integrals**: list of integrals of L_k over t, k = 1..K
+  - **landscape_max_1**: max of the first landscape L_1 over t
+  - **landscape_norm_1**: L2 norm of L_1
+  - **mean_landscape_integral**: mean integral across k = 1..K
 
 These complement the scalar persistence entropy and Betti curve tasks.
 """
@@ -137,7 +137,9 @@ class PersistenceLandscapeTask(DiagnosticTask):
         if layers is None:
             return {"error": "Could not detect layers"}
         n_layers = len(layers)
-        target_layers = [0, n_layers // 2, n_layers - 1]
+        # Dedupe so models with <=2 layers don't collect (and process) the
+        # same layer twice — same fix as topology_homology.
+        target_layers = sorted({0, n_layers // 2, n_layers - 1})
 
         # Collect mean-pooled per-sentence representations at target layers.
         layer_reps: Dict[int, List[np.ndarray]] = {l: [] for l in target_layers}

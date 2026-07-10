@@ -80,7 +80,11 @@ def test_persistent_homology(mock_model, mock_tokenizer):
 
 
 def test_betti_curve(mock_model, mock_tokenizer):
-    """Betti number trajectory across layers."""
+    """Betti number trajectory across layers, with the derived summary
+    statistics numerically pinned to their definitions (recomputed here
+    from the returned curves) — a source-grep test alone lets the polyfit
+    degree/coefficient silently change."""
+    import numpy as np
     from blme.tasks.topology.betti_curve import BettiCurveTask
 
     task = BettiCurveTask(config={"num_samples": 5})
@@ -89,9 +93,25 @@ def test_betti_curve(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # May error if get_layers returns None for this architecture
     if "error" not in results:
-        assert "betti_0_curve" in results
-        assert "betti_1_curve" in results
-        assert "simplification_ratio" in results
+        curve0 = results["betti_0_curve"]
+        curve1 = results["betti_1_curve"]
+        L = len(curve0)
+        assert results["betti_0_first"] == curve0[0]
+        assert results["betti_0_last"] == curve0[-1]
+        # simplification_ratio = last/first (1.0 fallback when first == 0)
+        expected_ratio = curve0[-1] / curve0[0] if curve0[0] > 0 else 1.0
+        assert results["simplification_ratio"] == pytest.approx(
+            expected_ratio, abs=1e-12
+        )
+        # decay rate = degree-1 polyfit SLOPE on normalized depth in [0, 1]
+        if L > 1:
+            x = np.arange(L, dtype=np.float64) / float(max(1, L - 1))
+            expected_slope = float(np.polyfit(x, curve0, 1)[0])
+            assert results["betti_0_decay_rate"] == pytest.approx(
+                expected_slope, abs=1e-9
+            )
+        assert results["max_betti_1_layer"] == int(np.argmax(curve1))
+        assert results["max_betti_1"] == int(np.max(curve1))
 
 
 def test_betti_curve_geodesic_recovers_clusters_and_loops():
@@ -126,7 +146,9 @@ def test_betti_curve_geodesic_recovers_clusters_and_loops():
 
 
 def test_persistence_entropy(mock_model, mock_tokenizer):
-    """Persistence entropy at early, middle, and late layers."""
+    """Persistence entropy at early, middle, and late layers. The normalized
+    (relative) entropy keys must equal PE / log2(m) with m the number of
+    finite bars — the [0, 1] scale-free form stated in the paper appendix."""
     from blme.tasks.topology.persistence_entropy import PersistenceEntropyTask
 
     task = PersistenceEntropyTask(config={"num_samples": 5})
@@ -137,3 +159,35 @@ def test_persistence_entropy(mock_model, mock_tokenizer):
     if "error" not in results:
         assert "pe_simplification_ratio" in results
         assert any("pe_h0" in k for k in results.keys())
+        for key in list(results):
+            if not key.endswith("_pe_h0_norm"):
+                continue
+            prefix = key[: -len("_pe_h0_norm")]
+            m = results[f"{prefix}_num_features_h0"]
+            pe = results[f"{prefix}_pe_h0"]
+            expected = pe / np.log2(m) if m >= 2 else 0.0
+            assert results[key] == pytest.approx(expected, abs=1e-12)
+            assert 0.0 <= results[key] <= 1.0 + 1e-9
+
+
+def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
+    """The scale-normalized persistence keys must equal raw / mean-pairwise-
+    distance (the cross-model normalization stated in the paper appendix)."""
+    from blme.tasks.topology.homology import PersistentHomologyTask
+
+    task = PersistentHomologyTask(config={"num_samples": 5})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    if "error" in results:
+        pytest.skip("architecture not supported by get_layers")
+
+    norm_keys = [k for k in results if k.endswith("_mean_persistence_h0_norm")]
+    assert norm_keys, "normalized persistence keys missing"
+    for key in norm_keys:
+        prefix = key[: -len("_mean_persistence_h0_norm")]
+        mpd = results[f"{prefix}_mean_pairwise_distance"]
+        assert mpd > 0
+        for stat in ("mean_persistence_h0", "max_persistence_h0",
+                     "mean_persistence_h1"):
+            assert results[f"{prefix}_{stat}_norm"] == pytest.approx(
+                results[f"{prefix}_{stat}"] / mpd, rel=1e-9
+            )

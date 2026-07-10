@@ -46,6 +46,7 @@ import torch
 # ---------------------------------------------------------------------------
 _REF_CANDIDATES = [
     os.environ.get("LIPESTIMATION_DIR", ""),
+    os.path.expanduser("~/.cache/blme-refrepos/lipEstimation"),
 ]
 _REF_DIR = next((d for d in _REF_CANDIDATES if d and
                  os.path.isfile(os.path.join(d, "max_eigenvalue.py"))), None)

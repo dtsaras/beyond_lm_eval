@@ -292,3 +292,38 @@ The remaining ~28 `proxy-only`/`refined-adaptation` tasks — geometry (categori
 - **Value-changing / structural changes acted on:** `induction_heads` fixed to reproduce TransformerLens (→ regen); `attention_graph` citation corrected + `attention_rollout` added; citation/label tightenings for lipschitz, spectral, knowledge_neurons, edge_attribution; sae-lens API-drift flagged.
 - **Study regeneration required before the paper trusts these features:** `induction_score`/`prefix_match_score_*` (changed by the fix) + all 8 new-task feature groups (newly emitted). Everything else is additive test coverage / labels / citations with no feature-value change.
 - **Method:** every agent artifact (verify script + parity test) was re-run and line-audited by the lead; no `src/blme` change was made by any agent; heavy references ran in throwaway venvs so BLME gained **no** new dependency.
+
+## Campaign 4 — absolute-correctness batches (2026-07-10 →)
+
+Scope: the 47 structural-paper tasks (geometry/topology/dynamics/repe), resolving every
+standing Campaign-3 finding to the evidence standard in the campaign plan (official-code
+parity / analytic anchors / disclosed adaptations / no false attribution), with per-paper
+notes in `docs/tasks_<category>.md` and the paper appendix reconciled to the code.
+
+### B1 — Topology (5/5 tasks CLOSED) + verification infra
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `topology_homology` | ripser backend; GUDHI cross-backend ≤6.2e-8; scipy-MST H0 ≤9.6e-8; analytic anchors exact | dup-layer bug fixed (`d4daa1a`, prior session); Naitzat venue ICLR→JMLR in docstring; **new**: mean-pairwise-distance-normalized summaries emitted (paper tab:normalization claim now true in code); relation pinned in tests |
+| `topology_betti_curve` | triple-engine (networkx / GF(2) reduction / GUDHI) 0 mismatches; ground-truth anchors | zero-weight-edge bug fixed (`d4daa1a`, prior session); derived evaluate() stats now numerically pinned (was source-grep only); placeholder pseudo-citation removed; stale kNN comment corrected |
+| `topology_persistence_entropy` | executed giotto-tda 0.6.2 parity 2.7e-15 / 203 cases (C3); live scipy base-2 guard (gtda's own kernel) | 2 docstring citations fixed (wrong author set on the 2016 paper; "Entropy 2019" → Pattern Recognition 107:107509, 2020); target_layers deduped; **new**: relative PE (/log2 m) emitted, matching the appendix claim |
+| `topology_persistence_landscape` | persim 0.3.8 parity: single-bar + **new multi-bar K=4** case (~9e-16, k-selection sort now exercised); brute-force Bubenik reimpl 0.0 | docstring metric list corrected to actual keys; target_layers deduped |
+| `topology_zigzag_persistence` | 3-way: analytic anchors + recorded dionysus barcode + independent reimpl <1e-12, incl. **new non-degenerate scenarios** (two disjoint circles; two clusters) that separate `h1_loop_layer_sum` from `h1_total_layer_persistence` and exercise non-constant H0 | coverage-only findings closed; certification unchanged (declared faithful proxy) |
+
+Infra closed in B1: the 3 reference-parity tests (phd/lipschitz/magnitude) now fall back to
+the durable `~/.cache/blme-refrepos/` convention (cloned: GPTID@8c8759e,
+lipEstimation@336b6cc, magnipy@7d49b90) and **run green, not skip** (90 passed / 0 skipped
+with `tests/test_common.py`); `magnipy` pip-installed for the live half; giotto-tda has no
+py3.12 wheel — documented in REPRODUCE.md (scipy guard is the same kernel); unguarded HF
+tokenizer download in `tests/test_common.py` now skips cleanly offline.
+
+Paper-side reconciliation (B1): appendix `metrics_topology.tex` — homology definition now
+cites Zomorodian-Carlsson for the computation and states both raw + normalized summaries;
+PE formula states log2 + relative-PE normalization (+ Atienza citation); Betti entry now
+describes the actual geodesic-kNN construction, discloses the Eirene→ripser adaptation, and
+the SR formula was corrected to match the code (`late/early`, not `1 − late/early`) with the
+hypothesis reworded; `appendix_normalization.tex` gained the PE row; `references.bib`:
+naitzat2020topology venue fixed (ICLR→JMLR), rucco2016 entry type fixed, zomorodian2005computing
++ atienza2020stability added. Feature-value impact: **none to existing keys** — B1 only adds
+new `_norm` keys (regen will pick them up); the two prior-session bug fixes (d4daa1a) already
+required regen for ≤2-layer models' homology/betti features.

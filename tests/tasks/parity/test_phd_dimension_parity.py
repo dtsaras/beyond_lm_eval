@@ -45,10 +45,14 @@ FIXTURE_PATH = (
     / "fixtures/reference_parity/parity/phd_dimension.json"
 )
 
-# Location of the cloned official GPTID repo (holds IntrinsicDim.py), via a
-# documented env var. Absent -> the reference-backed cases skip cleanly.
+# Location of the cloned official GPTID repo (holds IntrinsicDim.py): the
+# documented env var, falling back to the durable local-clone convention
+# ~/.cache/blme-refrepos/ (git clone --depth 1
+# https://github.com/ArGintum/GPTID there). Absent -> the reference-backed
+# cases skip cleanly.
 _REF_CANDIDATES = [
     os.environ.get("BLME_GPTID_DIR", ""),
+    str(Path.home() / ".cache/blme-refrepos/GPTID"),
 ]
 
 

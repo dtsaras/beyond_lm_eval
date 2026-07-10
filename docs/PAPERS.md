@@ -101,7 +101,9 @@ it's cited. Sorted alphabetically by first author.
 | **Bubenik 2015** | `topology_persistence_landscape` | arXiv:1207.6437 | `topology/persistence_landscape.py` |
 | **Bubenik, Dlotko 2017** | `topology_persistence_landscape` implementation reference | arXiv:1501.00179 | `topology/persistence_landscape.py` |
 | **Chazal, Fasy, Lecci, Michel, Rinaldo, Wasserman 2015** — *Subsampling Methods for Persistent Homology* | `topology_persistence_landscape` (bootstrap idea) | arXiv:1406.1901 | `topology/persistence_landscape.py` (cited) |
-| **Rucco, Castiglione, Merelli, Pettini 2016** — *Characterisation of the Idiotypic Immune Network Through Persistent Entropy* | `topology_persistence_entropy` | Springer 2016 | `topology/persistence_entropy.py` |
+| **Rucco, Castiglione, Merelli, Pettini 2016** — *Characterisation of the Idiotypic Immune Network Through Persistent Entropy* | `topology_persistence_entropy` | Springer 2016 (Proc. ECCS 2014) | `topology/persistence_entropy.py` |
+| **Chintakunta, Gentimis, Gonzalez-Diaz, Jimenez, Krim 2015** — *An entropy-based persistence barcode* | `topology_persistence_entropy` | Pattern Recognition 48(2):391-401 | `topology/persistence_entropy.py` |
+| **Atienza, Gonzalez-Diaz, Soriano-Trigueros 2020** — *On the stability of persistent entropy and new summary functions for TDA* | `topology_persistence_entropy` (canonical log2 Def. 3.1) | Pattern Recognition 107:107509; arXiv:1803.08304 | `topology/persistence_entropy.py` |
 | **Zomorodian, Carlsson 2005** — *Computing Persistent Homology* | `topology_homology` | Discrete & Computational Geometry | `topology/homology.py` |
 
 ### Campaign-2 additions (2026-07) — new methods, official-code parity-verified
@@ -324,11 +326,12 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `repe_steering_effectiveness` ✅ Zou 2023; Turner 2023
 - `repe_task_vectors` ✅ Zou 2023 RepE + Ilharco 2023 Task Arithmetic (round 10)
 
-**Topology (4 tasks)**:
-- `topology_betti_curve` 📝 add Naitzat et al. 2020 (JMLR 21(184):1-40, 2020) to docstring
-- `topology_homology` ✅ Zomorodian-Carlsson 2005; Naitzat 2020; Edelsbrunner-Harer 2008
-- `topology_persistence_entropy` 📝 add Rucco 2016
-- `topology_persistence_landscape` ✅ Bubenik 2015; Chazal 2015
+**Topology (5 tasks — citation audit closed 2026-07, campaign B1)**:
+- `topology_betti_curve` ✅ Naitzat, Zhitnikov & Lim 2020 (JMLR 21(184):1-40)
+- `topology_homology` ✅ Zomorodian-Carlsson 2005; Naitzat 2020 (JMLR, venue fixed); Edelsbrunner-Harer 2008
+- `topology_persistence_entropy` ✅ Rucco et al. 2016 (ECCS 2014/Springer); Chintakunta et al. 2015; Atienza et al. 2020 (Pattern Recognition — was mis-cited as "Entropy 2019")
+- `topology_persistence_landscape` ✅ Bubenik 2015; Bubenik-Dlotko toolbox; Chazal 2015
+- `topology_zigzag_persistence` ✅ Gardinazzi et al. 2025 (ICML, arXiv:2410.11042); Carlsson-de Silva 2010
 
 ### Citation-audit summary
 

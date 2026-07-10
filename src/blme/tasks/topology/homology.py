@@ -9,8 +9,8 @@ References:
     *Discrete and Computational Geometry* 33(2).
   * Edelsbrunner, Harer 2008 — "Persistent Homology: a Survey".
   * Naitzat, Zhitnikov, Lim 2020 — "Topology of Deep Neural
-    Networks", ICLR (motivation for applying TDA to learned
-    representations).
+    Networks", JMLR 21(184):1-40 (arXiv:2004.06093; motivation for
+    applying TDA to learned representations).
 """
 
 import torch
@@ -118,21 +118,35 @@ class PersistentHomologyTask(DiagnosticTask):
         results = {}
         for l_idx, data_points in layer_representations.items():
             data_matrix = np.array(data_points) # Shape: (num_samples, hidden_dim)
-            
+
             # Compute Persistent Homology
             # maxdim=1 computes up to 1-dimensional holes (loops)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 dgms = ripser(data_matrix, maxdim=1)['dgms']
-                
+
             # dgms[0] contains 0-dimensional features (connected components)
             # dgms[1] contains 1-dimensional features (loops)
-            
+
             # Summarize finite-bar lifespans (shared, testable helper).
             summary = _lifespan_summary(dgms)
             results[f"layer_{l_idx}_mean_persistence_h0"] = summary["mean_persistence_h0"]
             results[f"layer_{l_idx}_max_persistence_h0"] = summary["max_persistence_h0"]
             results[f"layer_{l_idx}_mean_persistence_h1"] = summary["mean_persistence_h1"]
             results[f"layer_{l_idx}_num_loops_h1"] = summary["num_loops_h1"]
+
+            # Scale-normalized persistence: raw lifespans scale with the
+            # hidden-state norms, which differ across models. Dividing by the
+            # mean pairwise distance of the layer's point cloud makes the
+            # summaries comparable across models (the normalization stated in
+            # the paper's cross-model framework).
+            from scipy.spatial.distance import pdist
+            pairwise = pdist(data_matrix)
+            mpd = float(pairwise.mean()) if pairwise.size else 0.0
+            if mpd > 0:
+                for key in ("mean_persistence_h0", "max_persistence_h0",
+                            "mean_persistence_h1"):
+                    results[f"layer_{l_idx}_{key}_norm"] = summary[key] / mpd
+                results[f"layer_{l_idx}_mean_pairwise_distance"] = mpd
 
         return results

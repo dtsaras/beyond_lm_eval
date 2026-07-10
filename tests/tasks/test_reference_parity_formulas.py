@@ -263,6 +263,40 @@ def test_persistence_landscape_matches_persim_library():
     assert blme.tolist() == pytest.approx(ref.tolist(), abs=1e-9)
 
 
+def test_persistence_landscape_multibar_k4_matches_persim():
+    """Multi-bar, k>=2 persim parity: with overlapping bars the k-selection
+    (descending sort of tent values at each t) actually matters — a
+    sort-direction bug or missing max(0, .) clip is invisible on single-bar
+    diagrams but changes L_2..L_4 here. Verified 2026-07: max diff vs
+    persim 0.3.8 PersLandscapeApprox is ~8.9e-16 on this diagram.
+    """
+    persim = pytest.importorskip("persim")
+    from blme.tasks.topology.persistence_landscape import _compute_landscape
+
+    dgm = np.array([
+        [0.0, 4.0],
+        [1.0, 3.0],
+        [2.0, 6.0],
+        [2.5, 3.5],
+        [5.0, 5.5],
+    ])
+    K, n_points = 4, 241
+    blme = _compute_landscape(dgm, n_landscapes=K, n_points=n_points)
+    pl = persim.PersLandscapeApprox(
+        dgms=[dgm], hom_deg=0, start=0.0, stop=6.0, num_steps=n_points
+    )
+    ref = np.asarray(pl.values, dtype=float)  # (K_ref, n_points)
+    for k in range(min(K, ref.shape[0])):
+        assert blme[k].tolist() == pytest.approx(ref[k].tolist(), abs=1e-9), (
+            f"landscape k={k + 1} diverged from persim"
+        )
+    # Landscapes beyond the persim-emitted depth must be identically zero.
+    for k in range(ref.shape[0], K):
+        assert not blme[k].any()
+    # Sanity: the k-selection is non-trivial on this diagram (L2 != L1).
+    assert np.max(np.abs(blme[0] - blme[1])) > 0.1
+
+
 def test_calibration_ece_matches_torchmetrics_library():
     """Independent-library cross-check: BLME's ECE must equal
     torchmetrics' binary_calibration_error (l1, equal-width bins).

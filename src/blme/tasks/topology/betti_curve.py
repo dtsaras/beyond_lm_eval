@@ -24,8 +24,6 @@ Method (2026-06-22 redesign — refined adaptation of Naitzat et al.):
 
 References:
 - "Topology of Deep Neural Networks" (Naitzat, Zhitnikov & Lim, JMLR 21(184):1-40, 2020, arXiv:2004.06093)
-- "Topological Data Analysis of Large Language Models' Hidden Representations"
-  (General TDA on Transformers literature)
 """
 
 import torch
@@ -88,7 +86,12 @@ def _count_betti(data, maxdim=1, n_neighbors=5, persistence_frac=0.3):
 
     k = int(min(n_neighbors, n - 1))
     tree = cKDTree(X)
-    dists, idx = tree.query(X, k=k + 1)  # column 0 is the point itself
+    # Column 0 is usually the point itself, but with exact-duplicate points
+    # the self-entry and the duplicate (both distance 0) may swap columns.
+    # Dropping column 0 is still safe: the surviving zero-distance entry is
+    # either the duplicate edge (kept, floored below) or a harmless (i, i)
+    # self-loop that csgraph ignores.
+    dists, idx = tree.query(X, k=k + 1)
     dists = np.atleast_2d(dists)
     idx = np.atleast_2d(idx)
 

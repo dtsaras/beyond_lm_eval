@@ -53,9 +53,14 @@ def _fixture() -> dict:
 # Locate an OFFICIAL magnipy checkout.
 # ---------------------------------------------------------------------------
 def _find_magnipy_dir():
-    cand = os.environ.get("BLME_MAGNIPY_DIR")
-    if cand and (Path(cand) / "magnipy" / "magnitude" / "compute.py").exists():
-        return cand
+    # Documented env var, then the durable local-clone convention
+    # (~/.cache/blme-refrepos/, git clone https://github.com/aidos-lab/magnipy).
+    for cand in (
+        os.environ.get("BLME_MAGNIPY_DIR"),
+        str(Path.home() / ".cache/blme-refrepos/magnipy"),
+    ):
+        if cand and (Path(cand) / "magnipy" / "magnitude" / "compute.py").exists():
+            return cand
     return None
 
 

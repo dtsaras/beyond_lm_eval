@@ -11,6 +11,18 @@ from blme.tasks.common import (
 )
 
 
+def _gpt2_tokenizer_or_skip():
+    """Load the gpt2 tokenizer, skipping (not erroring) when the HF Hub is
+    unreachable and the tokenizer is not in the local cache — a fresh-clone
+    offline test run must not hard-fail on a network download."""
+    from transformers import GPT2TokenizerFast
+
+    try:
+        return GPT2TokenizerFast.from_pretrained("gpt2")
+    except Exception as exc:  # OSError / HTTPError / offline-mode errors
+        pytest.skip(f"gpt2 tokenizer unavailable offline: {type(exc).__name__}")
+
+
 def test_get_layers_returns_module_list(mock_model_tokenizer):
     model, tokenizer = mock_model_tokenizer
     layers = get_layers(model)
@@ -67,7 +79,7 @@ def test_score_continuation_finds_boundary_via_offset_map():
                      n_head=2)
     cfg._attn_implementation = "eager"
     model = GPT2LMHeadModel(cfg).eval()
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    tokenizer = _gpt2_tokenizer_or_skip()
 
     prompt = "The capital of France is"
     answer = " Paris"
@@ -96,7 +108,7 @@ def test_score_continuation_scores_spanning_boundary_token():
                      n_head=2)
     cfg._attn_implementation = "eager"
     model = GPT2LMHeadModel(cfg).eval()
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    tokenizer = _gpt2_tokenizer_or_skip()
 
     prompt = "The capital of France is"
     answer = " Paris"

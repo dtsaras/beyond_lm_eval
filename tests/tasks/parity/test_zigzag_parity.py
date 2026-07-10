@@ -80,6 +80,24 @@ def _make_clouds():
     }
 
 
+def _make_nondegenerate_clouds():
+    """Scenarios where the 'redundant-looking' metrics genuinely differ:
+    a layer with TWO disjoint circles separates h1_loop_layer_sum from
+    h1_total_layer_persistence, and two-cluster layers exercise the H0
+    metrics away from the constant 1.0 of the original scenarios.
+    (Not dionysus-anchored: ground truth is known by construction and
+    cross-checked against the independent reimplementation.)"""
+    base = _make_clouds()
+    circle = base["circle_all"][0]
+    line = base["no_loop"][0]
+    two_circles = np.concatenate([circle, circle + np.array([10.0, 0.0])])
+    two_lines = np.concatenate([line, line + np.array([0.0, 10.0])])
+    return {
+        "double_loop_mid": [circle, two_circles, circle],
+        "two_clusters_mid": [line, two_lines, two_lines, line],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Independent from-scratch reimplementation of the summary (different code path)
 # ---------------------------------------------------------------------------
@@ -276,6 +294,57 @@ def test_blme_matches_independent_reimplementation(name):
     fx = _fixture()["scenarios"][name]["blme_summary"]
     for k, v in fx.items():
         assert float(blme[k]) == pytest.approx(v, abs=1e-9), k
+
+
+# ===========================================================================
+# (A') Non-degenerate ground-truth anchors: metrics that the original four
+#      scenarios could not distinguish (loop multiplicity, H0 structure).
+# ===========================================================================
+def test_anchor_double_loop_separates_sum_from_persistence():
+    """Layer 1 holds TWO disjoint circles (2 loops), layers 0/2 one circle.
+    loops-per-layer = [1, 2, 1], so the loop-count SUM (4) must differ from
+    the #layers-with-a-loop count (3). A regression that conflates
+    loops.sum() with mask.sum() fails here and nowhere else."""
+    clouds = _make_nondegenerate_clouds()["double_loop_mid"]
+    loops = [h1 for _, h1 in (_layer_topology(X, 5, 0.3) for X in clouds)]
+    assert loops == [1, 2, 1]
+
+    s = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    assert s["h1_loop_layer_sum"] == 4.0
+    assert s["h1_total_layer_persistence"] == 3.0
+    assert s["h1_num_bands"] == 1.0
+    assert s["h1_max_band_length"] == 3.0
+    assert s["betti1_fraction_layers"] == 1.0
+    # H0 is non-constant too: components = [1, 2, 1].
+    assert s["h0_mean_components"] == pytest.approx(4.0 / 3.0, abs=1e-12)
+    assert s["h0_persistence_range"] == 1.0
+
+
+def test_anchor_two_clusters_h0_metrics():
+    """Middle layers split into two far-apart clusters: components per layer
+    = [1, 2, 2, 1]. Pins the H0 summary metrics away from the constant-1.0
+    degenerate regime of the original scenarios; no loops anywhere."""
+    clouds = _make_nondegenerate_clouds()["two_clusters_mid"]
+    s = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    assert s["h0_mean_components"] == 1.5
+    assert s["h0_persistence_range"] == 1.0
+    assert s["h0_first_layer_components"] == 1.0
+    assert s["h0_last_layer_components"] == 1.0
+    assert s["h1_num_bands"] == 0.0
+    assert s["h1_loop_layer_sum"] == 0.0
+    assert s["betti1_fraction_layers"] == 0.0
+
+
+@pytest.mark.parametrize("name", ["double_loop_mid", "two_clusters_mid"])
+def test_blme_matches_independent_reimpl_nondegenerate(name):
+    """(C) bit-exact independent-reimplementation parity on the
+    non-degenerate scenarios (no fixture entry: ground truth is analytic)."""
+    clouds = _make_nondegenerate_clouds()[name]
+    blme = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    indep = _independent_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    keys = [k for k in blme if not k.startswith("_meta_")]
+    max_diff = max(abs(float(blme[k]) - float(indep[k])) for k in keys)
+    assert max_diff < 1e-12
 
 
 # ===========================================================================

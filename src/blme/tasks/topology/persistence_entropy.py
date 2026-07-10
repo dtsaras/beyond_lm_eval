@@ -7,10 +7,15 @@ lifetimes (complex, disordered topology), while low entropy indicates a few
 dominant persistent features (simple, ordered topology).
 
 References:
-- "A New Topological Entropy-based Approach for Measuring Similarities Among
-  Piecewise Linear Functions" (Rucco, Castiglione, Merelli et al., 2016)
-- "On the Stability of Persistent Entropy and New Summary Functions for TDA"
-  (Atienza et al., Entropy 2019)
+- "Characterisation of the Idiotypic Immune Network Through Persistent
+  Entropy" (Rucco, Castiglione, Merelli, Pettini — Proceedings of ECCS 2014,
+  Springer Proceedings in Complexity, 2016; persistent entropy introduced)
+- "An Entropy-based Persistence Barcode" (Chintakunta, Gentimis,
+  Gonzalez-Diaz, Jimenez, Krim — Pattern Recognition 48(2):391-401, 2015)
+- "On the Stability of Persistent Entropy and New Summary Functions for
+  Topological Data Analysis" (Atienza, Gonzalez-Diaz, Soriano-Trigueros —
+  Pattern Recognition 107:107509, 2020; arXiv:1803.08304; Def. 3.1 is the
+  log2 formulation implemented here)
 """
 
 import torch
@@ -97,7 +102,10 @@ class PersistenceEntropyTask(DiagnosticTask):
         
         layers = get_layers(model)
         num_layers = len(layers)
-        target_layers = [0, num_layers // 2, num_layers - 1]
+        # Dedupe so models with <=2 layers don't collect the same layer twice
+        # (duplicated point clouds inflate num_features) — same fix as
+        # topology_homology / topology_persistence_landscape.
+        target_layers = sorted({0, num_layers // 2, num_layers - 1})
         layer_reps = {l: [] for l in target_layers}
         
         with torch.no_grad():
@@ -144,6 +152,18 @@ class PersistenceEntropyTask(DiagnosticTask):
             results[f"layer_{l_idx}_pe_h1"] = pe_h1
             results[f"layer_{l_idx}_num_features_h0"] = len(lifespans_h0)
             results[f"layer_{l_idx}_num_features_h1"] = len(lifespans_h1)
+            # Normalized (relative) persistent entropy: PE / log2(m) in [0, 1],
+            # where log2(m) is PE's maximum over m bars — the scale-free form
+            # used for cross-layer / cross-model comparison (Atienza et al.
+            # 2020 call PE/max the relative persistent entropy).
+            results[f"layer_{l_idx}_pe_h0_norm"] = (
+                pe_h0 / float(np.log2(len(lifespans_h0)))
+                if len(lifespans_h0) >= 2 else 0.0
+            )
+            results[f"layer_{l_idx}_pe_h1_norm"] = (
+                pe_h1 / float(np.log2(len(lifespans_h1)))
+                if len(lifespans_h1) >= 2 else 0.0
+            )
         
         # Summary: how much does topological entropy change across layers?
         pe_values = [results[f"layer_{l}_pe_h0"] for l in target_layers]
