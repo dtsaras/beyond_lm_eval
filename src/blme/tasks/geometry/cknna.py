@@ -32,7 +32,9 @@ Definition (Huh et al. 2024, `metrics.py:cknna`):
                                 · HSIC(mask_L⊙L, mask_L⊙L) ) + 1e-6 ),
 
     where HSIC is the unbiased Hilbert-Schmidt Independence Criterion
-    (Song et al. 2012, Eq. 5) by default. Identical inputs give 1.0; it is
+    (Song et al. 2012, Eq. 5) by default. Identical inputs give ~1.0
+    (exactly 1.0 only with biased HSIC; the unbiased reference default
+    yields ~0.9999 because of the +1e-6 denominator regularizer); it is
     invariant to orthogonal rotations of either representation (like CKA);
     independent representations give ~0.
 
@@ -109,12 +111,21 @@ def _cknna(X, Y, topk: int, unbiased: bool = True, distance_agnostic: bool = Fal
         topk: number of nearest neighbours (must be >= 2 and < N).
         unbiased: use unbiased HSIC and mask the self-diagonal (reference default).
         distance_agnostic: use the raw mutual-kNN mask instead of the kernel
-            values (reference option; off by default).
+            values. NON-FUNCTIONAL: it crashes identically in the official
+            code at the pinned reference commit (dcd76ba) — kept only for
+            crash-parity documentation; raises NotImplementedError.
 
     Returns:
-        CKNNA value in [~0, 1]; identical inputs give 1.0. Returns NaN if the
-        inputs are degenerate (N < topk+1, or HSIC denominator collapses).
+        CKNNA value in [~0, 1]; identical inputs give ~1.0 (see module
+        docstring for the unbiased-HSIC caveat). Returns NaN if the inputs
+        are degenerate (N < topk+1, or HSIC denominator collapses).
     """
+    if distance_agnostic:
+        raise NotImplementedError(
+            "distance_agnostic=True is non-functional: the official "
+            "platonic-rep cknna crashes identically at the pinned commit "
+            "(.item() on an (n,n) tensor); do not use."
+        )
     if not isinstance(X, torch.Tensor):
         X = torch.as_tensor(np.asarray(X))
     if not isinstance(Y, torch.Tensor):

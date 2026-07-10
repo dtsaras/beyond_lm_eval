@@ -50,6 +50,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Kriegeskorte, N., Mur, M., & Bandettini, P. A. (2008). Representational similarity analysis-connecting the branches of systems neuroscience.` [Frontiers in Systems Neuroscience]
 * **File & Function**: `src/blme/tasks/geometry/rsa.py` -> `RepresentationalSimilarityTask`
 * **Critical Info**: Because RSA is $O(N^2)$, the `max_tokens` parameter controls the computational cost.
+* **Verification** (2026-07, campaign B6/C3): CONFIRMED_CORRECT — all 6 outputs match a from-scratch Spearman (rank + Pearson-on-ranks, no scipy) AND rsatoolbox 0.3.2 to 1.1e-16 on controlled 5-layer activations; citations verified (Kriegeskorte, Mur & Bandettini 2008, Front. Syst. Neurosci. 2:4).
 
 ## 4. Latent Mahalanobis OOD Distance
 * **What are we measuring**: How far Out-Of-Distribution (OOD) a sample is, accounting for the natural covariance of the in-distribution manifold.
@@ -138,6 +139,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Dong, Y., Cordonnier, J. B., & Loukas, A. (2021). Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth.` [ICML 2021, ArXiv: 2103.03404]
 * **File & Function**: `src/blme/tasks/geometry/collapse.py` -> `RepresentationCollapseTask`
 * **Critical Info**: More pronounced in deep networks lacking robust layernorms or residual pathway scaling.
+* **Verification** (2026-07, campaign B6): erank == verbatim Roy-Vetterli Eq(1)/Def. 1 + scipy svdvals (analytic anchors exact: sv=[4,2,2] → 2^1.5 to 4.4e-16); B6 pinned the previously untested `max_drop`/`max_drop_layer` (a sign flip passed the suite before). Citations fixed: first author Queipo-de-Llano restored on arXiv:2510.06477 (docstring/metadata/PAPERS.md); a fabricated PAPERS.md row (wrong authors AND a physics arXiv id) deleted; the 'top-23' predictor rank corrected to 22.
 
 ## 14. Weight Spectral Decay
 * **What are we measuring**: Heavy-tailed spectral structure and effective utilization of learned weight matrices.
@@ -156,6 +158,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Gretton, A., Bousquet, O., Smola, A., & Schölkopf, B. (2005). Measuring Statistical Dependence with Hilbert-Schmidt Norms.` Related representation-similarity use in `Kornblith et al. (2019). Similarity of Neural Network Representations Revisited.`
 * **File & Function**: `src/blme/tasks/geometry/mutual_info.py` -> `HSICDependenceTask`
 * **Critical Info**: Registered task name is `geometry_hsic`; stale docs/recipes should not refer to `geometry_mutual_info`.
+* **Verification** (2026-07, campaign B6): normalized HSIC == verbatim Kornblith cka() + explicit Gretton Def. 2 (fixture 0.450953881199808, diff 3.3e-15); B6 refactored evaluate() to call the parity-pinned `_nhsic_from_grams` kernel (previously the pinned wrapper was never used by production and only key presence was asserted). Docstring corrected: the anchor layer is the FIRST TRANSFORMER BLOCK's output, not the input embedding (the cache drops hs[0]).
 
 ## 16. CKA (Centered Kernel Alignment)
 * **What are we measuring**: The similarity between the underlying structures of two sets of representations without requiring them to have the same features.
@@ -164,6 +167,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Kornblith, S., Norouzi, M., Lee, H., & Hinton, G. (2019). Similarity of neural network representations revisited.` [ICML 2019, ArXiv: 1905.00414]
 * **File & Function**: `src/blme/tasks/geometry/cka.py` -> `CKATask`
 * **Critical Info**: Less prone to the scaling artifacts that affect normal canonical correlation analysis (CCA).
+* **Verification** (2026-07, campaign B6/C3): CONFIRMED_CORRECT — executed the ACTUAL official google-research Demo.ipynb code: feature_space_linear_cka = 0.450953881199808 bit-identical to the pinned fixture; BLME ≤1.8e-8 (float32 cast). Citations verified (Kornblith et al. ICML 2019; Cortes et al. 2012 centered alignment).
 
 ## 17. Unembedding Geometry
 * **What are we measuring**: Static geometry of the LM head (unembedding) matrix: how many directions it effectively uses, whether semantically related tokens cluster, and how it relates to the input embeddings.
@@ -200,6 +204,8 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Hosseini, E. A. & Fedorenko, E. (2023). Large language models implicitly learn to straighten neural sentence trajectories to construct a predictive representation of natural language.` [NeurIPS 2023, ArXiv: 2311.04930]
 * **File & Function**: `src/blme/tasks/geometry/trajectory_curvature.py` -> `TrajectoryCurvatureTask`
 * **Critical Info**: Trajectory order matters — the task consumes per-sample `(T, D)` chunks (`per_sample=True`), never the flattened token cloud. The BOS token is skipped (`skip_first_tokens`, default 1) because its hidden state is an extreme outlier; cosines are clamped to $[-1, 1]$ and zero-norm difference vectors are skipped.
+* **Paper summary**: Hosseini & Fedorenko show that trained LMs "straighten" sentence trajectories with depth — the discrete curvature (angle between consecutive difference vectors of the hidden-state trajectory) decreases relative to the first contextualized layer — and that models with better next-word prediction straighten more; curvature is averaged per sentence, then across sentences.
+* **Verification** (2026-07, campaign B6): angle kernel == verbatim official curvature_utils.py to 8.9e-16 (f64); the layer aggregation now matches the paper's mean-of-per-sentence-means (the pooled-angles deviation was fixed and is pinned by the NEW parity file `test_trajectory_curvature_parity.py`, whose variable-length trajectories discriminate the two aggregations). Docstring corrected: the shared cache's first layer (hs[1]) EQUALS the paper's L0 baseline — an earlier note claiming a baseline mismatch was wrong.
 
 ## 21. Marchenko-Pastur Bulk Deviation (geometry_mp_bulk_deviation)
 * **What are we measuring**: How strongly per-layer activation spectra deviate from the random-matrix-theory iid null, i.e. how much *structure* (spiked directions) the representation carries beyond noise.
@@ -236,6 +242,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Papyan, V., Han, X. Y., & Donoho, D. L. (2020). Prevalence of neural collapse during the terminal phase of deep learning training.` [PNAS, ArXiv: 2008.08186]
 * **File & Function**: `src/blme/tasks/geometry/neural_collapse.py` -> `NeuralCollapseTask`
 * **Critical Info**: BLME reports `nc2_etf_cosine_deviation_proxy`; it does not implement full NC2 normalized-Gram Frobenius distance or NC3 self-duality.
+* **Verification** (2026-07, campaign B6): NC1 == the officially-RUN rhubarbwu/neural-collapse library (pinv/svd diff 0.0); NC2-ETF proxy correctly described as the Fig. 4 mean-absolute-deviation measure (docstring said "standard deviation" — Fig. 3's different statistic); comment pinpoint fixed (Eq. 3-4 are §2.9, not §2.3); dead import removed; NEW behavioral test drives the real evaluate() (previously the double-norm guard was a string match only).
 
 ## 25. Schatten / MNN / RankMe
 * **What are we measuring**: Spectral geometry of row-normalized per-sentence hidden-state matrices.
@@ -294,3 +301,23 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **File & Function**: `src/blme/tasks/geometry/phd_dimension.py` -> `PHDimensionTask`
 * **Critical Info**: Stochastic estimator — RNG-pinned for determinism. The general-α inversion in the docstring is d = α/(1−m) (a wrong formula α/(α−m) was fixed in B5); GPTID returns 1/(1−m) regardless of α, correct only at α=1 (documented).
 * **Verification** (2026-07, campaign B5/C2): seed-matched bit-exact (diff 0.0) vs official ArGintum/GPTID on default AND non-default schedules including α=0.5; reference checkout at `~/.cache/blme-refrepos/GPTID` (B1 infra) so the parity tests run rather than skip.
+
+## 31. CKNNA — Mutual-kNN Conditional CKA (geometry_cknna)
+* **What are we measuring**: LOCAL representational alignment between layers: CKA restricted to pairs that are mutual k-nearest neighbors, so only local-neighborhood structure contributes.
+* **How are we measuring**: Row-L2-normalize the features (reference preprocessing), build kernels K, L; CKNNA = HSIC(mask⊙K, mask⊙L) / (√(HSIC(mask_K⊙K,·)·HSIC(mask_L⊙L,·)) + 1e-6) with the mutual-kNN mask, unbiased HSIC (Song et al. 2012 Eq. 5) by default.
+* **Hypothesis**: Per the Platonic Representation Hypothesis, alignment between representations (especially local-neighborhood alignment) increases with model capability and across modalities.
+* **Citation/Paper**: `Huh, M., Cheung, B., Wang, T., & Isola, P. (2024). Position: The Platonic Representation Hypothesis.` [ICML 2024, PMLR 235:20617-20642, ArXiv: 2405.07987]
+* **Paper summary**: Huh et al. argue that as models scale, their representations converge toward a shared statistical model of reality across architectures and modalities; they measure this convergence with mutual-kNN alignment metrics (CKNNA is their kernel-alignment variant defined in the appendix) and show alignment increases with scale and downstream competence.
+* **File & Function**: `src/blme/tasks/geometry/cknna.py` -> `CKNNATask`
+* **Critical Info**: Identical inputs give ~1.0 (exactly 1.0 only with biased HSIC — the unbiased reference default gives ~0.9999 via the +1e-6 regularizer, documented). `distance_agnostic=True` is NON-FUNCTIONAL (crashes identically in the official code at the pinned commit) and now raises NotImplementedError.
+* **Verification** (2026-07, campaign B6/C2/C3): bit-exact vs official platonic-rep `metrics.cknna` (unbiased + biased HSIC, both orderings) at the pinned commit dcd76ba; B6 added coverage for the `_l2_normalize` preprocessing (was untested — the fixture tensors were pre-normalized) with a full-pipeline equality check on unnormalized input.
+
+## 32. Procrustes Linearity (geometry_procrustes_linearity)
+* **What are we measuring**: How close each adjacent-layer transformation is to a LINEAR map — the "transformers are secretly linear" signature.
+* **How are we measuring**: Per adjacent layer pair, fit the unconstrained least-squares map A = X⁺Y (NOT orthogonal Procrustes) between normalized representations and report the resulting similarity, per the official LLM-Microscope procedure; the across-depth profile is the signal.
+* **Hypothesis**: Adjacent-layer maps in trained LMs are nearly linear (similarity ≈ 0.99); departures localize where nonlinear computation concentrates.
+* **Citation/Paper**: `Razzhigaev, A., Mikhalchuk, M., Goncharova, E., Gerasimenko, N., Oseledets, I., Dimitrov, D., & Kuznetsov, A. (2024). Your Transformer is Secretly Linear.` [ACL 2024 (long), ArXiv: 2405.12250]
+* **Paper summary**: The paper finds a near-perfect linear relationship (Procrustes similarity ~0.99) between sequential transformer layers' embeddings, shows the linearity is connected to the residual stream's dominance, and demonstrates that pruning the most-linear layers (or regularizing linearity away) barely hurts — evidence that much of depth is close to linear.
+* **File & Function**: `src/blme/tasks/geometry/procrustes_linearity.py` -> `ProcrustesLinearityTask`
+* **Critical Info**: The absolute value is conditioning-dependent (the official code's unguarded 1/S amplifies ~1e-17 singular values) — interpret the across-depth PROFILE, not any single value (documented in the parity test and metadata).
+* **Verification** (2026-07, campaign B6/C2/C3): CONFIRMED_CORRECT — |diff| = 0 vs the ACTUAL pip wheel llm_microscope 0.0.7 on 4 fresh cases including a rank-deficient one and an exact-linear anchor (1.0); real-model values 0.9988–0.99999 consistent with the paper's ~0.99 headline.

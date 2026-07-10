@@ -15,15 +15,26 @@ def _centered_linear_gram(X: torch.Tensor) -> torch.Tensor:
     return K - K.mean(dim=0) - K.mean(dim=1, keepdim=True) + K.mean()
 
 
+def _nhsic_from_grams(K_i: torch.Tensor, K_j: torch.Tensor,
+                      self_i: "float | None" = None,
+                      self_j: "float | None" = None) -> float:
+    """Normalized HSIC from (centered) gram matrices:
+    tr(K_i K_j) / sqrt(tr(K_i K_i) tr(K_j K_j)). This is THE production
+    kernel — evaluate() and the parity-pinned feature-space wrapper both
+    call it, so the reference-value parity test covers the shipped path
+    (previously evaluate() duplicated the formula inline and only the
+    unused wrapper was pinned)."""
+    hsic_ij = float(torch.sum(K_i * K_j))
+    if self_i is None:
+        self_i = float(torch.sum(K_i * K_i))
+    if self_j is None:
+        self_j = float(torch.sum(K_j * K_j))
+    return float(hsic_ij / (np.sqrt(self_i * self_j) + 1e-12))
+
+
 def _normalized_linear_hsic(X: torch.Tensor, Y: torch.Tensor) -> float:
     """Normalized linear HSIC, equivalent to linear CKA."""
-    Kx = _centered_linear_gram(X)
-    Ky = _centered_linear_gram(Y)
-    hsic_xy = float(torch.sum(Kx * Ky))
-    hsic_xx = float(torch.sum(Kx * Kx))
-    hsic_yy = float(torch.sum(Ky * Ky))
-    denom = np.sqrt(hsic_xx * hsic_yy)
-    return float(hsic_xy / (denom + 1e-12))
+    return _nhsic_from_grams(_centered_linear_gram(X), _centered_linear_gram(Y))
 
 
 @register_task("geometry_hsic")
@@ -44,7 +55,9 @@ class HSICDependenceTask(DiagnosticTask):
 
     ``input_to_layer_hsic.mean`` enters BLME's top-24 partial predictors
     at +0.68 partial ρ (`docs/TOP_PREDICTORS.md` §2), measuring how
-    strongly per-layer activations still depend on the input embedding.
+    strongly per-layer activations still depend on the FIRST TRANSFORMER
+    BLOCK's output (the shared cache drops the embedding output hs[0],
+    so layer 0 here is block-1 output, not the input embedding).
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -104,16 +117,13 @@ class HSICDependenceTask(DiagnosticTask):
             K = gram_matrices[idx]
             self_hsic[idx] = float(torch.sum(K * K))
 
-        # Adjacent layer HSIC
+        # Adjacent layer HSIC (shared, parity-pinned kernel).
         adjacent_hsic = []
         for i in range(n_layers - 1):
-            K_i = gram_matrices[layers[i]]
-            K_j = gram_matrices[layers[i + 1]]
-
-            hsic_ij = float(torch.sum(K_i * K_j))
-            norm = np.sqrt(self_hsic[layers[i]] * self_hsic[layers[i + 1]])
-            nhsic = hsic_ij / (norm + 1e-12)
-            adjacent_hsic.append(nhsic)
+            adjacent_hsic.append(_nhsic_from_grams(
+                gram_matrices[layers[i]], gram_matrices[layers[i + 1]],
+                self_hsic[layers[i]], self_hsic[layers[i + 1]],
+            ))
 
         # Input-to-layer HSIC (first layer vs every *later* layer).
         # Historic bug: the loop started at ``i = 0``, including the
@@ -124,11 +134,10 @@ class HSICDependenceTask(DiagnosticTask):
         input_hsic = []
         K_input = gram_matrices[layers[0]]
         for i in range(1, n_layers):
-            K_i = gram_matrices[layers[i]]
-            hsic_val = float(torch.sum(K_input * K_i))
-            norm = np.sqrt(self_hsic[layers[0]] * self_hsic[layers[i]])
-            nhsic = hsic_val / (norm + 1e-12)
-            input_hsic.append(nhsic)
+            input_hsic.append(_nhsic_from_grams(
+                K_input, gram_matrices[layers[i]],
+                self_hsic[layers[0]], self_hsic[layers[i]],
+            ))
 
         return {
             "adjacent_hsic": adjacent_hsic,

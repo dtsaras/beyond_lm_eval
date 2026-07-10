@@ -34,9 +34,11 @@ Implementation notes:
       through a private :class:`~blme.cache.ModelOutputCache`.
     * The shared cache stores only post-block hidden states (it drops
       the embedding output ``hs[0]``), so "first layer" here is the
-      output of the first transformer block — Hosseini & Fedorenko
-      compare against the input embedding, which is one step earlier.
-      The straightening trend is unaffected; only the baseline differs.
+      output of the first transformer block — which MATCHES the paper:
+      Hosseini & Fedorenko start their analyses "from the first
+      contextualized layer L0", and the official curvature_utils.py
+      likewise baselines curvature change at hs[1]. (An earlier note
+      here claimed the paper uses the input embedding; it does not.)
     * The BOS token is skipped (``skip_first_tokens``, default 1)
       because the BOS hidden state is an extreme outlier in most
       architectures and the first difference vector through it would

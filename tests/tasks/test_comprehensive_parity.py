@@ -2997,6 +2997,14 @@ def test_geometry_collapse():
     assert out["max_erank"] == pytest.approx(mx, rel=1e-6)
     assert out["min_erank"] == pytest.approx(mn, rel=1e-6)
 
+    # max_drop / max_drop_layer (campaign-4 B6: previously unpinned — a
+    # np.max/np.min sign flip or an off-by-one in the layer index passed
+    # the whole suite). max_drop = most NEGATIVE adjacent erank change;
+    # max_drop_layer = 1-based index of the layer where it lands.
+    diffs = np.diff(np.asarray(ref, dtype=np.float64))
+    assert out["max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
+    assert out["max_drop_layer"] == int(np.argmin(diffs)) + 1
+
     # ---- Determinism: same input twice -> identical output ----------------
     out2 = RepresentationCollapseTask(
         config={"num_samples": 3, "use_cache": False}

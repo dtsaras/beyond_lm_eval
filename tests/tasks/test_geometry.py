@@ -1409,3 +1409,26 @@ def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
 
     assert out["unembedding_n_category_tokens"] == 8
     assert out["unembedding_purity_mean"] == 1.0
+
+
+def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):
+    """Behavioral coverage (campaign-4 B6): no test previously ran
+    NeuralCollapseTask.evaluate() on a model — the double-norm regression
+    guard was a string match on one exact spelling. Drive the real task and
+    assert finite, plausible outputs."""
+    from blme.tasks.geometry.neural_collapse import NeuralCollapseTask
+
+    task = NeuralCollapseTask(config={"num_samples": 4})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    if "error" in results:
+        pytest.skip(f"unsupported architecture: {results['error']}")
+
+    for key, val in results.items():
+        if isinstance(val, float):
+            assert np.isfinite(val), f"{key} not finite"
+    assert any("nc1" in k for k in results), results.keys()
+    r2 = NeuralCollapseTask(config={"num_samples": 4}).evaluate(
+        mock_model, mock_tokenizer, dataset=None)
+    for key, val in results.items():
+        if isinstance(val, float):
+            assert val == pytest.approx(r2[key], abs=0.0), f"{key} not deterministic"

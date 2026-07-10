@@ -23,13 +23,14 @@ class RepresentationCollapseTask(DiagnosticTask):
         Dimensionality", European Signal Processing Conference. The
         exp(Shannon-entropy-of-normalised-singular-values) erank formula
         this task reports under ``erank_per_layer``.
-      * Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv 2025 —
+      * Queipo-de-Llano, Arroyo, Barbero, Dong, Bronstein, LeCun,
+        Shwartz-Ziv 2025 —
         "Attention Sinks and Compression Valleys in LLMs are Two Sides
         of the Same Coin", arXiv:2510.06477. The erank-vs-depth profile
         is a BLME collapse/valley proxy, not the full paper pipeline.
 
     ``erank_per_layer.q75`` and ``collapse_ratio`` are BLME's top-17 and
-    top-23 partial predictors beyond scale (+0.71 and +0.68 partial ρ;
+    top-22 partial predictors beyond scale (+0.71 and +0.68 partial ρ;
     see `docs/TOP_PREDICTORS.md` §2).
     """
 

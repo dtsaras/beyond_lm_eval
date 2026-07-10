@@ -12,9 +12,11 @@ class label. Three metrics from the Neural Collapse phenomenon:
   - **NC2-equinorm**: coefficient of variation of class-mean norms
     ||μ_k - μ_global||. Lower = more equal class-mean norms.
 
-  - **NC2-ETF cosine deviation proxy**: standard deviation of pairwise
-    cosine similarities between centred class-mean vectors vs. the ETF
-    target of ``-1/(K-1)``. This is a lightweight ETF-alignment proxy,
+  - **NC2-ETF cosine deviation proxy**: MEAN ABSOLUTE deviation of
+    pairwise cosine similarities between centred class-mean vectors from
+    the ETF target ``-1/(K-1)`` (the Papyan et al. Fig. 4 maximal-angle
+    equiangularity measure; their Fig. 3 std-of-cosines is a different
+    statistic). This is a lightweight ETF-alignment proxy,
     not the full normalized Gram/Frobenius NC2 measure from Papyan et al.
 
 Because BLME is unsupervised, we use a small bundled topic-classification
@@ -32,7 +34,6 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_final_norm
 
 logger = logging.getLogger("blme")
 
@@ -116,7 +117,7 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     sigma_b = (centered.T @ centered) / K
 
     # NC1: tr(Σ_W · Σ_B⁺) / K, measured in the (K-1)-dim *Σ_B principal
-    # subspace* (Papyan, Han & Donoho 2020 Eq. 3 / §2.3). Naïve
+    # subspace* (Papyan, Han & Donoho 2020 Eq. 3-4 / §2.9, Fig. 6). Naïve
     # ``np.linalg.pinv(Σ_B, rcond=1e-10)`` keeps any eigenvalue above
     # the tiny threshold and inverts it — on real LLM hidden states
     # that promotes near-zero noise eigenvalues to ≈ 1/rcond and makes

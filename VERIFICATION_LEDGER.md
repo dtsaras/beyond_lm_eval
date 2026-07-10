@@ -413,3 +413,21 @@ eigenvalue ratio" — it is the normalized covariance-spectrum-defect score).
 Feature-value impact: magnitude AUC now computable under numpy 1.x; the three
 prior-session value-changing fixes (svd cosine, magnitude median/med-scale)
 regenerate with the pending rerun.
+
+### B6 — Geometry: similarity & depth profiles (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_cka` | CONFIRMED_CORRECT (C3): executed ACTUAL official Demo.ipynb — fixture bit-identical, BLME ≤1.8e-8 | notes/metadata provenance only |
+| `geometry_rsa` | CONFIRMED_CORRECT (C3): all 6 outputs == from-scratch Spearman AND rsatoolbox to 1.1e-16 | notes/metadata provenance only |
+| `geometry_procrustes_linearity` | CONFIRMED_CORRECT (C3): diff 0 vs ACTUAL pip llm_microscope 0.0.7 incl. rank-deficient + exact-linear anchor | NEW tasks_geometry.md section (§32) |
+| `geometry_cknna` | bit-exact vs official platonic-rep metrics.cknna @dcd76ba (C2) | B6: `_l2_normalize` preprocessing now covered (fixtures were pre-normalized — dropping it passed everything) + unnormalized full-pipeline equality; `distance_agnostic` documented non-functional (crashes in official code too) → explicit NotImplementedError; "identical inputs give 1.0" docstring corrected (~0.9999 with unbiased HSIC); NEW section §31 |
+| `geometry_hsic` | nHSIC == verbatim Kornblith cka() + explicit-H Gretton Def. 2 (3.3e-15) | B6 REFACTOR: evaluate() now calls the parity-pinned `_nhsic_from_grams` kernel (production path previously duplicated the formula inline while only an unused wrapper was pinned); docstring + docs + paper appendix corrected: anchor = FIRST BLOCK output, not input embedding |
+| `geometry_collapse` | erank == verbatim Roy-Vetterli + svdvals; analytic anchors exact | B6: max_drop/max_drop_layer now pinned (sign flip passed before); Queipo-de-Llano restored as first author (docstring/metadata/PAPERS.md); FABRICATED PAPERS.md row deleted (Thilak/Maddox + a physics arXiv id, cited nowhere in code); top-23→22; paper's collapse_ratio formula fixed (said r(L)/max, code is min/max) |
+| `geometry_neural_collapse` | NC1 == officially-RUN rhubarbwu/neural-collapse (diff 0.0) | docstring NC2-ETF proxy corrected (mean-absolute Fig. 4 measure, not "standard deviation"/Fig. 3); Eq. 3-4 pinpoint fixed (§2.9/Fig. 6, not §2.3); dead import removed; NEW behavioral evaluate() test (was string-guard only) |
+| `geometry_trajectory_curvature` | angle kernel == official curvature_utils.py 8.9e-16; aggregation == paper mean-of-per-sentence-means | DISC fixed (prior session) + NEW dedicated parity file with variable-length trajectories that DISCRIMINATE pooled vs per-sentence aggregation; docstring's false baseline-mismatch claim removed (cache layer 1 == paper L0) |
+
+Docs: tasks_geometry.md now covers all 32/32 geometry tasks (cknna §31 +
+procrustes §32 added). Feature-value impact: trajectory_curvature aggregation
+(prior session) regenerates with the rerun; hsic refactor is numerically
+identical; everything else doc/test-only.
