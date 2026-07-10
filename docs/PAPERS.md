@@ -135,10 +135,7 @@ for paper-ready release.
 | `consistency_knowledge_capacity` | Tirumala et al. 2022 / Carlini et al. 2023 memorization framing; BLME reports exact-vs-rephrased likelihood proxy, not Allen-Zhu knowledge-capacity scaling |
 | `dynamics_stability` | Wendlandt, Kummerfeld & Mihalcea 2018 (kNN-neighborhood embedding instability), arXiv:1804.09692 |
 | `dynamics_interpolation` (`trajectories.py`) | Shoemake 1985 slerp (SIGGRAPH); latent-space interpolation White 2016, arXiv:1609.04468 |
-| `geometry/hubness.py` | Tomašev et al. 2014 (cited above) |
-| `geometry/lid.py` | Levina-Bickel 2004 (cited above) |
 | `geometry/rsa.py` | Kriegeskorte 2008 (cited above) |
-| `geometry/intrinsic_dim.py` | Facco 2017 (cited above) |
 | `geometry/perplexity.py` | Shannon 1948 (bits-per-character); standard cross-entropy |
 | `geometry/tokenizer_efficiency.py` | Rust et al. 2021 for fertility; Ali et al. 2024 for tokenizer-choice/training-cost effects |
 | `geometry/unembedding.py` | effective rank (Roy & Vetterli 2007, EUSIPCO) of the MEAN-CENTERED unembedding matrix (centering changes the value ~4%); alignment/purity are BLME diagnostics |

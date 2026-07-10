@@ -2,7 +2,7 @@
 
 TASK: geometry_correlation_dimension
 BLME: src/blme/tasks/geometry/correlation_dimension.py
-      CorrelationDimensionTask.evaluate(), GP kernel lines 83-119.
+      CorrelationDimensionTask.evaluate(), GP kernel the _gp_correlation_dimension helper.
 
 Reference: Grassberger & Procaccia, Phys. Rev. Lett. 50(5) 346 (1983) and
            Physica D 9(1) 189-208 (1983); official code nolds.corr_dim.
@@ -24,7 +24,7 @@ wave1/correlation_dimension_verify.py). The bar we pin here:
       scaling-region choice, not a code bug.
 
 The BLME GP kernel below is transcribed VERBATIM from
-correlation_dimension.py lines 83-119 so the test exercises the exact numeric
+correlation_dimension.py the _gp_correlation_dimension helper so the test exercises the exact numeric
 path without importing torch / a model. src/blme is NOT modified.
 """
 
@@ -55,7 +55,7 @@ def _fixture() -> dict:
 
 # ---------------------------------------------------------------------------
 # BLME GP kernel, transcribed from src/blme/tasks/geometry/correlation_dimension.py
-# lines 83-119 (compute pairwise L2 dists -> upper triangle -> percentile-spaced
+# the _gp_correlation_dimension helper (compute pairwise L2 dists -> upper triangle -> percentile-spaced
 # logspace radii -> C(r) = fraction of pairs with dist < r -> log-log polyfit).
 # rvals override pins it against a reference on an identical radius grid.
 # ---------------------------------------------------------------------------

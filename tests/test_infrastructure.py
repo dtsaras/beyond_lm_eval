@@ -583,6 +583,39 @@ class TestNumpyTrapezoidCompat:
         m = _svd_metrics_for_layer(torch.randn(50, 8))
         assert m is not None and np.isfinite(m["svd_auc"])
 
+    def test_no_bare_np_trapezoid_calls_in_source(self):
+        """Campaign-4 B5: magnitude.py called np.trapezoid(...) directly,
+        which is NumPy>=2.0-only — REPRODUCE.md pins numpy<2.0, so
+        evaluate() crashed with AttributeError there. Every call site must
+        use the lazy `np.trapezoid if hasattr(np, "trapezoid") else
+        np.trapz` selection instead of a bare call."""
+        import pathlib
+        import re
+
+        src = pathlib.Path(__file__).resolve().parents[1] / "src" / "blme"
+        bare_call = re.compile(r"np\.trapezoid\s*\(")
+        offenders = []
+        for py in src.rglob("*.py"):
+            for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if bare_call.search(line):
+                    offenders.append(f"{py}:{i}")
+        assert not offenders, (
+            f"bare np.trapezoid( calls (crash on NumPy 1.x): {offenders}"
+        )
+
+    def test_magnitude_summary_runs_under_installed_numpy(self):
+        import numpy as np
+        from blme.tasks.geometry.magnitude import _magnitude_summary
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((20, 4))
+        sq = np.sum(X * X, axis=1)
+        D = np.sqrt(np.maximum(sq[:, None] + sq[None, :] - 2 * X @ X.T, 0.0))
+        np.fill_diagonal(D, 0.0)
+        out = _magnitude_summary(D, 6, 10.0)
+        assert np.isfinite(out["magnitude_auc"])
+
 
 def test_force_eager_covers_double_backward_tasks():
     """Regression (campaign-4 B3): dynamics_sharpness needs SECOND-order

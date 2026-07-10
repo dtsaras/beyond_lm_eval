@@ -217,6 +217,17 @@ def test_isoscore_matches_rudman_reference_package():
     X = np.array(case["points"], dtype=np.float64)
     assert _isoscore(X) == pytest.approx(case["expected"], abs=case["tol"])
 
+    # Live official-package cross-check (campaign-4 B5). Includes the N<d
+    # zero-padding branch, which no test previously exercised — deleting
+    # the padding passed the whole suite. Official IsoScore takes
+    # (n_points, n_dims), same orientation as BLME.
+    iso_mod = pytest.importorskip("IsoScore.IsoScore")
+    rng = np.random.default_rng(0)
+    Xa = rng.standard_normal((200, 16)) * np.linspace(1, 4, 16)[None, :]
+    assert _isoscore(Xa) == pytest.approx(float(iso_mod.IsoScore(Xa)), abs=1e-6)
+    Xw = rng.standard_normal((40, 128))          # N < d
+    assert _isoscore(Xw) == pytest.approx(float(iso_mod.IsoScore(Xw)), abs=1e-6)
+
 
 def test_twonn_intrinsic_dim_recovers_known_dimension_and_tracks_skdim():
     """geometry_intrinsic_dim (Two-NN, Facco et al. 2017) — formula-faithful.

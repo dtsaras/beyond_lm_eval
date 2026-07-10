@@ -9,7 +9,7 @@ This reveals whether certain inputs live on lower-dimensional sub-manifolds
 References:
 - "Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality"
   (Ma et al., ICLR 2018)
-- "Local Intrinsic Dimensionality Estimation via Maximum Likelihood"
+- "Maximum Likelihood Estimation of Intrinsic Dimension"
   (Levina & Bickel, NeurIPS 2004 — MLE-based LID)
 """
 
@@ -26,7 +26,7 @@ def _lid_mle(distances, k):
     """Maximum Likelihood Estimator for Local Intrinsic Dimensionality.
     
     Given sorted distances from a query to its k nearest neighbors,
-    estimates the local dimensionality using the MLE formula from Levina & Bickel (2004):
+    estimates the local dimensionality using the -k MLE variant of Ma et al. 2018 (Eq. 4), derived from Levina & Bickel (2004):
         LID = -k / sum_{i=1}^{k} log(d_i / d_k)
     
     Args:

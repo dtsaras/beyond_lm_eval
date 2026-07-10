@@ -217,7 +217,11 @@ def _magnitude_summary(D: np.ndarray, n_scales: int, scale_span: float) -> dict:
     # Area under log|tX| vs log t (trapezoid over finite scales).
     lt = np.log(ts[finite])
     lm = np.log(np.clip(mags[finite], 1e-12, None))
-    auc = float(np.trapezoid(lm, lt)) if lt.size >= 2 else float("nan")
+    # np.trapezoid is NumPy>=2.0-only (np.trapz removed there); REPRODUCE.md
+    # pins numpy<2.0, so use the same lazy lookup as isotropy/ablation/
+    # persistence_landscape (eager getattr would evaluate np.trapz on 2.x).
+    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+    auc = float(_trapz(lm, lt)) if lt.size >= 2 else float("nan")
 
     mag_high = float(mags[finite][-1])
     med_scale = _magnitude(D, float(t_med))  # |tX| AT t_med, not the nearest ladder point

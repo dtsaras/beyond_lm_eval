@@ -134,7 +134,7 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `geometry_correlation_dimension` | CITATION_FIX(refuted) | formula-faithful | — | CSchoel/nolds | MATCH |
 | `geometry_hsic` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_hubness` | CITATION_FIX | parity-ready | (TKDE 2014) ⚠ | VarIr/scikit-hubness | MATCH |
-| `geometry_intrinsic_dim` | CITATION_FIX | parity-ready | 1803.06992 ⚠ | scikit-dimension | MATCH |
+| `geometry_intrinsic_dim` | CITATION_FIX | formula-faithful (label deliberately conservative: mu<=1 pre-filter, not bit-exact vs skdim) | 1803.06992 ⚠ | scikit-dimension | MATCH |
 | `geometry_isoscore` | VERIFIED_PARITY | parity-ready | 2108.07344 | bcbi-edu/p_eickhoff_isoscore | MATCH |
 | `geometry_lid` | FORMULA-FAITHFUL (agent's VERIFIED_PARITY refuted) | formula-faithful | 1801.02613 | xingjunm/lid_adversarial_subspace_detection / skdim | `-k` variant, ~k/(k-1) off skdim |
 | `geometry_lipschitz` | PROXY_OK | proxy-only | 1802.05957 | avirmaux/lipEstimation | MATCH |
@@ -149,7 +149,7 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `geometry_rsa` | FAITHFUL | refined-adaptation | — | rsagroup/rsatoolbox | MATCH |
 | `geometry_schatten` | DISCREPANCY→fixed | refined-adaptation | 2410.10672 ⚠ | MLGroupJLU/MatrixNuclearNorm | fixed→MATCH |
 | `geometry_spectral` | PROXY_OK | refined-adaptation | 1810.01075 | CalculatedContent/WeightWatcher | MISMATCH (proxy) |
-| `geometry_svd` | FAITHFUL | refined-adaptation | 1909.00512 | EUSIPCO 2007 (eff. rank) | MATCH |
+| `geometry_svd` | FAITHFUL | refined-adaptation | 1909.00512 | EUSIPCO 2007 (eff. rank) | MATCH | *(avg_cosine_similarity historically deviated — centered states vs Eq. 4 raw; fixed + pinned in campaign-4 B5)*
 | `geometry_tokenizer_efficiency` | CITATION_FIX | formula-faithful | 2012.15613 ⚠ | Rust et al. 2021 (ACL) | MATCH |
 | `geometry_trajectory_curvature` | VERIFIED_PARITY | parity-ready | 2311.04930 | Hosseini & Fedorenko 2023 | MATCH |
 | `geometry_unembedding` | CITATION_FIX | proxy-only | 2503.21073 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
@@ -391,3 +391,25 @@ test), 4 skipped.
 | `geometry_schatten` | normalize+MNN == official MNN.py verbatim (0.0); NEW e2e per-sentence pipeline pin incl. the mnn/T fix (reverting /T passed all 31 tests before) | 'sqrt(D)' comment → d^(1/p); PAPERS.md checklist Wei 2025→Yusupov 2025; arXiv:2509.23024 author list corrected (Li, Agrawal, Ghosh, Teru, Santoro, Lajoie, Richards) |
 | `geometry_matrix_entropy` | NEW dedicated parity file vs verbatim official Diff-eRank fp64 transcription (≤1e-5, ln2 analytic anchor, mutant-discrimination check) — was the only parity-ready task with NO external-reference test | 512/128 cache/fresh truncation DISCREPANCY fixed (prior session, unified 512; official 2048 documented); appendix definition corrected (row-normalization step was omitted; now cites Wei et al.) |
 | `geometry_unembedding` | erank == f64 EUSIPCO re-derivation 5.4e-6 rel; purity == independent reference 1e-10 (C3); NEW exact orthogonal-cluster purity==1.0 anchor | tasks_geometry.md §17 rewritten (described angles/norms vs hidden states — the task touches neither); mean-centering now stated in PAPERS.md + paper appendix |
+
+### B5 — Geometry: dimension & diversity (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_svd` | erank/PR/AUC analytic (exact singular values, ≤1e-13); Roy-Vetterli Def. 1 verbatim | avg_cosine_similarity DISCREPANCY fixed (prior session): now Ethayarajh Eq. 4 on RAW states with self-pair rejection (centered version read ~0 even on gpt2's 0.973-anisotropy layer); B5 added the exact pin in comprehensive parity (was bound-only) + appendix/metadata/docs updated to the raw-state semantics (interpreting_results thresholds are now reachable) |
+| `geometry_isoscore` | Algorithm 1/Eq. 4.1 exact; k-of-n analytic anchors 2.2e-16; ≤4e-8 vs official IsoScore 2.0.1 | NEW live-package cases incl. the untested N<d zero-padding branch (9e-9); Rayne author initial fixed |
+| `geometry_lid` | _lid_mle bit-exact (0.0) vs official xingjunm mle_batch; pipeline ≤4.3e-7 | 2 CITATIONs fixed: fabricated Levina-Bickel title + the −k formula is Ma et al. 2018 Eq. 4 (not L-B, whose canonical form is −(k−1)) |
+| `geometry_intrinsic_dim` | bit-identical (0.0) to skdim _TwoNN transcription on analytic Pareto samples | fabricated "Fig. 3" sub-1-estimate attribution removed (paper never discusses it; honest rationale = Pareto support); ledger cert reconciled to formula-faithful; stale PAPERS.md weak-citation rows dropped |
+| `geometry_correlation_dimension` | matches official nolds.corr_dim (live) after removing nolds' self-match artifact | REPOSITORIES.md pointed at a NONEXISTENT giotto-tda CorrelationDimension → nolds/skdim; 4 stale pre-extraction line references updated |
+| `geometry_phd_dimension` | seed-matched bit-exact (0.0) vs official GPTID, default + non-default schedules + α=0.5 | docstring inversion formula was mathematically wrong (α/(α−m) → α/(1−m)); GPTID's α-independent 1/(1−m) noted; refrepo path fixed in B1 so parity RUNS |
+| `geometry_magnitude` | bit-exact vs 5 official magnipy paths (≤2.8e-14) + Leinster line closed form (8.9e-16) | BUG fixed: bare np.trapezoid crashed on numpy 1.x (REPRODUCE pins numpy<2) → lazy lookup + NEW source-guard test; 2 DISCREPANCIES fixed (prior session, now reference-pinned live vs magnipy in B5): median-heuristic includes zero distances (duplicate clouds), med_scale = |tX| AT t_med |
+| `geometry_vendi_score` | bit-exact vs official score_K/score_X (live pip) | docstring's false "unbiased estimate" claim → deterministic size-CAPPED estimate (VS ≤ max_points, eye(1000)@512 → 512 not 1000) |
+
+Docs: tasks_geometry.md gained paper summaries + verification for the 5 existing
+sections and NEW sections for magnitude/vendi/phd (§28–30; cknna + procrustes
+follow in B6). Paper appendix: svd cosine entry now states the raw-state Eq. 4
+sampler; isoscore catalogue row corrected (was described as a "geometric-mean
+eigenvalue ratio" — it is the normalized covariance-spectrum-defect score).
+Feature-value impact: magnitude AUC now computable under numpy 1.x; the three
+prior-session value-changing fixes (svd cosine, magnitude median/med-scale)
+regenerate with the pending rerun.

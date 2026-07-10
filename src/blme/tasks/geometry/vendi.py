@@ -154,9 +154,13 @@ def _layer_vendi(cloud, kernel: str, gamma: float, max_points: int, seed: int) -
     """Vendi Score for one layer's (N, D) token cloud.
 
     Subsamples to ``max_points`` rows (deterministic seed) because the
-    kernel and its eigendecomposition are O(N^2)/O(N^3); the Vendi Score
-    is a diversity statistic of the cloud, so a fixed random subsample is
-    an unbiased estimate at controlled cost.
+    kernel and its eigendecomposition are O(N^2)/O(N^3). NOTE: this is a
+    deterministic size-CAPPED estimate, not an unbiased one — VS of a
+    subsample is bounded by ``max_points``, so clouds with more than
+    ``max_points`` effectively-distinct rows are under-reported (e.g.
+    eye(1000) at max_points=512 gives ~512, not ~1000). The cap and the
+    per-layer point counts are exposed via ``_meta_n_points_per_layer``
+    and the normalized variant.
     """
     arr = _to_numpy(cloud)
     if arr.ndim != 2 or arr.shape[0] == 0:

@@ -31,6 +31,8 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Levina, E. & Bickel, P. J. (2004). Maximum Likelihood Estimation of Intrinsic Dimension.` [NeurIPS 2004]. Secondary: `Ma, X., et al. (2018). Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality.` [ICLR 2018]
 * **File & Function**: `src/blme/tasks/geometry/lid.py` -> `LocalIntrinsicDimensionalityTask`
 * **Critical Info**: LID changes drastically from shallow layers to deep layers, often forming an "intrinsic dimension bottleneck."
+* **Paper summary**: Levina & Bickel derive the MLE of intrinsic dimension from nearest-neighbor distances by modeling them as a Poisson process (their canonical form sums to k−1). Ma et al. adapt it (the −k variant, their Eq. 4) to characterize adversarial subspaces, showing LID rises sharply for adversarial examples. BLME implements Ma et al.'s −k variant (per-point), reporting mean/std/median/min/max.
+* **Verification** (2026-07, campaign B5): `_lid_mle` bit-exact (diff 0.0) vs the official xingjunm `mle_batch` transcription; full-pipeline ≤4.3e-7 on 200×32. Docstring citations corrected: the Levina-Bickel title was fabricated ("Local Intrinsic Dimensionality Estimation via Maximum Likelihood" → real title) and the −k formula is Ma et al. 2018's, not Levina-Bickel's (metadata note was already accurate).
 
 ## 2. Lipschitz Continuity Analysis
 * **What are we measuring**: The local smoothness and sensitivity of the model to small perturbations in the input space.
@@ -82,6 +84,8 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Grassberger, P. & Procaccia, I. (1983). Characterization of strange attractors.` [Phys. Rev. Lett. 50(5)]. BLME uses the classical estimator; it does not implement a paper-specific LLM correlation-dimension pipeline.
 * **File & Function**: `src/blme/tasks/geometry/correlation_dimension.py` -> `CorrelationDimensionTask`
 * **Critical Info**: Requires larger sample sizes to compute pairwise distances effectively. Normal text generally exhibits a non-integer structural dimension around ~6-7.
+* **Paper summary**: Grassberger & Procaccia define the correlation integral C(r) — the fraction of point pairs within distance r — and show its log-log slope ν (the correlation dimension) measures an attractor's fractal dimensionality from a finite sample; it lower-bounds the Hausdorff dimension and became the standard practical estimator.
+* **Verification** (2026-07, campaign B5): kernel matches official `nolds.corr_dim` (run live in the parity suite) after removing nolds' diagonal self-match artifact; slope-invariant normalization difference vs the paper's 1/N² documented. Stale references to the pre-extraction inline kernel updated (helper `_gp_correlation_dimension` since 754e06b); REPOSITORIES.md pointer fixed (giotto-tda has no CorrelationDimension — nolds/skdim are the real references).
 
 ## 8. Positional Attention Decay (RoPE Geometry)
 * **What are we measuring**: The structural integrity and geometric degradation of context windows.
@@ -93,11 +97,13 @@ efficiency diagnostics, not standalone proof of downstream quality.
 
 ## 9. SVD Isotropy (geometry_svd)
 * **What are we measuring**: The isotropy (roundness) of the representation space.
-* **How are we measuring**: Decomposing the hidden state matrix with SVD and calculating the ratio of the top singular value to the sum of all singular values, or looking at the variance drop-off.
+* **How are we measuring**: Centered SVD of the hidden-state matrix → Roy-Vetterli effective rank, participation ratio, and spectral AUC; plus the Ethayarajh Eq. 4 anisotropy baseline — the mean cosine of ~1000 sampled pairs of RAW (uncentered) states, self-pairs excluded.
 * **Hypothesis**: Highly anisotropic spaces (e.g., dominating outlier dimensions) collapse semantics into a narrow cone, degrading similarity metrics. Isotropic spaces utilize capacity more uniformly.
 * **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [EMNLP 2019, ArXiv: 1909.00512]
 * **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `SVDIsotropyTask`
 * **Critical Info**: Language models almost always suffer from an "anisotropy cone" unless explicitly regularized or normalized.
+* **Paper summary**: Ethayarajh shows contextual representations are highly anisotropic — random word pairs have near-1 cosine similarity in upper layers of GPT-2/BERT/ELMo — so isotropy-corrected measures are needed; the anisotropy baseline (his Eq. 4) is the expected cosine between uniformly sampled occurrence pairs on raw representations.
+* **Verification** (2026-07, campaign B5): erank/PR/AUC pinned analytically (exact singular values, ≤1e-13) and vs the official IsoScore package; `avg_cosine_similarity` historically deviated — it was computed on CENTERED states (reads ~0 always, −0.047 on gpt2 where Eq. 4 gives 0.973) — now computed on raw states with self-pair rejection per the cited definition, and exact-pinned in the comprehensive parity test (was bound-checked only).
 
 ## 10. Hubness
 * **What are we measuring**: The tendency of certain tokens to be the "nearest neighbor" of an unusually high number of other tokens in latent space.
@@ -184,6 +190,8 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Facco, E., d'Errico, M., Rodriguez, A., & Laio, A. (2017). Estimating the intrinsic dimension of datasets by a minimal neighborhood information.` [Scientific Reports]
 * **File & Function**: `src/blme/tasks/geometry/intrinsic_dim.py` -> `IntrinsicDimensionTask`
 * **Critical Info**: Returns a single global scalar, contrasting with Local Intrinsic Dimensionality (LID) which assesses local point neighborhoods.
+* **Paper summary**: Facco et al.'s Two-NN estimates global intrinsic dimension from only the two nearest neighbors of each point: the ratio μ = r2/r1 follows a Pareto distribution with exponent d, so a straight-line fit through the origin of the empirical CDF recovers d — minimizing the effect of density variation and curvature; they discard the top 10% of μ values for robustness (BLME matches, tail_trim=0.1).
+* **Verification** (2026-07, campaign B5): bit-identical (0.0) to a verbatim skdim 0.3.4 `_TwoNN` fit transcription on analytic Pareto samples; formula-faithful label kept deliberately conservative (μ≤1 pre-filter deviates from skdim on duplicate-heavy data). Docstring corrected: the paper never discusses sub-1 estimates (a "Fig. 3" claim was fabricated) — the honest rationale is the Pareto support d ∈ (0, ∞); ledger cert label reconciled.
 
 ## 20. Trajectory Curvature (geometry_trajectory_curvature)
 * **What are we measuring**: How straight the token-position trajectory of a sentence is at each layer, and how much deeper layers *straighten* it.
@@ -215,9 +223,11 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **What are we measuring**: Uniformity of embedding-space dimension utilization.
 * **How are we measuring**: Applying Rudman et al.'s covariance-isotropy IsoScore to hidden-state clouds.
 * **Hypothesis**: More isotropic representations use dimensional capacity more evenly and avoid narrow anisotropy cones.
-* **Citation/Paper**: `Rudman, W., Gillman, N., Rayne, S., & Eickhoff, C. (2022). IsoScore: Measuring the Uniformity of Embedding Space Utilization.` [Findings of ACL 2022, ArXiv: 2108.07344]
+* **Citation/Paper**: `Rudman, W., Gillman, N., Rayne, T., & Eickhoff, C. (2022). IsoScore: Measuring the Uniformity of Embedding Space Utilization.` [Findings of ACL 2022, ArXiv: 2108.07344]
 * **File & Function**: `src/blme/tasks/geometry/isotropy.py` -> `IsoScoreTask`
 * **Critical Info**: Distinct from `geometry_svd`, which reports generic SVD/effective-rank diagnostics.
+* **Paper summary**: Rudman et al.'s IsoScore measures what fraction of dimensions a point cloud uses uniformly: PCA-align, L2-normalize the covariance spectrum, measure its distance from the identity, and rescale so an isotropic cloud scores 1 and a 1-dimensional cloud scores ~0 (Algorithm 1 / Eq. 4.1); unlike partition-function isotropy measures it is rotation-invariant and has an exact k-of-n interpretation.
+* **Verification** (2026-07, campaign B5): exact analytic anchors — k-of-n isotropic dims → (k−1)/(n−1) to 2.2e-16; ≤4e-8 vs the official IsoScore 2.0.1 package in all regimes; NEW live-package cases added including the previously untested N<d zero-padding branch (agrees to 9e-9). Author-initial typo fixed (Taylor Rayne).
 
 ## 24. Neural Collapse
 * **What are we measuring**: Topic-label neural-collapse proxies on a bundled labelled corpus.
@@ -254,3 +264,33 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Critical Info**: Use alongside `geometry_spectral`; do not interpret raw norm size without architecture context. `norm_uniformity` = max(0, 1 − CV) — clamped at zero (now documented). 3-D fused-MoE expert tensors are handled by per-expert slicing (campaign-3 BUG: they silently got spectral_norm=Frobenius and stable_rank=1.0).
 * **Verification** (2026-07, campaign B4): analytic planted-singular-value parity (frob/spec/srank/uniformity ≤1.2e-6); stable rank agrees with the actual pip weightwatcher `stable_rank` on all distilgpt2 layers (9.2e-5 rel); ledger/metadata certification reconciled to formula-faithful.
 
+
+## 28. Metric-Space Magnitude (geometry_magnitude)
+* **What are we measuring**: The "effective number of distinct points" of a representation cloud across geometric scales — a diversity/structure summary from category theory.
+* **How are we measuring**: Magnitude |tX| = 1ᵀ ζ⁻¹ 1 with ζ_ij = exp(−t·d_ij), evaluated on a geometric ladder of scales around the magnipy median-heuristic scale; summaries: magnitude at t_med (computed directly at t_med), log-log AUC (magnitude function area), and the magnitude dimension (max log-log slope).
+* **Hypothesis**: Magnitude profiles capture multi-scale diversity: higher magnitude at moderate scales = more effectively distinct representations; the magnitude dimension proxies intrinsic dimensionality.
+* **Citation/Paper**: `Limbeck, K., Andreeva, R., Sarkar, R., & Rieck, B. (2024). Metric Space Magnitude for Evaluating the Diversity of Latent Representations.` [NeurIPS 2024, ArXiv: 2311.16054]
+* **Paper summary**: Limbeck et al. bring Leinster's metric-space magnitude to representation learning: magnitude counts the effective number of distinct points as a function of scale, and its area/dimension summaries quantify diversity robustly. They propose magnitude-based diversity measures for embeddings and validate against known diversity manipulations. BLME's scale ladder + log-log AUC are documented BLME choices (the paper uses its own convergence-scale selection).
+* **File & Function**: `src/blme/tasks/geometry/magnitude.py` -> `MagnitudeTask`
+* **Critical Info**: O(n³) solve per scale — point counts are capped. Duplicate points make ζ singular; a perturbation fallback matching magnipy is used.
+* **Verification** (2026-07, campaign B5): `_magnitude` bit-exact vs FIVE official magnipy paths (≤2.8e-14) + Leinster line-subset closed form (1+Σtanh(t·gap/2), 8.9e-16); B5 pinned the median-heuristic scale against live magnipy INCLUDING duplicate clouds (the historic zero-distance filter deviation is fixed), `magnitude_med_scale` is now |tX| at t_med exactly, and the numpy-1.x `np.trapezoid` crash is fixed with a source-level guard test.
+
+## 29. Vendi Score (geometry_vendi_score)
+* **What are we measuring**: The effective number of distinct samples in a representation cloud — exp of the Shannon entropy of the similarity-kernel eigenvalues.
+* **How are we measuring**: Cosine (or RBF) kernel K with unit diagonal over (subsampled) hidden states; VS = exp(−Σ λ_i log λ_i) for eigenvalues of K/n.
+* **Hypothesis**: Higher Vendi score = more diverse representations; unlike effective rank / RankMe it uses a NONLINEAR kernel, so it measures sample diversity rather than linear-subspace utilization.
+* **Citation/Paper**: `Friedman, D. & Dieng, A. B. (2023). The Vendi Score: A Diversity Evaluation Metric for Machine Learning.` [TMLR 2023, ArXiv: 2210.02410]
+* **Paper summary**: Friedman & Dieng define the Vendi Score as the exponential of the von Neumann entropy of a similarity kernel — a reference-free diversity metric requiring no labels or reference distribution, interpretable as the effective number of dissimilar samples. They apply it across modalities to diagnose mode collapse and diversity trade-offs.
+* **File & Function**: `src/blme/tasks/geometry/vendi.py` -> `VendiScoreTask`
+* **Critical Info**: Subsampling to `max_points` gives a deterministic size-CAPPED estimate (VS ≤ max_points) — not unbiased (docstring corrected in B5); the cap is exposed via `_meta_n_points_per_layer` and the normalized variant.
+* **Verification** (2026-07, campaign B5/C2): bit-exact vs official `vendi_score.vendi.score_K` on the same kernel (live pip package); independent eigvalsh Definition-1 re-derivation 0.0–1.4e-14; official `score_X(normalize=True)` path matches to 8.9e-16.
+
+## 30. Persistent-Homology Dimension (geometry_phd_dimension)
+* **What are we measuring**: A topologically-motivated intrinsic dimension: how total minimum-spanning-tree edge length scales with sample size.
+* **How are we measuring**: The GPTID estimator: for subsample sizes n, the total H0 persistence (MST length) E(n) scales as n^((d−1)/d) (α=1); d is recovered from the log-log slope m as d = 1/(1−m), with medians over subsamples and averaged restarts.
+* **Hypothesis**: Lower PHD = more compressed, lower-dimensional representation manifolds; Tulchinskii et al. show PHD separates human from AI-generated text.
+* **Citation/Paper**: `Tulchinskii, E., Kuznetsov, K., Kushnareva, L., Cherniavskii, D., Nikolenko, S., Burnaev, E., Barannikov, S., & Piontkovskaya, I. (2023). Intrinsic Dimension Estimation for Robust Detection of AI-Generated Texts.` [NeurIPS 2023, ArXiv: 2306.04723]
+* **Paper summary**: The paper shows text embeddings of human-written text have a characteristically higher persistent-homology dimension (~9 for human vs ~7 for generated English), giving a robust AI-text detector that survives domain shift. The PHD estimator itself (MST-length power law) goes back to Birdal et al.'s topological generalization bounds; Tulchinskii et al.'s GPTID implementation is the official reference.
+* **File & Function**: `src/blme/tasks/geometry/phd_dimension.py` -> `PHDimensionTask`
+* **Critical Info**: Stochastic estimator — RNG-pinned for determinism. The general-α inversion in the docstring is d = α/(1−m) (a wrong formula α/(α−m) was fixed in B5); GPTID returns 1/(1−m) regardless of α, correct only at α=1 (documented).
+* **Verification** (2026-07, campaign B5/C2): seed-matched bit-exact (diff 0.0) vs official ArGintum/GPTID on default AND non-default schedules including α=0.5; reference checkout at `~/.cache/blme-refrepos/GPTID` (B1 infra) so the parity tests run rather than skip.

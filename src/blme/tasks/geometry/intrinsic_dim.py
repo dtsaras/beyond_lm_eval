@@ -196,10 +196,11 @@ def _twonn_linear_fit(mus: np.ndarray, tail_trim: float = 0.1) -> float:
     heavy upper tail on the slope. We do NOT trim the lower tail —
     small μ's (μ ≈ 1) are the most informative points, not noise.
 
-    We also do NOT floor the estimate at 1: the paper explicitly
-    observes the estimate dipping below 1 on near-degenerate geometries
-    (Fig. 3) and treats that as a diagnostic signal, not an error. If
-    the downstream analysis wants a lower bound it can apply one
+    We also do NOT floor the estimate at 1: the Two-NN Pareto model has
+    support d in (0, inf), so estimates below 1 are valid outputs on
+    near-degenerate geometries and carry diagnostic signal. (The paper
+    itself never discusses sub-1 estimates — no floor is implied by it.)
+    If the downstream analysis wants a lower bound it can apply one
     explicitly.
     """
     if mus.size == 0:

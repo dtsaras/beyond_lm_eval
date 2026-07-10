@@ -27,7 +27,11 @@ persistent-homology fractal dimension):
     so, fitting the exponent  m = slope of  log E vs log n  across several
     subsample sizes n, the intrinsic dimension is recovered as
 
-        d = alpha / (alpha - m)   ==>  (alpha = 1)   d = 1 / (1 - m).
+        d = alpha / (1 - m)   ==>  (alpha = 1)   d = 1 / (1 - m)
+
+    (from E ~ n^((d-alpha)/d), the slope is m = 1 - alpha/d; note the
+    official GPTID code returns 1/(1-m) regardless of alpha, which is
+    only the correct inversion at alpha = 1).
 
     The reference computes, for each candidate size n in ``range(min_points,
     max_points, point_jump)``, the *median* MST weight over ``n_points``

@@ -311,3 +311,47 @@ def test_fixture_records_parity_verdict():
     assert anchors["single_point"]["pass"] is True
     assert anchors["two_points_large_t"]["pass"] is True
     assert anchors["n_separated_large_t"]["pass"] is True
+
+
+def test_median_heuristic_matches_magnipy_including_duplicates():
+    """Campaign-4 B5: the median-heuristic scale was never reference-pinned,
+    which hid a zero-distance pre-filter deviation on duplicate points
+    (BLME 1.0 vs magnipy 1.1547 on the probe cloud). BLME now matches
+    magnipy's median over ALL upper-triangle distances."""
+    scales = pytest.importorskip("magnipy.magnitude.scales")
+    from scipy.spatial.distance import pdist, squareform
+    from blme.tasks.geometry.magnitude import _median_heuristic_scale
+
+    rng = np.random.default_rng(0)
+    D_clean = squareform(pdist(rng.standard_normal((30, 5))))
+    assert _median_heuristic_scale(D_clean) == pytest.approx(
+        float(scales.median_heuristic_from_distances(D_clean)), abs=0.0
+    )
+
+    # Duplicate-point probe cloud from the campaign finding.
+    X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+    D_dup = squareform(pdist(X))
+    t_blme = _median_heuristic_scale(D_dup)
+    t_ref = float(scales.median_heuristic_from_distances(D_dup))
+    assert t_blme == pytest.approx(t_ref, abs=0.0)
+    assert t_blme == pytest.approx(1.1547005383792517, abs=1e-12)
+
+
+def test_duplicate_cloud_magnitude_matches_magnipy():
+    """Duplicate points make zeta singular; both BLME and magnipy fall back
+    to a perturbed/pinv solve. Pin the duplicate-cloud magnitude against
+    live magnipy (campaign measured 2.209641094842 from both)."""
+    magnipy_compute = pytest.importorskip("magnipy.magnitude.compute")
+    from scipy.spatial.distance import pdist, squareform
+    from blme.tasks.geometry.magnitude import _magnitude
+
+    X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+    D = squareform(pdist(X))
+    t = 1.0
+    got = _magnitude(D, t)
+    ref = float(np.sum(magnipy_compute.compute_magnitude_until_convergence(
+        D * t, ts=[1.0], method="cholesky", perturb_singularities=True,
+    )[0])) if hasattr(magnipy_compute, "compute_magnitude_until_convergence") else None
+    if ref is None:
+        pytest.skip("magnipy API changed; update reference call")
+    assert got == pytest.approx(ref, rel=1e-9)

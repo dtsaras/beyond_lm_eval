@@ -35,7 +35,7 @@ Last updated: **2026-07** (Campaign-2 additions section).
 | **Rudman et al. 2022** — IsoScore | arXiv:2108.07344, ACL Findings 2022 | [bcbi-edu/p_eickhoff_isoscore](https://github.com/bcbi-edu/p_eickhoff_isoscore) | HIGH |
 | **Tomašev et al. 2014** — Hubness | IEEE TKDE 2014 | [VarIr/scikit-hubness](https://github.com/VarIr/scikit-hubness) | MEDIUM |
 | **Ethayarajh 2019** — Contextualization | arXiv:1909.00512, EMNLP 2019 | [kawine/contextual](https://github.com/kawine/contextual) | HIGH |
-| **Grassberger, Procaccia 1983** — Correlation Dim | Phys. Rev. Lett. 50(5) | no author repo; [giotto-tda](https://github.com/giotto-ai/giotto-tda) has `CorrelationDimension` | MEDIUM |
+| **Grassberger, Procaccia 1983** — Correlation Dim | Phys. Rev. Lett. 50(5) | [CSchoel/nolds](https://github.com/CSchoel/nolds) (`nolds.corr_dim`, executed in the parity suite); also `skdim.id.CorrInt` | HIGH |
 | **Martin & Mahoney 2019/2020; Martin, Peng & Mahoney 2021** — Heavy-Tailed α | arXiv:1901.08276, 1901.08278 (SDM 2020), 2002.06716 (Nat. Comms. 12:4122) | [CalculatedContent/WeightWatcher](https://github.com/CalculatedContent/WeightWatcher) | HIGH |
 | **Lee et al. 2018** — Mahalanobis OOD | arXiv:1807.03888, NeurIPS 2018 | [pokaxpoka/deep_Mahalanobis_detector](https://github.com/pokaxpoka/deep_Mahalanobis_detector) | HIGH |
 | **Wei et al. 2024** — Matrix Entropy / Diff-eRank | arXiv:2401.17139, NeurIPS 2024 | [waltonfuture/Matrix-Entropy](https://github.com/waltonfuture/Matrix-Entropy) | HIGH |

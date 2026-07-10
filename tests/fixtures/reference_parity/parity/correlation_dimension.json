@@ -1,7 +1,7 @@
 {
   "task": "geometry_correlation_dimension",
   "blme_file": "src/blme/tasks/geometry/correlation_dimension.py",
-  "blme_lines": "83-119 (GP kernel inside CorrelationDimensionTask.evaluate)",
+  "blme_lines": "_gp_correlation_dimension (GP kernel inside CorrelationDimensionTask.evaluate)",
   "label": "FORMULA-FAITHFUL / PROXY",
   "paper": [
     "Grassberger & Procaccia, Phys. Rev. Lett. 50(5) 346 (1983)",

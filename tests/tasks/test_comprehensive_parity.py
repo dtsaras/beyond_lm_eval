@@ -3017,7 +3017,7 @@ def test_geometry_correlation_dimension():
     power law C(r) ~ r^D, that slope estimates the cloud's correlation
     dimension D.
 
-    The estimator logic is inline in evaluate() (no importable helper), so we
+    The estimator logic is module-level in evaluate() (helper _gp_correlation_dimension importable since 754e06b), so we
     drive the FULL task on controlled point clouds via a stub model whose
     final hidden state for sample i is a precomputed point P[i] (mean-pooling
     over a length-1 sequence returns the point unchanged).
@@ -4074,7 +4074,18 @@ def test_geometry_svd():
 
     # For this well-conditioned full-rank N>D matrix, numerical rank == D.
     assert nrank_ref == D
-    # avg_cosine_similarity is a sampled statistic in (-1, 1); sanity bound.
+    # avg_cosine_similarity: exact pin against an independent transcription
+    # of the Ethayarajh 2019 Eq. 4 sampler semantics — RAW (uncentered)
+    # states, seeded pairs, self-pairs rejected. (Was bound-checked only;
+    # the historic centered-states deviation was invisible.)
+    rng_ref = np.random.default_rng(42)
+    idx = rng_ref.choice(len(X), size=(min(1000, len(X)), 2), replace=True)
+    keep = idx[:, 0] != idx[:, 1]
+    idx = idx[keep] if keep.any() else idx
+    v1 = X[idx[:, 0]] / (np.linalg.norm(X[idx[:, 0]], axis=1, keepdims=True) + 1e-9)
+    v2 = X[idx[:, 1]] / (np.linalg.norm(X[idx[:, 1]], axis=1, keepdims=True) + 1e-9)
+    ref_cos = float(np.mean(np.sum(v1 * v2, axis=1)))
+    assert m["avg_cosine_similarity"] == pytest.approx(ref_cos, abs=1e-9)
     assert -1.0 <= m["avg_cosine_similarity"] <= 1.0
 
     # ---------- PART B: _isoscore vs the independent IsoScore pip package ----------
