@@ -130,7 +130,7 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `geometry_categories` | PROXY_OK | proxy-only | — | scipy.spatial.distance | MATCH |
 | `geometry_cka` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_collapse` | CITATION_FIX | refined-adaptation | 2110.09348 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
-| `geometry_contextualization` | DISCREPANCY→fixed | formula-faithful | 1909.00512 | kawine/contextual (analyze.py) | fixed→MATCH |
+| `geometry_contextualization` | DISCREPANCY→fixed | refined-adaptation (ledger label corrected 2026-07; shipped metadata was always refined-adaptation) | 1909.00512 | kawine/contextual (analyze.py) | fixed→MATCH |
 | `geometry_correlation_dimension` | CITATION_FIX(refuted) | formula-faithful | — | CSchoel/nolds | MATCH |
 | `geometry_hsic` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_hubness` | CITATION_FIX | parity-ready | (TKDE 2014) ⚠ | VarIr/scikit-hubness | MATCH |
@@ -143,14 +143,14 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `geometry_mp_bulk_deviation` | VERIFIED_PARITY | parity-ready | math/0403022 | AlejandroSantorum/scikit-rmt | MATCH |
 | `geometry_neural_collapse` | VERIFIED_PARITY | formula-faithful | 2008.08186 | neuralcollapse/neuralcollapse | MATCH |
 | `geometry_perplexity` | FAITHFUL | formula-faithful | — | HF transformers perplexity | MATCH |
-| `geometry_positional_decay` | PROXY_OK | proxy-only | 2104.09864 ⚠ | (RoPE lit.) | MATCH |
+| `geometry_positional_decay` | PROXY_OK | proxy-only | 2104.09864 (verified correct 2026-07; stale flag removed) | (RoPE lit.) | MATCH |
 | `geometry_prediction_alignment` | PROXY_OK | proxy-only | 2303.08112 | AlignmentResearch/tuned-lens | MATCH |
 | `geometry_representation_sensitivity` | PROXY_OK | proxy-only | — ⚠ | torch.autograd | MATCH |
 | `geometry_rsa` | FAITHFUL | refined-adaptation | — | rsagroup/rsatoolbox | MATCH |
 | `geometry_schatten` | DISCREPANCY→fixed | refined-adaptation | 2410.10672 ⚠ | MLGroupJLU/MatrixNuclearNorm | fixed→MATCH |
 | `geometry_spectral` | PROXY_OK | refined-adaptation | 1810.01075 | CalculatedContent/WeightWatcher | MISMATCH (proxy) |
 | `geometry_svd` | FAITHFUL | refined-adaptation | 1909.00512 | EUSIPCO 2007 (eff. rank) | MATCH | *(avg_cosine_similarity historically deviated — centered states vs Eq. 4 raw; fixed + pinned in campaign-4 B5)*
-| `geometry_tokenizer_efficiency` | CITATION_FIX | formula-faithful | 2012.15613 ⚠ | Rust et al. 2021 (ACL) | MATCH |
+| `geometry_tokenizer_efficiency` | CITATION_FIX | proxy-only (ledger label corrected 2026-07, matches task_metadata) | 2012.15613 ⚠ | Rust et al. 2021 (ACL) | MATCH |
 | `geometry_trajectory_curvature` | VERIFIED_PARITY | parity-ready | 2311.04930 | Hosseini & Fedorenko 2023 | MATCH |
 | `geometry_unembedding` | CITATION_FIX | proxy-only | 2503.21073 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
 | `geometry_weight_norms` | VERIFIED_PARITY | formula-faithful | 1901.08276 | CalculatedContent/WeightWatcher | MATCH |
@@ -371,9 +371,10 @@ hidden-state noise injection — both wrong). Feature-value impact: sharpness
 trace/top-eig now deterministic per seed (values will shift once at regen, then be
 stable); everything else unchanged.
 
-Known pre-existing failure (out of campaign scope, per user 2026-07-10):
-`tests/tasks/test_interpretability.py::test_superposition_index` fails on 11
-mock architectures at HEAD (numpy 'safe' cast TypeError in
+Known pre-existing failures (out of campaign scope, per user 2026-07-10):
+`tests/tasks/test_interpretability.py::test_superposition_index` (11 mock
+architectures) and `test_task_results_independent_of_global_rng[...superposition...]`
+(same np.place dtype-cast root cause) fail at HEAD (numpy 'safe' cast TypeError in
 `superposition.py:47 _multimodality_score`, float64 vals into float32 arr via
 np.place) — interpretability family, deferred to the follow-up mech-interp
 paper. Full-suite status at B3 commit: 1217 passed, 11 failed (all this one
@@ -431,3 +432,36 @@ Docs: tasks_geometry.md now covers all 32/32 geometry tasks (cknna §31 +
 procrustes §32 added). Feature-value impact: trajectory_curvature aggregation
 (prior session) regenerates with the rerun; hsic refactor is numerically
 identical; everything else doc/test-only.
+
+### B7 — Geometry: corpus & behavioral (8/8 tasks CLOSED) — CAMPAIGN COMPLETE
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_perplexity` | NEW parity file: overall/rare/freq PPL + BPC reconstructed independently (f64 log-softmax, (count,id) bucket sort) ≤1e-4 on gpt2 | both C3 BUGs fixed (prior session) + now regression-pinned: BOS-tokenizer BPC desync (~13% low) via a BOS-emulating wrapper tokenizer; empty-text crash via a mixed corpus test; rare/freq buckets pinned (only finiteness-checked before) |
+| `geometry_mahalanobis` | kernel == official deep_Mahalanobis_detector (0.0); LW-vs-empirical proxy deviation quantified | held-out-duplicate BUG fixed (prior session, text-disjoint ID pool + test); NEW analytic pin for the sklearn-free pinv fallback (zero coverage — ridge/ddof drift was invisible); Eq. 2 (not Eq. 3) reference fixed ×2 |
+| `geometry_contextualization` | SelfSim/IntraSim/MEV == official kawine/contextual ≤3.3e-16 | NEW value pins for the 3 uncovered kernels (MEV vs sklearn PCA + centering-mutant check; pairwise-mean vs full triu; anisotropy exact ray anchor); MEV documented UNADJUSTED (paper headline adjusted — not comparable); ledger cert reconciled |
+| `geometry_tokenizer_efficiency` | analytic fake-tokenizer anchors exact | FABRICATED author list fixed ('Rajput, Chamberlain, Reese' → Ali, Fromm, Thellmann et al., arXiv:2310.08754); fertility credited to Ács 2019 via Rust et al.; +0.71→+0.71–0.77 range; ledger cert → proxy-only |
+| `geometry_positional_decay` | Spearman kernel == hand-written tie-averaged reference 1.1e-16 | stale ledger ⚠ flag removed (citations verified correct: RoFormer decay premise + ALiBi) |
+| `geometry_categories` | separation/purity already pinned | NEW coverage for never-executed kernels: relation consistency + analogy exact (constant-relation construction → both 1.0 analytically); hub_skew/hub_max vs independent k-occurrence recomputation |
+| `geometry_prediction_alignment` | tied model == pure-numpy cosine ≤7e-9 | NEW untied-head numeric pin (re-randomized lm_head: projection MUST be lm_head.weight — the central advertised claim was source-grep-guarded only) |
+| `geometry_representation_sensitivity` | closed form == f64 autograd + finite differences (1.1e-6 rel, fp32 round-off) | NEW bias-ful-head cross-check (the `logits += bias` branch had zero coverage); docstring's non-existent Amari (title, year) pairing → Natural Gradient Works Efficiently in Learning, Neural Computation 10(2) |
+
+## Campaign 4 — FINAL STATUS (2026-07-10)
+
+**All 47 structural-paper tasks closed** across 7 batches (B1 topology 5, B2 RepE 4,
+B3 dynamics 6, B4–B7 geometry 32). Every standing Campaign-3 BUG/DISCREPANCY for
+in-scope tasks is fixed with a regression test; every WEAK_TEST that guarded
+correctness is closed with a numeric pin (official code, analytic anchor, or
+independent reimplementation); every CITATION finding is corrected at source,
+in docs, and in the paper bibliography; every task carries a paper summary +
+verification-provenance entry in docs/tasks_<category>.md (geometry now 32/32).
+Out-of-scope (per user, 2026-07-10): interpretability/causality/consistency
+families — including the known-red test_superposition_index — deferred to the
+follow-up mech-interp paper.
+
+Value-changing fixes requiring results regeneration (already pending per the
+scope-reset plan): homology/betti (≤2-layer models), steering (first-ever
+values), task-vector norms (+normalized keys), sharpness (seeded + force-eager:
+first default-pipeline values), trajectory curvature (per-sentence aggregation),
+svd cosine (raw-state Eq. 4), magnitude (median scale + med-scale + numpy-1.x),
+mahalanobis (held-out), perplexity BPC (BOS models), topology _norm keys.

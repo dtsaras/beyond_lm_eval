@@ -59,6 +59,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Lee, K., Lee, K., Lee, H., & Shin, J. (2018). A simple unified framework for detecting out-of-distribution samples and adversarial attacks.` [ArXiv: 1807.03888]
 * **File & Function**: `src/blme/tasks/geometry/mahalanobis.py` -> `MahalanobisOODTask`
 * **Critical Info**: The covariance matrix must be inverted or pseudo-inverted. High-dimensional spaces ($d > N$) require Tikhonov regularization (adding $\epsilon I$) to prevent singularity.
+* **Verification** (2026-07, campaign B7): distance == official deep_Mahalanobis_detector kernel (sqrt(−2·term_gau), diff 0.0 at matched precision); Ledoit-Wolf-vs-empirical proxy deviation quantified & documented; the dataset=None held-out bug (scored duplicates of fit texts, inverting the OOD conclusion) fixed with a distinct ID pool + regression test; NEW analytic pin for the sklearn-free pinv fallback (closed-form diagonal-covariance case); paper's Eq. 2 (not Eq. 3) reference fixed in the parity comments.
 
 ## 5. Trace of the Empirical Fisher Information Matrix
 * **What are we measuring**: The local curvature and sharpness of the representation manifold.
@@ -67,6 +68,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Amari, S. (1998). Natural gradient works efficiently in learning.` [Neural Computation, Vol 10(2)] — foundational reference for information geometry of neural networks. Application to LLMs is an active area of research.
 * **File & Function**: `src/blme/tasks/geometry/information_geometry.py` -> `RepresentationSensitivityTask`
 * **Critical Info**: FIM is computationally intractable to store entirely; the trace is an efficient scalar summary of total curvature.
+* **Verification** (2026-07, campaign B7): closed-form gradient W_y − E_p[W] == float64 autograd and finite differences (≤1.1e-6 rel, pure fp32 round-off) on real gpt2; NEW bias-ful-head cross-check (the `logits += bias` branch had zero coverage — flipping its sign passed the suite). Citation fixed: the docstring cited a non-existent (title, year) pairing — now Amari 1998, "Natural Gradient Works Efficiently in Learning", Neural Computation 10(2).
 
 ## 6. Matrix Entropy (Information Bottleneck)
 * **What are we measuring**: The data compression capabilities of the LLM layers over inference.
@@ -95,6 +97,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Su, J., et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding.` and long-context extrapolation methods like `Chen, Q., et al. (2023). Extending Context Window of Large Language Models via Position Interpolation.`
 * **File & Function**: `src/blme/tasks/geometry/positional_decay.py` -> `PositionalAttentionDecayTask`
 * **Critical Info**: Requires sequences longer than a few tokens to establish a valid distance/attention correlation pattern.
+* **Verification** (2026-07, campaign B7): proxy-only (no defining equation); Spearman kernel == fully hand-written tie-averaged reference to 1.1e-16 over 200 randomized rows; RoFormer decay premise and ALiBi citation verified real and topical; a stale ledger warning flag (claimed-but-unrecorded citation correction) removed.
 
 ## 9. SVD Isotropy (geometry_svd)
 * **What are we measuring**: The isotropy (roundness) of the representation space.
@@ -123,6 +126,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: Derived from general geometric alignment literature [No specific conference paper].
 * **File & Function**: `src/blme/tasks/geometry/categories.py` -> `CategoryGeometryTask`
 * **Critical Info**: Also computes category Purity and generates coordinates for UMAP/t-SNE visualization if installed.
+* **Verification** (2026-07, campaign B7): separation+purity were already pinned; NEW coverage for the previously never-executed kernels — relation consistency and analogy exact on a constructed constant-relation embedding (both 1.0 analytically), hub_skew/hub_max vs an independent k-occurrence recomputation. BLME diagnostic (proxy-only, tokenizer/category dependent).
 
 ## 12. Prediction Alignment (`geometry_prediction_alignment`)
 * **What are we measuring**: How closely the final hidden state points toward the output-projection vector for the next token.
@@ -131,6 +135,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: Derived from standard output-embedding geometry and logit-lens style analyses; no single canonical paper.
 * **File & Function**: `src/blme/tasks/geometry/consistency.py` -> `PredictionAlignmentTask`
 * **Critical Info**: Heavily dependent on generation parameters like temperature and top-p.
+* **Verification** (2026-07, campaign B7): tied model == pure-numpy cosine reference (≤7e-9); the central untied-head claim is NOW numerically pinned (GPT2 with tie_word_embeddings=False and a re-randomized head: the projection tensor must be lm_head.weight, not the embedding table — previously only a source-grep guarded this).
 
 ## 13. Representation Collapse
 * **What are we measuring**: Severe rank collapse or dimension degeneration in the hidden states of identical repeated input tokens or near-duplicated data.
@@ -186,6 +191,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: Canonical language modeling metric. 
 * **File & Function**: `src/blme/tasks/geometry/perplexity.py` -> `RarePPLTask`
 * **Critical Info**: Lower is better. This is a performance-like baseline and is excluded from the primary intrinsic-predictor feature set.
+* **Verification** (2026-07, campaign B7): NEW dedicated parity file — ppl_overall/ppl_rare/ppl_freq/BPC reconstructed from scratch (float64 log-softmax, independent (count,id) bucket sort) on gpt2 (≤1e-4 rel); BOS-adding-tokenizer BPC regression pinned (the historic recount/scoring desync under-reported BPC ~13%); empty-text rows skip cleanly (previously crashed). Both campaign-3 BUGs fixed.
 
 ## 19. Global Intrinsic Dimension (geometry_intrinsic_dim / PDE)
 * **What are we measuring**: The global effective dimensionality of the dataset within the model's space.
@@ -224,6 +230,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations?` [EMNLP 2019, ArXiv: 1909.00512]
 * **File & Function**: `src/blme/tasks/geometry/contextualization.py` -> `ContextualizationTask`
 * **Critical Info**: MEV and similarity profiles are descriptive diagnostics; primary predictor analysis excludes sample-count/configuration fields.
+* **Verification** (2026-07, campaign B7): SelfSim/IntraSim/MEV kernels == official kawine/contextual formulas (≤3.3e-16); NEW value pins for the 3 previously uncovered kernels (MEV vs sklearn PCA with a centering-mutant check; pairwise mean vs full-triu; anisotropy baseline exact ray anchor). Docstring now states MEV is reported UNADJUSTED (the paper's headline MEV is anisotropy-adjusted and not comparable); ledger cert label reconciled to refined-adaptation.
 
 ## 23. IsoScore
 * **What are we measuring**: Uniformity of embedding-space dimension utilization.
@@ -261,6 +268,7 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: Related to tokenizer fertility and tokenization-efficiency literature; BLME treats this as a tokenizer diagnostic.
 * **File & Function**: `src/blme/tasks/geometry/tokenizer_efficiency.py` -> `TokenizerEfficiencyTask`
 * **Critical Info**: Marked non-primary for intrinsic-predictor analyses because it is tokenizer/configuration dependent.
+* **Verification** (2026-07, campaign B7): analytic fake-tokenizer anchors exact (fertility 8/3, hand-computed Shannon entropy, vocab utilisation); proxy-only label reconciled in the ledger. Citations fixed: a FABRICATED author list ("Rajput, Chamberlain, Reese" for arXiv:2310.08754 — real authors Ali, Fromm, Thellmann et al.) and Rust et al. credited as popularizing (not introducing) fertility, which the paper itself attributes to Ács 2019; partial-ρ range corrected (+0.71 to +0.77).
 
 ## 27. Weight Norm Profiles
 * **What are we measuring**: Layerwise norms and stable-rank style summaries of model weight matrices.

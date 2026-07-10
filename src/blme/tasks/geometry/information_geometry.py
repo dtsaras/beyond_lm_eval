@@ -16,7 +16,8 @@ closed-form:  grad_h log P(y|h) = W_y - sum_k p(k) W_k,  which avoids
 per-token backward passes entirely.
 
 References:
-- "Information Geometry of Neural Networks" (Amari, 1998)
+    "Natural Gradient Works Efficiently in Learning" (Amari, 1998,
+    Neural Computation 10(2):251-276) — the softmax score-function
 """
 
 import torch

@@ -3302,7 +3302,7 @@ def test_geometry_mahalanobis():
 
     BLME (src/blme/tasks/geometry/mahalanobis.py) computes, per Lee et al.
     2018 "A Simple Unified Framework for Detecting Out-of-Distribution
-    Samples and Adversarial Attacks" (NeurIPS 2018, Eq. 3), the Mahalanobis
+    Samples and Adversarial Attacks" (NeurIPS 2018, Eq. 2), the Mahalanobis
     distance of each test point to the centroid of a reference set:
 
         d(x) = sqrt( (x - mu)^T  Sigma^{-1}  (x - mu) )
@@ -3374,7 +3374,7 @@ def test_geometry_mahalanobis():
     assert shrinkage == pytest.approx(lw.shrinkage_, abs=1e-12)
     assert np.max(np.abs(shrunk_ref - lw.covariance_)) < 1e-12
 
-    # ---- Independent Mahalanobis distance (Lee 2018 Eq. 3) ------------------
+    # ---- Independent Mahalanobis distance (Lee 2018 Eq. 2) ------------------
     mu = X_train.mean(axis=0)
     P_ref = np.linalg.inv(shrunk_ref)
     ref_dists = np.array(

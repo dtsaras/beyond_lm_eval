@@ -22,6 +22,10 @@ Three complementary measurements per layer:
 The bare versions (`*_raw`) are reported alongside the
 anisotropy-corrected versions (`*_corrected`), which subtract the average
 cosine similarity of random pairs of tokens at the same layer.
+
+MEV is reported UNADJUSTED only (matching the official
+variance_explained_by_pc); the paper's headline MEV figures are
+anisotropy-adjusted (Sec. 3.4) and are NOT directly comparable.
 """
 
 import logging

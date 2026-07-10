@@ -1432,3 +1432,147 @@ def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):
     for key, val in results.items():
         if isinstance(val, float):
             assert val == pytest.approx(r2[key], abs=0.0), f"{key} not deterministic"
+
+
+def test_mahalanobis_pinv_fallback_matches_closed_form(monkeypatch):
+    """Campaign-4 B7: the HAS_SKLEARN=False pinv fallback had zero coverage —
+    dropping the ridge or the ddof would pass the suite. Analytic anchor:
+    symmetric 4-point cloud has a DIAGONAL ddof-1 covariance, so the
+    Mahalanobis distance has a closed form."""
+    import blme.tasks.geometry.mahalanobis as mah
+
+    monkeypatch.setattr(mah, "HAS_SKLEARN", False)
+    a, b = 1.5, 0.5
+    X_train = np.array([[a, 0.0], [-a, 0.0], [0.0, b], [0.0, -b]])
+    query = np.array([[a, b]])
+    d = mah._compute_mahalanobis_distances(X_train, query)
+
+    var_x = 2 * a * a / 3.0     # ddof=1 over 4 zero-mean points
+    var_y = 2 * b * b / 3.0
+    ridge = 1e-6
+    expected = np.sqrt(a * a / (var_x + ridge) + b * b / (var_y + ridge))
+    assert d[0] == pytest.approx(float(expected), rel=1e-9)
+
+
+def test_prediction_alignment_uses_output_projection_when_untied():
+    """Campaign-4 B7: the untied-head behavior (the task's central advertised
+    claim) was guarded only by a source grep — a regression to
+    `return get_embeddings(model)` passed. Pin it numerically: on an untied
+    model with a re-randomized head, the projection weight must be the
+    lm_head tensor and must NOT be the input embedding table."""
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.geometry.consistency import _get_output_projection_weight
+
+    torch.manual_seed(0)
+    cfg = GPT2Config(n_layer=1, n_embd=16, n_head=2, vocab_size=97,
+                     n_positions=32, tie_word_embeddings=False)
+    model = GPT2LMHeadModel(cfg).eval()
+    with torch.no_grad():
+        model.lm_head.weight.normal_(std=0.3)   # decouple from wte for sure
+
+    W = _get_output_projection_weight(model)
+    assert torch.equal(W, model.lm_head.weight.detach())
+    assert not torch.allclose(W, model.transformer.wte.weight.detach())
+
+
+def test_categories_relation_hubness_and_analogy_kernels():
+    """Campaign-4 B7: the relation-consistency and analogy kernels never
+    executed in tests, and hub_skew/hub_max were computed but unasserted.
+    Constructed embedding: pairs relate by an EXACT constant vector r, so
+    consistency == 1.0 and analogy top-1 == 1.0 analytically; hubness is
+    recomputed independently."""
+    from scipy.stats import skew as scipy_skew
+    from blme.tasks.geometry.categories import CategoryGeometryTask
+
+    rng = np.random.default_rng(0)
+    V, d = 40, 12
+    E = rng.standard_normal((V, d)) * 5.0
+    r = np.zeros(d); r[0] = 30.0                 # exact relation vector
+    pairs = []
+    for i in range(6):                           # ids 0..5 -> 20..25
+        a_id, b_id = i, 20 + i
+        E[b_id] = E[a_id] + r
+        pairs.append((a_id, b_id))
+
+    task = CategoryGeometryTask(config={})
+    out = task._compute_relation_consistency(E, {"rel": pairs}, tokenizer=None)
+
+    assert out["rel_consistency"] == pytest.approx(1.0, abs=1e-9)
+    assert out["rel_analogy_acc_top1"] == pytest.approx(1.0, abs=1e-12)
+    assert out["rel_analogy_acc_top5"] == pytest.approx(1.0, abs=1e-12)
+
+    # Hubness kernel vs an independent recomputation on a category.
+    tids = list(range(10, 20))
+    hub = task._compute_hubness(E, None, {"cat": tids}, k_cat=3)
+    E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-10)
+    Ec = E_norm[np.array(tids)]
+    n_occ = np.zeros(len(tids))
+    for i in range(len(tids)):
+        sims = Ec @ Ec[i]
+        sims[i] = -np.inf
+        for idx in np.argsort(sims)[-3:]:
+            n_occ[idx] += 1
+    assert hub["cat_hub_max"] == int(n_occ.max())
+    ref_skew = 0.0 if n_occ.std() == 0 else float(scipy_skew(n_occ))
+    assert hub["cat_hub_skew"] == pytest.approx(ref_skew, abs=1e-9)
+
+
+def test_representation_sensitivity_bias_head_matches_autograd():
+    """Campaign-4 B7: the lm_head-bias branch (logits += bias) had zero
+    coverage — both existing tests use GPT-2's bias-free head, so flipping
+    the '+' to '-' passed the suite. Cross-check the closed-form gradient
+    against autograd on a model whose head HAS a bias."""
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.geometry.information_geometry import (
+        RepresentationSensitivityTask,
+    )
+
+    torch.manual_seed(0)
+    vocab = 211
+    cfg = GPT2Config(n_layer=1, n_embd=16, n_head=2, vocab_size=vocab,
+                     n_positions=32, tie_word_embeddings=False)
+    model = GPT2LMHeadModel(cfg).eval()
+    model.lm_head = torch.nn.Linear(16, vocab, bias=True)
+    with torch.no_grad():
+        model.lm_head.weight.normal_(std=0.2)
+        model.lm_head.bias.normal_(std=0.5)   # non-trivial bias
+
+    class _Tok:
+        pad_token_id = 0
+        eos_token_id = 1
+        def __call__(self, text, return_tensors="pt", **kw):
+            import zlib
+            g = torch.Generator().manual_seed(zlib.crc32(text.encode()))
+            ids = torch.randint(2, vocab, (1, 10), generator=g)
+            class BD(dict):
+                def to(self, dev): return self
+            return BD({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+    texts = [{"text": f"probe sentence {i}"} for i in range(3)]
+    task = RepresentationSensitivityTask(config={"num_samples": 3})
+    out = task.evaluate(model, _Tok(), dataset=texts)
+    if "error" in out:
+        pytest.skip(f"unsupported: {out['error']}")
+    blme_val = out["representation_sensitivity"]
+
+    # Independent autograd reference on the same texts/ids/hidden states.
+    W = model.lm_head.weight.detach().double()
+    b = model.lm_head.bias.detach().double()
+    sq_norms = []
+    with torch.no_grad():
+        pass
+    for row in texts:
+        enc = _Tok()(row["text"])
+        with torch.no_grad():
+            hs = model(input_ids=enc["input_ids"],
+                       output_hidden_states=True).hidden_states[-1][0]
+        ids = enc["input_ids"][0]
+        for pos in range(hs.shape[0] - 1):
+            h = hs[pos].detach().double().requires_grad_(True)
+            logp = torch.log_softmax(W @ h + b, dim=-1)[ids[pos + 1]]
+            (grad,) = torch.autograd.grad(logp, h)
+            sq_norms.append(float((grad ** 2).sum()))
+    ref = float(np.mean(sq_norms))
+    assert blme_val == pytest.approx(ref, rel=1e-4), (
+        f"bias-branch closed form diverged from autograd: {blme_val} vs {ref}"
+    )

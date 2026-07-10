@@ -491,3 +491,37 @@ def test_persistence_landscape_single_bar_tent_function():
     assert landscape[0].tolist() == pytest.approx(case["expected_first_landscape"])
     assert landscape[1].tolist() == pytest.approx(case["expected_second_landscape"])
 
+
+
+def test_contextualization_kernels_pin_values():
+    """Campaign-4 B7: 3 of 4 contextualization kernels had zero value-pinning
+    coverage (only IntraSim was pinned) — dropping MEV's centering or the
+    pairwise normalization passed the whole suite."""
+    from blme.tasks.geometry.contextualization import (
+        _baseline_anisotropy,
+        _cosine_pairwise_mean,
+        _max_explainable_variance,
+    )
+
+    rng = np.random.default_rng(0)
+    V = rng.standard_normal((30, 8)) + 0.5
+
+    # MEV == sklearn PCA top-component explained-variance ratio.
+    sk = pytest.importorskip("sklearn.decomposition")
+    ref_mev = float(sk.PCA(n_components=1).fit(V).explained_variance_ratio_[0])
+    assert _max_explainable_variance(V) == pytest.approx(ref_mev, abs=1e-9)
+    # ...and the centering matters on this cloud (mutant discrimination).
+    Sun = np.linalg.svd(V, full_matrices=False)[1]
+    mutant_no_center = float(Sun[0] ** 2 / (Sun ** 2).sum())
+    assert abs(mutant_no_center - ref_mev) > 1e-3
+
+    # SelfSim kernel (all-pairs regime) == independent full upper-triangle mean.
+    unit = V / np.linalg.norm(V, axis=1, keepdims=True)
+    sims = unit @ unit.T
+    ref_pair = float(sims[np.triu_indices(len(V), k=1)].mean())
+    assert _cosine_pairwise_mean(V) == pytest.approx(ref_pair, abs=1e-12)
+
+    # Anisotropy baseline: rows all along ONE direction (varied magnitudes)
+    # -> every pair cosine is exactly 1.
+    ray = np.outer(np.linspace(0.5, 3.0, 40), np.ones(6))
+    assert _baseline_anisotropy(ray) == pytest.approx(1.0, abs=1e-12)

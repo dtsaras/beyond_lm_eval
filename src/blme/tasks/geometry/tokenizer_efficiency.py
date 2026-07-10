@@ -19,14 +19,14 @@ capture the tokenizer's intrinsic properties:
 References:
   * Rust, Pfeiffer, Vulić, Ruder, Gurevych 2021 — "How Good is Your
     Tokenizer? On the Monolingual Performance of Multilingual Language
-    Models", ACL 2021, arXiv:2012.15613. Introduces fertility as a
+    Models", ACL 2021, arXiv:2012.15613. Popularizes fertility (introduced by Ács 2019) as a
     cross-tokenizer comparison metric.
-  * Rajput, Chamberlain, Reese et al. 2024 — "Tokenizer Choice For LLM
+  * Ali, Fromm, Thellmann et al. 2024 (NAACL Findings 2024) — "Tokenizer Choice For LLM
     Training: Negligible or Crucial?", arXiv:2310.08754. Evidence that
     tokenizer efficiency is correlated with downstream capability.
   * fertility, compression_ratio, total_tokens, and vocab_size enter
     BLME's top-25 partial predictors (`docs/TOP_PREDICTORS.md` §2) as
-    tokenizer-confound signals — all ~+0.71 partial ρ with composite
+    tokenizer-confound signals — +0.71 to +0.77 partial ρ with composite
     benchmark capability beyond scale.
 """
 
