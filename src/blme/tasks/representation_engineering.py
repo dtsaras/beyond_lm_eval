@@ -134,21 +134,57 @@ class TaskVectorGeometryTask(DiagnosticTask):
             
         results["layer_task_vector_norms"] = task_vector_norms
         results["layer_task_vector_cosine_sim"] = task_vector_cosine_similarities
-        
+
         if task_vector_norms:
             results["max_norm_layer"] = int(np.argmax(task_vector_norms))
             results["mean_vector_norm"] = float(np.mean(task_vector_norms))
-            
+            # sqrt(d_model)-normalized norms: for fixed per-coordinate scale,
+            # ||v|| grows ~sqrt(d), so raw norms are not comparable across
+            # model widths (the normalization stated in the paper's
+            # cross-model framework).
+            d_model = pos_activations[0][0].numel()
+            scale = float(np.sqrt(d_model))
+            results["layer_task_vector_norms_normalized"] = [
+                n / scale for n in task_vector_norms
+            ]
+            results["mean_vector_norm_normalized"] = (
+                results["mean_vector_norm"] / scale
+            )
+
         return results
+
+
+def _auc_summary(layer_aucs, layer_accs):
+    """Summarize per-layer separability, NaN-aware.
+
+    Deep fp16/bf16 layers can legitimately be NaN (non-finite activations are
+    filtered per layer), so the summary must use the nan-aware reductions:
+    np.argmax/np.max/np.mean would point max_auc_layer at a NaN layer and
+    poison max_auc/mean_auc. All-NaN input is an error, not a result.
+    """
+    if not layer_aucs or all(np.isnan(a) for a in layer_aucs):
+        return {"error": "No layer produced finite separability values"}
+    return {
+        "layer_separability_auc": layer_aucs,
+        "layer_separability_acc": layer_accs,
+        "max_auc_layer": int(np.nanargmax(layer_aucs)),
+        "max_auc": float(np.nanmax(layer_aucs)),
+        # Mean over the layers with finite AUC (NaN layers excluded).
+        "mean_auc": float(np.nanmean(layer_aucs)),
+    }
 
 
 @register_task("repe_concept_separability")
 class ConceptSeparabilityTask(DiagnosticTask):
     """
     Computes Linear Separability (AUC/Accuracy) of a target concept at each layer.
-    
+
     Following Zou et al. (2023), tests if activating concepts can be linearly
-    separated (A prerequisite for Representation Engineering).
+    separated (A prerequisite for Representation Engineering). This is a
+    held-out logistic-regression separability probe (stratified-CV AUC and
+    accuracy) — a refined adaptation in the paper's linear-reading family
+    (cf. Zou et al. §5.1 logistic-regression directions); it does not compute
+    the PCA/LAT reading vector itself.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Concept Separability Analysis (RepE)...")
@@ -187,8 +223,19 @@ class ConceptSeparabilityTask(DiagnosticTask):
 
         samples = list(dataset)[:num_samples * 2]
         texts = [s["text"] for s in samples]
-        labels = [s["label"] for s in samples]
-        
+        # Labels must be binary integers. String labels (e.g. the sibling
+        # refusal task's "harmful"/"harmless" format) previously passed the
+        # _is_labelled guard and crashed np.bincount with a dtype TypeError;
+        # reject them with this task's own error convention instead.
+        try:
+            labels = [int(s["label"]) for s in samples]
+        except (TypeError, ValueError):
+            return {"error": "Concept labels must be binary integers (0/1); "
+                             "got non-numeric labels."}
+        if set(labels) - {0, 1}:
+            return {"error": "Concept labels must be binary (0/1); "
+                             f"got {sorted(set(labels))}."}
+
         if len(set(labels)) < 2: return {"error": "Need at least two classes."}
         if len(texts) < 4: return {"error": "Need at least 4 samples for CV."}
         
@@ -247,13 +294,7 @@ class ConceptSeparabilityTask(DiagnosticTask):
             layer_aucs.append(float(np.mean(fold_aucs)) if fold_aucs else float("nan"))
             layer_accs.append(float(np.mean(fold_accs)) if fold_accs else float("nan"))
             
-        return {
-            "layer_separability_auc": layer_aucs,
-            "layer_separability_acc": layer_accs,
-            "max_auc_layer": int(np.argmax(layer_aucs)),
-            "max_auc": float(np.max(layer_aucs)),
-            "mean_auc": float(np.mean(layer_aucs))
-        }
+        return _auc_summary(layer_aucs, layer_accs)
 
 
 @register_task("repe_steering_effectiveness")
@@ -278,25 +319,41 @@ class SteeringEffectivenessTask(DiagnosticTask):
             return {"error": "Could not detect model layers."}
         num_layers = len(layers)
 
-        # Contrastive dataset for task vector extraction
-        if dataset is None:
-            dataset = [
-                {"text_pos": "This is absolutely true and correct.",
-                 "text_neg": "This is completely false and wrong.",
-                 "neutral": "The weather today is"},
-            ] * num_samples
+        # Contrastive dataset for task vector extraction. Fall back to the
+        # bundled triples when the caller's dataset carries NO contrastive
+        # keys at all — which is the DEFAULT pipeline situation: core
+        # substitutes the WikiText {"text": ...} corpus before tasks run, so
+        # a `dataset is None` check alone made this task error on every
+        # study run (zero steering columns in the feature matrix). Mirrors
+        # the sibling repe_task_vectors fallback.
+        _FALLBACK_TRIPLES = [
+            {"text_pos": "This is absolutely true and correct.",
+             "text_neg": "This is completely false and wrong.",
+             "neutral": "The weather today is"},
+        ]
+        preview = ([s for s in list(dataset)[:num_samples]]
+                   if dataset is not None else [])
+        has_keys = [isinstance(s, dict) and "text_pos" in s and "text_neg" in s
+                    for s in preview]
+        if not preview or not any(has_keys):
+            dataset = _FALLBACK_TRIPLES * num_samples
+        elif not all(has_keys):
+            # A dataset that mixes contrastive and non-contrastive items is
+            # explicitly malformed — surface it rather than silently
+            # dropping the user's data.
+            return {"error": "Dataset mixes items with and without "
+                             "'text_pos'/'text_neg' keys."}
 
-        samples = list(dataset)[:num_samples]
+        # Deep-copy the sample dicts: we add a default "neutral" key below,
+        # and the corpus list core passes is SHARED across all tasks —
+        # mutating it in place leaks keys into every downstream task.
+        samples = [dict(s) for s in list(dataset)[:num_samples]]
         if not samples:
             return {"error": "Need at least 1 sample."}
 
-        required = {"text_pos", "text_neg", "neutral"}
-        # If dataset lacks neutral, provide a default
         for s in samples:
             if "neutral" not in s:
                 s["neutral"] = "The weather today is"
-            if "text_pos" not in s or "text_neg" not in s:
-                return {"error": "Dataset must contain 'text_pos' and 'text_neg' keys."}
 
         # Step 1: Extract task vectors at each layer
         task_vectors = {}
@@ -340,7 +397,6 @@ class SteeringEffectivenessTask(DiagnosticTask):
                 # Baseline output distribution
                 base_out = model(neutral_ids)
                 base_probs = F.softmax(base_out.logits[0, -1], dim=-1)
-                base_log_probs = F.log_softmax(base_out.logits[0, -1], dim=-1)
 
                 for l_idx in test_layers:
                     tv = task_vectors[l_idx].to(device)
@@ -459,9 +515,13 @@ class RefusalDirectionTask(DiagnosticTask):
         separation, 0.5 = no signal.
       - **mean_projection_gap**: difference of mean projections (positive
         = harmful prompts project further along the direction).
-      - **per_layer**: the same metrics computed at every layer, useful
-        for finding the layer at which the refusal concept is most
-        linearly accessible.
+      - **auc_at_depth_{0,25,50,75,100}**: held-out AUC interpolated at
+        normalized depths, so the feature set is architecture-agnostic
+        (a raw per-layer dict was removed: absolute layer keys made 99%
+        of refusal columns NaN in the cross-model CSV aggregation).
+      - **best_layer / best_layer_fraction / best_layer_separability_auc**:
+        the layer at which the refusal concept is most linearly accessible,
+        in absolute and depth-normalized form.
 
     The metric is intrinsic given the bundled prompt set and does not
     require the model to be RLHF'd — it just measures whether the model's

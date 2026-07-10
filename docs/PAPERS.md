@@ -53,7 +53,7 @@ it's cited. Sorted alphabetically by first author.
 | **Guo, Pleiss, Sun, Weinberger 2017** — *On Calibration of Modern Neural Networks* | `consistency_calibration` | ICML 2017 | `consistency/calibration.py` |
 | **Holtzman, Buys, Du, Forbes, Choi 2020** — *The Curious Case of Neural Text Degeneration* | `interpretability_prediction_entropy` | arXiv:1904.09751 | `interpretability/prediction_entropy.py` |
 | **Hosseini, Fedorenko 2023** — *Large language models implicitly learn to straighten neural sentence trajectories to construct a predictive representation of natural language* | `geometry_trajectory_curvature` | arXiv:2311.04930 (NeurIPS 2023) | `geometry/trajectory_curvature.py` |
-| **Ilharco, Ribeiro, Wortsman, Schmidt, Hajishirzi, Farhadi 2023** — *Editing Models with Task Arithmetic* | `repe_task_vectors` | ICLR 2023 | `representation_engineering.py` |
+| **Ilharco, Ribeiro, Wortsman, Gururangan, Schmidt, Hajishirzi, Farhadi 2023** — *Editing Models with Task Arithmetic* | `repe_task_vectors` | ICLR 2023, arXiv:2212.04089 | `representation_engineering.py` |
 | **Kornblith, Norouzi, Lee, Hinton 2019** — *Similarity of Neural Network Representations Revisited* | `geometry_cka`, `geometry_hsic` | arXiv:1905.00414 | `geometry/cka.py`, `geometry/mutual_info.py` |
 | **Kriegeskorte, Mur, Bandettini 2008** — *Representational Similarity Analysis* | `geometry_rsa` | *Front. Syst. Neurosci.* 2 | `geometry/rsa.py` |
 | **Lee, Lee, Lee, Shin 2018** — *A Simple Unified Framework for Detecting OOD Samples and Adversarial Attacks* | `geometry_mahalanobis` | NeurIPS 2018 | `geometry/mahalanobis.py` |

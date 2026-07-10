@@ -327,3 +327,19 @@ naitzat2020topology venue fixed (ICLR→JMLR), rucco2016 entry type fixed, zomor
 + atienza2020stability added. Feature-value impact: **none to existing keys** — B1 only adds
 new `_norm` keys (regen will pick them up); the two prior-session bug fixes (d4daa1a) already
 required regen for ≤2-layer models' homology/betti features.
+
+### B2 — RepE (4/4 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `repe_task_vectors` | direction kernel == official RepE ClusterMeanRepReader (0.0 in fp64 fixture; ≤4.5e-7 rel e2e on distilgpt2); law-of-cosines analytic identity | PAPERS.md Ilharco author list completed (Gururangan restored); **new**: sqrt(d_model)-normalized norms emitted (appendix tab:normalization claim now true in code); appendix definition corrected (cosine is pos-vs-neg class means, NOT adjacent-layer task vectors) |
+| `repe_concept_separability` | per-layer AUC/acc == sklearn cross_val_score to 0.0 (controlled model); planted 20σ concept → AUC exactly 1.0; official PCA-LAT kernel recovers planted direction on same activations | **BUG fixed**: NaN layer poisoned max_auc_layer/max_auc/mean_auc → nan-aware `_auc_summary` + all-NaN error (regression test); **BUG fixed**: string labels crashed np.bincount → binary-int validation with error dict (regression test); doc + appendix reworded: held-out LR-CV probe, not PCA/LAT reading vector |
+| `repe_steering_effectiveness` | per-layer KL == fp64 KL(base‖steered) reference ≤1.7e-6; α=0 → KL≈0 analytic; hook == official RepE linear_comb/token_pos="end" | **BUG fixed**: bundled-pair fallback unreachable in default pipeline (core always passes text corpus) — task errored on EVERY study run, 0 steering columns in feature matrix; now falls back like siblings + mixed datasets error explicitly (regression tests); **BUG fixed**: in-place mutation of shared corpus dicts → deep-copy (regression test); dead code removed; success-rate denominator (≤5 sampled layers) documented; appendix normalization claim was fabricated ("std-dev units") → corrected to nats/fraction |
+| `repe_refusal_direction` | direction == official andyrdt get_mean_diff exactly (0.0, |cos|=1); official hook mechanism live vs BLME ≤5.9e-9; AUC/gap == independent recomputation exactly | DOC_GAP fixed: docstring promised a `per_layer` key evaluate() deliberately omits → documents actual depth-quantile outputs; appendix definition now states the held-out CV protocol |
+
+Feature-value impact: existing keys unchanged EXCEPT `repe_steering_effectiveness` now
+produces metrics in the default pipeline (previously all-error → the regen gains steering
+columns for the first time) and `repe_task_vectors` gains `*_normalized` keys. Suite: 102
+passed (test_repe + 3 repe parity files) before the normalized-norms addition; rerun after.
+Paper-side: `metrics_repe.tex` all four entries reconciled; `turner2023steering` added to
+references.bib; AUC range row fixed in `appendix_normalization.tex`.

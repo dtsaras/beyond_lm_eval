@@ -153,3 +153,77 @@ def test_refusal_direction_reports_heldout_separability(mock_model, mock_tokeniz
     assert results["separability_validation"] == "stratified_kfold_projection"
     assert results["metric_interpretation"] == "heldout_linear_separability"
     assert "causal_steering_auc" not in results
+
+
+def test_auc_summary_nan_layers_use_nanaware_reductions():
+    """Regression (campaign-4 B2): deep fp16/bf16 layers legitimately produce
+    NaN AUCs (non-finite activations filtered per layer). np.argmax/max/mean
+    pointed max_auc_layer at the NaN layer and poisoned max_auc/mean_auc."""
+    from blme.tasks.representation_engineering import _auc_summary
+
+    s = _auc_summary([1.0, 0.8519, float("nan")], [0.93, 0.83, float("nan")])
+    assert s["max_auc_layer"] == 0
+    assert s["max_auc"] == 1.0
+    assert s["mean_auc"] == pytest.approx((1.0 + 0.8519) / 2, abs=1e-12)
+
+    all_nan = _auc_summary([float("nan")] * 3, [float("nan")] * 3)
+    assert "error" in all_nan
+
+
+def test_concept_separability_rejects_string_labels(mock_model, mock_tokenizer):
+    """Regression (campaign-4 B2): string labels (the sibling refusal task's
+    'harmful'/'harmless' format) passed the _is_labelled guard and crashed
+    np.bincount with a dtype TypeError. Must return this task's own error
+    dict instead of raising."""
+    from blme.tasks.representation_engineering import ConceptSeparabilityTask
+
+    dataset = [
+        {"text": "How do I hack a computer?", "label": "harmful"},
+        {"text": "How do I bake a cake?", "label": "harmless"},
+        {"text": "How do I steal a car?", "label": "harmful"},
+        {"text": "How do I plant a garden?", "label": "harmless"},
+    ]
+    task = ConceptSeparabilityTask(config={"num_samples": 2})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+    assert isinstance(results, dict)
+    assert "error" in results
+    assert "label" in results["error"].lower()
+
+
+def test_steering_effectiveness_runs_on_default_text_corpus(mock_model, mock_tokenizer):
+    """Regression (campaign-4 B2): in the default pipeline core substitutes
+    the WikiText {"text": ...} corpus, so the old `dataset is None` fallback
+    was unreachable and the task errored on EVERY study run (zero steering
+    columns in the feature matrix). A text-only corpus must now fall back to
+    the bundled contrastive triples and produce metrics — without mutating
+    the caller's shared dataset dicts."""
+    import copy
+    from blme.tasks.representation_engineering import SteeringEffectivenessTask
+
+    corpus = [{"text": f"Wikipedia sentence number {i}."} for i in range(4)]
+    snapshot = copy.deepcopy(corpus)
+
+    task = SteeringEffectivenessTask(config={"num_samples": 2})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=corpus)
+
+    assert corpus == snapshot, "task mutated the caller's shared corpus"
+    assert isinstance(results, dict)
+    if "error" not in results:
+        assert "best_steering_layer" in results
+        assert "steering_success_rate" in results
+        assert "layer_steering_kl_divergence" in results
+
+
+def test_steering_effectiveness_rejects_mixed_dataset(mock_model, mock_tokenizer):
+    """A dataset mixing contrastive and non-contrastive items is explicitly
+    malformed: surface an error rather than silently dropping user data."""
+    from blme.tasks.representation_engineering import SteeringEffectivenessTask
+
+    dataset = [
+        {"text_pos": "This is true.", "text_neg": "This is false."},
+        {"text": "Just a plain sentence."},
+    ]
+    task = SteeringEffectivenessTask(config={"num_samples": 2})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
+    assert isinstance(results, dict)
+    assert "error" in results
