@@ -30,6 +30,7 @@ official-code parity, analytic anchors, and/or independent reimplementation.
 * **File & Function**: `src/blme/tasks/topology/homology.py` -> `PersistentHomologyTask`
 * **Critical Info**: TDA scales exponentially with the number of points. Computations must be restricted to small semantic trajectories or requires massive linear algebra optimizations (like Ripser).
 * **Verification** (2026-07, campaign B1): backend is ripser 0.6.14 called directly; cross-backend parity vs GUDHI 3.12 RipsComplex (6 H1 bars, bar-by-bar ≤ 6.2e-8) and vs scipy minimum-spanning-tree for H0 (elder rule, ≤ 9.6e-8 at float32); analytic anchors (collinear points, regular hexagon, unit square) exact. Duplicate-target-layer bug (≤2-layer models) fixed in `d4daa1a`; venue of the Naitzat citation corrected (JMLR, not ICLR).
+* **B8 extension** (2026-07): scale-stratified persistence summaries — H0/H1 bars split into fine vs coarse by death threshold 0.5×(mean pairwise distance), reporting counts and the fine fraction of persistence mass per layer. Motivated by Fay et al. (ArXiv: 2505.20435): degenerate/adversarial inputs COMPRESS latent topology (fewer fine-scale features, amplified coarse ones), so the fine/coarse split separates regimes the raw lifespan means conflate. Anchored on constructed diagrams with known fine/coarse membership.
 
 ## 2. Persistence Entropy
 * **What are we measuring**: The topological disorder and structural noise of the representation manifold.

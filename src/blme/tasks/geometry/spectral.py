@@ -13,6 +13,51 @@ except Exception:
     _HFConv1D = None
 
 
+def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 8) -> tuple:
+    """Official-style HT-SR power-law fit (campaign-4 B8).
+
+    Clauset-Shalizi-Newman continuous-MLE power-law fit to the EIGENVALUE
+    spectral density lambda = sigma^2 with a KS-optimal x_min scan — the
+    procedure WeightWatcher's fit_powerlaw implements (Martin & Mahoney;
+    Yang et al., KDD 2023). For each candidate x_min (every order
+    statistic, leaving at least ``min_tail`` tail points):
+
+        alpha(x_min) = 1 + n_tail / sum(ln(lambda_i / x_min))
+        KS(x_min)    = max_i | F_emp(lambda_i) - F_PL(lambda_i) |
+
+    and the fit with minimal KS is returned as (alpha, x_min, ks, n_tail).
+    This complements the fixed-20%-tail Hill proxy on SINGULAR values kept
+    for continuity (at a matched cutoff, alpha_sigma = 2*alpha_lambda - 1).
+    """
+    lam = np.sort(np.asarray(evals, dtype=np.float64))
+    lam = lam[lam > 1e-12]
+    n = lam.size
+    if n < min_tail + 2:
+        return float("nan"), float("nan"), float("nan"), 0
+    best = (np.inf, float("nan"), float("nan"), 0)
+    # Scan candidate x_min over order statistics (cap the scan for speed).
+    max_candidates = 200
+    cand_idx = np.unique(np.linspace(0, n - min_tail - 1, max_candidates).astype(int))
+    for i in cand_idx:
+        x_min = lam[i]
+        tail = lam[i:]
+        n_tail = tail.size
+        log_ratio = np.log(tail / x_min)
+        denom = log_ratio.sum()
+        if denom <= 0:
+            continue
+        alpha = 1.0 + n_tail / denom
+        # KS between the empirical tail CDF and the fitted Pareto CDF.
+        emp = np.arange(1, n_tail + 1) / n_tail
+        model_cdf = 1.0 - (x_min / tail) ** (alpha - 1.0)
+        ks = float(np.max(np.abs(emp - model_cdf)))
+        if ks < best[0]:
+            best = (ks, float(alpha), float(x_min), int(n_tail))
+    if not np.isfinite(best[1]):
+        return float("nan"), float("nan"), float("nan"), 0
+    return best[1], best[2], best[0], best[3]
+
+
 @register_task("geometry_spectral")
 class WeightSpectralTask(DiagnosticTask):
     """
@@ -57,6 +102,7 @@ class WeightSpectralTask(DiagnosticTask):
 
         logger.info(f"  Found {len(modules_to_scan)} linear modules.")
 
+        alphas_official, alpha_hats = [], []
         for name, module in tqdm(modules_to_scan, desc="Analyzing Weights"):
             W = module.weight.detach().float()
 
@@ -91,13 +137,27 @@ class WeightSpectralTask(DiagnosticTask):
                 else:
                     alpha = 0.0
 
+                # Official-style PL-MLE alpha on eigenvalues (B8).
+                evals = S_np.astype(np.float64) ** 2
+                alpha_off, _xmin, _ks, _ntail = _pl_mle_alpha_ks(evals)
+                lambda_max = float(evals.max()) if evals.size else float("nan")
+                alpha_hat = (alpha_off * np.log10(lambda_max)
+                             if np.isfinite(alpha_off) and lambda_max > 0
+                             else float("nan"))
+
                 layer_stats[name] = {
                     "stable_rank": float(stable_rank),
                     "alpha": float(alpha),
+                    "alpha_official": float(alpha_off),
+                    "alpha_hat": float(alpha_hat),
                     "spectral_norm": float(S_np[0]) if len(S_np) > 0 else 0,
                 }
 
                 alphas.append(alpha)
+                if np.isfinite(alpha_off):
+                    alphas_official.append(alpha_off)
+                if np.isfinite(alpha_hat):
+                    alpha_hats.append(alpha_hat)
                 stable_ranks.append(stable_rank)
 
             except Exception as e:
@@ -110,6 +170,13 @@ class WeightSpectralTask(DiagnosticTask):
         results["max_alpha"] = float(np.max(alphas)) if alphas else 0.0
         results["std_alpha"] = float(np.std(alphas)) if alphas else 0.0
         results["median_alpha"] = float(np.median(alphas)) if alphas else 0.0
+        # Official-style PL-MLE summaries (KS-optimal x_min on eigenvalues).
+        results["avg_alpha_official"] = (float(np.mean(alphas_official))
+                                         if alphas_official else float("nan"))
+        results["median_alpha_official"] = (float(np.median(alphas_official))
+                                            if alphas_official else float("nan"))
+        results["avg_alpha_hat"] = (float(np.mean(alpha_hats))
+                                    if alpha_hats else float("nan"))
         results["tail_fraction"] = tail_fraction
 
         return results

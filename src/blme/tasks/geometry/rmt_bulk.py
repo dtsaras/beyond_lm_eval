@@ -183,6 +183,8 @@ def _mp_layer_metrics(
     out = {
         "outlier_frac": core["outlier_frac"],
         "spike_energy": core["spike_energy"],
+        "lower_outlier_frac": core["lower_outlier_frac"],
+        "lower_energy": core["lower_energy"],
         "ks_distance": core["ks_distance"],
         "gamma": core["gamma"],
         "n_tokens": core["n_tokens"],
@@ -230,9 +232,26 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float) -> dict:
     outliers = eigs[eigs > threshold]
     trace = float(np.sum(eigs))
 
+    # LOWER spectral edge (campaign-4 B8, after Staats, Thamm & Rosenow,
+    # arXiv:2410.17770: deviations at the SMALL-eigenvalue edge also carry
+    # learned information). Only meaningful for gamma < 1, where the MP
+    # lower edge (1 - sqrt(gamma))^2 is strictly positive; for gamma >= 1
+    # the bulk touches 0 / has an atom there, so the statistic is NaN.
+    if gamma < 1.0:
+        lo_threshold = _mp_lower_edge(gamma) * (1.0 - edge_tol)
+        lower_outliers = eigs[eigs < lo_threshold]
+        lower_outlier_frac = float(lower_outliers.size / eigs.size)
+        lower_energy = (float(np.sum(lower_outliers) / trace)
+                        if trace > 0 else float("nan"))
+    else:
+        lower_outlier_frac = float("nan")
+        lower_energy = float("nan")
+
     return {
         "outlier_frac": float(outliers.size / eigs.size),
         "spike_energy": float(np.sum(outliers) / trace) if trace > 0 else float("nan"),
+        "lower_outlier_frac": lower_outlier_frac,
+        "lower_energy": lower_energy,
         "ks_distance": _ks_distance(eigs, gamma),
         "gamma": float(gamma),
         "n_tokens": int(n_tokens),

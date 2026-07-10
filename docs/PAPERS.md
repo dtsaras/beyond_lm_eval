@@ -121,6 +121,15 @@ landing (see `VERIFICATION_LEDGER.md` and `tests/tasks/parity/`).
 | **Akhondzadeh, Bojchevski, Eleftheriou, Dazzi 2025** — *KurTail: Kurtosis-based LLM Quantization* | `interpretability_activation_kurtosis` | arXiv:2503.01483 (Findings of EMNLP 2025) | `interpretability/activation_kurtosis.py` |
 | **Abnar, Zuidema 2020** — *Quantifying Attention Flow in Transformers* (attention rollout) | `interpretability_attention_rollout` | arXiv:2005.00928 (ACL 2020) | `interpretability/attention_rollout.py` |
 | **Gardinazzi, Viswanathan, Panerai, Ansuini, Cazzaniga, Biagetti 2025** — *Persistent Topological Features in Large Language Models* (zigzag persistence) | `topology_zigzag_persistence` | arXiv:2410.11042 (ICML 2025) | `topology/zigzag.py` |
+| **Liu, Liu, Gore 2025** — *Superposition Yields Robust Neural Scaling* | `geometry_superposition_strength` | arXiv:2505.10465 (NeurIPS 2025) | `geometry/superposition_strength.py` |
+| **Men et al. 2024** — *ShortGPT: Layers in Large Language Models are More Redundant Than You Expect* (Block Influence) | `geometry_effective_depth` | arXiv:2403.03853 | `geometry/effective_depth.py` |
+| **Csordás, Manning, Potts 2025** — *Do Language Models Use Their Depth Efficiently?* | `geometry_effective_depth` | arXiv:2505.13898 (NeurIPS 2025) | `geometry/effective_depth.py` |
+| **Alabdulmohsin, Tran, Dehghani 2024** — *Fractal Patterns May Illuminate the Success of Next-Token Prediction* | `dynamics_fractal` | arXiv:2402.01825 (NeurIPS 2024) | `dynamics/fractal.py` |
+| **Li et al. 2025** — *Cognitive Activation and Chaotic Dynamics in LLMs: A Quasi-Lyapunov Analysis* (grounding) | `dynamics_perturbation_growth` | arXiv:2503.13530 | `dynamics/perturbation_growth.py` |
+| **Staats, Thamm, Rosenow 2024** — *Small Singular Values Matter: A Random Matrix Analysis of Transformer Models* (MP lower-edge extension) | `geometry_mp_bulk_deviation` | arXiv:2410.17770 | `geometry/rmt_bulk.py` |
+| **Kalra, Gagnon-Audet, Gromov, Mediratta, Niu, Miller, Shvartsman 2026** — *A Scalable Measure of Loss Landscape Curvature for Analyzing the Training Dynamics of LLMs* (critical step size; critical-sharpness extension) | `dynamics_sharpness` | arXiv:2601.16979 | `dynamics/sharpness.py` |
+| **Fay, García-Redondo, Wang, Dubossarsky, Monod 2026** — *The Shape of Adversarial Influence: Characterizing LLM Latent Spaces with Persistent Homology* (scale-stratified PH extension) | `topology_homology` | arXiv:2505.20435 | `topology/homology.py` |
+| **Clauset, Shalizi, Newman 2009** — *Power-Law Distributions in Empirical Data* (official PL-MLE + KS x_min, spectral extension) | `geometry_spectral` | arXiv:0706.1062 (SIAM Review 51(4)) | `geometry/spectral.py` |
 
 ### Metrics with weak citation — paper-provenance documented but not in docstring
 

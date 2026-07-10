@@ -30,6 +30,36 @@ except ImportError:
     HAS_RIPSER = False
 
 
+def _scale_stratified_summary(dgms, scale: float, frac: float = 0.5) -> dict:
+    """Scale-stratified persistence summaries (campaign-4 B8, after Fay et
+    al., arXiv:2505.20435: adversarial/degenerate inputs COMPRESS latent
+    topology — fewer small-scale features, amplified coarse ones).
+
+    Bars are stratified by the scale at which they DIE relative to the
+    point cloud's mean pairwise distance: fine = death < frac * scale,
+    coarse = death >= frac * scale. Reported per homology dimension:
+    fine/coarse counts and the fine fraction of total persistence mass.
+    """
+    out = {}
+    if scale <= 0:
+        return out
+    thresh = frac * scale
+    for k, name in ((0, "h0"), (1, "h1")):
+        if len(dgms) <= k:
+            continue
+        bars = [(b, d) for b, d in dgms[k] if np.isfinite(d)]
+        fine = [(b, d) for b, d in bars if d < thresh]
+        coarse = [(b, d) for b, d in bars if d >= thresh]
+        out[f"{name}_fine_count"] = len(fine)
+        out[f"{name}_coarse_count"] = len(coarse)
+        total_mass = sum(d - b for b, d in bars)
+        fine_mass = sum(d - b for b, d in fine)
+        out[f"{name}_fine_persistence_frac"] = (
+            fine_mass / total_mass if total_mass > 0 else float("nan")
+        )
+    return out
+
+
 def _lifespan_summary(dgms) -> dict:
     """Summarize ripser/GUDHI persistence diagrams into finite-bar lifespan
     statistics (lifespan = death - birth; the essential infinite-death H0
@@ -135,6 +165,10 @@ class PersistentHomologyTask(DiagnosticTask):
             results[f"layer_{l_idx}_mean_persistence_h1"] = summary["mean_persistence_h1"]
             results[f"layer_{l_idx}_num_loops_h1"] = summary["num_loops_h1"]
 
+            # Scale-stratified summaries (B8): fine vs coarse features
+            # relative to the mean pairwise distance (computed below).
+            # (Inserted before the normalization block so both share mpd.)
+            # -- see _scale_stratified_summary
             # Scale-normalized persistence: raw lifespans scale with the
             # hidden-state norms, which differ across models. Dividing by the
             # mean pairwise distance of the layer's point cloud makes the
@@ -148,5 +182,7 @@ class PersistentHomologyTask(DiagnosticTask):
                             "mean_persistence_h1"):
                     results[f"layer_{l_idx}_{key}_norm"] = summary[key] / mpd
                 results[f"layer_{l_idx}_mean_pairwise_distance"] = mpd
+                for k, v in _scale_stratified_summary(dgms, mpd).items():
+                    results[f"layer_{l_idx}_{k}"] = v
 
         return results

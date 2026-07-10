@@ -140,6 +140,73 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
     return float("nan"), float("nan"), grad_norm
 
 
+def _critical_step_size(compute_loss, params, grads, grad_norm: float,
+                        baseline_loss: float, max_doublings: int = 30,
+                        bisect_iters: int = 6,
+                        eta0: float = 1e-6) -> Tuple[float, float]:
+    """Critical sharpness (campaign-4 B8, after Kalra et al.,
+    arXiv:2601.16979): the largest stable step size eta* of the raw
+    gradient-descent update — loss(theta - eta*g) decreases for
+    eta < eta* and increases beyond it. Reported with
+    lambda_c = 2/eta*, the edge-of-stability curvature scale (exact for a
+    quadratic: eta* = 2/lambda). Kalra et al. probe the optimizer's update
+    direction; this is the gradient-direction variant (documented).
+
+    Cost: <= max_doublings + bisect_iters forward passes. Parameters are
+    perturbed in place and restored exactly after every probe. The probe
+    step is the RAW gradient-descent update theta - eta*g (eta in
+    learning-rate units): for a quadratic with curvature lambda this gives
+    theta' = (1 - eta*lambda)*theta, so eta* = 2/lambda EXACTLY and the
+    identity lambda_c = 2/eta* recovers the curvature. (A normalized-
+    direction probe would instead measure 2*distance-to-reflection, not
+    curvature.)
+
+    Returns (eta*, lambda_c); (nan, nan) when no stable step exists at
+    eta0 or the gradient is zero.
+    """
+    if grad_norm <= 0:
+        return float("nan"), float("nan")
+    gvecs = [g.detach() for g in grads]
+
+    saved = [p.detach().clone() for p in params]
+
+    def probe(eta: float) -> float:
+        with torch.no_grad():
+            for p_, g_ in zip(params, gvecs):
+                p_.add_(g_, alpha=-eta)
+            val = float(compute_loss().item())
+            for p_, s_ in zip(params, saved):
+                p_.copy_(s_)
+        return val
+
+    # Doubling phase: find the first unstable eta.
+    eta = eta0
+    if probe(eta) >= baseline_loss:
+        return float("nan"), float("nan")   # unstable already at eta0
+    lo = eta
+    hi = None
+    for _ in range(max_doublings):
+        eta *= 2.0
+        if probe(eta) >= baseline_loss:
+            hi = eta
+            break
+        lo = eta
+    if hi is None:
+        # Never became unstable within the search range; report the last
+        # stable step as a lower bound.
+        return float(lo), float(2.0 / lo)
+
+    # Bisection between last stable (lo) and first unstable (hi).
+    for _ in range(bisect_iters):
+        mid = 0.5 * (lo + hi)
+        if probe(mid) >= baseline_loss:
+            hi = mid
+        else:
+            lo = mid
+    eta_star = 0.5 * (lo + hi)
+    return float(eta_star), float(2.0 / eta_star)
+
+
 def _make_random_vec(params, rademacher: bool = True,
                      generator: "torch.Generator | None" = None,
                      ) -> List[torch.Tensor]:
@@ -276,6 +343,16 @@ class LossSharpnessTask(DiagnosticTask):
                 compute_loss, params, sam_rho, baseline_loss
             )
 
+            # 4. Critical sharpness (B8): largest stable descent step along
+            # the normalized gradient; lambda_c = 2/eta* (edge of stability).
+            loss_for_cs = compute_loss()
+            grads_cs = torch.autograd.grad(loss_for_cs, params,
+                                           create_graph=False)
+            gnorm_cs = float(_flatten_grads(list(grads_cs)).norm().item())
+            critical_step, critical_sharpness = _critical_step_size(
+                compute_loss, params, list(grads_cs), gnorm_cs, baseline_loss
+            )
+
         finally:
             # Restore original requires_grad state and training mode.
             for p, grad_flag in orig_grad_state.items():
@@ -292,6 +369,8 @@ class LossSharpnessTask(DiagnosticTask):
             "top_eigenvalue_estimate": top_eig,
             "sam_sharpness": sam_sharpness,
             "sam_perturbed_loss": perturbed_loss,
+            "critical_step_size": critical_step,
+            "critical_sharpness": critical_sharpness,
             "sam_rho": sam_rho,
             "n_hutchinson_samples": n_hutchinson,
             "n_power_iterations": n_power_iter,

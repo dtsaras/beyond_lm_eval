@@ -465,3 +465,39 @@ values), task-vector norms (+normalized keys), sharpness (seeded + force-eager:
 first default-pipeline values), trajectory curvature (per-sentence aggregation),
 svd cosine (raw-state Eq. 4), magnitude (median scale + med-scale + numpy-1.x),
 mahalanobis (held-out), perplexity BPC (BOS models), topology _norm keys.
+
+## Campaign 4 — B8: gap-survey metrics (2026-07-10)
+
+Post-campaign metric-gap survey (3 parallel agents; synthesis at
+`beyond_benchmarks/docs/2026-07-10-metric-gaps-and-similar-studies.md`)
+identified 8 Tier-A additions. All implemented + verified to campaign-4
+standards in this batch. Registry 82 → 86. Paper's structural core 43 → 47
+(geometry 32→34, topology 5, dynamics 6→8; + RepE 4 appendix-only = 51
+verified overall; extensions live inside existing tasks).
+Per user decision: competing same-timeline studies (LPP arXiv:2605.30018,
+ABLE arXiv:2606.07524) are NOT cited.
+
+**New tasks (4):**
+
+| Task | Cert | Evidence |
+|---|---|---|
+| `geometry_superposition_strength` | formula-faithful | Liu-Liu-Gore 2025 (NeurIPS, 2505.10465; repo liuyz0/SuperpositionScaling). Anchors exact: orthonormal→0, simplex ETF == Welch bound (rel 1e-6), iid Gaussian→1/m; sampled≈exact. PROTOCOL: headline MSO on MEAN-CENTERED rows (gpt2: raw 0.075 vs centered 0.0025 ≈ 1.9×Welch — the paper's ~1/m only reproduces centered); raw emitted alongside; centering pinned by a task-level test |
+| `geometry_effective_depth` | formula-faithful | ShortGPT BI_l = 1−E[cos(h_l,h_{l+1})] (Men et al. 2403.03853) + Csordás-style effective_depth_90 (2505.13898). Anchors exact: identity→0, sign-flip→2, rotation≈1, concentrated stack→0.25 |
+| `dynamics_fractal` | refined-adaptation | Alabdulmohsin-Tran-Dehghani 2024 (NeurIPS, 2402.01825). R/S Hurst + Joseph + Hölder on the NLL stream; white-noise H≈0.5/J≈0.5, trending H>0.85; == nolds.hurst_rs ±0.1 (live pip). DEVIATION disclosed: concatenated eval-corpus stream vs paper's per-document 4K windows. gpt2 H=0.63 (paper: language ~0.70±0.09) |
+| `dynamics_perturbation_growth` | proxy-only | BLME formulation; QLE grounding Li et al. 2503.13530 (+ Fernando & Guitchounts context). Seeded per-token-relative input-embedding perturbation; linear gain-a stack slope exact (rel 1e-5 fp32 floor); contracting→negative |
+
+**Extensions to verified tasks (4):**
+
+| Host task | Extension | Evidence |
+|---|---|---|
+| `geometry_spectral` | official Clauset PL-MLE α with KS-optimal x_min on eigenvalues (`alpha_official`, `alpha_hat`) | planted Pareto α=3→2.994; == LIVE weightwatcher 0.7.7 to 5e-3 abs (2.253529 vs 2.253539); Clauset-Shalizi-Newman 2009 added to citations |
+| `geometry_mp_bulk_deviation` | lower-edge outliers for γ<1 (`lower_outlier_frac`/`lower_energy`; Staats-Thamm-Rosenow 2410.17770) | iid ≈0, planted correlated ≥0.04, γ≥1 → NaN (regression-pinned) |
+| `dynamics_sharpness` | critical step size η*/λ_c=2/η* (Kalra et al. 2601.16979; raw-gradient variant documented) | quadratic anchors λ∈{0.25,4,37.5} EXACT; param restoration asserted; zero-grad→NaN. (Fixed during dev: doubling budget + raw-vs-normalized gradient probe — normalized gives η*=2‖θ‖, wrong) |
+| `topology_homology` | scale-stratified fine/coarse persistence (Fay et al. 2505.20435) | constructed-diagram anchors (known fine/coarse membership); threshold 0.5×mean-pairwise-distance shared with the _norm keys |
+
+Test artifact: `tests/tasks/parity/test_b8_new_metrics_parity.py` (26 tests,
+analytic anchors + live weightwatcher/nolds parity). e2e on gpt2 (CPU,
+HF_HUB_OFFLINE): all 8 metrics finite & plausible. Citations web-verified
+2026-07-10 (incl. corrections: Kalra author list, Fay title). defaults.yaml,
+task_metadata.py, docs/tasks_{geometry,dynamics,topology}.md §§33-34/7-8 +
+extension bullets, PAPERS.md rows — all updated.
