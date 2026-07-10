@@ -60,12 +60,13 @@ it's cited. Sorted alphabetically by first author.
 | **Levina, Bickel 2004** — *Maximum Likelihood Estimation of Intrinsic Dimension* | `geometry_lid` | NeurIPS 2004 | `geometry/lid.py` |
 | **Li, Galley, Brockett, Gao, Dolan 2016** — *A Diversity-Promoting Objective Function* (Distinct-n) | `dynamics_generation_diversity` | NAACL 2016 | `dynamics/generation_diversity.py` |
 | **Li, Xia, Chang, Wu 2024** — *Large Language Model Evaluation via Matrix Nuclear-Norm* | `geometry_schatten.row_normalized_matrix_nuclear_norm` | arXiv:2410.10672 | `geometry/schatten.py` |
-| **Li, Lizhi, Sondak, Wang 2025** — *Tracing the Representation Geometry of Language Models from Pretraining to Post-training* | metrics already implemented via `geometry_schatten.rankme` + `geometry_spectral.avg_alpha` | arXiv:2509.23024 | `geometry/schatten.py` (comment) |
+| **Li, Agrawal, Ghosh, Teru, Santoro, Lajoie, Richards 2025** — *Tracing the Representation Geometry of Language Models from Pretraining to Post-training* | metrics already implemented via `geometry_schatten.rankme` + `geometry_spectral.avg_alpha` | arXiv:2509.23024 | `geometry/schatten.py` (comment) |
 | **Liu, Lin, Hu, Manning, Liang 2023** — *Lost in the Middle: How Language Models Use Long Contexts* | `consistency_position_sensitivity` | arXiv:2307.03172 | `consistency/position_sensitivity.py` |
 | **Ma, Li, Wang, Erfani, Wijewickrema, Schoenebeck, Song, Houle, Bailey 2018** — *Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality* | `geometry_lid` | ICLR 2018 | `geometry/lid.py` |
 | **Marchenko, Pastur 1967** — *Distribution of eigenvalues for some sets of random matrices* | `geometry_mp_bulk_deviation` | *Mat. Sb.* 72(114):4, 507–536; English transl. *Math. USSR-Sb.* 1(4), 457–483 | `geometry/rmt_bulk.py` |
 | **Martin, Mahoney 2019a** — *Traditional and Heavy-Tailed Self Regularization in Neural Network Models* | `geometry_spectral.avg_alpha` | arXiv:1901.08276 | `geometry/spectral.py` |
-| **Martin, Mahoney 2019b / 2021** — *Heavy-Tailed Universality Predicts Trends in Test Accuracies* (Nature Comms. 2021) | `geometry_spectral.avg_alpha` | arXiv:1901.08278, Nat. Comms. 12:4122 | `geometry/spectral.py` |
+| **Martin, Mahoney 2020** — *Heavy-Tailed Universality Predicts Trends in Test Accuracies* (SDM 2020) | `geometry_spectral.avg_alpha` | arXiv:1901.08278 | `geometry/spectral.py` |
+| **Martin, Peng, Mahoney 2021** — *Predicting trends in the quality of state-of-the-art neural networks without access to training or testing data* | `geometry_spectral.avg_alpha` | arXiv:2002.06716, Nat. Comms. 12:4122 | `geometry/spectral.py` |
 | **May, Wang, Bordia, Bowman, Rudinger 2019** — *On Measuring Social Biases in Sentence Encoders* (SEAT) | `consistency_bias_weat` | arXiv:1903.10561 | `consistency/bias.py` |
 | **Meng, Bau, Andonian, Belinkov 2022** — *Locating and Editing Factual Associations in GPT* (ROME) | `causality_tracing` | arXiv:2202.05262 | `causality/tracing.py` |
 | **Michel, Levy, Neubig 2019** — *Are Sixteen Heads Really Better than One?* | `causality_attention_knockout` | NeurIPS 2019 | `causality/attention_knockout.py` |
@@ -82,7 +83,7 @@ it's cited. Sorted alphabetically by first author.
 | **Sun, Chen, Kolter, Liu 2024** — *Massive Activations in Large Language Models* | `interpretability_activation_sinks.massive_activation_*` | arXiv:2402.17762 | `interpretability/activation_sinks.py` |
 | **Syed, Rager, Conmy 2024** — *Attribution Patching Outperforms Automated Circuit Discovery* (EAP) | `causality_edge_attribution` | arXiv:2310.10348 (BlackboxNLP 2024) | `causality/edge_attribution.py` |
 | **Thilak, Maddox 2021** — *The Low-Rank Simplicity Bias in Deep Networks* | `geometry_collapse` (effective rank context) | arXiv:2011.09348 | `geometry/collapse.py` |
-| **Tomašev, Radovanović, Mladenić, Ivanović 2014** — *The Role of Hubness in High-Dimensional Data* | `geometry_hubness` | IEEE TKDE 2014 | `geometry/hubness.py` |
+| **Tomašev, Radovanović, Mladenić, Ivanović 2014** — *The Role of Hubness in Clustering High-Dimensional Data* | `geometry_hubness` | IEEE TKDE 2014 | `geometry/hubness.py` |
 | **Voita, Talbot, Moiseev, Sennrich, Titov 2019** — *Analyzing Multi-Head Self-Attention: Specialized Heads Do the Heavy Lifting* | `causality_attention_knockout`, `interpretability_head_roles` | ACL 2019 | `causality/attention_knockout.py`, `head_roles.py` |
 | **Wang, Wei, Schuurmans, Le, Chi, Zhou 2022** — *Self-Consistency Improves Chain of Thought Reasoning* | `consistency_self_consistency` | arXiv:2203.11171 | `consistency/self_consistency.py` |
 | **Wang, Zhang, Yang, Wong, Wang 2025** — *Latent Space Chain-of-Embedding Enables Output-free LLM Self-Evaluation* (ICLR 2025) | `dynamics_coe` | arXiv:2410.13640 | `dynamics/coe.py` |
@@ -140,7 +141,7 @@ for paper-ready release.
 | `geometry/intrinsic_dim.py` | Facco 2017 (cited above) |
 | `geometry/perplexity.py` | Shannon 1948 (bits-per-character); standard cross-entropy |
 | `geometry/tokenizer_efficiency.py` | Rust et al. 2021 for fertility; Ali et al. 2024 for tokenizer-choice/training-cost effects |
-| `geometry/unembedding.py` | effective rank (Roy & Vetterli 2007, EUSIPCO) on the unembedding matrix; alignment/purity are BLME diagnostics |
+| `geometry/unembedding.py` | effective rank (Roy & Vetterli 2007, EUSIPCO) of the MEAN-CENTERED unembedding matrix (centering changes the value ~4%); alignment/purity are BLME diagnostics |
 | `geometry/weight_norms.py` | Martin-Mahoney 2019 style per-layer diagnostic |
 | `geometry/positional_decay.py` | Press et al. 2021 *ALiBi* — positional bias concept |
 | `interpretability/attention_graph.py` | Abnar & Zuidema 2020 *Attention Rollout* (topology part) + standard PageRank |
@@ -264,7 +265,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `geometry_prediction_alignment` (alias `geometry/consistency.py`) 📝 BLME-custom; no canonical paper
 - `geometry_representation_sensitivity` (alias `information_geometry.py`) 📝 add Amari 2016
 - `geometry_rsa` 📝 add Kriegeskorte 2008
-- `geometry_schatten` ✅ Wei 2025, Li 2024, Garrido 2023
+- `geometry_schatten` ✅ Yusupov 2025 (arXiv:2509.25359), Li 2024, Garrido 2023
 - `geometry_spectral` ✅ Martin-Mahoney 2019/2021
 - `geometry_svd` — standard SVD diagnostics
 - `geometry_tokenizer_efficiency` ✅ Rust 2021 fertility; Ali et al. 2024 tokenizer-choice effects (round 10)

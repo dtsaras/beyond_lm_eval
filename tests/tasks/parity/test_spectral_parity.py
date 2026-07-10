@@ -208,3 +208,47 @@ def test_fixture_records_proxy_verdict():
     assert fx["check_a_known_exponent_recovery"]["pass"] is True
     assert fx["check_b_independent_hill"]["pass"] is True
     assert fx["check_d_anchor_marchenko_pastur"]["pass"] is True
+
+
+def test_real_task_matches_transcribed_kernel():
+    """Anti-drift guard (campaign-4 B4): every other test in this file runs
+    on the TRANSCRIBED kernel above, so a formula change in spectral.py
+    would leave them green. Drive the REAL WeightSpectralTask on a Linear
+    layer with a PLANTED spectrum and assert it equals _blme_hill_alpha on
+    the same singular values (and the analytic stable rank)."""
+    torch = pytest.importorskip("torch")
+    from blme.tasks.geometry.spectral import WeightSpectralTask
+
+    # Planted Pareto-quantile spectrum (a=2.5), n=300, embedded via QR bases.
+    rng = np.random.default_rng(0)
+    n = 300
+    q = (1.0 - (np.arange(1, n + 1) - 0.5) / n) ** (-1.0 / 2.5)
+    s = np.sort(q)[::-1]
+    U, _ = np.linalg.qr(rng.standard_normal((n, n)))
+    Vt, _ = np.linalg.qr(rng.standard_normal((n, n)))
+    W = (U * s) @ Vt.T
+
+    lin = torch.nn.Linear(n, n, bias=False)
+    with torch.no_grad():
+        lin.weight.copy_(torch.tensor(W, dtype=torch.float32))
+
+    class _M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = lin
+
+    out = WeightSpectralTask(config={"tail_fraction": 0.2}).evaluate(
+        _M(), None, dataset=None
+    )
+    assert "error" not in out
+
+    # The task recomputes svdvals in float32; feed the SAME float32 svdvals
+    # to the transcribed kernel so the comparison isolates the formula.
+    S32 = torch.linalg.svdvals(lin.weight.detach()).numpy()
+    expected_alpha = _blme_hill_alpha(S32, tail_fraction=0.2)
+    assert out["avg_alpha"] == pytest.approx(expected_alpha, rel=1e-6), (
+        "real task diverged from the transcribed kernel — update BOTH"
+    )
+
+    expected_srank = float((S32 ** 2).sum() / (S32 ** 2).max())
+    assert out["avg_stable_rank"] == pytest.approx(expected_srank, rel=1e-5)

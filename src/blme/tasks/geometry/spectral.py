@@ -18,8 +18,9 @@ class WeightSpectralTask(DiagnosticTask):
     """
     Analyzes the spectral properties of weight matrices.
     Metrics:
-    - Stable Rank: ||W||_F^2 / ||W||_2^2 (Bartlett, Foster & Telgarsky,
-      NeurIPS 2017, arXiv:1706.08498)
+    - Stable Rank: ||W||_F^2 / ||W||_2^2 (definition: Rudelson &
+      Vershynin 2007, JACM 54(4); used in DNN generalization bounds by
+      Neyshabur, Bhojanapalli & Srebro 2018, arXiv:1707.09564)
     - Power Law Alpha: Hill estimator over the top tail of the *singular
       values* (Martin & Mahoney HT-SR, 2021). NB: Martin & Mahoney fit the
       power law to the empirical spectral density of the *eigenvalues*

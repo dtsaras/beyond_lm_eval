@@ -1272,3 +1272,140 @@ def test_mp_bulk_integration(mock_model, mock_tokenizer):
         assert results[f"_meta_mp_gamma_{tag}"] > 0
         assert results[f"_meta_mp_n_tokens_{tag}"] > 0
     assert np.isfinite(results["mp_ks_distance_mean"])
+
+
+# ---------------------------------------------------------------------------
+# Campaign-4 B4: numeric pins for the weights-and-spectra kernels that were
+# previously only key-presence / bound-checked.
+# ---------------------------------------------------------------------------
+
+class _EmbOnlyModel(torch.nn.Module):
+    """Fake model exposing just an input-embedding matrix."""
+
+    def __init__(self, E):
+        super().__init__()
+        self.emb = torch.nn.Embedding.from_pretrained(E.clone(), freeze=True)
+
+    def get_input_embeddings(self):
+        return self.emb
+
+
+def test_hubness_evaluate_matches_independent_knn_reference():
+    """Regression (campaign-4 B4): the evaluate() k-occurrence kernel was
+    never numerically pinned — removing the self-mask changed skew/gini and
+    every test still passed. Full independent numpy reference: cosine kNN,
+    self excluded, occurrence counts -> scipy skew + sorted-rank Gini."""
+    from scipy.stats import skew as scipy_skew
+    from blme.tasks.geometry.hubness import GlobalHubnessTask
+
+    torch.manual_seed(0)
+    V, d, k = 257, 24, 5
+    E = torch.randn(V, d)
+    task = GlobalHubnessTask(config={"k_values": [k], "batch_size": 40})
+    out = task.evaluate(_EmbOnlyModel(E), None, dataset=None)
+    assert "error" not in out
+
+    # Independent reference (numpy float64, full argsort — no argpartition).
+    En = E.double().numpy()
+    En = En / np.linalg.norm(En, axis=1, keepdims=True)
+    sims = En @ En.T
+    np.fill_diagonal(sims, -np.inf)               # self-mask
+    counts = np.zeros(V, dtype=np.int64)
+    for i in range(V):
+        for j in np.argsort(sims[i])[-k:]:
+            counts[j] += 1
+    ref_skew = float(scipy_skew(counts))
+    x = np.sort(counts.astype(np.float64))
+    n = len(x)
+    ref_gini = float(
+        (2.0 * np.arange(1, n + 1) - n - 1.0) @ x / (n * x.sum())
+    )
+
+    assert out[f"hubness_k{k}_skew"] == pytest.approx(ref_skew, abs=1e-6)
+    assert out[f"hubness_k{k}_gini"] == pytest.approx(ref_gini, abs=1e-6)
+    assert out[f"hubness_k{k}_max"] == counts.max()
+
+
+def test_schatten_per_sentence_matches_official_mnn_pipeline():
+    """Regression (campaign-4 B4): nothing pinned _per_sentence_measurements
+    (preprocessing + MNN + the 2026-06-22 '/T' fix) — reverting mnn/T to
+    mnn/d passed all 31 schatten tests. Reference: verbatim transcription of
+    MLGroupJLU/MatrixNuclearNorm MNN.py (normalize L32-38, MNN L41-49,
+    per-token division L195) @ e7a9188."""
+    from blme.tasks.geometry.schatten import (
+        _normalise_matrix,
+        _per_sentence_measurements,
+    )
+
+    torch.manual_seed(0)
+    Z = torch.randn(24, 16)
+
+    # --- verbatim official reference ---
+    def official_normalize(R):
+        R = R - R.mean(dim=0, keepdim=True)
+        return R / R.norm(dim=1, keepdim=True)
+
+    def official_mnn(X):
+        D = min(X.shape)
+        col = X.norm(dim=0)
+        return float(col.sort(descending=True).values[:D].sum())
+
+    Zn_ref = official_normalize(Z.clone())
+    ref_mnn_over_T = official_mnn(Zn_ref) / Z.shape[0]
+
+    # Preprocessing must be BIT-identical to the official normalize().
+    assert torch.equal(_normalise_matrix(Z.clone()), Zn_ref)
+
+    out = _per_sentence_measurements(Z.clone())
+    assert out["row_normalized_matrix_nuclear_norm"] == pytest.approx(
+        ref_mnn_over_T, rel=1e-6
+    )
+
+
+def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
+    """Analytic anchor (campaign-4 B4): two orthogonal category clusters in
+    the unembedding matrix -> top-k purity EXACTLY 1.0 (purity was only
+    bound-checked before; formula drift like match/(k+1) was invisible)."""
+    import json as _json
+    from blme.tasks.geometry.unembedding import UnembeddingDiagnosticsTask
+
+    words_a = ["aa", "bb", "cc", "dd"]
+    words_b = ["ee", "ff", "gg", "hh"]
+    vocab = {w: i + 2 for i, w in enumerate(words_a + words_b)}  # ids 2..9
+
+    class _Tok:
+        def encode(self, text, add_special_tokens=False):
+            t = text.strip()
+            if t in vocab:
+                return [vocab[t]]
+            return [0, 1]  # multi-token -> skipped by the label loader
+
+    V, d = 12, 8
+    W = torch.zeros(V, d)
+    for w in words_a:
+        W[vocab[w], 0] = 1.0          # category A -> e1
+    for w in words_b:
+        W[vocab[w], 1] = 1.0          # category B -> e2
+    W[0, 2] = 1.0                      # unlabeled distractors, orthogonal
+    W[1, 3] = 1.0
+    W[10, 4] = 1.0
+    W[11, 5] = 1.0
+
+    class _HeadModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lm_head = torch.nn.Linear(d, V, bias=False)
+            with torch.no_grad():
+                self.lm_head.weight.copy_(W)
+
+    cats = tmp_path / "categories.json"
+    cats.write_text(_json.dumps({"cat_a": words_a, "cat_b": words_b}))
+
+    # k = cluster size - 1: every neighbor slot must be same-category.
+    task = UnembeddingDiagnosticsTask(config={
+        "categories_path": str(cats), "k": 3, "num_samples": 0,
+    })
+    out = task.evaluate(_HeadModel(), _Tok(), dataset=None)
+
+    assert out["unembedding_n_category_tokens"] == 8
+    assert out["unembedding_purity_mean"] == 1.0

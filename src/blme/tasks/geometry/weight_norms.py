@@ -16,7 +16,8 @@ Reports:
     matrices in each transformer block.
   - **spectral_norm_per_layer**: mean largest singular value per block.
   - **stable_rank_per_layer**: mean stable rank per block.
-  - **norm_uniformity**: 1 - CV(frobenius_per_layer). Higher = more
+  - **norm_uniformity**: max(0, 1 - CV(frobenius_per_layer)) — clamped
+    at zero when the layer norms vary wildly (CV > 1). Higher = more
     uniform weight magnitudes across layers.
 """
 

@@ -149,7 +149,7 @@ def _per_sentence_measurements(Z: torch.Tensor) -> Dict[str, float]:
         return {}
 
     mnn = _matrix_nuclear_norm_fast(Z_norm)
-    # The Schatten-p norms are normalised by sqrt(D) — a BLME width-
+    # The Schatten-p norms are normalised by d^(1/p) — a BLME width-
     # comparability convention (‖X‖_{S_p} / d^{1/p}) so the values are
     # comparable across models of different d_model.
     d = float(max(Z_norm.shape[1], 2))

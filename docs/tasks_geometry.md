@@ -34,11 +34,12 @@ efficiency diagnostics, not standalone proof of downstream quality.
 
 ## 2. Lipschitz Continuity Analysis
 * **What are we measuring**: The local smoothness and sensitivity of the model to small perturbations in the input space.
-* **How are we measuring**: Practically estimated by computing the ratio of the distance between output representations to the distance between input representations for closely neighbored points.
+* **How are we measuring**: Per-layer relative-change ratios of the residual stream: for each token, ‖h^(l+1) − h^(l)‖ / ‖h^(l)‖, averaged over tokens per layer (`lipschitz_max` = max over layers of these per-layer token-means; the mean-aggregation choice is documented in the module docstring).
 * **Hypothesis**: High Lipschitz constants indicate an unstable, highly chaotic representation space vulnerable to adversarial perturbations. Low constants indicate smooth, stable generalization.
 * **Citation/Paper**: `Anil, C., Lucas, J., & Grosse, R. (2019). Sorting out Lipschitz function approximation.` [ICML 2019, ArXiv: 1811.05381]. Related estimation work: `Miyato, T., et al. (2018). Spectral Normalization for Generative Adversarial Networks.` and `Scaman, K. & Virmaux, A. (2018). Lipschitz regularity of deep neural networks.` [NeurIPS 2018, ArXiv: 1805.10965]
 * **File & Function**: `src/blme/tasks/geometry/lipschitz.py` -> `LipschitzContinuityTask`
-* **Critical Info**: Extremely hard to measure analytically; this task uses an empirical local approximation based on sampled neighbors.
+* **Critical Info**: Proxy-only — an empirical hidden-state relative-change diagnostic, NOT the operator-norm Lipschitz bound of the cited papers (disclaimed in the docstring). The exact σ_max kernel is verified separately against the official avirmaux/lipEstimation power method.
+* **Verification** (2026-07, campaign B4): hand-derived 4-layer/3-pair analytic case matches all five outputs to 1e-6; distilgpt2 end-to-end matches a from-scratch NumPy reference; official lipEstimation clone diffed identical to upstream and its power method run live against BLME's svdvals kernel. The mean-vs-max aggregation ambiguity (campaign-3 DISCREPANCY) is resolved and documented.
 
 ## 3. Representational Similarity Analysis (RSA)
 * **What are we measuring**: The structural isomorphism between the representation spaces of two different models, or two different layers.
@@ -69,8 +70,10 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **How are we measuring**: By computing the von Neumann spectral entropy over the internal covariance matrix of the hidden states at each layer.
 * **Hypothesis**: As information passes through an LLM, the model actively filters out noise. A decreasing or low layer-wise matrix entropy indicates the model is actively forming a tighter semantic "Information Bottleneck".
 * **Citation/Paper**: `Wei, L., Tan, Z., Li, C., Wang, J., & Huang, W. (2024). Diff-eRank: A Novel Rank-Based Metric for Evaluating Large Language Models.` [NeurIPS 2024, ArXiv: 2401.17139]
+* **Paper summary**: Wei et al. define per-sentence matrix entropy as the von Neumann entropy of the trace-normalized covariance of centered, row-normalized hidden states (Def. 4.1/4.3, averaged over sentences and divided by log d), and show it separates trained from random models and tracks quality; v2 of the paper (Diff-eRank, NeurIPS 2024) recasts the same quantity as an effective-rank difference between the untrained and trained model.
 * **File & Function**: `src/blme/tasks/geometry/matrix_entropy.py` -> `MatrixEntropyTask`
-* **Critical Info**: Values typically decrease monotonically in deeper layers as the network compresses raw syntax into refined semantic logic.
+* **Critical Info**: Values typically decrease monotonically in deeper layers as the network compresses raw syntax into refined semantic logic. Cache and fresh paths both truncate at 512 tokens (the official protocol used 2048 — documented in the code).
+* **Verification** (2026-07, campaign B4): NEW dedicated parity file `tests/tasks/parity/test_matrix_entropy_parity.py` — verbatim float64 transcription of the official Diff-eRank normalize/cal_cov/cal_entropy vs BLME's kernel on three shapes incl. N<d and low-rank (≤1e-5, fp32 kernel), an exact ln 2 analytic anchor, and a mutant-discrimination check (previously NO numeric parity test existed and centering/normalization mutants passed the suite). The 512-vs-128 cache/fresh truncation mismatch (campaign-3 DISCREPANCY) is fixed.
 
 ## 7. Correlation Dimension (Fractal Geometry)
 * **What are we measuring**: The underlying fractal complexity and self-similarity of the generated language manifold.
@@ -98,11 +101,13 @@ efficiency diagnostics, not standalone proof of downstream quality.
 
 ## 10. Hubness
 * **What are we measuring**: The tendency of certain tokens to be the "nearest neighbor" of an unusually high number of other tokens in latent space.
-* **How are we measuring**: Computing pairwise cosine similarities and tracking the skewed distribution of incoming Nearest Neighbor (1-NN) edges. High skew/max indicates severe hubness.
+* **How are we measuring**: Computing pairwise cosine similarities and, for each k in `k_values`, the k-occurrence distribution N_k (how many times each token appears in other tokens' top-k lists, self excluded). Reported: skewness of N_k (the canonical hubness statistic), Gini, max, and top-1% mass.
 * **Hypothesis**: The "Curse of Dimensionality" leads to spatial hubs in high dimensions. These hubs crowd semantic spaces and degrade zero-shot retrieval and generation.
-* **Citation/Paper**: `Radovanovic, M., Nanopoulos, A., & Ivanovic, M. (2010). Hubs in space: Popular nearest neighbors in high-dimensional data.` [Journal of Machine Learning Research (JMLR) Vol 11]
+* **Citation/Paper**: `Radovanovic, M., Nanopoulos, A., & Ivanovic, M. (2010). Hubs in space: Popular nearest neighbors in high-dimensional data.` [JMLR 11:2487-2531]; `Tomašev, Radovanović, Mladenić, Ivanović (2014). The Role of Hubness in Clustering High-Dimensional Data.` [IEEE TKDE 26(3):739-751]
+* **Paper summary**: Radovanović et al. show that in high dimensions the k-occurrence distribution becomes heavily right-skewed: a few points ("hubs") appear in a disproportionate share of neighbor lists, an intrinsic-dimensionality effect that degrades nearest-neighbor methods; S_Nk (skewness of N_k) is their canonical hubness measure — exactly what BLME reports. Tomašev et al. extend the analysis to clustering.
 * **File & Function**: `src/blme/tasks/geometry/hubness.py` -> `GlobalHubnessTask`
 * **Critical Info**: Highly sensitive to the choice of similarity metric (L2 distance vs Cosine). Usually worse under Euclidean distance.
+* **Verification** (2026-07, campaign B4): kernel matches scikit-hubness (bincount + scipy.stats.skew, self-hit filter, Gini) line-for-line; NEW end-to-end pin in `test_geometry.py` — evaluate() on a seeded 257×24 fake model vs an independent full-argsort numpy reference (skew/gini/max ≤1e-6; a dropped self-mask now fails loudly). PAPERS.md Tomašev title corrected.
 
 ## 11. Category Separation
 * **What are we measuring**: How well conceptually related words group together organically.
@@ -133,8 +138,10 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **How are we measuring**: Scanning linear/Conv1D weight matrices, computing stable rank and a Hill-estimator tail exponent over top singular values.
 * **Hypothesis**: Heavy-tailed spectra can indicate learned correlation structure and implicit self-regularization; extreme collapse or noise-like spectra are warnings.
 * **Citation/Paper**: `Martin, C. H. & Mahoney, M. W. (2019/2021). Traditional and Heavy-Tailed Self Regularization in Neural Network Models / Heavy-Tailed Universality Predicts Trends in Test Accuracies.` BLME's `avg_alpha` is a singular-value Hill proxy, not the exact WeightWatcher ESD alpha.
+* **Paper summary**: Martin & Mahoney's Heavy-Tailed Self-Regularization theory fits power laws to the eigenvalue spectral density of weight matrices and finds that well-trained networks develop heavy tails (small α) without explicit regularization; across families, smaller/more uniform α predicts better test accuracy — with the follow-up (Martin, Peng & Mahoney, Nat. Comms. 2021) showing α-based metrics predict quality WITHOUT any training/test data. BLME's `avg_alpha` is a documented proxy: a Hill estimator on the fixed top-20% singular-value tail; at matched x_min the identity α_σ = 2·α_MM − 1 to the official eigenvalue fit is exact.
 * **File & Function**: `src/blme/tasks/geometry/spectral.py` -> `WeightSpectralTask`
-* **Critical Info**: Shows strong parallels between biological neural networks and artificial models.
+* **Critical Info**: Shows strong parallels between biological neural networks and artificial models. Stable rank ‖W‖_F²/‖W‖_2² definition: Rudelson & Vershynin 2007 (previously mis-attributed to Bartlett et al. 2017, which never uses it — fixed in B4).
+* **Verification** (2026-07, campaign B4): Hill kernel equals official weightwatcher-0.7.7 WW_powerlaw at forced x_min (identity exact at 0.0); NEW anti-drift test drives the REAL WeightSpectralTask on a planted-spectrum Linear and pins avg_alpha/avg_stable_rank against the transcribed kernel (the parity file previously never imported blme).
 
 ## 15. HSIC Dependence (`geometry_hsic`)
 * **What are we measuring**: Kernel dependence between representation sets, usually across layers or between input and layer representations.
@@ -153,12 +160,14 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Critical Info**: Less prone to the scaling artifacts that affect normal canonical correlation analysis (CCA).
 
 ## 17. Unembedding Geometry
-* **What are we measuring**: The relationship between the hidden language representations in the final layer and the static unembedding parameters located in the LM head.
-* **How are we measuring**: Looking at the angles (cosine similarity) and norms between the highest logit token vectors and the actual dynamic context state vectors. 
-* **Hypothesis**: The final language modeling head forces representations into distinct regions of the LM head space. The "Unembedding" operation exhibits severe bias due to token frequency in the pre-training set.
-* **Citation/Paper**: Derived from unembedding-geometry and vocabulary-bias analyses; BLME's alignment and purity summaries are diagnostics inspired by unembedding-geometry and vocabulary-bias analyses (effective rank: Roy & Vetterli 2007, EUSIPCO).
+* **What are we measuring**: Static geometry of the LM head (unembedding) matrix: how many directions it effectively uses, whether semantically related tokens cluster, and how it relates to the input embeddings.
+* **How are we measuring**: Four static diagnostics — (1) tied-weight check (W_out ≈ E_in); (2) Roy-Vetterli effective rank of the MEAN-CENTERED unembedding matrix (GPU SVD); (3) top-k category purity over a bundled concept taxonomy (fraction of each labelled token's k nearest unembedding rows sharing its category); (4) per-token cosine alignment between the final-layer-norm-transformed input embedding and the unembedding row. No hidden states, logits, or norms are involved.
+* **Hypothesis**: Higher effective rank = richer prediction geometry; higher purity = semantically organized unembedding space; alignment characterizes how far apart the input/output vocabularies drift in untied models.
+* **Citation/Paper**: Effective rank: `Roy, O. & Vetterli, M. (2007). The Effective Rank: A Measure of Effective Dimensionality.` [EUSIPCO 2007]. The purity and alignment summaries are BLME diagnostics (proxy-only).
+* **Paper summary**: Roy & Vetterli define the effective rank as exp of the Shannon entropy of the L1-normalized singular values — a smooth, threshold-free count of "how many dimensions the matrix really uses"; BLME applies it to the mean-centered unembedding matrix (centering changes the value by ~4% and is part of the definition used here).
 * **File & Function**: `src/blme/tasks/geometry/unembedding.py` -> `UnembeddingDiagnosticsTask`
-* **Critical Info**: Typically reveals that frequent tokens dominate the manifold geometry by pushing less frequent tokens away from the origin computationally.
+* **Critical Info**: Tier-1 (weights only). Purity iterates the labelled tokens directly (a historic bug sampled the whole vocab and purity collapsed to 0); the final layer norm is applied before alignment so tied models don't trivially score 1.0.
+* **Verification** (2026-07, campaign B4): effective rank matches a float64 numpy re-derivation of the EUSIPCO definition (5.4e-6 rel, fp32-vs-fp64); purity matched an independently rebuilt label map + full-argsort reference to 1e-10 on distilgpt2; NEW exact analytic anchor in `test_geometry.py` — two orthogonal category clusters → purity exactly 1.0 (previously only bound-checked).
 
 ## 18. Perplexity (Baseline / Y-variable Geometry)
 * **What are we measuring**: Baseline auto-regressive predictability.
@@ -189,7 +198,9 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **How are we measuring**: At first/mid/last layers, z-score each dimension of the flattened token cloud $X \in \mathbb{R}^{N \times D}$ (dropping zero-variance dims), form the correlation matrix $C = Z^\top Z / N$ and its eigenvalues. Under the iid null the spectrum follows the Marchenko-Pastur law with ratio $\gamma = D/N$ and bulk support $[(1-\sqrt{\gamma})^2, (1+\sqrt{\gamma})^2]$. We report the fraction of eigenvalues above the buffered upper edge (`mp_outlier_frac`, `edge_tol` = 0.05 absorbs Tracy-Widom $O(N^{-2/3})$ edge fluctuations), the variance fraction carried by those spikes (`mp_spike_energy`), and the KS distance between the empirical eigenvalue CDF and the $\gamma$-matched MP CDF (`mp_ks_distance`), plus fixed-aspect-ratio variants (`*_g25`) on a seeded token subsample with $\gamma = 0.25$.
 * **Hypothesis**: Real activations are highly structured: a substantial outlier fraction and spike energy indicate many learned signal directions standing above the noise bulk (BBP-supercritical spikes). Models whose spectra hug the MP bulk encode little linear structure at that layer.
 * **Citation/Paper**: `Marchenko, V. A. & Pastur, L. A. (1967). Distribution of eigenvalues for some sets of random matrices.` [Mat. Sb. 72(114):4; Math. USSR-Sbornik 1(4), 457-483] and `Baik, J., Ben Arous, G., & Péché, S. (2005). Phase transition of the largest eigenvalue for nonnull complex sample covariance matrices.` [Annals of Probability 33(5), 1643-1697, ArXiv: math/0403022]
+* **Paper summary**: Marchenko & Pastur derive the limiting eigenvalue distribution of sample covariance matrices of iid noise — the "MP bulk" with support [(1±√γ)²] and, for γ>1, a point mass at 0 from rank deficiency. Baik, Ben Arous & Péché characterize when a true signal direction escapes the bulk (the BBP phase transition): spikes above the threshold detach as outlier eigenvalues. BLME uses both as the null model: eigenvalues above the buffered bulk edge are learned structure, and the KS distance to the γ-matched MP CDF summarizes overall deviation from noise.
 * **File & Function**: `src/blme/tasks/geometry/rmt_bulk.py` -> `MPBulkDeviationTask`
+* **Verification** (2026-07, campaign B4): _mp_cdf vs transcribed scikit-rmt closed form and scipy.quad (≤2.3e-5 away from γ=1); BBP detachment threshold and outlier location confirmed analytically. Both campaign-3 BUGs fixed with regression tests: the γ>1 KS distance now handles the zero-eigenvalue atom (was returning ~1−1/γ regardless of fit) and _mp_cdf is accurate at γ=1 (was off by up to 0.59 at the density singularity); the previously untested γ≥1 branch is now covered.
 * **Critical Info**: Uses the *unordered* flattened token cloud (`per_sample=False` is correct here — RMT statements concern a population of rows). $\gamma$ varies across models, but the MP reference is $\gamma$-matched per layer so the comparison stays fair; the `*_g25` variants additionally pin $\gamma = 0.25$ for strict cross-model comparability (NaN when fewer than $\lceil D/0.25 \rceil$ tokens exist).
 
 ## 22. Contextualization
@@ -221,8 +232,10 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **How are we measuring**: Centering columns, row-L2 normalizing, then computing row-normalized Schatten-p norms (p=1,4,∞), Matrix Nuclear-Norm, and RankMe.
 * **Hypothesis**: Spectral concentration and nuclear-norm summaries can proxy representation compression and rank utilization.
 * **Citation/Paper**: `Yusupov et al. (2025). From Internal Representations to Text Quality: A Geometric Approach to LLM Evaluation.` [ArXiv: 2509.25359]; `Li, Xia, Chang, & Wu (2024). Large Language Model Evaluation via Matrix Nuclear-Norm.` [ArXiv: 2410.10672]; `Garrido et al. (2023). RankMe.` [ICML 2023, ArXiv: 2210.02885]
+* **Paper summary**: Li et al. propose the Matrix Nuclear-Norm — an O(n²) L1,2 column-norm upper bound on the nuclear norm of the (centered, row-normalized) hidden-state matrix — as a single capability/compression scalar that avoids O(n³) SVDs. Yusupov et al. stress-test Schatten norms and related rank/geometry metrics of internal representations as reference-free text-quality signals (noting Schatten norms partly track output length — one reason BLME reports dimension-normalized, per-sentence-averaged forms). Garrido et al.'s RankMe (exp of the entropy of normalized singular values) predicts downstream quality of self-supervised representations without labels.
 * **File & Function**: `src/blme/tasks/geometry/schatten.py` -> `SchattenNormTask`
-* **Critical Info**: `schatten_2` is intentionally not exposed because it equals a content-free function of token count and width after row-L2 normalization.
+* **Critical Info**: `schatten_2` is intentionally not exposed because it equals a content-free function of token count and width after row-L2 normalization. Schatten-p norms are reported divided by d^(1/p) (see the paper appendix's scaling derivation).
+* **Verification** (2026-07, campaign B4): _normalise_matrix and _matrix_nuclear_norm_fast match the official MLGroupJLU/MatrixNuclearNorm MNN.py verbatim (diff 0.0); the per-sentence pipeline including the 2026-06-22 mnn/T fix is NOW pinned end-to-end in `test_geometry.py` against an in-test transcription of the official pipeline (previously reverting /T to /d passed all 31 tests); RankMe epsilon-placement deviation (O(1e-5)) documented in the kernel docstring.
 
 ## 26. Tokenizer Efficiency
 * **What are we measuring**: Tokenizer-dependent fertility and compression properties for a fixed text sample.
@@ -236,7 +249,8 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **What are we measuring**: Layerwise norms and stable-rank style summaries of model weight matrices.
 * **How are we measuring**: Scanning weight matrices and reporting Frobenius norm, spectral norm, and derived uniformity/profile summaries.
 * **Hypothesis**: Extreme layer-norm concentration can reveal architectural or training instabilities.
-* **Citation/Paper**: BLME diagnostic related to standard spectral/norm analyses; no single canonical paper.
+* **Citation/Paper**: Standard definitions — Frobenius norm, spectral norm (σ_max), stable rank ‖W‖_F²/‖W‖_2² (Rudelson & Vershynin 2007). Certified formula-faithful (upgraded from proxy-only in B4: the formulas are textbook-standard and independently parity-tested).
 * **File & Function**: `src/blme/tasks/geometry/weight_norms.py` -> `WeightNormProfileTask`
-* **Critical Info**: Use alongside `geometry_spectral`; do not interpret raw norm size without architecture context.
+* **Critical Info**: Use alongside `geometry_spectral`; do not interpret raw norm size without architecture context. `norm_uniformity` = max(0, 1 − CV) — clamped at zero (now documented). 3-D fused-MoE expert tensors are handled by per-expert slicing (campaign-3 BUG: they silently got spectral_norm=Frobenius and stable_rank=1.0).
+* **Verification** (2026-07, campaign B4): analytic planted-singular-value parity (frob/spec/srank/uniformity ≤1.2e-6); stable rank agrees with the actual pip weightwatcher `stable_rank` on all distilgpt2 layers (9.2e-5 rel); ledger/metadata certification reconciled to formula-faithful.
 

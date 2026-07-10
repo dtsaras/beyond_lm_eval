@@ -378,3 +378,16 @@ mock architectures at HEAD (numpy 'safe' cast TypeError in
 np.place) — interpretability family, deferred to the follow-up mech-interp
 paper. Full-suite status at B3 commit: 1217 passed, 11 failed (all this one
 test), 4 skipped.
+
+### B4 — Geometry: weights & spectra (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_spectral` | Hill kernel == weightwatcher-0.7.7 at forced x_min (α_σ = 2α_λ−1 identity exact); planted-spectrum anchors | stable-rank citation fixed (Bartlett 2017 NEVER defines it → Rudelson-Vershynin 2007 / Neyshabur 2018, in docstring + test); NEW real-task anti-drift test (parity file never imported blme); PAPERS.md Martin-Mahoney conflation split (1901.08278 SDM 2020 ≠ Martin-Peng-Mahoney Nat Comms 2021, Peng restored); fixture k=floor text fixed; appendix now discloses the singular-value-Hill proxy relation |
+| `geometry_weight_norms` | analytic planted-singular-value parity ≤1.2e-6; pip weightwatcher stable_rank agreement 9.2e-5 rel | 3-D fused-MoE bug fixed (prior session, slicing); docstring norm_uniformity clamp documented; cert reconciled ledger↔metadata → formula-faithful |
+| `geometry_mp_bulk_deviation` | closed-form/quad CDF parity ≤2.3e-5; BBP threshold analytic | both C3 BUGs fixed (prior session): γ>1 KS zero-atom handling (was ~1−1/γ constant) + γ=1 CDF singularity (was err 0.59); γ≥1 branch now regression-tested |
+| `geometry_hubness` | kernel == scikit-hubness line-for-line; NEW e2e evaluate() pin vs independent full-argsort numpy reference (self-mask regression guarded) | Tomašev title fixed in PAPERS.md ('Clustering' restored); k-occurrence wording fixed in docs; radovanovic2010hubs added to paper bib |
+| `geometry_lipschitz` | analytic 4-layer case exact; distilgpt2 == numpy reference; official lipEstimation power method run live | mean-vs-max aggregation DISCREPANCY resolved & documented (lipschitz_max = max over layers of token-means); docs \"How\" corrected (was described as input-space neighbor ratios) |
+| `geometry_schatten` | normalize+MNN == official MNN.py verbatim (0.0); NEW e2e per-sentence pipeline pin incl. the mnn/T fix (reverting /T passed all 31 tests before) | 'sqrt(D)' comment → d^(1/p); PAPERS.md checklist Wei 2025→Yusupov 2025; arXiv:2509.23024 author list corrected (Li, Agrawal, Ghosh, Teru, Santoro, Lajoie, Richards) |
+| `geometry_matrix_entropy` | NEW dedicated parity file vs verbatim official Diff-eRank fp64 transcription (≤1e-5, ln2 analytic anchor, mutant-discrimination check) — was the only parity-ready task with NO external-reference test | 512/128 cache/fresh truncation DISCREPANCY fixed (prior session, unified 512; official 2048 documented); appendix definition corrected (row-normalization step was omitted; now cites Wei et al.) |
+| `geometry_unembedding` | erank == f64 EUSIPCO re-derivation 5.4e-6 rel; purity == independent reference 1e-10 (C3); NEW exact orthogonal-cluster purity==1.0 anchor | tasks_geometry.md §17 rewritten (described angles/norms vs hidden states — the task touches neither); mean-centering now stated in PAPERS.md + paper appendix |
