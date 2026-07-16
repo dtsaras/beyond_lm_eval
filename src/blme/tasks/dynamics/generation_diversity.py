@@ -13,7 +13,8 @@ For each prompt, generate N completions (with temperature > 0) and measure:
     completions from the same prompt, then average. Lower = more diverse
     (each completion is unlike the others). Zhu et al. 2018 ("Texygen: A
     Benchmarking Platform for Text Generation Models"). Uses a simple
-    n-gram overlap implementation (no external NLTK dependency).
+    n-gram overlap implementation (used only when NLTK is unavailable;
+    the primary path uses NLTK sentence_bleu, a declared dependency).
 
   - **Entropy collapse**: Shannon entropy of the softmax distribution at
     each generated token position, averaged. If entropy drops sharply
@@ -130,14 +131,25 @@ def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]
     for n in range(1, max_n + 1):
         hyp_ng = Counter(tuple(hypothesis[i:i + n]) for i in range(len(hypothesis) - n + 1))
         p = _ngram_overlap(ref_pool[n - 1], hyp_ng, n)
-        precisions.append(p if p > 0 else 1e-9)  # method1-style smoothing
+        # NLTK method1 smoothing: 0.1 / denominator for zero counts (audit
+        # 2026-07-16: the old hard 1e-9 gave 0.004 where NLTK gives 0.33 —
+        # reintroducing the hard-zero understatement this fallback exists
+        # to avoid).
+        denom = max(1, sum(hyp_ng.values()))
+        precisions.append(p if p > 0 else 0.1 / denom)
     log_avg = np.mean([np.log(p) for p in precisions])
     return float(np.exp(log_avg))
 
 
 @register_task("dynamics_generation_diversity")
 class GenerationDiversityTask(DiagnosticTask):
-    """Distinct-n, Self-BLEU, and entropy collapse over generated tokens."""
+    """Distinct-n, Self-BLEU, and entropy collapse over generated tokens.
+
+    PROTOCOL NOTE (audit 2026-07-16): Self-BLEU is computed over model
+    SUBWORD TOKEN IDS; Texygen computes it over nltk.word_tokenize word
+    n-grams. The kernel is parity-verified, but absolute Self-BLEU values
+    are not comparable across models with different tokenizers — interpret
+    within-model or across models sharing a tokenizer."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
@@ -171,6 +183,12 @@ class GenerationDiversityTask(DiagnosticTask):
         all_phrase_rep_rate = []    # fraction of 4-grams that are repeated
 
         with torch.no_grad():
+            if seed is not None:
+                # transformers' generate() has no per-call generator kwarg;
+                # seed the global RNG once BEFORE the loop (audit 2026-07-16:
+                # the old per-prompt reseed replayed the identical RNG stream
+                # for every prompt, correlating completions across prompts).
+                torch.manual_seed(int(seed))
             for prompt in prompts:
                 enc = tokenizer(prompt, return_tensors="pt").to(device)
                 prompt_len = enc["input_ids"].shape[1]
@@ -186,11 +204,6 @@ class GenerationDiversityTask(DiagnosticTask):
                         "output_scores": True,
                         "return_dict_in_generate": True,
                     }
-                    if seed is not None:
-                        # transformers' generate() has no per-call generator
-                        # kwarg; seed the global RNG (which drives sampling)
-                        # for determinism instead.
-                        torch.manual_seed(int(seed))
                     outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed: {e}")

@@ -178,6 +178,6 @@ class GradientFlowTask(DiagnosticTask):
             "gradient_norm_mean": float(mean_norms.mean()),
             "gradient_norm_max": float(mean_norms.max()),
             "gradient_norm_min": float(mean_norms.min()),
-            "n_layers": n_layers,
+            "_meta_n_layers": n_layers,
             "loss": "cross_entropy",
         }

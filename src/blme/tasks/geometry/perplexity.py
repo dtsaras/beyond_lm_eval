@@ -51,7 +51,11 @@ class RarePPLTask(DiagnosticTask):
             rare_ids, freq_ids = set(), set()
         else:
             rare_thresh = max(1, int(round(n_observed * 0.2)))
-            freq_thresh = max(1, n_observed - int(round(n_observed * 0.2)))
+            # Keep the freq bucket non-empty on tiny vocab counts (audit
+            # 2026-07-16: with 2 observed ids the old asymmetry emptied the
+            # freq bucket -> ppl_freq = inf).
+            freq_thresh = min(n_observed - 1,
+                              max(1, n_observed - int(round(n_observed * 0.2))))
             rare_ids = set(sorted_observed[:rare_thresh].tolist())
             freq_ids = set(sorted_observed[freq_thresh:].tolist())
 
@@ -93,10 +97,20 @@ class RarePPLTask(DiagnosticTask):
                     # ~13% low) and skip <2-token docs the SAME way, so
                     # total_tokens_for_chars == cnt_total exactly and BPC reduces
                     # to nll_total_bits / total_chars.
-                    n_tok = len(tokenizer(text)["input_ids"])
+                    # Truncation MUST match the scoring path (cache and
+                    # collect_prediction_stats both truncate at 512; audit
+                    # 2026-07-16: an untruncated recount over-counted tokens
+                    # on long docs — 727 vs 519 on a 720-token doc — biasing
+                    # BPC low, growing with doc length).
+                    enc = tokenizer(text, truncation=True, max_length=512)
+                    n_tok = len(enc["input_ids"])
                     if n_tok < 2:
                         continue
                     total_tokens_for_chars += (n_tok - 1)
+                    # Chars must correspond to the SCORED (truncated) text.
+                    if len(enc["input_ids"]) >= 512:
+                        text = tokenizer.decode(enc["input_ids"],
+                                                skip_special_tokens=True)
                     total_chars += len(text)
 
                 if total_chars > 0 and total_tokens_for_chars > 0:

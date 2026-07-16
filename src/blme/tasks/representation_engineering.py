@@ -238,9 +238,19 @@ class ConceptSeparabilityTask(DiagnosticTask):
 
         if len(set(labels)) < 2: return {"error": "Need at least two classes."}
         if len(texts) < 4: return {"error": "Need at least 4 samples for CV."}
-        
+        # Reject labels that cannot support stratified CV BEFORE running any
+        # forward pass (audit 2026-07-16: [1,1,1,0] forced n_splits=2, made a
+        # one-class train fold, and LogisticRegression raised out of
+        # evaluate(), killing the study run).
+        _counts = np.bincount(np.array(labels))
+        if _counts.min() < 2:
+            return {"error": "concept labels too imbalanced for stratified CV "
+                             f"(class counts: {_counts.tolist()})"}
+
         device = next(model.parameters()).device
         layers = get_layers(model)
+        if layers is None:
+            return {"error": "Could not detect model layers"}
         num_layers = len(layers)
         
         layer_reps = {l: [] for l in range(num_layers)}
@@ -257,7 +267,7 @@ class ConceptSeparabilityTask(DiagnosticTask):
         
         y = np.array(labels)
         layer_aucs, layer_accs = [], []
-        
+
         n_splits = min(3, np.min(np.bincount(y)))
         if n_splits < 2: n_splits = 2
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)

@@ -89,6 +89,22 @@ class RepresentationSensitivityTask(DiagnosticTask):
                 # Add bias if present
                 if head is not None and head.bias is not None:
                     logits = logits + head.bias.detach().float()
+                # Guard the linear-head assumption (audit 2026-07-16): with a
+                # post-head transform (e.g. Gemma-2 final_logit_softcapping)
+                # both these probs and the closed form W_y - E_p[W] are
+                # silently wrong (0.82 max gradient error demonstrated).
+                # Verify the recomputed logits against the model's real
+                # logits on the first sample; bail out cleanly on mismatch.
+                if not getattr(self, "_head_checked", False):
+                    self._head_checked = True
+                    real = out.logits[0, :-1, :].float()
+                    rel = (logits - real).abs().max() / real.abs().max().clamp_min(1e-9)
+                    if float(rel) > 1e-3:
+                        return {"error": (
+                            "LM head is not purely linear (recomputed logits "
+                            f"deviate rel={float(rel):.3g}; e.g. final logit "
+                            "softcapping) — closed-form sensitivity invalid "
+                            "for this architecture")}
                 probs = torch.softmax(logits, dim=-1)  # (T-1, V)
 
                 # Closed-form gradient: grad_h log P(y|h) = W_y - sum_k p(k) W_k

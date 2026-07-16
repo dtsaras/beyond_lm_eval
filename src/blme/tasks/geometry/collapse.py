@@ -100,5 +100,5 @@ class RepresentationCollapseTask(DiagnosticTask):
             "min_erank": min_erank,
             "collapse_ratio": collapse_ratio,
             "max_drop": max_drop,
-            "max_drop_layer": max_drop_layer,
+            "_meta_max_drop_layer": max_drop_layer,
         }

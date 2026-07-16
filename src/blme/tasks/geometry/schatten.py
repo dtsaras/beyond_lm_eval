@@ -220,7 +220,7 @@ class SchattenNormTask(DiagnosticTask):
       - ``row_normalized_schatten_1_last``, ``row_normalized_schatten_4_last``,
         ``row_normalized_schatten_inf_last`` — last-layer values of each norm,
         normalised by ``d^{1/p}`` so they're comparable across
-        d_model (Yusupov et al. 2025 convention). Schatten-2 is omitted
+        d_model (BLME width-comparability convention — Yusupov et al. use the PLAIN norm on MLP-internal activations with no dimension normalization; attribution fixed, audit 2026-07-16). Schatten-2 is omitted
         because it is content-free under row-L2 preprocessing
         (``‖X‖_F = sqrt(T)`` for ``T`` unit-norm rows).
       - ``row_normalized_matrix_nuclear_norm_last`` — fast L1,2 approximation,
@@ -283,7 +283,7 @@ class SchattenNormTask(DiagnosticTask):
                 result[f"{k}_last"] = float("nan")
                 result[f"{k}_per_layer"] = profile
                 continue
-            # Headline = last layer (Yusupov et al. 2025 convention).
+            # Headline = last layer (BLME width-comparability convention — Yusupov et al. use the PLAIN norm on MLP-internal activations with no dimension normalization; attribution fixed, audit 2026-07-16).
             last_val = profile[sorted(per_layer.keys()).index(headline_idx)]
             result[f"{k}_last"] = float(last_val) if np.isfinite(last_val) else float("nan")
             result[f"{k}_per_layer"] = profile

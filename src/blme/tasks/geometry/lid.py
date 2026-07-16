@@ -42,11 +42,16 @@ def _lid_mle(distances, k):
         return 0.0
     
     ratios = distances / d_k
-    ratios = np.maximum(ratios, 1e-10)
-    
+    # Exact-duplicate neighbor (d_i = 0): official mle_batch yields
+    # -k / (-inf) = 0.0; the old 1e-10 clamp returned ~k/23 instead, which
+    # then passed the lid > 0 filter and dragged lid_min/lid_mean on
+    # duplicate-heavy clouds (audit 2026-07-16). Return 0.0 to match the
+    # reference (0.0 estimates are excluded downstream).
+    if np.any(ratios <= 0):
+        return 0.0
     log_ratios = np.log(ratios)
     sum_log = np.sum(log_ratios)
-    
+
     if abs(sum_log) < 1e-10:
         return float("nan")
 
@@ -94,7 +99,7 @@ def _compute_lid_for_matrix(X, k, max_queries=500, seed: int = 0):
         "lid_min": float(np.min(lid_arr)),
         "lid_max": float(np.max(lid_arr)),
         "lid_median": float(np.median(lid_arr)),
-        "num_estimates": len(lid_estimates),
+        "_meta_num_estimates": len(lid_estimates),
     }
 
 

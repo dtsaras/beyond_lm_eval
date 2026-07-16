@@ -144,8 +144,8 @@ def test_task_instantiable(task_name):
 def test_task_count():
     """Registry must expose the current 82-task catalog."""
     registered = list_tasks()
-    assert len(registered) == 82, (
-        f"Expected exactly 82 registered tasks, got {len(registered)}"
+    assert len(registered) == 86, (
+        f"Expected exactly 86 registered tasks, got {len(registered)}"
     )
     assert len(registered) >= len(EXPECTED_TASKS), (
         f"Expected at least {len(EXPECTED_TASKS)} tasks, "
@@ -157,4 +157,4 @@ def test_getting_started_docs_task_count():
     """Docs drift guard: getting_started must mention the current task total."""
     from pathlib import Path
     text = Path("docs/getting_started.md").read_text(encoding="utf-8")
-    assert "82 diagnostic tasks" in text
+    assert "86 diagnostic tasks" in text

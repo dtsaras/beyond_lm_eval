@@ -426,7 +426,7 @@ class TestRegistry:
         # (74 + 8 Campaign-2 additions: vendi, phd, cknna, magnitude,
         #  procrustes_linearity, activation_kurtosis, zigzag_persistence,
         #  attention_rollout).
-        assert len(tasks) == 82
+        assert len(tasks) == 86
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks
@@ -494,7 +494,7 @@ class TestCLI:
         with patch.object(sys, "argv", ["blme", "list-tasks", "--group", "geometry", "--json"]):
             main()
         payload = json.loads(capsys.readouterr().out)
-        assert payload["count"] == 32
+        assert payload["count"] == 34
         first = payload["tasks"][0]
         assert {"name", "group", "status", "papers"} <= set(first)
         assert all(task["group"] == "geometry" for task in payload["tasks"])

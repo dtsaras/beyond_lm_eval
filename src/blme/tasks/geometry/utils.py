@@ -86,11 +86,15 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                 if i >= num_samples:
                     break
 
+                # Truncate at 512 to match the shared cache's tokenization
+                # (audit 2026-07-16: no truncation crashed on >n_positions
+                # docs AND made the cache/non-cache paths inconsistent).
                 if isinstance(sample, str):
-                    inputs = tokenizer(sample, return_tensors="pt").to(model.device)
+                    text = sample
                 else:
                     text = sample.get("text", "")
-                    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+                inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                                   max_length=512).to(model.device)
 
                 # Skip empty / single-token docs: an empty forward pass crashes
                 # ("cannot reshape tensor of 0 elements").
@@ -221,11 +225,15 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
                 if i >= num_samples:
                     break
 
+                # Truncate at 512 to match the shared cache's tokenization
+                # (audit 2026-07-16: no truncation crashed on >n_positions
+                # docs AND made the cache/non-cache paths inconsistent).
                 if isinstance(sample, str):
-                    inputs = tokenizer(sample, return_tensors="pt").to(model.device)
+                    text = sample
                 else:
                     text = sample.get("text", "")
-                    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+                inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                                   max_length=512).to(model.device)
 
                 # Skip empty / single-token docs: they yield no (T-1) labels to
                 # score and an empty forward pass crashes ("cannot reshape tensor

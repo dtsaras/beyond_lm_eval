@@ -12,13 +12,19 @@ References:
     norm and shows the second half of layers contributes much less —
     models have an "effective depth" smaller than their nominal depth.
 
-Reported (one forward pass; consumes the shared hidden-state cache):
+Reported (one private forward pass — the shared cache is NOT used because
+it drops the embedding output and its final entry is post-final-norm; a
+hook recovers the last block's pre-norm output):
   * ``block_influence_per_layer`` and mean/min/max summaries.
   * ``frac_low_influence``: fraction of layers with BI below a threshold
-    (default 0.05) — the ShortGPT redundancy count.
-  * ``contribution_ratio_per_layer``: E_t ||h_{l+1}-h_l|| / E_t ||h_l||.
+    (default 0.05). The threshold is a BLME choice — ShortGPT itself ranks
+    layers by BI and prunes to a target ratio; it defines no threshold.
+  * ``contribution_ratio_per_layer``: E_t ||h_{l+1}-h_l|| / E_t ||h_l||
+    (ratio-of-means; Csordas et al. use per-token relative norms).
   * ``effective_depth_90``: smallest normalized depth k/L at which the
-    cumulative contribution mass reaches 90% of the total.
+    cumulative contribution mass reaches 90% of the total. This is a BLME
+    summary INSPIRED BY Csordas et al.'s depth-utilization analysis; their
+    own statistic is an importance-weighted depth score, not this.
 
 Analytic anchors: identity layers -> BI = 0, contribution 0; an
 orthogonal-rotation layer -> BI = 1; a sign-flip layer -> BI = 2.
@@ -100,20 +106,41 @@ class EffectiveDepthTask(DiagnosticTask):
         # Accumulate per-layer token states over samples, then compute the
         # profile on the concatenated token clouds (position-aligned per
         # sample; concatenating preserves the per-token expectations).
+        #
+        # PROTOCOL FIX (audit 2026-07-16): HF ``hidden_states[-1]`` is
+        # POST-final-norm; on gpt2 ~90% of the last transition's BI was the
+        # ln_f artifact, not the last block's transformation. We capture the
+        # last block's raw (pre-norm) output with a forward hook and use it
+        # as the final state, so every transition is block-input -> block
+        # -output as ShortGPT's X_i requires.
+        last_block_out = {}
+
+        def _capture_last(module, inputs, output):
+            out_t = output[0] if isinstance(output, tuple) else output
+            last_block_out["h"] = out_t.detach()
+
+        hook = layers[-1].register_forward_hook(_capture_last)
         per_layer: List[List[torch.Tensor]] = None
-        with torch.no_grad():
-            for i, s in enumerate(dataset):
-                if i >= num_samples:
-                    break
-                text = s["text"] if isinstance(s, dict) else str(s)
-                enc = tokenizer(text, return_tensors="pt",
-                                truncation=True, max_length=128).to(device)
-                out = model(**enc, output_hidden_states=True)
-                hs = out.hidden_states  # embedding output + L block outputs
-                if per_layer is None:
-                    per_layer = [[] for _ in range(len(hs))]
-                for li, h in enumerate(hs):
-                    per_layer[li].append(h[0].float().cpu())
+        try:
+            with torch.no_grad():
+                for i, s in enumerate(dataset):
+                    if i >= num_samples:
+                        break
+                    text = s["text"] if isinstance(s, dict) else str(s)
+                    enc = tokenizer(text, return_tensors="pt",
+                                    truncation=True, max_length=128).to(device)
+                    out = model(**enc, output_hidden_states=True)
+                    hs = list(out.hidden_states)
+                    # embedding output + L block outputs; replace the
+                    # post-norm final entry with the hooked pre-norm output.
+                    if "h" in last_block_out:
+                        hs[-1] = last_block_out["h"]
+                    if per_layer is None:
+                        per_layer = [[] for _ in range(len(hs))]
+                    for li, h in enumerate(hs):
+                        per_layer[li].append(h[0].float().cpu())
+        finally:
+            hook.remove()
 
         if not per_layer or len(per_layer) < 2:
             return {"error": "Not enough hidden states collected"}
@@ -122,5 +149,5 @@ class EffectiveDepthTask(DiagnosticTask):
         results = _depth_profile(layer_states)
         if not results:
             return {"error": "Depth profile could not be computed"}
-        results["n_layers_profiled"] = len(layer_states) - 1
+        results["_meta_n_layers_profiled"] = len(layer_states) - 1
         return results

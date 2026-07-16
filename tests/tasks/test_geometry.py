@@ -606,7 +606,7 @@ def test_cka(mock_model, mock_tokenizer):
     assert "layers" not in results
     # Paper-faithful scalar summaries.
     for k in ("avg_adjacent_cka", "mean_offdiag_cka", "early_late_cka",
-              "first_middle_cka", "n_layers"):
+              "first_middle_cka", "_meta_n_layers"):
         assert k in results, f"missing {k}"
     assert 0 <= results["avg_adjacent_cka"] <= 1.0
 

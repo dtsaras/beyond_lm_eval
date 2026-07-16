@@ -75,7 +75,7 @@ def _svd_metrics_for_layer(X):
     return {
         "svd_auc": float(auc),
         "cond_number": cond_number,
-        "numerical_rank": effective_rank_num,
+        "_meta_numerical_rank": effective_rank_num,
         "avg_cosine_similarity": avg_cos_sim,
         "effective_rank": effective_rank,
         "participation_ratio": participation_ratio,

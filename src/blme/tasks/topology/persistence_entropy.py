@@ -154,8 +154,10 @@ class PersistenceEntropyTask(DiagnosticTask):
             results[f"layer_{l_idx}_num_features_h1"] = len(lifespans_h1)
             # Normalized (relative) persistent entropy: PE / log2(m) in [0, 1],
             # where log2(m) is PE's maximum over m bars — the scale-free form
-            # used for cross-layer / cross-model comparison (Atienza et al.
-            # 2020 call PE/max the relative persistent entropy).
+            # used for cross-layer / cross-model comparison (the PE/log2(m)
+            # normalization is a BLME convenience bounded in [0,1]; it does
+            # NOT appear in Atienza et al. 2020 — attribution fixed in the
+            # 2026-07-16 audit).
             results[f"layer_{l_idx}_pe_h0_norm"] = (
                 pe_h0 / float(np.log2(len(lifespans_h0)))
                 if len(lifespans_h0) >= 2 else 0.0

@@ -225,6 +225,11 @@ def evaluate(
             "geometry_cka",
             "geometry_trajectory_curvature",
             "geometry_mp_bulk_deviation",
+            # audit 2026-07-16: both consume cached hidden states but were
+            # missing here — a cache populated for logits-only tasks made
+            # them error out instead of falling back to self-collection.
+            "geometry_cknna",
+            "geometry_procrustes_linearity",
         }
         cache_logits_tasks = {
             "geometry_perplexity",

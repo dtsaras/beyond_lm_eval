@@ -2,9 +2,11 @@
 
 This module assesses the mathematical stability and topological progression of the model's representations over the course of the forward pass or autoregressive generation trajectory.
 
-**Current registry coverage (6 tasks)**: `dynamics_coe`,
-`dynamics_generation_diversity`, `dynamics_gradient_flow`,
-`dynamics_interpolation`, `dynamics_sharpness`, and `dynamics_stability`.
+**Current registry coverage (8 tasks)**: `dynamics_coe`,
+`dynamics_fractal`, `dynamics_generation_diversity`,
+`dynamics_gradient_flow`, `dynamics_interpolation`,
+`dynamics_perturbation_growth`, `dynamics_sharpness`, and
+`dynamics_stability`.
 
 **Paper-faithful vs. BLME proxy notes**: `dynamics_coe` implements Wang et al.'s
 CoE magnitude/angle scores, but BLME reads the prompt's final-token hidden-state
@@ -58,7 +60,7 @@ independent recomputation.
 * **File & Function**: `src/blme/tasks/dynamics/sharpness.py` -> `LossSharpnessTask`
 * **Critical Info**: Second-order derivatives may require eager attention instead of SDPA/Flash Attention (the task detects this and errors cleanly). Hutchinson/power-iteration probe vectors are seeded (`seed` config, default 42) — B3 made the estimates reproducible run-to-run.
 * **Verification** (2026-07, campaign B3): power iteration == exact `eigh` λ_max to <1e-9 (f64) and == pip PyHessian `eigenvalues(top_n=1)` to <1e-5; the earlier ‖Hv‖ form dropped the eigenvalue SIGN — fixed to the signed Rayleigh quotient (`2d01ae0`) and now pinned by a negative-dominant-Hessian anchor (diag(−5,3) → −5, not +5); SAM delta == analytic quadratic answer ρ‖θ‖+ρ²/2 exactly, with parameter restoration asserted; parity tests now import the real helpers (previously they transcribed the loop), and a real `evaluate()` end-to-end determinism test exists.
-* **B8 extension** (2026-07): critical step size — probe θ − η·g along the RAW gradient with doubling then bisection to find the largest stable η* (loss non-increasing), reporting `critical_step_size` = η* and `critical_sharpness` λ_c = 2/η* (edge-of-stability curvature; Kalra et al. 2026, ArXiv: 2601.16979 — *A Scalable Measure of Loss Landscape Curvature for Analyzing the Training Dynamics of LLMs*, which introduces the critical step size as a forward-pass-only curvature measure; they probe the optimizer's update direction, BLME the raw-gradient direction, documented). On a quadratic ½λ‖θ‖², η* = 2/λ holds EXACTLY — pinned for λ ∈ {0.25, 4, 37.5}; parameters restored after probing (asserted); zero-gradient case → NaN.
+* **B8 extension** (2026-07): critical step size — probe θ − η·g along the RAW gradient with doubling then bisection to find the largest stable η* (loss non-increasing), reporting `critical_step_size` = η* and `critical_sharpness` λ_c = 2/η* (edge-of-stability curvature; Kalra et al. 2026, ArXiv: 2601.16979 — *A Scalable Measure of Loss Landscape Curvature for Analyzing the Training Dynamics of LLMs*, which introduces the critical step size as a forward-pass-only curvature measure; they probe the optimizer's update direction, BLME the raw-gradient direction, documented). On a quadratic ½λ‖θ‖², η* = 2/λ holds EXACTLY — pinned for λ ∈ {0.25, 4, 37.5}; parameters restored after probing (asserted); zero-gradient case → NaN. Audit 2026-07-16: a never-unstable search now returns NaN instead of the η₀·2³⁰ cap constant (which polluted cross-model regressions as an indistinguishable sentinel), and the search halves BELOW η₀ when already unstable (Kalra et al. search bidirectionally) — both regression-pinned. Note λ_c is the DIRECTIONAL curvature along the gradient (Rayleigh quotient), exactly Kalra et al.'s definition, not λ_max.
 
 ## 5. Gradient Flow
 * **What are we measuring**: Per-layer gradient norm propagation under next-token cross-entropy.

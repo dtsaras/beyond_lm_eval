@@ -56,8 +56,12 @@ def _weight_matrix_stats(W):
             else:
                 sranks.append(0.0)
         except Exception:
-            specs.append(frob)  # fallback
-            sranks.append(1.0)
+            # NaN, not fabricated values (audit 2026-07-16: spectral=frob +
+            # stable_rank=1.0 was exactly the silent-fallback pathology the
+            # module docstring criticizes). NaN rows are excluded by the
+            # nan-aware aggregation.
+            specs.append(float("nan"))
+            sranks.append(float("nan"))
     return frobs, specs, sranks
 
 
@@ -102,9 +106,9 @@ class WeightNormProfileTask(DiagnosticTask):
                 spec_vals.extend(sp)
                 srank_vals.extend(sr)
 
-            frob_per_layer.append(float(np.mean(frob_vals)) if frob_vals else 0.0)
-            spec_per_layer.append(float(np.mean(spec_vals)) if spec_vals else 0.0)
-            srank_per_layer.append(float(np.mean(srank_vals)) if srank_vals else 0.0)
+            frob_per_layer.append(float(np.nanmean(frob_vals)) if frob_vals else 0.0)
+            spec_per_layer.append(float(np.nanmean(spec_vals)) if spec_vals else 0.0)
+            srank_per_layer.append(float(np.nanmean(srank_vals)) if srank_vals else 0.0)
 
         frob_arr = np.array(frob_per_layer)
         spec_arr = np.array(spec_per_layer)
@@ -125,5 +129,5 @@ class WeightNormProfileTask(DiagnosticTask):
             "mean_spectral_norm": float(spec_arr.mean()),
             "mean_stable_rank": float(srank_arr.mean()),
             "norm_uniformity": norm_uniformity,
-            "n_layers": n_layers,
+            "_meta_n_layers": n_layers,
         }

@@ -35,9 +35,12 @@ def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 8) -> tuple:
     if n < min_tail + 2:
         return float("nan"), float("nan"), float("nan"), 0
     best = (np.inf, float("nan"), float("nan"), 0)
-    # Scan candidate x_min over order statistics (cap the scan for speed).
-    max_candidates = 200
-    cand_idx = np.unique(np.linspace(0, n - min_tail - 1, max_candidates).astype(int))
+    # Scan candidate x_min over ALL order statistics up to a generous cap
+    # (2000 covers every eigenvalue count that occurs in practice for a
+    # single weight matrix; beyond it, evenly subsample).
+    max_candidates = 2000
+    cand_idx = np.unique(np.linspace(0, n - min_tail - 1,
+                                     min(max_candidates, n - min_tail)).astype(int))
     for i in cand_idx:
         x_min = lam[i]
         tail = lam[i:]
@@ -48,7 +51,12 @@ def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 8) -> tuple:
             continue
         alpha = 1.0 + n_tail / denom
         # KS between the empirical tail CDF and the fitted Pareto CDF.
-        emp = np.arange(1, n_tail + 1) / n_tail
+        # LEFT-continuous empirical CDF (arange(0,n)/n) — the Clauset
+        # plfit / powerlaw / WeightWatcher convention. The right-continuous
+        # variant coincides on smooth planted spectra but lands in different
+        # KS-minima on real weight spectra (audit 2026-07-16: mean |dalpha|
+        # 0.41 vs live WW on gpt2's 48 modules; left-continuous: 0.07).
+        emp = np.arange(n_tail) / n_tail
         model_cdf = 1.0 - (x_min / tail) ** (alpha - 1.0)
         ks = float(np.max(np.abs(emp - model_cdf)))
         if ks < best[0]:

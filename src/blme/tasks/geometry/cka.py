@@ -152,6 +152,6 @@ class CKATask(DiagnosticTask):
             ),
             # First-to-last normalised depth distance; lower => layers
             # diverge more across depth.
-            "n_layers": int(n),
+            "_meta_n_layers": int(n),
         }
         return results

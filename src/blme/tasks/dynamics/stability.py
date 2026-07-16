@@ -80,8 +80,11 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         E1_norm = E1_np / (np.linalg.norm(E1_np, axis=1, keepdims=True) + 1e-10)
         E2_norm = E2_np / (np.linalg.norm(E2_np, axis=1, keepdims=True) + 1e-10)
         
-        np.random.seed(42)
-        sample_idx = np.random.choice(n_vocab, min(n_sample, n_vocab), replace=False)
+        # Local generator — np.random.seed(42) mutated GLOBAL numpy RNG
+        # state, an order-dependence hazard for co-resident tasks (audit
+        # 2026-07-16). Row sampling now also honors the config seed.
+        rng = np.random.default_rng(int(self.config.get("seed", 42)))
+        sample_idx = rng.choice(n_vocab, min(n_sample, n_vocab), replace=False)
         
         jaccards = []
         

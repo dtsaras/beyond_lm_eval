@@ -10,6 +10,14 @@ trajectory diagnostic.
 
 References:
 - Grassberger & Procaccia 1983 correlation integral estimator.
+
+
+CALIBRATION CAVEAT (audit 2026-07-16): the 5th-95th-percentile radius
+window includes the correlation-integral saturation regime, so the
+estimate is COMPRESSIVE at higher dimensions (fresh k-cubes: true dim
+3 -> ~2.1, 6 -> ~3.4, with fit R^2 > 0.97 throughout — R^2 cannot
+flag it). Interpret as a monotone complexity proxy, not a calibrated
+Grassberger-Procaccia dimension.
 """
 
 import torch
@@ -154,6 +162,6 @@ class CorrelationDimensionTask(DiagnosticTask):
             "hidden_state_correlation_dimension": float(slope),
             "correlation_dimension_method": "hidden_state_grassberger_procaccia",
             "correlation_dimension_point_space": point_space,
-            "num_points": N,
+            "_meta_num_points": N,
             "fit_r_squared": float(r_squared),
         }

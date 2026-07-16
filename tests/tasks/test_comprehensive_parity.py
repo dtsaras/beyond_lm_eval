@@ -2418,7 +2418,7 @@ def test_dynamics_gradient_flow():
     assert res["gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
     assert res["gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
     assert res["loss"] == "cross_entropy"
-    assert res["n_layers"] == n_layers
+    assert res["_meta_n_layers"] == n_layers
 
     # ---- determinism: identical output on a fresh task instance ----
     task2 = get_task("dynamics_gradient_flow")(config={"num_samples": 1})
@@ -2712,8 +2712,9 @@ def test_dynamics_stability():
     E2n = E2np / (np.linalg.norm(E2np, axis=1, keepdims=True) + 1e-10)
 
     V = len(E1np)
-    np.random.seed(42)
-    sample = np.random.choice(V, min(n_sample, V), replace=False)
+    # Matches the task's local default_rng sampling (audit 2026-07-16 fix:
+    # the task no longer mutates global numpy RNG state).
+    sample = np.random.default_rng(42).choice(V, min(n_sample, V), replace=False)
 
     # --- INDEPENDENT cosine kNN via sklearn (k+1 to allow self removal) ---
     nn1 = NearestNeighbors(n_neighbors=k + 1, metric="cosine").fit(E1n)
@@ -3003,7 +3004,7 @@ def test_geometry_collapse():
     # max_drop_layer = 1-based index of the layer where it lands.
     diffs = np.diff(np.asarray(ref, dtype=np.float64))
     assert out["max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
-    assert out["max_drop_layer"] == int(np.argmin(diffs)) + 1
+    assert out["_meta_max_drop_layer"] == int(np.argmin(diffs)) + 1
 
     # ---- Determinism: same input twice -> identical output ----------------
     out2 = RepresentationCollapseTask(
@@ -3887,7 +3888,7 @@ def test_geometry_rsa():
     assert out["rsa_adjacent_std"] == pytest.approx(ref_adjacent_std, abs=TOL)
     assert out["rsa_early_late"] == pytest.approx(ref_early_late, abs=TOL)
     assert out["rsa_first_middle"] == pytest.approx(ref_first_mid, abs=TOL)
-    assert out["rsa_min_continuity_layer"] == ref_min_layer
+    assert out["_meta_rsa_min_continuity_layer"] == ref_min_layer
 
     # sanity: rsatoolbox euclidean RDM is NOT scipy's pdist euclidean (the
     # reference is an independent transform, only rank-equivalent -> not tautological)
@@ -4076,7 +4077,7 @@ def test_geometry_svd():
     # numerical_rank / cond_number on the numerical-rank subspace.
     rel_tol = float(S[0]) * max(S.shape) * np.finfo(S.dtype).eps
     nrank_ref = int(np.sum(S > rel_tol))
-    assert m["numerical_rank"] == nrank_ref
+    assert m["_meta_numerical_rank"] == nrank_ref
     cond_ref = float(S[0] / S[nrank_ref - 1])
     assert m["cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
 
@@ -4138,7 +4139,7 @@ def test_geometry_svd():
     expected_keys = {
         "svd_auc",
         "cond_number",
-        "numerical_rank",
+        "_meta_numerical_rank",
         "avg_cosine_similarity",
         "effective_rank",
         "participation_ratio",
@@ -4418,7 +4419,7 @@ def test_geometry_weight_norms():
     assert blme["mean_spectral_norm"] == pytest.approx(ref_spec.mean(), **TOL)
     assert blme["mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
     assert blme["norm_uniformity"] == pytest.approx(ref_uniformity, **TOL)
-    assert blme["n_layers"] == 2
+    assert blme["_meta_n_layers"] == 2
 
     # ---- Defining-property sanity checks --------------------------------
     # Stable rank is bounded: 1 <= srank(W) <= rank(W) <= min(W.shape).

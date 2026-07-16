@@ -8,7 +8,7 @@ Reference:
     Official repo: https://github.com/vertaix/Vendi-Score
     Official pip package: ``vendi_score`` (v0.0.3).
 
-Definition (Friedman & Dieng 2023, Def. 1 / eqn. for q=1):
+Definition (Friedman & Dieng 2023, Definition 3.1 / eqn. for q=1):
     Given ``n`` samples and a positive-semidefinite similarity matrix
     ``K`` with unit diagonal (``K_ii = 1``), let ``K/n`` have eigenvalues
     ``λ_1 … λ_n`` (each ≥ 0, summing to 1). The Vendi Score of order

@@ -543,3 +543,55 @@ category sweeps, CLI-pipeline e2e of the 4 new tasks.
   was outside B8's metric-citation scope. Survey §3 open decisions likewise
   pending: Tier-B implementations, re-scoping sinks/kurtosis/compression-
   valley into geometry, length-confound statement.
+
+## Campaign 4 — independent adversarial audit fleet (2026-07-16, user-requested)
+
+Six INDEPENDENT auditors (one per task family), instructed to distrust all
+prior verification claims: re-derive each formula from the source paper,
+re-verify citations against arXiv, probe test discrimination (would a sign
+flip/swap pass?), and run fresh numeric spot-checks vs official packages.
+Plus two clean-slate research scouts (missed metrics; missed categories).
+All 8 reports archived; research syntheses at
+`beyond_benchmarks/docs/2026-07-16-{missed-metrics-sweep,taxonomy-evaluation}.md`.
+
+### Substantive defects found & FIXED (with regression tests)
+
+| # | Task / file | Defect | Fix & validation |
+|---|---|---|---|
+| 1 | geometry_spectral `_pl_mle_alpha_ks` | KS scan used RIGHT-continuous empirical CDF (Clauset/plfit/WW = left-continuous) — invisible on planted spectra, real weights landed in different KS minima: mean |dα| 0.41 / max 3.64 vs live WW on gpt2 | left-continuous CDF + scan cap 200→2000: ALL 49 gpt2 modules now match live WW (mean 3e-4, max 2.1e-3) |
+| 2 | geometry_superposition_strength | Headline mean-centered rows, justified as "the paper's protocol" — official overlap-0.py NEVER centers (raw rows, all pairs); the ~1/m claim is a scaling trend | headline → RAW (official); centered → disclosed BLME auxiliary (`*_centered` keys); welch V uses post-filter count; protocol pinned by test |
+| 3 | geometry_effective_depth | Final transition used post-ln_f `hidden_states[-1]`: ~90% of gpt2's last-layer BI was the final-norm artifact (BI 0.737; effective_depth_90 0.917) | forward hook captures last block's PRE-norm output: BI 0.166, e_d_90 0.25; toy-model e2e regression test; effective_depth_90/0.05-threshold relabeled BLME summaries (not Csordás/ShortGPT metrics) |
+| 4 | dynamics_fractal metadata | WRONG AUTHOR LIST in task_metadata.py ("Tolstikhin & Zhang"; real: Alabdulmohsin, Tran & Dehghani) — the fabricated-author pattern again | fixed; module/docs/bib were already correct |
+| 5 | dynamics_sharpness `_critical_step_size` | Never-unstable search returned the η₀·2³⁰ CAP (1073.74…) indistinguishable from a real η*; no halving below η₀ | NaN on cap-hit; bidirectional (halving) search; both regression-pinned |
+| 6 | topology_zigzag `_layer_topology` | Missing 1e-12 zero-edge floor (betti_curve had it): duplicate points inflated β₀ (corpus with a repeated line: h0=7.0 vs 1.0) | floor added; the parity test's independent reimpl had COPIED the same omission (correlated error) — regression test with duplicate cluster |
+| 7 | repe_concept_separability | Imbalanced labels ([1,1,1,0]) crashed OUT of evaluate() (one-class train fold) — could kill a study run | pre-forward guard returns error dict; layers-None guard added; regression test |
+| 8 | geometry_contextualization | dataset=None fallback = 50 IDENTICAL sentences → SelfSim/MEV ≡ 1.0 (all fallback outputs artifacts); BOS tracked as a "word" (SelfSim=1.0 rows on BOS tokenizers); baseline pairs shared contexts | distinct-sentence fallback pool; special-token exclusion; baseline = one vector per sentence (reference protocol) |
+| 9 | geometry_perplexity + infra | BPC recount tokenized UNTRUNCATED vs the 512-truncating scoring paths (BPC bias grows with doc length); collect_prediction_stats had NO truncation (>n_positions doc crashed); cache crashed on empty docs; 2-observed-ids → ppl_freq=inf | truncation unified at 512 across cache/utils/recount (chars from truncated text); empty-doc skip in cache; freq-bucket guard; regression test |
+| 10 | geometry_representation_sensitivity | Closed form assumed a purely LINEAR head — silently wrong under Gemma-2-style logit softcapping (0.82 max gradient error demonstrated) | first-sample logits cross-check vs out.logits; clean error dict on mismatch |
+| 11 | geometry_intrinsic_dim GPU path | f32 mm-mode `torch.cdist` catastrophic cancellation: TwoNN +23% on dense clouds, host-dependent (GPU vs CPU) | f64 + donot_use_mm_for_euclid_dist (validated ~1e-11 by auditor's probe) |
+| 12 | geometry_cknna | No token cap: study defaults → 1e4–5e4-token Gram matrices, O(N³)×L² — OOM/infeasible; missing from core cache_hidden_tasks (spurious error when cache lacks hidden states; also procrustes) | max_cknna_tokens=2000 seeded shared-perm subsample (hsic pattern); both tasks added to cache_hidden_tasks |
+| 13 | geometry_lid | Duplicate-neighbor clamp gave ~k/23 (0.20) where official mle_batch gives 0.0 — passed the lid>0 filter, dragging lid_min/mean | ratios≤0 → 0.0 (matches official); regression test |
+| 14 | dynamics_stability / geometry_categories | `np.random.seed(42)` mutated GLOBAL numpy RNG (order-dependence hazard); sampling seed hardcoded | stability → local default_rng honoring config seed (categories left as known-minor, documented here) |
+| 15 | geometry_weight_norms | SVD-failure fallback FABRICATED spectral=frob, srank=1.0 | NaN + nanmean aggregation |
+| 16 | dynamics_generation_diversity | Per-prompt reseed replayed the same RNG stream every prompt; fallback "method1" smoothing was 1e-9 (NLTK: 0.1/denom → 0.004 vs 0.334); subword-vs-word Self-BLEU unit undisclosed; stale "no NLTK" docstring | seed once before loop; 0.1/denom smoothing; unit disclosed in docstring; docstring fixed |
+| 17 | dynamics_coe | `torch.acos(torch.tensor(c))` = f32 under default dtype (caps parity at ~1e-7, default-dtype-dependent) | math.acos with clamp |
+| 18 | geometry_phd_dimension | Fallback path indexed the raw hidden_states tuple (embedding at 0) — off-by-one vs the cache convention for explicit layer_idx ≥ 0 | +1 alignment with cache convention |
+
+### Citation / claim corrections
+- persistence_entropy: "relative persistent entropy" attribution to Atienza et al. removed (term/normalization not in the paper).
+- betti_curve metadata: "triple-engine networkx/GF(2)/GUDHI" overstated → networkx cross-check (as exists in repo).
+- schatten docstring: d^{1/p} + last-layer conventions wrongly attributed to Yusupov et al. (their paper: plain norms, MLP-internal activations) → BLME conventions.
+- tokenizer_efficiency: Ali et al. 2024 was cited as evidence tokenizer efficiency predicts capability; the paper finds the near-opposite → recharacterized. Non-list datasets no longer silently ignored.
+- vendi: "Def. 1" → "Definition 3.1". correlation_dimension: compressive-estimate caveat (true dim 6 → ~3.4 at R²>0.97) now in the task docstring.
+- gradient_flow / stability metadata: uncommitted-session parity figures relabeled as session artifacts; committed evidence stated instead.
+- Leak convention: `sample_size` (a TOP-15 predictor in the pre-reset run — pure vocab-size proxy), `n_layers`, `numerical_rank`, `max_drop_layer`, `rsa_min_continuity_layer`, `num_points`, `num_estimates`, `n_classes`/`n_samples` → `_meta_`-prefixed across 10 tasks (kept out of the analysis feature matrix).
+
+### Verified-clean highlights (independent evidence, not prior claims)
+cka/hsic/rsa/trajectory_curvature/neural_collapse/procrustes (formula), isoscore (≤3.3e-8 vs official on 7 fresh clouds), vendi (bit-exact fresh clouds), phd (bit-exact vs GPTID fresh clouds), magnitude (≤3.6e-15, incl. duplicate clouds), mp_bulk (CDF vs quad 6.4e-8), matrix_entropy (vs cloned official repo), gradient_flow (independent leaf-replacement recompute: exact), perturbation_growth, interpolation, positional_decay, mahalanobis (AUROC 0.869 non-degenerate held-out), homology, persistence_landscape, task_vectors, refusal_direction, steering (no hook leaks incl. forced-exception path). NO fabricated citations found in any of the 51 audited tasks beyond item 4.
+
+### Remaining accepted-risk notes (documented, not fixed)
+- procrustes_linearity float64 promotion vs the reference's native-dtype pipeline: values diverge in the ill-conditioned regime (0.42 observed); docstring claim amended — profile interpretation unchanged.
+- magnitude LU-vs-Cholesky singular fallback can differ from magnipy on near-singular clouds (BLME's branch is closer to dedup ground truth).
+- correlation_dimension is a compressive proxy at high dim (documented).
+- categories.py global np.random.seed + surface-form asymmetries (proxy-only task, cross_model_comparable=False).
+- Self-BLEU absolute values not cross-tokenizer comparable (disclosed).

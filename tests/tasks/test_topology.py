@@ -191,3 +191,43 @@ def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
             assert results[f"{prefix}_{stat}_norm"] == pytest.approx(
                 results[f"{prefix}_{stat}"] / mpd, rel=1e-9
             )
+
+
+def test_zigzag_duplicate_points_do_not_inflate_components():
+    """Audit 2026-07-16: _layer_topology lacked the zero-distance edge floor
+    (betti_curve.py had it since campaign 3) — duplicate points produced
+    explicit-zero csr entries that csgraph treats as NO edge, inflating
+    beta_0 (8 dups + 5 far -> 9 instead of 2; e2e: a corpus with one line
+    repeated 6x gave h0_mean_components 7.0 vs 1.0)."""
+    import numpy as np
+    from blme.tasks.topology.zigzag import _layer_topology
+
+    rng = np.random.default_rng(0)
+    dup = np.tile(rng.normal(size=(1, 8)), (8, 1))          # 8 identical points
+    far = rng.normal(size=(10, 8)) + 100.0                   # distinct cluster
+    # (>k points per cluster so kNN edges stay within clusters)
+    X = np.vstack([dup, far])
+    betti0, _ = _layer_topology(X, n_neighbors=5)
+    assert betti0 == 2, f"duplicates inflated beta_0: {betti0}"
+
+
+def test_scale_stratified_boundary_and_infinite_bars():
+    """Audit 2026-07-16 anchors: death EXACTLY at frac*scale is COARSE
+    (strict <), and infinite-death bars are excluded entirely."""
+    import numpy as np
+    from blme.tasks.topology.homology import _scale_stratified_summary
+
+    scale = 2.0   # threshold = 0.5 * 2.0 = 1.0
+    dgms = [
+        np.array([[0.0, 0.5],          # fine (death < 1.0)
+                  [0.0, 1.0],          # boundary -> coarse (strict <)
+                  [0.0, 1.5],          # coarse
+                  [0.0, np.inf]]),     # essential bar -> excluded
+        np.array([[0.2, 0.9]]),        # h1 fine
+    ]
+    out = _scale_stratified_summary(dgms, scale, frac=0.5)
+    assert out["h0_fine_count"] == 1
+    assert out["h0_coarse_count"] == 2          # boundary bar counted coarse
+    assert out["h1_fine_count"] == 1 and out["h1_coarse_count"] == 0
+    total = 0.5 + 1.0 + 1.5
+    assert out["h0_fine_persistence_frac"] == pytest.approx(0.5 / total)

@@ -80,7 +80,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
                  return {"error": "Could not extract embeddings"}
              
              E_np = E.float().cpu().numpy()
-             return self._compute_id(E_np, sample_size=self.config.get("sample_size", None))
+             return self._compute_id(E_np, sample_size=self.config.get("_meta_sample_size", None))
 
     def _compute_id(self, X, sample_size=None):
         """Two-NN intrinsic dimension of the point cloud ``X``.
@@ -105,29 +105,29 @@ class IntrinsicDimensionTask(DiagnosticTask):
 
         N = int(X_tensor.shape[0])
         if N < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         r1, r2 = _two_nearest_neighbor_distances(X_tensor)
         if r1 is None:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         # Drop exact duplicates (r1 = 0 → mu undefined). Near-duplicates
         # are kept; they're valid density samples.
         valid = r1 > 0
         r1, r2 = r1[valid], r2[valid]
         if r1.size < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         mus = r2 / r1
         # Filter numerical noise: mu must be ≥ 1 by construction.
         mus = mus[mus > 1.0]
         if mus.size < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         intrinsic_dim = _twonn_linear_fit(mus)
         return {
             "intrinsic_dimension": float(intrinsic_dim),
-            "sample_size": N,
+            "_meta_sample_size": N,
         }
 
 
@@ -151,13 +151,19 @@ def _two_nearest_neighbor_distances(
 
     if device is not None:
         try:
-            X_dev = X.to(device)
+            # float64 + no-mm compute mode (audit 2026-07-16): the default
+            # f32 mm-mode cdist (x^2+y^2-2xy) catastrophically cancels when
+            # r1 << ||x||, inflating TwoNN by up to +23% on dense clouds and
+            # making results host-dependent (GPU vs CPU). f64 + direct
+            # euclidean brings the error to ~1e-11.
+            X_dev = X.to(device).double()
             N = X_dev.shape[0]
             r1 = np.zeros(N, dtype=np.float64)
             r2 = np.zeros(N, dtype=np.float64)
             for s in range(0, N, chunk_rows):
                 e = min(N, s + chunk_rows)
-                d = torch.cdist(X_dev[s:e], X_dev, p=2)  # (chunk, N)
+                d = torch.cdist(X_dev[s:e], X_dev, p=2,
+                                compute_mode="donot_use_mm_for_euclid_dist")
                 # Take top-3 smallest; index 0 is self (distance 0).
                 vals, _ = torch.topk(d, k=3, dim=1, largest=False, sorted=True)
                 r1[s:e] = vals[:, 1].detach().cpu().double().numpy()

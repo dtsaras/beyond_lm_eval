@@ -63,6 +63,12 @@ References:
   Models", ICML 2025, arXiv:2410.11042. Repo RitAreaSciencePark/ZigZagLLMs.
 - Zigzag persistence: Carlsson & de Silva, "Zigzag persistence", Found.
   Comput. Math. 10(4):367-405, 2010.
+
+
+DISCLOSED DEVIATIONS (audit 2026-07-16): Gardinazzi et al. extract the
+LAST-TOKEN representation per prompt at each layer; BLME mean-pools
+tokens per prompt (consistent with the rest of the topology family).
+This changes the point cloud, not the zigzag construction.
 """
 
 import logging
@@ -128,7 +134,11 @@ def _layer_topology(
 
     rows = np.repeat(np.arange(n), k)
     cols = idx[:, 1:].ravel()
-    vals = dists[:, 1:].ravel()
+    # Floor zero distances (duplicate points): explicit-zero csr entries are
+    # treated as NO edge by csgraph, inflating beta_0 (same fix as
+    # betti_curve.py; audit 2026-07-16 demonstrated h0=7.0 vs 1.0 on a
+    # corpus with one repeated line).
+    vals = np.maximum(dists[:, 1:].ravel(), 1e-12)
     graph = csr_matrix((vals, (rows, cols)), shape=(n, n))
     graph = graph.maximum(graph.T)  # symmetrize (mutual + one-directional kNN)
 
@@ -375,7 +385,7 @@ class ZigzagPersistenceTask(DiagnosticTask):
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
                 enc = tokenizer(
-                    text, return_tensors="pt", truncation=True, max_length=128,
+                    text, return_tensors="pt", truncation=True, max_length=512,
                 ).to(device)
                 out = model(**enc, output_hidden_states=True)
                 for l_idx in range(n_layers):

@@ -22,8 +22,12 @@ References:
     Models", ACL 2021, arXiv:2012.15613. Popularizes fertility (introduced by Ács 2019) as a
     cross-tokenizer comparison metric.
   * Ali, Fromm, Thellmann et al. 2024 (NAACL Findings 2024) — "Tokenizer Choice For LLM
-    Training: Negligible or Crucial?", arXiv:2310.08754. Evidence that
-    tokenizer efficiency is correlated with downstream capability.
+    Training: Negligible or Crucial?", arXiv:2310.08754. NOTE: the paper's own
+    finding is that tokenizer choice matters but fertility/parity "are not
+    always predictive of the model's downstream performance" — cited here
+    as the study that MEASURES these statistics at LLM scale, not as
+    evidence they predict capability (mischaracterization fixed, audit
+    2026-07-16).
   * fertility, compression_ratio, total_tokens, and vocab_size enter
     BLME's top-25 partial predictors (`docs/TOP_PREDICTORS.md` §2) as
     tokenizer-confound signals — +0.71 to +0.77 partial ρ with composite
@@ -74,6 +78,14 @@ class TokenizerEfficiencyTask(DiagnosticTask):
 
         num_samples = self.config.get("num_samples", len(_EFFICIENCY_CORPUS))
 
+        # Accept any iterable dataset (audit 2026-07-16: the isinstance-
+        # list gate silently ignored HF Datasets/generators and fell back
+        # to the internal corpus).
+        if dataset is not None and not isinstance(dataset, list):
+            try:
+                dataset = list(dataset)
+            except TypeError:
+                dataset = None
         if dataset is not None and isinstance(dataset, list) and dataset:
             texts = []
             for s in dataset[:num_samples]:

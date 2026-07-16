@@ -179,10 +179,26 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                 p_.copy_(s_)
         return val
 
-    # Doubling phase: find the first unstable eta.
+    # Doubling phase: find the first unstable eta. If already unstable at
+    # eta0, HALVE downward first (Kalra et al. search in both directions;
+    # audit 2026-07-16) so extremely sharp scopes still resolve eta*.
     eta = eta0
     if probe(eta) >= baseline_loss:
-        return float("nan"), float("nan")   # unstable already at eta0
+        hi0 = eta
+        for _ in range(max_doublings):
+            eta /= 2.0
+            if eta < 1e-30:
+                return float("nan"), float("nan")
+            if probe(eta) < baseline_loss:
+                lo, hi = eta, eta * 2.0
+                for _ in range(bisect_iters):
+                    mid = 0.5 * (lo + hi)
+                    if probe(mid) >= baseline_loss:
+                        hi = mid
+                    else:
+                        lo = mid
+                return float(lo), float(2.0 / lo)
+        return float("nan"), float("nan")
     lo = eta
     hi = None
     for _ in range(max_doublings):
@@ -192,9 +208,12 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
             break
         lo = eta
     if hi is None:
-        # Never became unstable within the search range; report the last
-        # stable step as a lower bound.
-        return float(lo), float(2.0 / lo)
+        # Never became unstable within the search range. Returning the cap
+        # (eta0 * 2^max_doublings, a CONSTANT) polluted cross-model
+        # regressions with an indistinguishable sentinel (audit 2026-07-16:
+        # random-init gpt2 returned exactly 1073.74). NaN is honest: eta*
+        # exceeds the search range.
+        return float("nan"), float("nan")
 
     # Bisection between last stable (lo) and first unstable (hi).
     for _ in range(bisect_iters):

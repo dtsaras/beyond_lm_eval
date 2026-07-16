@@ -139,9 +139,25 @@ class ContextualizationTask(DiagnosticTask):
         layer_subset = self.config.get("layers", None)
 
         if dataset is None:
+            # Distinct sentences that reuse common words across DIFFERENT
+            # contexts (audit 2026-07-16: the previous 50-identical-sentence
+            # fallback made SelfSim and MEV identically 1.0 — every tracked
+            # occurrence was the same vector — and drew the anisotropy
+            # baseline entirely from same-context pairs).
+            subjects = ["fox", "dog", "bank", "river", "market", "story",
+                        "model", "system", "garden", "player"]
+            frames = [
+                "The {w} was near the old {v} before dawn.",
+                "Every {w} in the {v} looked different that day.",
+                "She described the {w} while walking past the {v}.",
+                "A {w} can change how the {v} is understood.",
+                "Nobody expected the {w} to matter for the {v}.",
+            ]
             dataset = [
-                {"text": "The quick brown fox jumps over the lazy dog."}
-                for _ in range(50)
+                {"text": f.format(w=subjects[i % len(subjects)],
+                                  v=subjects[(i + 3) % len(subjects)])}
+                for i, f in enumerate(
+                    [fr for fr in frames for _ in range(10)])
             ]
 
         device = next(model.parameters()).device
@@ -172,6 +188,11 @@ class ContextualizationTask(DiagnosticTask):
                 outputs = model(**inputs, output_hidden_states=True)
                 hidden = outputs.hidden_states  # (L+1) tuple of (1, T, D)
                 token_ids = inputs["input_ids"][0].cpu().tolist()
+                # Exclude special tokens (audit 2026-07-16: on BOS-adding
+                # tokenizers the position-0 BOS state is context-independent
+                # — SelfSim/MEV exactly 1.0 — inflating the averages; the
+                # reference tracks real words only).
+                special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
                 # Skip the embedding layer (index 0); keep block outputs 1..L.
                 per_layer = hidden[1:]
                 if not n_layers_seen:
@@ -180,9 +201,18 @@ class ContextualizationTask(DiagnosticTask):
                 for li, h in enumerate(per_layer):
                     h_np = h[0].float().cpu().numpy()  # (T, D)
                     intra_per_layer[li].append(h_np)
+                    # Baseline pool: ONE token vector per sentence per layer
+                    # (reference protocol: random pairs must not share a
+                    # context; audit 2026-07-16).
+                    non_special = [p_ for p_, t_ in enumerate(token_ids)
+                                   if t_ not in special_ids]
+                    if non_special:
+                        mid = non_special[len(non_special) // 2]
+                        all_states_per_layer[li].append(h_np[mid])
                     for tok_pos, tok_id in enumerate(token_ids):
+                        if tok_id in special_ids:
+                            continue
                         token_states[li][tok_id].append(h_np[tok_pos])
-                        all_states_per_layer[li].append(h_np[tok_pos])
 
         if n_layers_seen == 0:
             return {"error": "No samples processed"}

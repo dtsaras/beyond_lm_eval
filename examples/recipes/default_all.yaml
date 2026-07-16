@@ -315,6 +315,23 @@ tasks:
   consistency_icl_slope:
     shot_counts: [0, 1, 2, 4]
 
+  # ---- Campaign-4 B8 additions (2026-07) ----
+  geometry_superposition_strength:
+    max_pairs: 200000
+    seed: 42
+
+  geometry_effective_depth:
+    num_samples: 20
+
+  dynamics_fractal:
+    num_samples: 100
+    holder_eps: 0.005
+
+  dynamics_perturbation_growth:
+    num_samples: 10
+    rel_eps: 0.001
+    seed: 42
+
   # ---- Representation Engineering Tasks (4) ----
   repe_task_vectors:
     num_samples: 5

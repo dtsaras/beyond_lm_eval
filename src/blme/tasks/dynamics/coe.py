@@ -35,6 +35,7 @@ give highly correlated but not identical signals; we flag
 import logging
 
 import numpy as np
+import math
 import torch
 import torch.nn.functional as F
 
@@ -53,7 +54,11 @@ def _angle_between(a: torch.Tensor, b: torch.Tensor) -> float:
         return 0.0
     if c <= -1.0 + 1e-12:
         return float(np.pi)
-    return float(torch.acos(torch.tensor(c)).item())
+    # math.acos, not torch.acos(torch.tensor(c)): the latter builds a
+    # float32 tensor under the default dtype, capping angle precision at
+    # ~1e-7 and making it depend on torch.set_default_dtype (audit
+    # 2026-07-16).
+    return float(math.acos(max(-1.0, min(1.0, float(c)))))
 
 
 def _coe_from_chain(chain: list[torch.Tensor]) -> dict:

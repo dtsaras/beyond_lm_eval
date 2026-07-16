@@ -179,8 +179,8 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
         "nc1_subspace_rank": int(subspace_rank),
         "nc2_equinorm_cv": nc2_equinorm_cv,
         "nc2_etf_cosine_deviation_proxy": nc2_etf_cosine_deviation_proxy,
-        "n_classes": int(K),
-        "n_samples": int(n),
+        "_meta_n_classes": int(K),
+        "_meta_n_samples": int(n),
     }
 
 

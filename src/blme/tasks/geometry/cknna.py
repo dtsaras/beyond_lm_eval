@@ -248,10 +248,25 @@ class CKNNATask(DiagnosticTask):
                 )
             }
 
+        # Cap tokens with a seeded permutation SHARED across layers (same
+        # guard as geometry_hsic; audit 2026-07-16: without it the study
+        # defaults build ~1e4-5e4-point Gram matrices with O(N^3) unbiased
+        # HSIC per layer pair — infeasible/OOM).
+        max_tokens = int(self.config.get("max_cknna_tokens", 2000))
+        shared_perm = None
+        if n_points > max_tokens:
+            rng = torch.Generator(device="cpu")
+            rng.manual_seed(int(self.config.get("seed", 42)))
+            shared_perm = torch.randperm(n_points, generator=rng)[:max_tokens]
+            n_points = max_tokens
+
         logger.info("  Normalising activations...")
         normed = {}
         for idx in tqdm(layers, desc="Normalising"):
-            normed[idx] = _l2_normalize(layer_activations[idx].float())
+            acts = layer_activations[idx]
+            if shared_perm is not None:
+                acts = acts[shared_perm]
+            normed[idx] = _l2_normalize(acts.float())
 
         logger.info("  Computing CKNNA matrix...")
         cknna_matrix = np.full((n_layers, n_layers), np.nan, dtype=np.float64)

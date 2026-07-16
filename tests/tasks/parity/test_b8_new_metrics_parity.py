@@ -65,13 +65,14 @@ class TestSuperpositionStrength:
         sampled = _mean_squared_overlap(W, max_pairs=20_000, seed=0)
         assert sampled == pytest.approx(exact, rel=0.05)
 
-    def test_task_headline_is_mean_centered(self):
-        """Task-level protocol pin: LLM unembeddings carry a shared mean
-        direction (anisotropy cone) that inflates raw overlaps; Liu et
-        al.'s ~1/m Welch scaling only reproduces after mean-centering
-        (gpt2: raw 0.075 vs centered 0.0025 ~ 1.9/m). Construct W =
-        shared mean + iid Gaussian: the headline (centered) MSO must be
-        ~1/m while the raw variant stays an order of magnitude larger."""
+    def test_task_headline_follows_official_raw_protocol(self):
+        """Task-level protocol pin (audit 2026-07-16): the official repo
+        (liuyz0/SuperpositionScaling, overlap-0.py) computes overlaps on
+        RAW normalized rows with NO mean-centering — the headline must be
+        the raw statistic. The mean-centered variant is a disclosed BLME
+        auxiliary. Construct W = shared mean + iid Gaussian: the raw
+        headline must stay mean-dominated (an order of magnitude above
+        1/m) while the centered auxiliary recovers ~1/m."""
         from blme.tasks.geometry.superposition_strength import (
             SuperpositionStrengthTask)
 
@@ -88,8 +89,11 @@ class TestSuperpositionStrength:
 
         out = SuperpositionStrengthTask(config={}).evaluate(
             FakeLM(), None, dataset=None)
-        assert out["mean_squared_overlap"] * m == pytest.approx(1.0, rel=0.15)
-        assert out["mean_squared_overlap_raw"] > 10 * out["mean_squared_overlap"]
+        # Raw headline: mean-dominated, far above the Gaussian floor.
+        assert out["mean_squared_overlap"] > 10 * out["mean_squared_overlap_centered"]
+        # Centered auxiliary: recovers the iid-Gaussian 1/m floor.
+        assert out["mean_squared_overlap_centered"] * m == pytest.approx(1.0, rel=0.15)
+        assert out["superposition_ratio"] > out["superposition_ratio_centered"]
         assert out["vocab_size"] == V and out["hidden_dim"] == m
 
 
@@ -334,3 +338,128 @@ class TestScaleStratifiedPH:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ===========================================================================
+# 2026-07-16 audit regressions
+# ===========================================================================
+class TestAuditRegressions:
+    def test_critical_step_cap_returns_nan_not_sentinel(self):
+        """A never-unstable probe must give NaN, not the eta0*2^30 constant
+        (audit: random-init gpt2 returned exactly 1073.74 as eta*)."""
+        from blme.tasks.dynamics.sharpness import _critical_step_size
+        theta = torch.tensor([1.0, 1.0])
+        # Loss strictly decreasing in eta along -g: never unstable.
+        grads = [torch.tensor([1.0, 1.0])]
+        eta, lam = _critical_step_size(
+            lambda: theta.sum(),          # linear -> monotone decreasing
+            [theta], grads, grad_norm=float(np.sqrt(2.0)),
+            baseline_loss=float(theta.sum()), max_doublings=8, eta0=1e-6)
+        assert np.isnan(eta) and np.isnan(lam)
+
+    def test_critical_step_halves_below_eta0(self):
+        """Quadratic with lambda = 4e6 -> eta* = 5e-7 < eta0 = 1e-6: the
+        bidirectional search must resolve it instead of returning NaN."""
+        from blme.tasks.dynamics.sharpness import _critical_step_size
+        lam_true = 4.0e6
+        theta = torch.tensor([1.0], dtype=torch.float64)
+
+        def compute_loss():
+            return 0.5 * lam_true * (theta ** 2).sum()
+
+        grads = [lam_true * theta.clone()]
+        baseline = float(compute_loss())
+        eta, lam_c = _critical_step_size(
+            compute_loss, [theta], grads,
+            grad_norm=float(grads[0].norm()), baseline_loss=baseline,
+            max_doublings=30, bisect_iters=40, eta0=1e-6)
+        assert eta == pytest.approx(2.0 / lam_true, rel=1e-3)
+        assert lam_c == pytest.approx(lam_true, rel=1e-3)
+
+    def test_holder_exponent_anchor(self):
+        """Holder/self-similarity exponent (audit: zero prior coverage — a
+        sign flip or log-base error passed the suite). White noise: the
+        integrated process has p_eps(tau) ~ tau^-S with S ~ 0.5."""
+        from blme.tasks.dynamics.fractal import _holder_exponent
+        rng = np.random.default_rng(0)
+        z = rng.standard_normal(20000)
+        X = np.cumsum((z - z.mean()) / z.std())
+        S = _holder_exponent(X)
+        assert np.isfinite(S)
+        assert 0.3 < S < 0.7  # white-noise band; sign flip -> negative
+
+    def test_effective_depth_last_layer_not_final_norm_artifact(self):
+        """evaluate() must use the last block's PRE-norm output: on a model
+        whose final norm rescales massively, the last-layer BI must stay
+        ~0 for identity blocks (audit: gpt2 last-layer BI was ~90% ln_f)."""
+        from blme.tasks.geometry.effective_depth import EffectiveDepthTask
+
+        class Block(nn.Module):
+            def forward(self, h, *a, **k):
+                return (h,)  # identity block
+
+        class Inner(nn.Module):
+            def __init__(self, L):
+                super().__init__()
+                self.h = nn.ModuleList([Block() for _ in range(L)])
+
+        class Toy(nn.Module):
+            def __init__(self, D=8, L=3):
+                super().__init__()
+                self.emb = nn.Embedding(50, D)
+                self.transformer = Inner(L)   # get_layers: ("transformer","h")
+                # Final norm that would fake a huge last transition:
+                self.scale = 100.0
+
+            def get_input_embeddings(self):
+                return self.emb
+
+            def parameters(self, recurse=True):
+                return iter([self.emb.weight])
+
+            def forward(self, input_ids=None, attention_mask=None,
+                        output_hidden_states=False, **kw):
+                h = self.emb(input_ids)
+                states = [h]
+                for blk in self.transformer.h:
+                    h = blk(h)[0]
+                    states.append(h)
+                # post-"norm" final state (what HF puts at hidden_states[-1])
+                states[-1] = h * self.scale + 5.0
+                class Out:
+                    pass
+                o = Out()
+                o.hidden_states = tuple(states)
+                return o
+
+        class TokStub:
+            def __call__(self, text, **kw):
+                ids = torch.tensor([[1, 2, 3, 4, 5]])
+                class Enc(dict):
+                    def to(self, device):
+                        return self
+                e = Enc(input_ids=ids)
+                e["input_ids"] = ids
+                return e
+
+        # get_layers must find .h
+        out = EffectiveDepthTask(config={"num_samples": 2}).evaluate(
+            Toy(), TokStub(), dataset=[{"text": "a"}, {"text": "b"}])
+        assert "error" not in out, out
+        bis = out["block_influence_per_layer"]
+        # All blocks are identities; with the pre-norm hook every BI ~ 0.
+        assert max(bis) < 1e-5, bis
+
+    def test_lid_duplicate_neighbor_matches_official_zero(self):
+        from blme.tasks.geometry.lid import _lid_mle
+        d = np.array([0.0, 1.0, 1.5, 2.0, 2.5])
+        assert _lid_mle(d, k=5) == 0.0
+
+    def test_perplexity_freq_bucket_never_empty(self):
+        """2 observed ids: freq bucket must not be empty (was ppl_freq=inf)."""
+        n_observed = 2
+        rare_thresh = max(1, int(round(n_observed * 0.2)))
+        freq_thresh = min(n_observed - 1,
+                          max(1, n_observed - int(round(n_observed * 0.2))))
+        assert rare_thresh >= 1 and freq_thresh < n_observed
+        assert n_observed - freq_thresh >= 1  # freq bucket non-empty

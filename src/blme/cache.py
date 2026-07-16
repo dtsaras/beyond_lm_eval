@@ -360,6 +360,11 @@ class ModelOutputCache:
                 inputs = self.tokenizer(
                     text, return_tensors="pt", truncation=True, max_length=512,
                 ).to(device)
+                # Skip empty/whitespace docs: a 0-token forward pass crashes
+                # ("cannot reshape tensor of 0 elements"); mirrors the
+                # non-cache path's skip (audit 2026-07-16).
+                if "input_ids" in inputs and inputs["input_ids"].shape[1] < 1:
+                    continue
                 if "input_ids" in inputs:
                     seq_len = inputs["input_ids"].shape[1]
                     self._sample_lengths.append(int(seq_len))

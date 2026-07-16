@@ -115,5 +115,5 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             "rsa_adjacent_std": float(np.std(adj_arr)),
             "rsa_early_late": float(early_late_rho),
             "rsa_first_middle": float(first_mid_rho),
-            "rsa_min_continuity_layer": int(np.argmin(adj_arr)),
+            "_meta_rsa_min_continuity_layer": int(np.argmin(adj_arr)),
         }

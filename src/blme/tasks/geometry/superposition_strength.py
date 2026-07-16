@@ -10,17 +10,21 @@ bound, the tightest possible packing of n >> m unit vectors in m dimensions.
 
 Measured quantities (weights-only, Tier 1):
 
-  * ``mean_squared_overlap``: E_{i != j} [ cos^2(W_i, W_j) ] over sampled
-    row pairs of the MEAN-CENTERED unembedding matrix W in R^{V x m}
-    (row-normalized after centering; the raw-row variant is reported as
-    ``mean_squared_overlap_raw`` — see the protocol note in evaluate()).
+  * ``mean_squared_overlap``: E_{i != j} [ cos^2(W_i, W_j) ] over row
+    pairs of the RAW unembedding matrix W in R^{V x m} (row-normalized,
+    no centering) — the official-repo protocol (overlap-0.py). A
+    mean-centered variant is reported as ``mean_squared_overlap_centered``
+    (a disclosed BLME auxiliary that removes the shared anisotropy
+    direction; see the protocol note in evaluate()).
   * ``welch_bound``: kappa^2 = (V - m) / (m * (V - 1)) — the minimum
     achievable mean squared overlap for V unit vectors in R^m (~1/m for
     V >> m).
-  * ``superposition_ratio``: mean_squared_overlap / welch_bound. ~1 means
-    the vocabulary is packed at the theoretical optimum (strong
-    superposition); >> 1 means far-from-optimal packing; random Gaussian
-    rows give E[cos^2] = 1/m, i.e. ratio ~ 1/(1 - m/V) (slightly above 1).
+  * ``superposition_ratio``: mean_squared_overlap / welch_bound (raw
+    protocol; on real LLMs the shared mean direction makes this >> 1 —
+    gpt2: ~58). ``superposition_ratio_centered`` divides the centered
+    variant instead (~1-2 on real LLMs: near-optimal packing net of the
+    common mean; random Gaussian rows give E[cos^2] = 1/m, i.e. ratio
+    ~ 1/(1 - m/V), slightly above 1).
   * ``row_norm_cv`` and ``frac_norm_above_half_max``: dispersion of the
     row-norm distribution (the paper's toy-model phi thresholds are
     norm-scale dependent; we report scale-free analogues).
@@ -100,18 +104,26 @@ class SuperpositionStrengthTask(DiagnosticTask):
 
         W = W.float().cpu()
         V, m = W.shape
+        # Welch bound uses the same effective V as the overlap kernel
+        # (zero-norm rows are dropped there).
+        V_eff = int((W.norm(dim=1) > 0).sum().item())
 
-        # Headline statistic uses MEAN-CENTERED rows: LLM unembeddings carry
-        # a large shared mean direction (the anisotropy cone), which inflates
-        # raw cosine overlaps by orders of magnitude (gpt2: raw MSO 0.075 vs
-        # centered 0.0025 ~ 1.9/m). The paper's ~1/m Welch-scaling finding on
-        # open LLMs only reproduces after removing the mean component, and
-        # centering matches this library's unembedding-erank convention. The
-        # raw variant is reported alongside.
+        # Headline statistic follows the OFFICIAL protocol (repo
+        # liuyz0/SuperpositionScaling, LLMs/overlap-0.py): RAW rows,
+        # normalized without mean-centering. The paper's ~1/m claim is a
+        # log-log scaling TREND of this raw quantity across hidden sizes,
+        # not a coefficient-1 statement.
+        # BLME ALSO reports a mean-centered variant (BLME auxiliary, NOT
+        # part of the official protocol): LLM unembeddings carry a shared
+        # anisotropy direction that dominates raw cosines (gpt2: raw MSO
+        # 0.075 = 58x Welch vs centered 0.0025 = 1.9x Welch), so the
+        # centered variant isolates packing efficiency net of the common
+        # mean. Audit 2026-07-16 verified the official code never centers.
+        mso = _mean_squared_overlap(W, max_pairs=max_pairs, seed=seed)
         W_centered = W - W.mean(dim=0, keepdim=True)
-        mso = _mean_squared_overlap(W_centered, max_pairs=max_pairs, seed=seed)
-        mso_raw = _mean_squared_overlap(W, max_pairs=max_pairs, seed=seed)
-        welch = _welch_bound(V, m)
+        mso_centered = _mean_squared_overlap(W_centered, max_pairs=max_pairs,
+                                             seed=seed)
+        welch = _welch_bound(V_eff, m)
 
         norms = W.norm(dim=1)
         norms = norms[norms > 0]
@@ -120,12 +132,14 @@ class SuperpositionStrengthTask(DiagnosticTask):
 
         return {
             "mean_squared_overlap": mso,
-            "mean_squared_overlap_raw": mso_raw,
+            "mean_squared_overlap_centered": mso_centered,
             "welch_bound": welch,
-            # ratio vs the packing optimum; guard V<=m (welch=0).
+            # ratios vs the packing optimum; guard V<=m (welch=0).
             "superposition_ratio": (mso / welch) if welch > 0 else float("nan"),
-            # ratio vs the random-Gaussian baseline E[cos^2] = 1/m.
+            "superposition_ratio_centered": (mso_centered / welch) if welch > 0 else float("nan"),
+            # ratios vs the random-Gaussian baseline E[cos^2] = 1/m.
             "overlap_vs_random": mso * m,
+            "overlap_vs_random_centered": mso_centered * m,
             "row_norm_cv": norm_cv,
             "frac_norm_above_half_max": frac_half,
             "vocab_size": int(V),

@@ -230,8 +230,12 @@ def _gather_point_cloud(
             ).to(device)
             out = model(**inputs, output_hidden_states=True)
             hs = out.hidden_states  # tuple length n_layers+1 (embedding + blocks)
-            li = layer_idx if layer_idx >= 0 else len(hs) + layer_idx
-            li = max(0, min(li, len(hs) - 1))
+            # Match the CACHE convention: layer 0 = first block output (the
+            # cache drops the embedding entry). Audit 2026-07-16: the old
+            # raw-tuple indexing was off by one vs the cache path for
+            # explicit non-negative layer_idx.
+            li = (layer_idx + 1) if layer_idx >= 0 else len(hs) + layer_idx
+            li = max(1, min(li, len(hs) - 1))
             h = hs[li][0].detach().float().cpu().numpy()  # (T, D)
             if h.ndim != 2 or h.shape[0] == 0:
                 continue
