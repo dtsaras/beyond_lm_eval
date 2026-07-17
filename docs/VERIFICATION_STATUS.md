@@ -80,8 +80,10 @@ repe_concept_separability (== sklearn cross_val_score 0.0; probe family adaptati
 
 ## E. STILL UNSURE — residual caveats (the honest list)
 
-1. **superposition_strength**: protocol established from the official SOURCE (read, not run).
-   A head-to-head numeric run of liuyz0's overlap script on 1–2 shared models would close this.
+1. **superposition_strength**: CLOSED 2026-07-17 — the official overlap-0.py computation
+   (verbatim math, batched all-pairs) executed head-to-head on gpt2: official exact
+   E[cos^2] = 0.07465654 vs BLME sampled headline 0.07476744 (0.15% rel, inside the
+   ~0.45% 200k-pair sampling error). Task upgraded: protocol AND numbers verified.
 2. **procrustes_linearity**: bit-exact vs official only under float64; the official float32
    pipeline diverges up to 0.42 in the ill-conditioned regime. Absolute values are
    conditioning-dependent — only the across-depth PROFILE is trustworthy (documented).
