@@ -1,0 +1,28 @@
+{
+  "task": "repe_concept_separability",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "On the explicit-group fact-pair path, my independent estimator matched every gpt2 layer AUC with max |delta| = 0.0 (mean AUC 0.7128999748), and a planted linear concept gave AUC 1.0. However, a valid ungrouped positive-first dataset silently takes GroupKFold and returned 0.9166667 instead of the paper-defined StratifiedKFold result 0.3333333, a value-changing counterexample on the documented input domain.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "AUC is dimensionless with chance 0.5, and direct orthogonal-rotation and zero-padding tests preserved a non-degenerate AUC of 0.9166667 exactly from d = 5 through d = 4096. But the fixed-C probe is sensitive to representation scale: multiplying the same gpt2 activations by 0.01, 1, and 100 changed mean AUC from 0.6498488 to 0.7129000 to 0.6876417; the fresh 7-model panel also gave Spearman rho = +0.7093 with d_model (p = 0.0743), so cross-model use needs an activation-scale and uncertainty caveat.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_repo": "andyzoujm/representation-engineering",
+  "github_reason": "I fetched the official current `repe/rep_readers.py` (218 lines): it contains PCARepReader, ClusterMeanRepReader, and RandomRepReader, with 0 LogisticRegression implementations, so there is no released held-out CV-AUC estimator to run head-to-head. Locally rerunning the pinned commit-5455d8a fixture reproduced the independent PCA direction versus the captured real PCARepReader at |cos| = 0.9999999999997722 and the planted direction at |cos| = 0.9681839, but those checks validate the RepE PCA family rather than BLME's adapted estimator.",
+  "paper_number": "NONE",
+  "paper_reason": "Zou et al. Table 11 reports PCA/LAT accuracies of 81.0, 85.0, 72.5, 92.6, and 90.7 for Utility, Morality, Power, Probability, and Risk, while this implementation reports a gpt2 logistic-CV mean AUC of 0.7129000 on BLME's own fact pairs. Because the model, stimuli, reader, and statistic all differ, no relative error is meaningful, and the paper publishes 0 per-layer held-out logistic-CV AUC values for this protocol.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "Fresh fp32 CPU measurements were gpt2 0.7129000, distilgpt2 0.7094041, pythia-70m 0.5556185, pythia-160m 0.6497858, opt-125m 0.5958522, SmolLM2-135M 0.6924414, and gpt2-medium 0.7706995. Spearman associations were d_model +0.7093 (p = 0.0743), n_layers +0.4117 (p = 0.3588), log(params) +0.3214 (p = 0.4821), and vocab_size -0.6736 (p = 0.0971); identical-architecture random GPT-2 seeds scored 0.4697499, 0.5202507, and 0.4998110 versus trained gpt2 0.7129000, so width is suspected but the metric is not a pure architecture proxy.",
+  "defects": [
+    "CODE: lines 541-543 infer pair groups solely from an all-1-then-all-0 label layout even when the caller supplied no groups. On the same finite representations this emitted 0.9166667 instead of StratifiedKFold's 0.3333333; driving the repository's own ordered parity fixture through evaluate() emitted 0.9966667 rather than its stored stratified reference 0.9833333.",
+    "CODE: after non-finite rows are removed, line 548 passes `_groups[:len(ya)]` instead of applying the row mask. A constructed partial-invalid case emitted 0.8333333 while correctly masked groups give 0.1666667; when all positive rows were invalid, evaluate() raised an uncaught one-class LogisticRegression ValueError instead of excluding the layer.",
+    "COMPARABILITY: fixed-C liblinear is not invariant to uniform activation rescaling even though linear separability is; the same gpt2 representations changed mean AUC 0.7129000 -> 0.6498488 at scale 0.01 and -> 0.6876417 at scale 100, while isometric rotation and zero-padding changed AUC by exactly 0.0.",
+    "CONFIG/PROTOCOL: the effective defaults.yaml value is num_samples = 20, so only 11 of the bundled set's 17 entity groups are used. On the same gpt2 model, using all 39 pairs changed mean AUC from 0.7129000 to 0.6247535 (absolute -0.0881465, relative -12.36%).",
+    "STATISTICS: no null or interval is emitted. A 100-draw within-pair label-permutation null on the same gpt2 activations had mean 0.4822158, sd 0.0669080, and p95 0.5854938; trained gpt2's 0.7129000 was z = 3.4478 with empirical p = 0.00990, while the 7-model range 0.5556185-0.7706995 spans only 3.21 null sd.",
+    "CODE (input validation): `int(label)` silently truncates non-integral labels; labels 0.9 and 1.9 were accepted as 0 and 1 and produced AUC 1.0 instead of the documented binary-integer error.",
+    "DOCUMENTATION: the source comment says the 39 pairs form 19 groups, but independent union-find gives 17 groups with sizes [6, 4, 3, 2 x 12, 1, 1]; the empty-symmetric-difference fallback fires on exactly zero-based pairs 6, 7, and 11."
+  ],
+  "fix": "Use GroupKFold only when every caller row carries an explicit group; otherwise always use the documented StratifiedKFold, and add an end-to-end positive-first regression that drives evaluate() (the current parity helper bypasses it). For each layer, either mark the whole layer NaN when any row is non-finite, matching the paper's layer-exclusion wording, or mask X, y, and groups together, recompute class counts/n_splits, and fail closed if any train/test fold lacks both classes. Validate labels without lossy int() coercion. Separately, align the effective 20-pair protocol with the 39-pair bundle, emit a permutation/bootstrap interval, and standardize features or otherwise specify a scale-invariant probe policy before cross-model use."
+}

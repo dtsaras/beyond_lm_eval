@@ -1,0 +1,26 @@
+{
+  "task": "geometry_magnitude",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Although the pointwise solve 1^T exp(-tD)^{-1}1 matches magnipy to 6.66e-16 absolute when D is supplied, BLME does not reliably construct the source metric D_ij=||x_i-x_j||. Translating a four-point cloud by 1e12, which must leave every distance and magnitude unchanged, made all 12 off-diagonal distances zero and changed the largest distance by 10.0, so the public implementation has a concrete value-changing counterexample.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Raw scale/count summaries are architecture proxies: in 66 models magnitude_auc has rho=+0.502 with d_model (p=1.78e-5), +0.418 with n_layers (p=4.77e-4), +0.650 with vocabulary (p=3.52e-9), and +0.577 with parameter count (p=3.87e-7). The separately named magnitude_area_norm is exactly invariant when one fixed geometry is zero-padded from ambient width 4 to 128 (0.5796527377 throughout) and under scales 0.5,1,2,7 (0.9306890272 throughout for the two-point space), and a retained eight-model check found no association (rho=-0.270, p=0.52), so that normalized auxiliary is usable on numerically valid clouds even though the raw task is RED.",
+  "normalized_variant": "magnitude_area_norm",
+  "normalized_ok": "GREEN",
+  "github": "PARTIAL",
+  "github_repo": "aidos-lab/magnipy",
+  "github_reason": "Fetched magnipy commit 7d49b90f110db42fe666ada2964fea020d2cb1dd and executed its pointwise magnitude and convergence routines. Per-scale values matched to machine precision (maximum absolute error 6.66e-16), and magnipy found t_conv=2.944438979166444 versus ln(19)=2.944438979166440; however, magnipy's source-protocol area is 4.605169 while BLME's public summary is 18.613781, so end-to-end matching is partial.",
+  "paper_number": "PARTIAL",
+  "paper_reason": "Table S.1 prints MagArea=4.602 for X={0,1}, its zero-padded Q, and duplicate-augmented Z using X's convergence scale. Official magnipy gives 4.605169 (0.0689% from the rounded table), but BLME gives 18.613781 for X/Q (304.47% above 4.602), 18.511925 for Z, and an error for a five-row duplicate augmentation; only the pointwise magnitude component reproduces.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The archived 66-model correlations establish that magnitude_auc is strongly associated with width, depth, vocabulary, and total parameters, while magnitude_dimension is clean (all |rho|<=0.160, p>=0.199). The normalized area passes controlled ambient-width and scale tests, but it was introduced after the 66-model archive and therefore has only the retained eight-model cross-check.",
+  "defects": [
+    "CODE magnitude.py:258-288 substitutes t_cut=10/median(D) for the paper's root-found 95%-convergence scale and comparison-set common cutoff; the published two-point anchor changes from 4.602 to 18.613781.",
+    "CODE magnitude.py:137-147 uses the cancellation-prone Gram identity for Euclidean distances. Translating a four-point cloud by 1e12, an exact isometry, made every off-diagonal distance zero and produced maximum absolute distance error 10.0.",
+    "CODE the integration window is not twin-invariant because its median includes duplicate zero distances: X={0,1} gives area 18.613781, Z={0,1,1} gives 18.511925, and adding more twins can make the task fail, whereas Table S.1 requires the same 4.602.",
+    "CODE rejected fine-grid solves are removed and the remaining endpoints are trapezoid-connected across the missing intervals, so the task can emit a plausible area even when part of the required curve was numerically invalid.",
+    "COMPARABILITY: magnitude_area_norm is a useful explicit BLME normalization, not the paper's MagArea; its GREEN normalization judgement must not be used to relabel the source-metric verdict."
+  ],
+  "fix": "Replace the distance Gram subtraction with scipy.spatial.distance.cdist or an equally stable difference-based routine. Compute the source 95%-convergence root |tX|=0.95n and use the required common comparison cutoff, deduplicate twins before window construction, and fail the complete integral rather than bridging invalid intervals; retain the current fixed-window normalized value only under an explicitly BLME-specific name."
+}

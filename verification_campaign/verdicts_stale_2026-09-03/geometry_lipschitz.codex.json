@@ -1,0 +1,28 @@
+{
+  "task": "geometry_lipschitz",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The core relative-change mean and maximum faithfully implement BLME's stated formula, agreeing with independent recomputation to about 2.6e-7 or better. However, the paper-defined contractive-transition fraction is replaced by a mean hidden-norm ratio: on fresh gpt2 hooks those values are 0.8333 and 1.2175, respectively.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The across-transition mean is mechanically depth-dependent as residual norms accumulate: an identical additive-update construction gives means 0.7500, 0.52083, 0.40833, 0.29290, 0.16776 at 4,6,8,12,24 layers (rho=-1.0). In fresh runs on distilgpt2, gpt2, pythia-70m, and pythia-160m, current means 0.6699,0.3649,1.0427,0.6276 give rho=-0.894 with depth and -0.775 with width, albeit n=4.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "This hidden-state relative-change statistic is a BLME construction, so no original implementation was released. The cited avirmaux/lipEstimation repository was fetched for provenance but implements spectral/operator-norm bounds, a different quantity that cannot be compared numerically to ||delta h||/||h||.",
+  "paper_number": "NONE",
+  "paper_reason": "Miyato et al. publish spectral-normalization results and Virmaux-Scaman publish AutoLip/SeqLip bounds; neither reports this hidden-state relative-change statistic. The BLME manuscript provides only its equation, not a published numerical anchor.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The controlled residual construction proves a purely mechanical rho=-1 relation between relative_change_mean and depth. Four fresh allowed-model runs retain rho=-0.894 with n_layers and -0.775 with d_model; a larger recorded post-fix run reports -0.673 and -0.685. The quantity is dimensionless but not architecture-neutral.",
+  "defects": [
+    "src/blme/tasks/geometry/lipschitz.py:73-84 correctly removes the post-final-norm entry but, because collect_hidden_states already drops the embedding and exposes no raw last-block output, lines 92-119 measure only blocks 1 through L-2. Fresh hooks show the omitted first/last updates are 11.156/1.100 for gpt2 and 13.627/3.752 for pythia-70m; full-block means are 1.325/3.592 versus reported 0.365/1.043.",
+    "The BLME manuscript promises the fraction of transitions with L_l<1, but lipschitz.py:116-119 and 141 instead emit mean_contraction_rate as the mean of ||h_(l+1)||/||h_l||. Those are different statistics; on fresh gpt2 hooks the promised fraction is 0.8333 while the task's norm-ratio mean is 1.2175.",
+    "src/blme/tasks/geometry/lipschitz.py:107-110 maps an entirely invalid zero-denominator transition to legal-looking values 0.0 and 1.0 rather than NaN plus an invalid count.",
+    "src/blme/tasks/geometry/lipschitz.py:132-142 emits four values twice under lipschitz_* and relative_change_* names, creating perfectly collinear duplicate features.",
+    "lipschitz_max is the maximum of per-transition token means, not a maximum token quotient or an operator Lipschitz constant; the module now disclaims this, but the legacy key and downstream interpretation docs still overstate it.",
+    "All 46 archived study-table values predate the post-final-norm fix and are stale; they must not be combined with the four fresh values or used for a current correlation claim.",
+    "The focused current test run has one stale-test failure: tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz still independently includes the removed post-final-norm transition (expected mean 14.8128 versus current 0.493985 on its fixture)."
+  ],
+  "fix": "Retain the relative-change formula under only relative_change_* names; emit the manuscript-defined fraction of contractive transitions, capture every block's true input/output with hooks, replace degenerate sentinels with NaN plus invalid counts, and add an explicitly named depth-adjusted output before cross-model use."
+}

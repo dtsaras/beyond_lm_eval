@@ -1,0 +1,25 @@
+{
+  "task": "geometry_lid",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Ma et al. Eq. (4), -k / sum_i log(r_i/r_k), is transcribed exactly: the [1,2,3,4,5] analytic anchor is 1.5338845123190095 in both the derivation and _lid_mle. Both former selector counterexamples now match full direct search at 10.840828618204318 in 512 dimensions and 22.144526420679867 in 2048 dimensions, while exactly distance-preserving shifts by 0, +10000, and +16000 all return 77.37250603288686; no value-changing counterexample remains on the paper-defined domain.",
+  "defect_location": "NONE",
+  "comparable": "YELLOW",
+  "comparable_reason": "The effective merged config is k=20, num_samples=50, layerwise=false. Cache and fresh routes on the same 50 GPT-2 texts both collect 1456x768 states with torch.equal=true, max absolute difference 0.0, and lid_mean 4.580384936947337, but the same texts yield 1456 points under GPT-2 tokenization versus 1361 under Pythia tokenization (-6.525%). Isometric zero-padding from width 10 through 4096 leaves lid_mean exactly 9.808209465561024, yet five N=5000, 500-query trials per dimension give pooled-median finite-k biases +6.216%, -0.508%, -6.961%, and -17.052% at true dimensions 2, 5, 10, and 20; cross-model use therefore needs matched token populations and finite-k controls.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "xingjunm/lid_adversarial_subspace_detection",
+  "github_reason": "Fetched the released master util.py and executed an exact local transcription of mle_batch: float32 cast, scipy cdist, full sort, self drop, then -k/sum(log(v/v[-1])). BLME versus released means are 4.580384936947337 versus 4.580384936947335 on the matched GPT-2 route (4.44e-16 relative), 10.840828618204318 versus 10.840828620689202 on the former 512-dimensional failure (2.29e-10 relative), and 22.144526420679867 versus 22.144526420679885 on the former 2048-dimensional failure (7.77e-16 relative); the duplicate cloud also matches to 2.22e-16 relative with 2/100 zero estimates retained.",
+  "paper_number": "NONE",
+  "paper_reason": "Ma et al. provide only approximate raw Figure 1 labels (normal 1.53 and adversarial 4.36) with 0 released point coordinates; Figure 2 gives min-max-normalized curves for 100 examples, and Tables 1-3 report detector AUC or attack failure rather than a reproducible raw-LID scalar. The executable Eq. (4) anchor is nevertheless reproduced exactly at 1.5338845123190095; current N=5000 checks return 2.124311686586528, 4.974575358100165, 9.303859072674253, and 16.58967218613854 for true dimensions 2, 5, 10, and 20.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "Across the 66-model archive, raw lid_mean spans 13.316519045298886-35.56233231709208 and has Spearman rho +0.501858 with d_model (p=1.76e-5), +0.425204 with n_layers (p=3.72e-4), and +0.420388 with log parameters (p=4.41e-4). Exact zero-padding produces range 0.0 around lid_mean 9.808209465561024, refuting a mechanical ambient-width effect; the removed /log(d_model) twin lowers rho(d_model) to +0.029452 (p=0.814) but moves rho(vocabulary) from -0.182255 (p=0.143) to -0.407606 (p=6.81e-4), so NORMALIZERS correctly has 0 registrations and the observational architecture association remains suspected rather than established as causal.",
+  "defects": [
+    "COMPARABILITY, not implementation fidelity: the shipped 20/50/false route is internally matched, but the same 50 texts produce 1456 versus 1361 states under GPT-2 versus Pythia tokenization, and finite-k d-ball bias changes from +6.216% at true d=2 to -17.052% at true d=20.",
+    "BOUNDARY POLICY, outside the paper-defined positive continuous-distance domain and not scored as a fidelity defect: d_k=0 returns 0.0 where raw released arithmetic yields NaN; an all-equal positive shell returns NaN where raw NumPy arithmetic yields -inf. The smallest-positive representable [1,2,3,4,5] multiple still returns the exact 1.5338845123190095 anchor.",
+    "OUT-OF-CONTRACT SCALE PROBE, explicitly not scored as a fidelity defect: a direct float64 matrix cloud at scale 1e-160 differs from its scale-1 result by 9.13e-6 relative, and at 1e-200 it collapses to 0.0. tests/test_scale_invariance.py claims 1e-30 through 1e20, not these magnitudes, and the task's tensor path stores inputs in float32 before its float64 distance computation.",
+    "NORMALIZED VARIANT: correctly absent. NORMALIZERS has 0 registrations; raw lid_mean stays 9.808209465561024 at widths 10, 64, 256, 2048, and 4096, while the rejected /log(d_model) value moves 4.259651248244395 to 1.1791879296637566 and shifts archive vocabulary rho from -0.182255 to -0.407606."
+  ],
+  "fix": ""
+}

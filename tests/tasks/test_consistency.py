@@ -7,6 +7,120 @@ import torch
 import numpy as np
 
 
+def test_paraphrase_does_not_call_broken_mpararel(monkeypatch):
+    """Campaign-3 BUG: the dataset=None fallback tried load_dataset(
+    'coastalcph/mpararel','en') which always fails (wrong config + columns), so
+    every run made a failing network call before silently using bundled triples.
+    The dead branch is gone: no load_dataset call, real metrics from bundled."""
+    import datasets
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.paraphrase import ParaphraseInvarianceTask
+
+    called = {"n": 0}
+
+    def _spy(*a, **k):
+        called["n"] += 1
+        raise RuntimeError("load_dataset should not be called")
+
+    monkeypatch.setattr(datasets, "load_dataset", _spy)
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    r = ParaphraseInvarianceTask(config={"num_samples": 2}).evaluate(model, tok, dataset=None)
+    assert called["n"] == 0, "dead mpararel load_dataset branch still runs"
+    assert "error" not in r
+
+
+def test_contrastive_all_failed_returns_error_not_nan(monkeypatch):
+    """Campaign-3 BUG: when every triple fails to score, np.mean([]) returned
+    NaN metrics that look like a real measurement. It must return an error
+    dict (mirroring the empty-dataset case)."""
+    import blme.tasks.common as common
+    from blme.tasks.consistency.contrastive import ContrastiveConsistencyTask
+
+    monkeypatch.setattr(common, "score_continuation", lambda *a, **k: None)
+
+    class _M:
+        device = torch.device("cpu")
+
+        def parameters(self):
+            return iter([torch.zeros(1)])
+    r = ContrastiveConsistencyTask(config={"num_samples": 2}).evaluate(_M(), object(), dataset=None)
+    assert isinstance(r, dict) and "error" in r
+
+
+def test_icl_slope_skips_k_greater_than_available_demos():
+    """Campaign-3 BUG: demos[:k] silently truncated when k > n_demos, so an
+    8-shot metric with only 4 demos duplicated the 4-shot NLL and flattened the
+    slope. k > n_demos must yield NaN (unmeasurable), not a duplicate."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.icl_slope import ICLSlopeTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    item = {
+        "demos": [("a", "1"), ("b", "2"), ("c", "3"), ("d", "4")],  # only 4 demos
+        "query": "e", "target": " 5",
+        "template": "{inp} = {out}", "query_template": "{inp} =",
+    }
+    r = ICLSlopeTask(config={"shot_counts": [0, 4, 8]}).evaluate(model, tok, dataset=[item])
+    assert np.isnan(r["mean_nll_8shot"]), "8-shot with 4 demos must be NaN, not truncated"
+    assert np.isfinite(r["mean_nll_4shot"])
+
+
+def test_logical_unconditional_prompt_works_on_non_bos_tokenizer():
+    """Campaign-3 BUG: the unconditional " " prompt degenerated to prompt_len=0
+    on non-BOS tokenizers (gpt2), so score_continuation returned None and EVERY
+    pair was skipped -> the task errored. A BOS-prefixed prompt must let it run."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.logical import LogicalConsistencyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    r = LogicalConsistencyTask(config={"num_samples": 4}).evaluate(model, tok, dataset=None)
+    assert "error" not in r, f"task errored on a non-BOS tokenizer: {r}"
+    assert "conditional_likelihood_lift" in r
+
+
+def test_self_consistency_seed_does_not_crash_generation():
+    """Campaign-3 BUG: with a seed set, self_consistency passed a
+    generate(generator=...) kwarg that transformers rejects with ValueError;
+    only TypeError was caught for the fallback, so the broad except skipped
+    every prompt and the task returned {"error": ...}. A seeded run must
+    still produce real agreement metrics."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.consistency.self_consistency import SelfConsistencyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    task = SelfConsistencyTask(config={
+        "seed": 1234, "num_prompts": 2, "n_samples_per_prompt": 4,
+        "max_new_tokens": 4,
+    })
+    r = task.evaluate(model, tok, dataset=None)
+    assert "error" not in r, f"seeded run returned error dict: {r}"
+    assert "mean_first_token_agreement" in r and r["generation_seed"] == 1234
+
+
+def test_calibration_default_bins_is_15(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 DISCREPANCY: default n_bins was 10, but Guo 2017 and the
+    official _ECELoss (temperature_scaling) use M=15. Capture the n_bins the
+    task passes by default and assert it is 15."""
+    import blme.tasks.consistency.calibration as cal
+
+    captured = {}
+    orig = cal._calibration_from_confidences
+
+    def spy(*args, **kwargs):
+        captured["n_bins"] = kwargs.get("n_bins")
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(cal, "_calibration_from_confidences", spy)
+    cal.CalibrationTask(config={"num_samples": 8}).evaluate(mock_model, mock_tokenizer, None)
+    if "n_bins" not in captured:
+        pytest.skip("mock produced no calibration predictions")
+    assert captured["n_bins"] == 15, "default n_bins must be 15 (Guo M=15)"
+
+
 def test_calibration(mock_model, mock_tokenizer):
     """Expected Calibration Error (ECE) computation."""
     from blme.tasks.consistency.calibration import CalibrationTask
@@ -41,9 +155,12 @@ def test_contrastive_consistency(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
 
     assert isinstance(results, dict)
-    assert "mean_factual_prob" in results
-    assert "mean_exclusive_prob" in results
-    assert "mean_rejection_ratio" in results
+    # On mocks where no triple can be scored the task now returns an error dict
+    # (rather than silent NaN metrics).
+    if "error" not in results:
+        assert "mean_factual_prob" in results
+        assert "mean_exclusive_prob" in results
+        assert "mean_rejection_ratio" in results
 
 
 def test_logical_consistency(mock_model, mock_tokenizer):

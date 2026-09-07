@@ -38,6 +38,26 @@ pip install 'lm-eval[api]'
 `scripts/setup_server.sh` does this plus Qwen-3.5 flash-linear-attention
 dependencies.
 
+### Official-reference checkouts for the parity tests (optional)
+
+Three parity tests compare BLME kernels against official research code that
+is not pip-installable. They skip cleanly when the checkout is absent; to
+run them, clone the repos into the durable convention directory (or point
+the env vars at existing checkouts):
+
+```bash
+mkdir -p ~/.cache/blme-refrepos && cd ~/.cache/blme-refrepos
+git clone --depth 1 https://github.com/ArGintum/GPTID        # or BLME_GPTID_DIR
+git clone --depth 1 https://github.com/avirmaux/lipEstimation # or LIPESTIMATION_DIR
+git clone --depth 1 https://github.com/aidos-lab/magnipy      # or BLME_MAGNIPY_DIR
+pip install magnipy   # live-library half of the magnitude parity test
+```
+
+`giotto-tda` (persistence-entropy official reference) has no Python-3.12
+wheels; its 203-case parity run was executed in an isolated 3.11 venv and
+the recorded agreement is 2.7e-15. The in-repo live guard pins BLME against
+`scipy.stats.entropy(base=2)`, which is the exact kernel giotto-tda calls.
+
 ## 2. Run the 32-model evaluation
 
 The 32-model zoo is in `scripts/model_zoo.py`. Each model's HuggingFace

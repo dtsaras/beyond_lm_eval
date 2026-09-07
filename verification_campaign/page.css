@@ -1,0 +1,194 @@
+
+:root{
+  --ground:#F6F7F9; --panel:#FFFFFF; --panel-2:#FBFCFD;
+  --ink:#151A21; --ink-2:#4A5560; --ink-3:#78848F;
+  --rule:#E1E6EB; --rule-2:#EDF0F3;
+  --accent:#146B73; --accent-soft:#E4F0F1;
+  --ok:#2E7D5B; --ok-soft:#E3F1EA;
+  --warn:#9A6B05; --warn-soft:#F7EEDA;
+  --bad:#A93B2C; --bad-soft:#F6E5E2;
+  --idle:#5C6A78; --idle-soft:#EBEEF1;
+  --none:#93A0AB; --none-soft:#F0F2F4;
+  --shadow:0 1px 2px rgba(20,30,40,.05),0 8px 24px -12px rgba(20,30,40,.12);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1318; --panel:#161B22; --panel-2:#1B212A;
+    --ink:#E6EBF0; --ink-2:#A7B4C0; --ink-3:#75828E;
+    --rule:#252D37; --rule-2:#1F262F;
+    --accent:#5FBFC7; --accent-soft:#123034;
+    --ok:#63C08F; --ok-soft:#122C21;
+    --warn:#D6A53C; --warn-soft:#312611;
+    --bad:#E0796A; --bad-soft:#331C18;
+    --idle:#9AA8B5; --idle-soft:#1E252E;
+    --none:#6B7883; --none-soft:#1A2028;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1318; --panel:#161B22; --panel-2:#1B212A;
+  --ink:#E6EBF0; --ink-2:#A7B4C0; --ink-3:#75828E;
+  --rule:#252D37; --rule-2:#1F262F;
+  --accent:#5FBFC7; --accent-soft:#123034;
+  --ok:#63C08F; --ok-soft:#122C21;
+  --warn:#D6A53C; --warn-soft:#312611;
+  --bad:#E0796A; --bad-soft:#331C18;
+  --idle:#9AA8B5; --idle-soft:#1E252E;
+  --none:#6B7883; --none-soft:#1A2028;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  font-size:15px; line-height:1.55; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin:0 auto;padding:56px 28px 96px}
+header{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:34px}
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);font-weight:600;margin:0 0 10px
+}
+h1{
+  font-size:clamp(30px,4.4vw,44px);line-height:1.08;letter-spacing:-.022em;
+  font-weight:700;margin:0 0 12px;text-wrap:balance
+}
+.lede{
+  font-family:"IBM Plex Serif",Georgia,serif;
+  font-size:17px;line-height:1.6;color:var(--ink-2);
+  max-width:64ch;margin:0
+}
+h2{
+  font-size:13px;letter-spacing:.11em;text-transform:uppercase;font-weight:600;
+  color:var(--ink-3);margin:52px 0 16px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+}
+h2:first-of-type{margin-top:38px}
+.readout{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);border-radius:3px;
+  overflow:hidden;box-shadow:var(--shadow)
+}
+.cell{background:var(--panel);padding:18px 20px 16px}
+.cell .k{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:12px
+}
+.bar{height:5px;border-radius:99px;background:var(--none-soft);overflow:hidden;margin-bottom:9px}
+.bar-fill{height:100%;border-radius:99px}
+.bar-fill.ok{background:var(--ok)} .bar-fill.warn{background:var(--warn)}
+.bar-fill.bad{background:var(--bad)} .bar-fill.idle{background:var(--idle)}
+.bar-num{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:23px;font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em;line-height:1
+}
+.bar-num .of{font-size:14px;font-weight:400;color:var(--ink-3)}
+.verdict{
+  margin-top:22px;background:var(--bad-soft);border:1px solid color-mix(in srgb,var(--bad) 26%,transparent);
+  border-radius:3px;padding:16px 20px;display:flex;gap:14px;align-items:flex-start
+}
+.verdict .mark{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;
+  color:var(--bad);font-size:12px;letter-spacing:.09em;text-transform:uppercase;
+  white-space:nowrap;padding-top:2px
+}
+.verdict p{margin:0;font-size:14.5px;color:var(--ink-2);max-width:72ch}
+.verdict strong{color:var(--ink)}
+.scroll{overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--panel);box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13.5px}
+thead th{
+  position:sticky;top:0;z-index:2;background:var(--panel-2);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;text-align:left;padding:11px 14px;border-bottom:1px solid var(--rule);
+  white-space:nowrap
+}
+thead th.num{text-align:right;width:44px}
+tbody td{padding:9px 14px;border-bottom:1px solid var(--rule-2);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--panel-2)}
+td.num{
+  text-align:right;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums;color:var(--ink-3);font-size:12px
+}
+td.name{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;
+  white-space:nowrap;font-weight:500
+}
+td.stripe{padding:0;width:3px}
+.stripe i{display:block;width:3px;height:34px}
+.stripe i.ok{background:var(--ok)} .stripe i.warn{background:var(--warn)}
+.stripe i.bad{background:var(--bad)} .stripe i.none{background:var(--rule)}
+tr.grouphead td{
+  background:var(--ground);font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);
+  font-weight:600;padding:14px 14px 8px;border-bottom:1px solid var(--rule)
+}
+.chip{
+  display:inline-block;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:10.5px;letter-spacing:.05em;font-weight:500;
+  padding:3px 8px;border-radius:2px;white-space:nowrap
+}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.idle{background:var(--idle-soft);color:var(--idle)}
+.chip.none{background:transparent;color:var(--none)}
+.tier{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;
+  color:var(--ink-3);text-align:center
+}
+.rules{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:18px;margin-top:6px
+}
+.rule-card{
+  background:var(--panel);border:1px solid var(--rule);border-radius:3px;
+  padding:18px 20px;border-top:2px solid var(--accent)
+}
+.rule-card h3{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--accent);
+  margin:0 0 8px;font-weight:600
+}
+.rule-card p{margin:0;font-size:13.5px;color:var(--ink-2);line-height:1.5}
+.note{
+  border-left:2px solid var(--rule);padding:0 0 0 20px;margin:0 0 26px
+}
+.note h3{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;
+  font-weight:600;margin:0 0 9px;letter-spacing:-.01em
+}
+.note dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 14px;align-items:baseline}
+.note dt{white-space:nowrap}
+.note dd{margin:0;font-size:13.5px;color:var(--ink-2);line-height:1.5;max-width:78ch}
+.prose{font-family:"IBM Plex Serif",Georgia,serif;font-size:15.5px;color:var(--ink-2);max-width:70ch}
+.prose strong{color:var(--ink);font-weight:500}
+.prose code{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.88em;
+  background:var(--none-soft);padding:1px 5px;border-radius:2px;color:var(--ink)
+}
+footer{
+  margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;
+  color:var(--ink-3);letter-spacing:.04em
+}
+@media (max-width:640px){.wrap{padding:36px 16px 64px}}
+
+.verdict.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 26%,transparent)}
+.verdict.ok .mark{color:var(--ok)}
+.note p.who{margin:0 0 8px;font-size:13.5px;color:var(--ink-2);line-height:1.5;max-width:80ch}
+.note dl{margin:0 0 14px}
+.note dt.d{color:var(--bad)} .note dt.f{color:var(--accent)}
+.note dt{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding-top:2px
+}
+thead th.grp{text-align:center;border-bottom:1px solid var(--rule);color:var(--accent)}
+thead tr.sub th{
+  font-size:9.5px;letter-spacing:.06em;color:var(--ink-3);
+  padding:5px 14px 9px;border-bottom:1px solid var(--rule);top:31px
+}

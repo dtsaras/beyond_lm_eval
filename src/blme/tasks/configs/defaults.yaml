@@ -12,7 +12,17 @@ geometry_svd:
   layerwise: false
 
 geometry_isoscore:
-  num_samples: 100
+  # Rudman et al. warn that the point count must exceed the dimension by orders
+  # of magnitude; their own validation uses 100,000 points. 100 DOCUMENTS is not
+  # a point budget at all -- the realized N depends on document length, and at
+  # d_model = 4096 it can fall below d. The task now also enforces a minimum
+  # N/d ratio and reports the realized N, so the sampling condition is auditable
+  # rather than assumed.
+  num_samples: 1000
+  # The paper says points should outnumber dimension by ORDERS of magnitude.
+  # 10x is one order; 50x is a defensible floor at our corpus sizes, and the
+  # value is NaN-gated below it rather than silently emitted.
+  min_points_per_dim: 50
 
 geometry_hubness:
   k_values: [10, 50, 100]
@@ -54,7 +64,12 @@ geometry_rsa:
   max_tokens: 200
 
 geometry_contextualization:
-  num_samples: 200
+  # Ethayarajh 2019 estimates both the raw measure and the anisotropy baseline
+  # from 1K uniformly sampled word representations (Sec. 3.4). 200 was a speed
+  # default. NOTE: values here become the task's config, so a code-level
+  # `self.config.get("num_samples", N)` fallback can never fire -- this file is
+  # where the effective default lives.
+  num_samples: 1000
   min_word_occurrences: 5
   layers: null
 
@@ -94,7 +109,15 @@ geometry_categories:
   k_purity: 20
   projection_method: null
 
-geometry_neural_collapse: {}
+geometry_neural_collapse:
+  # Sentences per topic used from the bundled proxy set. The three NC2
+  # statistics are UNDERPOWERED at the shipped bundle -- all three lie inside
+  # their own 200-draw label-permutation null on every model measured, so they
+  # are emitted under `_meta_` and excluded from the feature matrix. NC1 passes
+  # at p = 0/200 and remains a feature. Raising this needs a larger
+  # _TOPIC_BUNDLE; 30-50 per topic is the level at which NC2 would be
+  # resolvable (adversarial review, 2026-09-04).
+  n_sentences_per_topic: null
 
 geometry_mahalanobis:
   num_samples: 50
@@ -112,6 +135,19 @@ geometry_trajectory_curvature:
 geometry_mp_bulk_deviation:
   num_samples: 100
   layers: first_mid_last  # bound eigvalsh cost to 3 layers
+  # REVERTED to 20000 (2026-09-06). The 32000 change was aimed at the `*_g25`
+  # fixed-gamma family -- the only width-comparable one -- which needs
+  # ceil(D / 0.25) = 4*D tokens and was NaN for 16 of 66 models. It did not
+  # work: at `num_samples: 200` the corpus supplies only **23,272 tokens**, so
+  # the cap never binds and `_meta_mp_n_tokens` reports 23272, not 32000.
+  # yi1.5-34b (d=7168, needs 28,673) is STILL NaN. Meanwhile 72 of 80 columns
+  # moved (gamma +14.06%) while the family it targeted moved **+0.22%** on
+  # gpt2 -- an archive incompatibility across the whole task bought nothing
+  # (independent Opus review, 2026-09-06).
+  #
+  # The right lever is the TOKEN SUPPLY (`num_samples`), or accepting the NaN
+  # and documenting which models the width-comparable family covers. Raising a
+  # cap above the supply is not a fix.
   max_tokens: 20000
   edge_tol: 0.05   # Tracy-Widom O(N^-2/3) finite-size buffer at the bulk edge
   fixed_gamma: 0.25  # also emit *_g25 variants at a common D/N aspect ratio
@@ -121,10 +157,19 @@ topology_homology:
   num_samples: 20
 
 topology_betti_curve:
-  num_samples: 20
+  # 20 mean-pooled points is not a point cloud: persistent homology over 20
+  # samples returns integers driven by sampling noise. Also note that at N=20
+  # the calibrated k = max(5, ceil(log2 N)) collapses to the old fixed 5, so
+  # leaving this at 20 made the k calibration a no-op.
+  num_samples: 1000
 
 topology_persistence_entropy:
-  num_samples: 20
+  # Raised with topology_betti_curve, which sits four lines above. At 20 points
+  # an iid Gaussian already SATURATES the entropy ceiling for any d_model >= 512
+  # -- pe_h0 was pinned at log2(m) with m = 49 for every model in the zoo, a
+  # 0.70% spread across 66 models. Leaving this at 20 while raising its
+  # neighbour would have been an inconsistency introduced by the same edit.
+  num_samples: 1000
 
 topology_persistence_landscape:
   num_samples: 20
@@ -216,8 +261,14 @@ dynamics_stability:
 
 dynamics_sharpness:
   param_scope: last_layer
-  n_hutchinson: 5
-  n_power_iter: 8
+  # Raised 5 -> 24 and 8 -> 64 (2026-09-04). At the shipped values the
+  # Hutchinson trace had 86.2% relative standard error and power
+  # iteration was 1.78% low on an analytic MLP with an exact answer.
+  # Both are now reported with their uncertainty/convergence, and the
+  # iteration stops early once the Rayleigh quotient settles, so the
+  # higher cap costs nothing on well-conditioned models.
+  n_hutchinson: 24
+  n_power_iter: 64
   sam_rho: 0.05
   num_samples: 4
 
@@ -225,7 +276,13 @@ dynamics_gradient_flow:
   num_samples: 4
 
 dynamics_interpolation:
-  num_pairs: 50
+  # 50 -> 200. `num_pairs`, not `num_samples`, sets this estimator's noise
+  # floor: the seed-to-seed sd of `convexity_gap` on gpt2 was 0.110 at 50
+  # pairs, 0.060 at 200 and 0.038 at 800 (1/sqrt(n)), while changing the
+  # document pool 10 -> 50 -> 200 left it at 0.110/0.110/0.106. At 50 pairs
+  # the within-model seed sd (0.126) was half the between-model sd (0.268)
+  # and pythia-160m vs pythia-70m ordered by coin flip (4/8 seeds).
+  num_pairs: 200
   steps: 10
   num_samples: 10
 
@@ -234,6 +291,18 @@ dynamics_coe:
   token_position: last
 
 dynamics_generation_diversity:
+  # SEED PINNED (2026-09-04). This task SAMPLES, and with no seed three runs of
+  # the same model spread `mean_self_bleu` by 16.68% and
+  # `sampling_entropy_collapse_delta` by 51.76%, with the between-run spread
+  # only 2.0-3.2x the within-run spread -- i.e. the run-to-run noise is the
+  # same order as the model-to-model signal (independent Opus review,
+  # 2026-09-04). Every other sampling task in this file pins one.
+  seed: 42
+  # PINNED: transformers 5.2.0 silently supplies top_k=50 from the model's
+  # generation config when it is not given, which truncates the sampling
+  # distribution and so decides what this task measures. 0 = no top-k
+  # filtering (adversarial review round 2, 2026-09-04).
+  top_k: 0
   n_samples_per_prompt: 6
   temperature: 0.8
   max_new_tokens: 32
@@ -291,7 +360,11 @@ repe_concept_separability:
   num_samples: 20
 
 repe_steering_effectiveness:
-  num_samples: 3
+  # 3 -> 8: the bundled probe set has 8 distinct triples, and taking the
+  # first 3 made the headline depend on WHICH 3 -- 12.9x swing in
+  # steering_concept_over_random, and directional_consistency flipping
+  # +1.0000 -> -0.2000 on the same model. See the note at `_n_take`.
+  num_samples: 8
   steering_alpha: 1.0
   steering_threshold: 0.01
 
@@ -307,6 +380,11 @@ geometry_vendi_score:
 
 geometry_phd_dimension:
   num_samples: 100
+  # Pin the window: without it the code-level fallback max_length=128 fires on
+  # the uncached path while the shared cache truncates at 512, so a cached and
+  # an uncached run of the same model on the same corpus built DIFFERENT point
+  # clouds. geometry_matrix_entropy pins 512 for exactly this reason.
+  max_length: 512
   layer_idx: -1
   pooling: all_tokens
   max_points: 2000
@@ -342,8 +420,58 @@ interpretability_activation_kurtosis:
 topology_zigzag_persistence:
   num_samples: 40
   n_neighbors: 5
-  persistence_frac: 0.3
+  # 0.3 -> 0.1 (2026-09-05). `persistence_frac` counts an H1 loop only if it
+  # persists for more than this fraction of the point cloud's geodesic scale,
+  # and at 0.3 -- 30% of the diameter -- NOTHING in a real hidden-state cloud
+  # qualifies. Swept on gpt2 (independent Opus review, 2026-09-05):
+  #
+  #   persistence_frac  betti1_fraction_layers  h1_num_bands
+  #   0.30 (was)        0.0000 at N = 40/100/200/400   0.00
+  #   0.10              0.6667                          3.00
+  #   0.05              0.9167                          2.00
+  #
+  # So SEVEN shipped feature columns were exactly constant across every model,
+  # and it was the threshold rather than the sample size: raising N from 40 to
+  # 400 changed nothing. 0.1 is a BLME choice, not a reference value -- the
+  # source publishes no threshold -- and the task now warns when the H1 family
+  # comes back identically zero, which is the condition that matters.
+  persistence_frac: 0.1
   use_cache: true
 
 interpretability_attention_rollout:
   num_samples: 10
+
+# ---- Campaign-4 B8 additions (2026-07): gap-survey metrics ----
+geometry_superposition_strength:
+  max_pairs: 200000
+  seed: 42
+
+geometry_effective_depth:
+  num_samples: 20
+  # Prefix scored per document. 128 was hard-coded in code and moved
+  # mean BI by 1.92% against a 1024-token protocol; 512 matches the
+  # window the cached tasks use (adversarial review, 2026-09-04).
+  max_length: 512
+
+dynamics_fractal:
+  # num_samples counts DOCUMENTS built by joining corpus rows to >= 4K tokens,
+  # not corpus rows, so this consumes many more rows than the number here.
+  num_samples: 100
+  # Pinned across models. seg_len = min(use_tokens, model context) otherwise
+  # gives 1024-context models ~895 usable tokens and >=2048-context models
+  # ~1919, and the Joseph exponent moves +0.021 across that split -- a
+  # context-window confound correlated with model recency.
+  use_tokens: 1024
+  # The authors' released notebook uses DEFAULT_EPS = 5e-2 and warns that a
+  # too-small eps makes the probability estimates unreliable. At 5e-3 the
+  # per-tau counts are single-digit and the Holder exponent is noise
+  # (0.31 +/- 0.27 against the paper's 0.59 +/- 0.08).
+  holder_eps: 0.05
+
+dynamics_perturbation_growth:
+  num_samples: 10
+  # 0.001 -> 0.01: bf16's eps is 7.812e-03, so a requested relative
+  # displacement of 1e-3 was realized as only 82% of itself on bf16
+  # checkpoints and 100% on fp32 ones. See the note in the task source.
+  rel_eps: 0.01
+  seed: 42

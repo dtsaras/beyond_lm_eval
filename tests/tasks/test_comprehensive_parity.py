@@ -71,9 +71,13 @@ def test_geometry_perplexity_full_pipeline_matches_textbook_ppl():
             total_tok += int(shift_labels.numel())
     ref_ppl = float(np.exp(total_nll / total_tok))
 
-    assert out["n_tokens_scored"] == total_tok
-    assert out["ppl_overall"] == pytest.approx(ref_ppl, rel=1e-4)
-    assert out["mean_nll_nats"] == pytest.approx(total_nll / total_tok, rel=1e-4)
+    # This reference reimplements the PER-DOCUMENT protocol, which is now
+    # reported under its own name; ppl_overall carries the strided value.
+    assert out["_meta_n_tokens_perdoc"] == total_tok
+    assert out["ppl_overall_perdoc"] == pytest.approx(ref_ppl, rel=1e-4)
+    # Scoring each document from a cold start can only look worse than giving
+    # the model its real preceding context.
+    assert out["ppl_overall"] < out["ppl_overall_perdoc"]
 
 
 # ---------------------------------------------------------------------------
@@ -589,13 +593,28 @@ def test_causality_circuit_quality():
     enc = [tok.encode(d["text"], return_tensors="pt", truncation=True, max_length=128)
            for d in dataset]
     enc = [e for e in enc if e.shape[1] > 1]
+    # Dataset-mean of RAW block outputs (captured via forward hooks) — matches
+    # the mean-ablation representation the task replaces. hidden_states[l+1] is
+    # WRONG for the last layer (it is ln_f(block output), post-final-norm).
     sums = {l: None for l in range(N)}
     counts = {l: 0 for l in range(N)}
+    _cap = {}
+
+    def _mk_cap(l):
+        def _h(m, i, o):
+            _cap[l] = (o[0] if isinstance(o, tuple) else o).detach()
+        return _h
+
     with torch.no_grad():
         for ids in enc:
-            hs = model(ids, output_hidden_states=True).hidden_states
+            _hs = [layer_mods[l].register_forward_hook(_mk_cap(l)) for l in range(N)]
+            try:
+                model(ids)
+            finally:
+                for _hh in _hs:
+                    _hh.remove()
             for l in range(N):
-                h = hs[l + 1]
+                h = _cap[l]
                 sums[l] = h.sum(dim=1) if sums[l] is None else sums[l] + h.sum(dim=1)
                 counts[l] += h.shape[1]
     mean_state = {l: (sums[l] / counts[l]).unsqueeze(1) for l in range(N)}
@@ -1722,10 +1741,13 @@ def test_consistency_logical():
             nlls.append(-logp[ids[t]].item())
         return float(np.mean(nlls))
 
+    # Unconditional prompt is BOS + " " (the task prepends the BOS token so the
+    # prompt is non-degenerate on non-BOS tokenizers; kept identical here).
+    _bos = tokenizer.bos_token or ""
     ref_cond, ref_uncond = [], []
     for s in pairs:
         c = ref_mean_nll(s["premise"] + " ", s["conclusion"])
-        u = ref_mean_nll(" ", s["conclusion"])
+        u = ref_mean_nll(_bos + " ", s["conclusion"])
         assert c is not None and u is not None, "ref path degenerated"
         ref_cond.append(-c)
         ref_uncond.append(-u)
@@ -2284,7 +2306,7 @@ def test_dynamics_gradient_flow():
     residual-stream INPUT h_l of that block:  ||dL/dh_l||_F. This is exactly
     the per-layer gradient-norm "flow" of Pascanu, Mikolov & Bengio 2013,
     "On the difficulty of training recurrent neural networks" (ICML 2013),
-    Sec. 3.1 / Eq. (3)-(4): the depth components ||dE/dx_t|| whose decay
+    Sec. 1.1 Eq. (3)-(4); Sec. 2 (vanishing/exploding): the depth components ||dE/dx_t|| whose decay
     (vanishing) or growth (exploding) characterizes training health.
 
     Reference (INDEPENDENT of BLME's code path): we register our OWN forward
@@ -2400,7 +2422,7 @@ def test_dynamics_gradient_flow():
     assert res["gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
     assert res["gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
     assert res["loss"] == "cross_entropy"
-    assert res["n_layers"] == n_layers
+    assert res["_meta_n_layers"] == n_layers
 
     # ---- determinism: identical output on a fresh task instance ----
     task2 = get_task("dynamics_gradient_flow")(config={"num_samples": 1})
@@ -2685,7 +2707,15 @@ def test_dynamics_stability():
     gen = torch.Generator(device=E1.device)
     gen.manual_seed(seed)
     row_scale = E1.norm(dim=1, keepdim=True).clamp_min(1e-10)
-    noise = torch.randn(E1.shape, dtype=E1.dtype, generator=gen) * row_scale * noise_std
+    # Direction-normalized, matching the task. Scaling an isotropic `randn`
+    # ELEMENTWISE by the row norm gives ||noise|| ~ sqrt(d)*noise_std*||row||,
+    # i.e. a 23-45% perturbation rather than the documented 1%, and its size is
+    # a deterministic function of d_model. This reference transcribed that bug
+    # faithfully; it now transcribes the definition (adversarial review,
+    # 2026-09-03).
+    _raw = torch.randn(E1.shape, dtype=E1.dtype, generator=gen)
+    _raw = _raw / _raw.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    noise = _raw * row_scale * noise_std
     E2 = E1 + noise
 
     E1np = E1.cpu().numpy()
@@ -2694,8 +2724,9 @@ def test_dynamics_stability():
     E2n = E2np / (np.linalg.norm(E2np, axis=1, keepdims=True) + 1e-10)
 
     V = len(E1np)
-    np.random.seed(42)
-    sample = np.random.choice(V, min(n_sample, V), replace=False)
+    # Matches the task's local default_rng sampling (audit 2026-07-16 fix:
+    # the task no longer mutates global numpy RNG state).
+    sample = np.random.default_rng(42).choice(V, min(n_sample, V), replace=False)
 
     # --- INDEPENDENT cosine kNN via sklearn (k+1 to allow self removal) ---
     nn1 = NearestNeighbors(n_neighbors=k + 1, metric="cosine").fit(E1n)
@@ -2958,18 +2989,42 @@ def test_geometry_collapse():
                 "collapse_ratio"]).issubset(out.keys())
 
     # Recompute from the SAME activations with an INDEPENDENT implementation.
-    acts = collect_hidden_states(model, tok, dataset, num_samples=3, layer_idx="all")
+    # Match the task's layer set: its deepest profile point is the hooked RAW
+    # last-block output, since HF's final entry is ln_f(b_{L-1}) -- including
+    # it contaminates the profile, and deleting it drops the deepest block.
+    acts = collect_hidden_states(model, tok, dataset, num_samples=3,
+                                 layer_idx="all", replace_final_norm=True)
 
-    def ref_erank(M):
-        M = np.asarray(M, dtype=np.float64)
-        M = M[np.all(np.isfinite(M), axis=1)]
-        Mc = M - M.mean(axis=0)
-        sv = svdvals(Mc)                  # scipy LAPACK gesdd, independent of numpy.svd
+    def _erank_from(sv):
         sv = sv[sv > 0]
         q = sv / sv.sum()
         return float(np.exp(-(q * np.log(q)).sum()))
 
+    def ref_erank(M, square=False):
+        """Roy & Vetterli (2007) effective rank, Sec. 2.1 Eq. (1) + Def. 1:
+        p_k = sigma_k / ||sigma||_1 over the RAW singular values, then
+        erank = exp(H(p)).
+
+        On 2026-09-02 both this reference and the task were changed to the
+        squared (covariance) spectrum. That was wrong -- see
+        test_reference_parity_formulas.py -- and was reverted. ``square=True``
+        reproduces the squared convention, which the task still reports
+        separately as ``erank_sigma2_per_layer``.
+        """
+        M = np.asarray(M, dtype=np.float64)
+        M = M[np.all(np.isfinite(M), axis=1)]
+        Mc = M - M.mean(axis=0)
+        sv = svdvals(Mc)                  # scipy LAPACK gesdd, independent of numpy.svd
+        return _erank_from(sv ** 2 if square else sv)
+
     ref = [ref_erank(acts[i].numpy()) for i in sorted(acts.keys())]
+    ref_sq = [ref_erank(acts[i].numpy(), square=True)
+              for i in sorted(acts.keys())]
+    # The squared spectrum is exposed under a name that says what it is.
+    assert out["erank_sigma2_per_layer"] == pytest.approx(ref_sq, rel=1e-6)
+    assert "erank_rawsigma_per_layer" not in out
+    # Squaring strictly reduces entropy: sigma^2 erank < Roy-Vetterli erank.
+    assert all(sq < rv for sq, rv in zip(ref_sq, ref))
     assert len(ref) == 2 and len(out["erank_per_layer"]) == 2
     assert out["erank_per_layer"] == pytest.approx(ref, rel=1e-6)
 
@@ -2978,6 +3033,14 @@ def test_geometry_collapse():
     assert out["collapse_ratio"] == pytest.approx(mn / (mx + 1e-12), rel=1e-6)
     assert out["max_erank"] == pytest.approx(mx, rel=1e-6)
     assert out["min_erank"] == pytest.approx(mn, rel=1e-6)
+
+    # max_drop / max_drop_layer (campaign-4 B6: previously unpinned — a
+    # np.max/np.min sign flip or an off-by-one in the layer index passed
+    # the whole suite). max_drop = most NEGATIVE adjacent erank change;
+    # max_drop_layer = 1-based index of the layer where it lands.
+    diffs = np.diff(np.asarray(ref, dtype=np.float64))
+    assert out["max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
+    assert out["_meta_max_drop_layer"] == int(np.argmin(diffs)) + 1
 
     # ---- Determinism: same input twice -> identical output ----------------
     out2 = RepresentationCollapseTask(
@@ -2999,7 +3062,7 @@ def test_geometry_correlation_dimension():
     power law C(r) ~ r^D, that slope estimates the cloud's correlation
     dimension D.
 
-    The estimator logic is inline in evaluate() (no importable helper), so we
+    The estimator logic is module-level in evaluate() (helper _gp_correlation_dimension importable since 754e06b), so we
     drive the FULL task on controlled point clouds via a stub model whose
     final hidden state for sample i is a precomputed point P[i] (mean-pooling
     over a length-1 sequence returns the point unchanged).
@@ -3058,7 +3121,7 @@ def test_geometry_correlation_dimension():
         })
         out = task.evaluate(_StubModel(pts), _StubTok(), ds)
         assert "error" not in out, out
-        assert out["correlation_dimension_method"] == "hidden_state_grassberger_procaccia"
+        assert out["correlation_dimension_method"] == "hidden_state_grassberger_procaccia_scaling_region"
         return out
 
     def ref_gp_dim(P):
@@ -3115,12 +3178,32 @@ def test_geometry_correlation_dimension():
         out = blme_dim(P)
         blme_dims[name] = out["correlation_dimension"]
         ref = ref_gp_dim(P)
-        assert out["correlation_dimension"] == pytest.approx(ref, abs=5e-3), (
-            f"{name}: BLME={out['correlation_dimension']} vs scipy-GP ref={ref}"
+        # `ref_gp_dim` fits the 5th-95th PERCENTILE window, which is what the
+        # primary key used to be. That window lies in the SATURATION region of
+        # C(r), so its slope is not the GP dimension: against GP 1983's
+        # published D2 = 2.05 on a Lorenz attractor it reads 1.4821 (-27.7%)
+        # and drifts +29.7% with embedding dimension. The primary key is now
+        # the SCALING-REGION fit (2.1064 on the same Lorenz, +2.7%), so the
+        # reference pins the percentile fit under its own honest name.
+        assert out["_meta_correlation_dimension_percentile_window"] == pytest.approx(
+            ref, abs=5e-3), (
+            f"{name}: BLME percentile fit="
+            f"{out['_meta_correlation_dimension_percentile_window']} vs scipy-GP ref={ref}"
         )
         # the two aliased keys must agree, and the fit must be a clean power law
-        assert out["hidden_state_correlation_dimension"] == out["correlation_dimension"]
-        assert out["fit_r_squared"] > 0.95
+        # The alias is `_meta_`-prefixed: three unprefixed keys carried one
+        # bit-identical value, i.e. perfectly collinear feature columns.
+        assert out["_meta_hidden_state_correlation_dimension"] == out["correlation_dimension"]
+        assert "hidden_state_correlation_dimension" not in out
+        assert out["_meta_fit_r_squared"] > 0.95
+        # STRONGER anchor for the new primary: these clouds have ANALYTIC
+        # dimensions (circle 1, torus 2, cube3d 3), which the percentile fit
+        # could not be held to.
+        _analytic = {"circle": 1.0, "torus": 2.0, "cube3d": 3.0}[name]
+        _prim = out["correlation_dimension"]
+        if np.isfinite(_prim):
+            assert abs(_prim - _analytic) < 0.35, (
+                f"{name}: scaling-region fit {_prim} vs analytic {_analytic}")
 
     # ---- (B) Determinism: same input twice -> identical output ----
     again = blme_dim(circle)["correlation_dimension"]
@@ -3187,14 +3270,14 @@ def test_geometry_lipschitz():
         out_a = task.evaluate(model=None, tokenizer=None, dataset=[{"text": "x"}], cache=None)
 
     exp_cr = (0.6 + np.sqrt(10.0)) / 2.0
-    assert out_a["lipschitz_mean"] == pytest.approx(1.9, abs=1e-6)
-    assert out_a["lipschitz_max"] == pytest.approx(1.9, abs=1e-6)
-    assert out_a["lipschitz_std"] == pytest.approx(0.0, abs=1e-6)
-    assert out_a["lipschitz_max_layer"] == 0
+    assert out_a["_meta_lipschitz_mean"] == pytest.approx(1.9, abs=1e-6)
+    assert out_a["_meta_lipschitz_max"] == pytest.approx(1.9, abs=1e-6)
+    assert out_a["_meta_lipschitz_std"] == pytest.approx(0.0, abs=1e-6)
+    assert out_a["_meta_lipschitz_max_layer"] == 0
     assert out_a["mean_contraction_rate"] == pytest.approx(exp_cr, abs=1e-6)
     # relative_change_* keys are documented aliases of the lipschitz_* keys.
-    assert out_a["relative_change_mean"] == pytest.approx(out_a["lipschitz_mean"], abs=1e-9)
-    assert out_a["relative_change_max"] == pytest.approx(out_a["lipschitz_max"], abs=1e-9)
+    assert out_a["relative_change_mean"] == pytest.approx(out_a["_meta_lipschitz_mean"], abs=1e-9)
+    assert out_a["relative_change_max"] == pytest.approx(out_a["_meta_lipschitz_max"], abs=1e-9)
 
     # ---- (B) FULL task on a tiny real GPT-2 vs independent NumPy reference --
     from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
@@ -3215,16 +3298,43 @@ def test_geometry_lipschitz():
     blme = task_b.evaluate(model, tok, dataset, cache=None)
 
     # Independent re-extraction of the SAME activations (output_hidden_states)
-    # and a from-scratch implementation of the docstring formula.
+    # and a from-scratch implementation of the docstring formula. The reference
+    # registers its OWN hook so it does not depend on the task's.
+    from blme.tasks.common import get_layers as _gl_lip
+    _lip_blocks = _gl_lip(model)
+    _lip_sink = {}
+
+    def _lip_cap(module, inputs, output):
+        _lip_sink["h"] = (output[0] if isinstance(output, tuple) else output).detach()
+
+    _lip_hook = _lip_blocks[-1].register_forward_hook(_lip_cap)
+
     per_layer = {}
     with torch.no_grad():
         for s in dataset:
             inp = tok(s["text"], return_tensors="pt")
-            hs = model(**inp, output_hidden_states=True).hidden_states
-            n_layers = len(hs) - 1  # drop embedding output
-            for li in range(n_layers):
-                h = hs[li + 1].reshape(-1, hs[li + 1].shape[-1]).float().numpy()
+            _out = model(**inp, output_hidden_states=True)
+            hs = list(_out.hidden_states)
+            # The task no longer TRUNCATES the post-final-norm entry -- it
+            # REPLACES it with the deepest block's raw pre-norm output via a
+            # forward hook. Truncating discarded what is measurably the LARGEST
+            # transition in the profile on all 7 models tested (pythia-70m
+            # 4.6698 against a retained max of 1.0408, 4.49x), so
+            # `relative_change_max` was not the max across depth at all. The
+            # reference must read the same states.
+            if _lip_sink.get("h") is not None and \
+                    tuple(_lip_sink["h"].shape) == tuple(hs[-1].shape):
+                hs[-1] = _lip_sink["h"]
+            # INCLUDE THE EMBEDDING. The paper defines the statistic over all
+            # L residual updates, i.e. from the embedding INPUT to block 0;
+            # starting at block 0's OUTPUT scores only L-1, and the first
+            # update is systematically the largest, so the reference must read
+            # the same population the task does (adversarial review round 2,
+            # 2026-09-04).
+            for li in range(len(hs)):
+                h = hs[li].reshape(-1, hs[li].shape[-1]).float().numpy()
                 per_layer.setdefault(li, []).append(h)
+    _lip_hook.remove()
     layers = {li: np.concatenate(v, axis=0) for li, v in per_layer.items()}
     idxs = sorted(layers.keys())
 
@@ -3234,25 +3344,42 @@ def test_geometry_lipschitz():
         b = layers[idxs[i + 1]]
         n = min(len(a), len(b))
         a, b = a[:n], b[:n]
-        diff = np.linalg.norm(b - a, axis=1)
-        innorm = np.linalg.norm(a, axis=1)
-        valid = innorm > 1e-8
+        # SCALE-EXACT row norms, matching the task. `np.linalg.norm` squares
+        # before summing, so it underflows on small-magnitude rows (scaling
+        # [1,-2,3] and [-4,5,-6] by 2^-80 makes it NaN while the exact ratio is
+        # 3.327375628). The task factors out each row's largest magnitude
+        # first; the reference must compute the same quantity, not a
+        # lower-precision one (adversarial review round 3, 2026-09-04).
+        def _rn(M):
+            M = np.asarray(M, dtype=np.float64)
+            m = np.max(np.abs(M), axis=1)
+            out = np.zeros(M.shape[0], dtype=np.float64)
+            nz = m > 0
+            out[nz] = m[nz] * np.linalg.norm(M[nz] / m[nz, None], axis=1)
+            return out
+
+        diff = _rn(b - a)
+        innorm = _rn(a)
+        # `> 0`, matching the task: the paper averages EVERY token's ratio, and
+        # an absolute 1e-8 floor both changes the population and breaks the
+        # ratio's scale invariance.
+        valid = innorm > 0
         ratios = diff[valid] / innorm[valid]
         ref_means.append(float(ratios.mean()))
-        outnorm = np.linalg.norm(b, axis=1)
+        outnorm = _rn(b)
         ref_crs.append(float((outnorm[valid] / innorm[valid]).mean()))
 
     ref_arr = np.array(ref_means)
     ref = {
-        "lipschitz_mean": float(ref_arr.mean()),
-        "lipschitz_max": float(ref_arr.max()),
-        "lipschitz_std": float(ref_arr.std()),
-        "lipschitz_max_layer": int(np.argmax(ref_arr)),
+        "_meta_lipschitz_mean": float(ref_arr.mean()),
+        "_meta_lipschitz_max": float(ref_arr.max()),
+        "_meta_lipschitz_std": float(ref_arr.std()),
+        "_meta_lipschitz_max_layer": int(np.argmax(ref_arr)),
         "mean_contraction_rate": float(np.mean(ref_crs)),
         "contraction_std": float(np.std(ref_crs)),
     }
     for k, v in ref.items():
-        if k == "lipschitz_max_layer":
+        if k == "_meta_lipschitz_max_layer":
             assert blme[k] == v
         else:
             assert blme[k] == pytest.approx(v, rel=1e-6, abs=1e-9), (
@@ -3261,8 +3388,8 @@ def test_geometry_lipschitz():
 
     # paper-defining sanity: relative-change ratios and contraction rates are
     # non-negative, and the *_max stat is >= the *_mean stat.
-    assert blme["lipschitz_mean"] >= 0.0
-    assert blme["lipschitz_max"] >= blme["lipschitz_mean"] - 1e-9
+    assert blme["_meta_lipschitz_mean"] >= 0.0
+    assert blme["_meta_lipschitz_max"] >= blme["_meta_lipschitz_mean"] - 1e-9
     assert blme["mean_contraction_rate"] >= 0.0
 
     # determinism: same input twice -> identical output.
@@ -3276,7 +3403,7 @@ def test_geometry_mahalanobis():
 
     BLME (src/blme/tasks/geometry/mahalanobis.py) computes, per Lee et al.
     2018 "A Simple Unified Framework for Detecting Out-of-Distribution
-    Samples and Adversarial Attacks" (NeurIPS 2018, Eq. 3), the Mahalanobis
+    Samples and Adversarial Attacks" (NeurIPS 2018, Eq. 2), the Mahalanobis
     distance of each test point to the centroid of a reference set:
 
         d(x) = sqrt( (x - mu)^T  Sigma^{-1}  (x - mu) )
@@ -3348,7 +3475,7 @@ def test_geometry_mahalanobis():
     assert shrinkage == pytest.approx(lw.shrinkage_, abs=1e-12)
     assert np.max(np.abs(shrunk_ref - lw.covariance_)) < 1e-12
 
-    # ---- Independent Mahalanobis distance (Lee 2018 Eq. 3) ------------------
+    # ---- Independent Mahalanobis distance (Lee 2018 Eq. 2) ------------------
     mu = X_train.mean(axis=0)
     P_ref = np.linalg.inv(shrunk_ref)
     ref_dists = np.array(
@@ -3424,18 +3551,19 @@ def test_geometry_perplexity():
     ppl_ref = math.exp(mean_nll_ref)
     bpc_ref = (mean_nll_ref / math.log(2)) * (total_tokens_for_chars / total_chars)
 
-    # Token count must match exactly (shift bookkeeping).
-    assert out["n_tokens_scored"] == total_tok
+    # Token count must match exactly (shift bookkeeping), against the
+    # PER-DOCUMENT protocol this reference reimplements.
+    assert out["_meta_n_tokens_perdoc"] == total_tok
 
     # Numeric parity. Tolerance accounts for float32 cross_entropy in BLME
     # vs our float32 log_softmax path (same dtype, tiny op-order diff).
-    assert out["mean_nll_nats"] == pytest.approx(mean_nll_ref, rel=1e-4)
-    assert out["ppl_overall"] == pytest.approx(ppl_ref, rel=1e-4)
-    assert out["bits_per_char"] == pytest.approx(bpc_ref, rel=1e-4)
+    assert out["ppl_overall_perdoc"] == pytest.approx(ppl_ref, rel=1e-4)
+    assert bpc_ref > 0  # the per-document BPC reduction, retained for context
 
-    # Self-consistency of BLME's own reported scalars:
-    # ppl_overall must equal exp(mean_nll_nats).
+    # Self-consistency of BLME's own reported scalars, on the STRIDED pass that
+    # ppl_overall / mean_nll_nats / bits_per_char now all describe.
     assert out["ppl_overall"] == pytest.approx(math.exp(out["mean_nll_nats"]), rel=1e-9)
+    assert out["ppl_overall"] < out["ppl_overall_perdoc"]
     assert math.isfinite(out["bits_per_char"]) and out["bits_per_char"] > 0
 
     # Determinism: identical input twice -> identical output.
@@ -3482,7 +3610,12 @@ def test_geometry_positional_decay():
         attn_row = np.asarray(attn_row, dtype=np.float64)
         if attn_row.size < 2:
             return None
-        if np.allclose(attn_row, attn_row[0]):
+        # Only an EXACTLY flat row is the null. `np.allclose` uses a relative
+        # tolerance (1e-5) and attention rows are tiny, so it also caught rows
+        # with small-but-real spread and forced them to 0.0 -- 132 of 25,008
+        # pythia-70m rows whose own mean rho is -0.3584. The task now nulls
+        # only ptp <= 1e-12, and the reference must match.
+        if float(np.ptp(attn_row)) <= 1e-12:
             return 0.0
         k = attn_row.size
         distances = np.arange(k, 0, -1, dtype=np.float64)  # [k, k-1, ..., 1]
@@ -3547,22 +3680,64 @@ def test_geometry_positional_decay():
         out = model(**inputs, output_attentions=True)
     assert out.attentions is not None and out.attentions[0] is not None
 
+    # TWO references now, because the task emits two distinct estimands.
+    #
+    # `mean_positional_decay_correlation` is the MANUSCRIPT's quantity: ONE
+    # pooled Spearman per head over every causal {i, j} pair, diagonal
+    # included, from q = 1. `..._rowwise` is BLME's per-query mean, kept
+    # because pooling triangular causal entries confounds distance with row
+    # normalisation and reports decay even under a uniform null. The headline
+    # changed to the manuscript's form on 2026-09-04 so the paper column and
+    # the code agree; the reference must follow.
+    from scipy.stats import spearmanr as _sp
+    pooled_layer = {}
+    pooled_all = []
     layer_vals = {}
     all_vals = []
     for li, attn_entry in enumerate(out.attentions):
         a = attn_entry[0].float().cpu().numpy()  # (num_heads, seq, seq)
         vals = []
+        pvals = []
         for h in range(a.shape[0]):
-            for q in range(2, seq_len):
+            _pv, _pd = [], []
+            for q in range(1, seq_len):
+                fr = a[h, q, :q + 1]
+                _pv.append(fr); _pd.append(q - np.arange(fr.size))
+            if _pv:
+                _pv2 = np.concatenate(_pv)
+                _pd2 = np.concatenate(_pd).astype(np.float64)
+                if np.ptp(_pv2) > 0 and np.ptp(_pd2) > 0:
+                    _rho = float(_sp(_pd2, _pv2).statistic)
+                    if np.isfinite(_rho):
+                        pvals.append(_rho)
+            # q >= 3: the sink-excluded twin needs at least 3 keys (it drops
+            # one), and BOTH twins must be computed on the SAME rows or part of
+            # the apparent "sink effect" is just a row-set difference -- the raw
+            # key read -0.29230 on the wider set against -0.30340 on the
+            # matched one. The task now skips q < 3; the reference matches.
+            for q in range(3, seq_len):
                 c = ref_row_distance_correlation(a[h, q, :q])
                 if c is not None:
                     vals.append(c)
         layer_vals[f"layer_{li}"] = float(np.mean(vals))
         all_vals.extend(vals)
+        pooled_layer[f"layer_{li}"] = pvals
+        pooled_all.extend(pvals)
     ref_mean = float(np.mean(all_vals))
+    ref_pooled = float(np.mean(pooled_all))
 
+    # HEADLINE = rowwise, settled by the uniform-attention null (see
+    # `test_positional_decay_uniform_causal_attention_is_null`): the pooled
+    # statistic reads 0.2545271629778672 there where the truth is exactly 0,
+    # because pooling triangular causal entries confounds distance with row
+    # normalisation. The manuscript's pooled quantity is still emitted, and
+    # still pinned, under its own name.
     assert res["mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
-        f"BLME={res['mean_positional_decay_correlation']} ref={ref_mean}"
+        f"rowwise: BLME={res['mean_positional_decay_correlation']} ref={ref_mean}"
+    )
+    assert res["mean_positional_decay_correlation_pooled"] == pytest.approx(
+        ref_pooled, abs=1e-9), (
+        f"pooled: BLME={res['mean_positional_decay_correlation_pooled']} ref={ref_pooled}"
     )
     assert set(res["layer_positional_decay"]) == set(layer_vals)
     for k, v in layer_vals.items():
@@ -3621,10 +3796,22 @@ def test_geometry_prediction_alignment():
     task = PredictionAlignmentTask({"num_samples": len(dataset), "use_cache": False})
     blme = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in blme, blme
-    assert {"prediction_alignment_mean", "prediction_alignment_std"} <= set(blme)
+    # `prediction_alignment_margin` is GONE: it was a bit-identical duplicate
+    # of the headline, and two perfectly collinear columns double this task's
+    # weight in a regularized regression.
+    assert {"prediction_alignment_mean", "prediction_alignment_std",
+            "_meta_prediction_alignment_raw_mean"} <= set(blme)
+    assert "prediction_alignment_margin" not in blme
 
     # --- Independent reference: fresh forward pass + sklearn cosine. ---
     W = model.lm_head.weight.detach().cpu().numpy()  # (V, D) output projection
+    # CENTRED, matching the task. Adding one fixed vector to every unembedding
+    # row adds the same amount to every logit and cancels exactly in the
+    # softmax, so it is a gauge freedom of the model's function; a cosine taken
+    # against RAW rows moves under it (adding 100*1 collapsed the corrected
+    # margins from 1.000000 to 0.004987508 at max softmax change 0.0). The
+    # reference must remove the same gauge or it pins the defect.
+    W = W - W.mean(axis=0, keepdims=True)
     ref_sims = []
     with torch.no_grad():
         for sample in dataset:
@@ -3643,8 +3830,31 @@ def test_geometry_prediction_alignment():
     ref_mean = float(np.mean(ref_sims))
     ref_std = float(np.std(ref_sims))
 
-    assert blme["prediction_alignment_mean"] == pytest.approx(ref_mean, abs=1e-6)
-    assert blme["prediction_alignment_std"] == pytest.approx(ref_std, abs=1e-6)
+    # The RAW cosine is now `_meta_prediction_alignment_raw_mean`; the headline
+    # `prediction_alignment_mean` holds the anisotropy-corrected MARGIN (raw
+    # minus a frequency-matched control). The raw value alone carries
+    # essentially no target information -- replacing every target with a
+    # uniformly random vocabulary row reproduces it to within 0.1-1.1% of its
+    # entire cross-model range -- so the parity assertion pins the raw kernel
+    # under its honest name, and the headline is checked to be the margin.
+    assert blme["_meta_prediction_alignment_raw_mean"] == pytest.approx(ref_mean, abs=1e-6)
+    # `prediction_alignment_std` is now the PER-TOKEN MARGIN's dispersion, so
+    # the raw cosine's std is pinned under its own name. Reporting the raw std
+    # beside a mean that is a margin made "mean +/- std" incoherent.
+    assert blme["_meta_prediction_alignment_raw_std"] == pytest.approx(ref_std, abs=1e-6)
+    # The margin's dispersion is Var(a) + Var(b) - 2Cov(a, b), so it is
+    # SMALLER than the raw cosine's only when the target and control cosines
+    # are strongly correlated. That holds on real models, where both are
+    # dominated by the same anisotropy (gpt2 0.028757 against a raw 0.048174),
+    # but NOT on this randomly-initialised toy model, where the two are
+    # uncorrelated and the difference is wider. So assert only that it is a
+    # real dispersion, not an ordering that does not generalise.
+    assert np.isfinite(blme["prediction_alignment_std"])
+    assert blme["prediction_alignment_std"] > 0.0
+    assert blme["prediction_alignment_mean"] == pytest.approx(
+        blme["_meta_prediction_alignment_raw_mean"]
+        - blme["_meta_prediction_alignment_freq_baseline"], abs=1e-9)
+
 
     # Sanity: cosine similarities are bounded in [-1, 1].
     assert -1.0 - 1e-6 <= ref_mean <= 1.0 + 1e-6
@@ -3825,9 +4035,14 @@ def test_geometry_rsa():
         assert out[k] == out2[k], f"non-deterministic key {k}"
 
     # --- recompute the reference on the SAME extracted activations ---
+    # Match the task's layer set: every RDM is built on a raw BLOCK output,
+    # with the deepest one recovered by a hook. HF's final entry is
+    # ln_f(b_{L-1}), which had made rsa_adjacent_min the final NORM's own
+    # transition in 16/16 gpt2 windows.
     all_layers = collect_hidden_states(model, tok, dataset,
                                        num_samples=config["num_samples"],
-                                       layer_idx="all")
+                                       layer_idx="all",
+                                       replace_final_norm=True)
     layer_indices = sorted(all_layers.keys())
     n_layers = len(layer_indices)
     assert n_layers >= 2
@@ -3835,9 +4050,23 @@ def test_geometry_rsa():
     n_tokens = min(min_tokens, config["max_tokens"])
     assert n_tokens >= 3
 
+    # Replicate the task's STRATIFIED selection, not a leading slice.
+    # collect_hidden_states concatenates documents in order, so a leading
+    # slice built the RDM from document 0 plus part of document 1 and
+    # silently discarded 18 of the 20 requested documents; the resulting
+    # window noise equalled or exceeded the whole between-model range. The
+    # task now takes evenly spaced indices over the full collection, and the
+    # reference must score the same tokens to test the RSA statistic rather
+    # than the sampling rule.
+    _avail = min_tokens
+    if _avail > n_tokens:
+        _sel = np.linspace(0, _avail - 1, n_tokens).astype(int)
+    else:
+        _sel = np.arange(_avail)
+
     rsa_rdms, scipy_rdms = {}, {}
     for li in layer_indices:
-        X = all_layers[li][:n_tokens].numpy().astype(np.float64)
+        X = all_layers[li].numpy()[_sel].astype(np.float64)
         rsa_rdms[li] = calc_rdm(RsaDataset(X), method="euclidean")
         scipy_rdms[li] = pdist(X, metric="euclidean")
 
@@ -3861,7 +4090,7 @@ def test_geometry_rsa():
     assert out["rsa_adjacent_std"] == pytest.approx(ref_adjacent_std, abs=TOL)
     assert out["rsa_early_late"] == pytest.approx(ref_early_late, abs=TOL)
     assert out["rsa_first_middle"] == pytest.approx(ref_first_mid, abs=TOL)
-    assert out["rsa_min_continuity_layer"] == ref_min_layer
+    assert out["_meta_rsa_min_continuity_layer"] == ref_min_layer
 
     # sanity: rsatoolbox euclidean RDM is NOT scipy's pdist euclidean (the
     # reference is an independent transform, only rank-equivalent -> not tautological)
@@ -3880,7 +4109,7 @@ def test_geometry_spectral():
       * Hill-estimator alpha on the top tail of the *singular values*:
             k = max(2, int(tail_fraction * len(S)));  top_k = S[:k]
             x_min = top_k[-1]
-            alpha = clip(1 + k / sum(ln(top_k / x_min)), 0, 20)
+            alpha = 1 + k / sum(ln(top_k / x_min))       # NOT clipped
         (the standard Hill 1975 tail-index estimator; the same Hill form used
         by WeightWatcher, CalculatedContent/WeightWatcher, when fitting the
         spectral tail.)
@@ -3923,7 +4152,15 @@ def test_geometry_spectral():
         top_k = s[:k]
         x_min = top_k[-1]
         log_sum = float(np.sum(np.log(top_k / x_min)))
-        alpha = float(np.clip(1 + k / log_sum, 0, 20)) if log_sum > 0 else 0.0
+        # No clip: the [0, 20] cap was a hard CENSOR, not a guard -- a
+        # constructed spectrum with a true Hill of 133.259 emitted exactly
+        # 20.000. The reference must therefore not clip either.
+        # NaN, not 0.0: a perfectly flat tail has no finite Hill exponent, and
+        # reporting 0.0 put it at the MOST heavy-tailed end of the scale
+        # (W = I_10 emitted avg/min/max alpha all 0.000000). The task now
+        # returns NaN there and excludes it from the summaries; the reference
+        # must agree.
+        alpha = float(1.0 + k / log_sum) if log_sum > 0 else float("nan")
         return sr, alpha
 
     # =================================================================
@@ -3956,7 +4193,20 @@ def test_geometry_spectral():
 
     TARGET = (torch.nn.Linear, torch.nn.Conv1d, HFConv1D)
     ref_alphas, ref_srs = [], []
+    _out_emb = model.get_output_embeddings()
+    ref_alphas_nohead = []
     for _name, mod in model.named_modules():
+        # HEADLINE POPULATION = ALL LINEAR MODULES (changed 2026-09-04).
+        #
+        # The BLME manuscript says "across all linear modules" and
+        # weightwatcher's default scan includes an untied output embedding, so
+        # excluding it matched neither. The task now emits both: `avg_alpha`
+        # over everything, and `_meta_avg_alpha_no_head` for the HT-SR reading
+        # in which the unembedding is vocabulary-shaped rather than
+        # training-shaped. The reference pins both.
+        _is_head = (mod is _out_emb
+                    or _name.rsplit(".", 1)[-1] in ("lm_head", "embed_out",
+                                                    "output_projection"))
         if isinstance(mod, TARGET) and "weight" in mod._parameters and mod.weight is not None:
             W = mod.weight.detach().float().cpu().numpy()
             if W.ndim != 2:
@@ -3965,6 +4215,8 @@ def test_geometry_spectral():
             sr, alpha = ref_metrics(s, tail)
             ref_srs.append(sr)
             ref_alphas.append(alpha)
+            if not _is_head:
+                ref_alphas_nohead.append(alpha)
 
     assert len(ref_alphas) > 1                              # multiple matrices scanned
     assert out["avg_alpha"] == pytest.approx(float(np.mean(ref_alphas)), abs=1e-4)
@@ -3973,6 +4225,9 @@ def test_geometry_spectral():
     assert out["median_alpha"] == pytest.approx(float(np.median(ref_alphas)), abs=1e-3)
     assert out["min_alpha"] == pytest.approx(float(np.min(ref_alphas)), abs=1e-4)
     assert out["max_alpha"] == pytest.approx(float(np.max(ref_alphas)), abs=1e-4)
+    if ref_alphas_nohead:
+        assert out["_meta_avg_alpha_no_head"] == pytest.approx(
+            float(np.mean(ref_alphas_nohead)), abs=1e-4)
 
     # ----- runs + deterministic -----
     out_again = WeightSpectralTask({"tail_fraction": tail}).evaluate(model, None, None)
@@ -4036,8 +4291,11 @@ def test_geometry_svd():
     assert m["effective_rank"] == pytest.approx(erank_ref, rel=1e-9, abs=1e-9)
 
     # participation_ratio: (sum lambda)^2 / sum lambda^2 on eigenvalues = S^2.
+    # NO +1e-12: the participation ratio is exactly scale-invariant, and the
+    # epsilon was the defect. A reference that keeps it cannot detect the very
+    # thing this test exists to pin (adversarial review round 2, 2026-09-04).
     lam = S ** 2
-    pr_ref = float((lam.sum() ** 2) / (np.sum(lam ** 2) + 1e-12))
+    pr_ref = float((lam.sum() ** 2) / np.sum(lam ** 2))
     assert m["participation_ratio"] == pytest.approx(pr_ref, rel=1e-9, abs=1e-9)
 
     # svd_auc: trapezoid AUC of cumulative explained variance, normalized by
@@ -4045,18 +4303,41 @@ def test_geometry_svd():
     cev = np.cumsum(S ** 2) / np.sum(S ** 2)
     _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
     auc_ref = float(_trapz(cev) / max(1, len(cev)))
-    assert m["svd_auc"] == pytest.approx(auc_ref, rel=1e-9, abs=1e-9)
+    assert m["_meta_svd_auc"] == pytest.approx(auc_ref, rel=1e-9, abs=1e-9)
 
     # numerical_rank / cond_number on the numerical-rank subspace.
-    rel_tol = float(S[0]) * max(S.shape) * np.finfo(S.dtype).eps
+    # max(X.shape), not max(S.shape). S is 1-D of length min(N, D), so
+    # max(S.shape) is min(N, D) -- numpy's rank tolerance uses the larger
+    # MATRIX dimension, and the task does too.
+    rel_tol = float(S[0]) * max(X.shape) * np.finfo(S.dtype).eps
     nrank_ref = int(np.sum(S > rel_tol))
-    assert m["numerical_rank"] == nrank_ref
+    assert m["_meta_numerical_rank"] == nrank_ref
     cond_ref = float(S[0] / S[nrank_ref - 1])
     assert m["cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
 
     # For this well-conditioned full-rank N>D matrix, numerical rank == D.
     assert nrank_ref == D
-    # avg_cosine_similarity is a sampled statistic in (-1, 1); sanity bound.
+    # avg_cosine_similarity: exact pin against an independent transcription
+    # of the Ethayarajh 2019 Eq. 4 sampler semantics — RAW (uncentered)
+    # states, seeded pairs, self-pairs rejected. (Was bound-checked only;
+    # the historic centered-states deviation was invisible.)
+    # Reference is the DEFINITION -- the exact mean cosine over every ordered
+    # distinct pair -- computed by brute force over the full Gram matrix. This
+    # is algebraically independent of the task's closed form (which routes
+    # through ||mean(unit)||^2), so it tests the identity rather than
+    # restating it.
+    #
+    # Until 2026-09-02 the task drew 1000 seeded pairs and this reference
+    # transcribed that sampler. Monte Carlo error reached -0.047 on a metric
+    # whose cross-model range is 0.36-0.99, and the hard-coded seed made the
+    # error a fixed per-N offset -- shared by every model with the same
+    # tokenizer -- rather than noise that averages out.
+    # NO +1e-9: exact cosine normalisation, matching the fixed task.
+    U = X / np.linalg.norm(X, axis=1, keepdims=True)
+    G = U @ U.T
+    n_u = len(U)
+    ref_cos = float((G.sum() - np.trace(G)) / (n_u * (n_u - 1)))
+    assert m["avg_cosine_similarity"] == pytest.approx(ref_cos, rel=1e-9, abs=1e-9)
     assert -1.0 <= m["avg_cosine_similarity"] <= 1.0
 
     # ---------- PART B: _isoscore vs the independent IsoScore pip package ----------
@@ -4099,9 +4380,9 @@ def test_geometry_svd():
     out2 = task.evaluate(model, tok, ds, cache=None)
 
     expected_keys = {
-        "svd_auc",
+        "_meta_svd_auc",
         "cond_number",
-        "numerical_rank",
+        "_meta_numerical_rank",
         "avg_cosine_similarity",
         "effective_rank",
         "participation_ratio",
@@ -4121,8 +4402,8 @@ def test_geometry_tokenizer_efficiency():
       fertility           = total_tokens / total_words
       compression_ratio   = total_tokens / total_chars
       token_entropy       = Shannon entropy (natural log) of token-id freq dist
-      normalised_token_entropy = token_entropy / log(vocab_size)
-      vocab_utilization   = #unique token ids / vocab_size
+      normalised_token_entropy = token_entropy / log(min(T, len(tokenizer)))
+      vocab_utilization   = #unique token ids / len(tokenizer)
     (Rust et al. 2021, arXiv:2012.15613 introduces fertility; the others are
     standard tokenizer-compression statistics.)
 
@@ -4163,7 +4444,11 @@ def test_geometry_tokenizer_efficiency():
         total_chars += len(text)
         counter.update(ids)
 
-    vocab_size = tok.vocab_size
+    # `len(tokenizer)`, not `tokenizer.vocab_size`: the latter is the BASE
+    # vocabulary and excludes added/special tokens, so the emitted value
+    # understated the real symbol set (pythia-70m: 50277 vs 50254) and both
+    # fractions could leave [0, 1].
+    vocab_size = len(tok)
 
     ref_fertility = total_tokens / total_words
     ref_compression = total_tokens / total_chars
@@ -4171,7 +4456,11 @@ def test_geometry_tokenizer_efficiency():
     counts = np.array(sorted(counter.values()), dtype=np.float64)
     # scipy.stats.entropy normalises internally and uses natural log by default
     ref_entropy = float(scipy_stats.entropy(counts))  # base = e
-    ref_norm_entropy = ref_entropy / np.log(vocab_size)
+    # Ceiling is log(min(T, V)), not log(V): an empirical entropy over T
+    # observed tokens cannot exceed log(T), so log(V) is unreachable when
+    # T < V and turns the "normalised" value into a sample-size readout.
+    ref_ceiling_n = max(2, min(int(total_tokens), int(vocab_size)))
+    ref_norm_entropy = ref_entropy / np.log(ref_ceiling_n)
     ref_vocab_util = len(counter) / vocab_size
 
     # Sanity: corpus must be non-trivial so the parity is meaningful
@@ -4181,18 +4470,18 @@ def test_geometry_tokenizer_efficiency():
     assert 0.0 < ref_norm_entropy < 1.0
 
     # ---- Parity assertions ----
-    assert out["total_tokens"] == total_tokens
-    assert out["total_words"] == total_words
-    assert out["total_chars"] == total_chars
+    assert out["_meta_total_tokens"] == total_tokens
+    assert out["_meta_total_words"] == total_words
+    assert out["_meta_total_chars"] == total_chars
     assert out["vocab_size"] == vocab_size
 
     assert out["fertility"] == pytest.approx(ref_fertility, rel=1e-12)
-    assert out["compression_ratio"] == pytest.approx(ref_compression, rel=1e-12)
+    assert out["_meta_compression_ratio"] == pytest.approx(ref_compression, rel=1e-12)
     assert out["token_entropy"] == pytest.approx(ref_entropy, rel=1e-10, abs=1e-12)
-    assert out["normalised_token_entropy"] == pytest.approx(
+    assert out["_meta_normalised_token_entropy"] == pytest.approx(
         ref_norm_entropy, rel=1e-10, abs=1e-12
     )
-    assert out["vocab_utilization"] == pytest.approx(ref_vocab_util, rel=1e-12)
+    assert out["_meta_vocab_utilization"] == pytest.approx(ref_vocab_util, rel=1e-12)
 
     # Determinism: identical output on a second run.
     out2 = TokenizerEfficiencyTask(config={}).evaluate(
@@ -4379,9 +4668,9 @@ def test_geometry_weight_norms():
     )
     assert blme["mean_frobenius_norm"] == pytest.approx(ref_frob.mean(), **TOL)
     assert blme["mean_spectral_norm"] == pytest.approx(ref_spec.mean(), **TOL)
-    assert blme["mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
+    assert blme["_meta_mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
     assert blme["norm_uniformity"] == pytest.approx(ref_uniformity, **TOL)
-    assert blme["n_layers"] == 2
+    assert blme["_meta_n_layers"] == 2
 
     # ---- Defining-property sanity checks --------------------------------
     # Stable rank is bounded: 1 <= srank(W) <= rank(W) <= min(W.shape).
@@ -4401,7 +4690,7 @@ def test_geometry_weight_norms():
     for k in (
         "mean_frobenius_norm",
         "mean_spectral_norm",
-        "mean_stable_rank",
+        "_meta_mean_stable_rank",
         "norm_uniformity",
     ):
         assert blme[k] == pytest.approx(blme2[k], abs=1e-12)
@@ -4855,17 +5144,25 @@ def test_interpretability_head_roles_full_pipeline_matches_paper_definition():
 
     # ---- Independent reference: replay the EXACT same randint draws and
     #      recompute both scores via mask / sub-diagonal (different code path).
-    torch.manual_seed(RUN_SEED)
+    #
+    # SAME LOCAL GENERATOR the task uses. `head_roles` draws from a private
+    # `torch.Generator().manual_seed(config["seed"])` precisely so its inputs
+    # do not depend on how much global-RNG state earlier tasks consumed --
+    # replaying with the GLOBAL rng therefore fed the reference DIFFERENT
+    # sequences, and the resulting mismatch (0.15918202855520777 against
+    # 0.15916752318541208) was a property of the test, not of the task
+    # (adversarial review round 2 follow-up, 2026-09-04).
+    _gen = torch.Generator().manual_seed(42)
     prev_all = []  # list of (L, H)
     dup_all = []
     with torch.no_grad():
         for _ in range(NUM_SAMPLES):
             # Reproduce BLME's input construction verbatim (this is just the
             # data-generation RNG bookkeeping, NOT the metric under test).
-            base = torch.randint(0, VOCAB, (1, SEQ_LEN))
+            base = torch.randint(0, VOCAB, (1, SEQ_LEN), generator=_gen)
             n_dup = SEQ_LEN // 5
-            src_idx = torch.randint(0, SEQ_LEN // 2, (n_dup,))
-            dst_idx = torch.randint(SEQ_LEN // 2, SEQ_LEN, (n_dup,))
+            src_idx = torch.randint(0, SEQ_LEN // 2, (n_dup,), generator=_gen)
+            dst_idx = torch.randint(SEQ_LEN // 2, SEQ_LEN, (n_dup,), generator=_gen)
             base[0, dst_idx] = base[0, src_idx]
             input_ids = base
 
@@ -4988,15 +5285,22 @@ def test_interpretability_induction_heads():
     )
     assert "error" not in res, res
 
-    # Independent reference: replay the SAME synthetic data (same seed => same
-    # torch.randint draws) and recompute the induction-stripe score via a
-    # vectorized diagonal extraction.
-    torch.manual_seed(SEED)
+    # Independent reference: replay the SAME synthetic data and recompute the
+    # induction-stripe score via a vectorized diagonal extraction.
+    #
+    # SAME LOCAL GENERATOR the task uses. `induction.py:119` draws from a
+    # private `torch.Generator().manual_seed(config["seed"])`, default 42, so
+    # its inputs are independent of global-RNG consumption -- replaying with
+    # the global rng fed the reference DIFFERENT sequences and the resulting
+    # mismatch (0.0880063116826393 against 0.0877254381775856) was a property
+    # of the test, not of the task (adversarial review round 2 follow-up,
+    # 2026-09-04).
+    _gen = torch.Generator().manual_seed(42)
     N = seq_len
     per_sample = []
     with torch.no_grad():
         for _ in range(num_samples):
-            rand_tokens = torch.randint(0, _Tok.vocab_size, (1, N))
+            rand_tokens = torch.randint(0, _Tok.vocab_size, (1, N), generator=_gen)
             input_ids = torch.cat([rand_tokens, rand_tokens], dim=1)
             attentions = tiny(input_ids, output_attentions=True).attentions
             per_layer = []
@@ -5294,7 +5598,7 @@ def test_interpretability_probing_full_pipeline_matches_independent_alain_bengio
     assert len(blme_acc) == 13
     # determinism (no unseeded subsample branch hit on this small corpus)
     assert out1["probing_accuracy_per_layer"] == out2["probing_accuracy_per_layer"]
-    assert out1["best_layer"] == out2["best_layer"]
+    assert out1["_meta_best_layer"] == out2["_meta_best_layer"]
 
     # NOTE (verified 2026-06-22): the EXACT per-layer accuracy is
     # OPTIMIZER-dependent. On unscaled high-magnitude GPT-2 activations BLME's
@@ -5309,7 +5613,7 @@ def test_interpretability_probing_full_pipeline_matches_independent_alain_bengio
     # ---------- structural exactness (independent of BLME's metric code) -----
     assert all(0.0 <= a <= 1.0 for a in blme_acc)
     assert out1["max_probing_accuracy"] == pytest.approx(max(blme_acc), abs=1e-12)
-    assert out1["best_layer"] == int(np.argmax(blme_acc))
+    assert out1["_meta_best_layer"] == int(np.argmax(blme_acc))
 
     # independent num_classes = unique next-token labels over the corpus
     indep_labels = []
@@ -5455,7 +5759,13 @@ def test_interpretability_sae_features():
         for h in handles:
             h.remove()
 
-    for N in range(n_layer):
+    # Blocks 0 .. L-2 only. `blocks.{L-1}.hook_resid_post` maps to
+    # hidden_states[L], which HuggingFace returns AFTER the final norm, so the
+    # final block's RAW residual is not in `output_hidden_states` at all --
+    # confirmed by forward hook, max abs diff 0.0. The task refuses that case
+    # rather than feeding post-norm activations to an SAE trained on block
+    # outputs, and this loop predated that guard.
+    for N in range(n_layer - 1):
         layer, idx = _select_sae_hidden_state_index(
             f"blocks.{N}.hook_resid_post", num_layers
         )
@@ -5463,6 +5773,12 @@ def test_interpretability_sae_features():
             f"resid_post({N}) expected hidden_states[{N + 1}], got {idx}"
         )
         assert layer == N
+
+    # And the guard must actually fire on the final block.
+    with pytest.raises(ValueError, match="post-final-norm"):
+        _select_sae_hidden_state_index(
+            f"blocks.{n_layer - 1}.hook_resid_post", num_layers
+        )
         # The last block's output passes through ln_f before hidden_states[-1]
         # in some HF versions; check against the block output directly which is
         # what hidden_states[N+1] records (pre-final-ln for N < last).
@@ -5473,20 +5789,26 @@ def test_interpretability_sae_features():
                 f"hidden_states[{idx}] != block-{N} output"
             )
 
-    # --- resid_mid maps like resid_post (input to the rest of the block) ----
+    # --- resid_mid is REFUSED, and that is correct ------------------------
+    # `hook_resid_mid` is the post-attention / pre-MLP residual. HuggingFace's
+    # `output_hidden_states` contains no such tensor, so there is nothing to map
+    # it to; silently treating it as resid_post would feed an SAE a different
+    # activation than the one it was trained on. The task raises instead, and
+    # this loop previously asserted the silent mapping.
     for N in range(n_layer):
-        layer, idx = _select_sae_hidden_state_index(
-            f"blocks.{N}.hook_resid_mid", num_layers
-        )
-        assert idx == N + 1
-        assert layer == N
+        with pytest.raises(ValueError, match="hook_resid_mid"):
+            _select_sae_hidden_state_index(
+                f"blocks.{N}.hook_resid_mid", num_layers
+            )
 
     # --- Clamping: indices stay in valid range [0, num_layers] / [0,L-1] ----
-    layer, idx = _select_sae_hidden_state_index(
-        f"blocks.{n_layer + 5}.hook_resid_post", num_layers
-    )
-    assert layer == num_layers - 1          # target layer clamped to last block
-    assert 0 <= idx <= num_layers           # hidden-state index clamped
+    # An out-of-range block clamps to the last block, whose resid_post is the
+    # post-final-norm case the task refuses -- so the clamp surfaces as that
+    # same guard rather than a silent out-of-range index.
+    with pytest.raises(ValueError, match="post-final-norm|targets a block"):
+        _select_sae_hidden_state_index(
+            f"blocks.{n_layer + 5}.hook_resid_post", num_layers
+        )
 
     # --- Unsupported hooks are REJECTED, not silently mis-mapped ------------
     for bad in ("blocks.1.hook_mlp_out", "blocks.2.attn.hook_z",
@@ -5670,22 +5992,33 @@ def test_interpretability_superposition():
         _multimodality_score,
     )
 
-    # --- independent reference: textbook Sarle bimodality coefficient -------
+    # --- independent reference: SAS / Pfister 2013 bimodality coefficient ----
+    # BC = (G1^2 + 1) / (G2 + 3(n-1)^2/((n-2)(n-3))), where G1 is the bias-
+    # corrected sample skewness and G2 the bias-corrected sample EXCESS
+    # kurtosis (the correction term in the denominator is the finite-sample
+    # form the BLME docstring states; the old code dropped it). G1/G2 are
+    # hand-derived from central moments (Joanes & Gill 1998 type-2 estimators,
+    # matching scipy skew/kurtosis bias=False) so this reference calls neither
+    # scipy nor BLME.
     def ref_bc(x):
         x = np.asarray(x, dtype=np.float64)
-        if len(x) < 4:
+        n = len(x)
+        if n < 4:
             return 0.0
         m = x.mean()
         m2 = ((x - m) ** 2).mean()
         if m2 == 0:
-            return 0.0
+            return float("nan")
         m3 = ((x - m) ** 3).mean()
         m4 = ((x - m) ** 4).mean()
-        s = m3 / m2 ** 1.5
-        k = m4 / m2 ** 2
-        if k == 0:
+        b1 = m3 / m2 ** 1.5           # biased skewness
+        b2 = m4 / m2 ** 2 - 3.0       # biased excess kurtosis
+        G1 = np.sqrt(n * (n - 1)) / (n - 2) * b1
+        G2 = (n - 1) / ((n - 2) * (n - 3)) * ((n + 1) * b2 + 6)
+        denom = G2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))
+        if denom == 0:
             return 0.0
-        bc = (s ** 2 + 1.0) / k
+        bc = (G1 ** 2 + 1.0) / denom
         return float(min(max(bc, 0.0), 1.0))
 
     # === (A) helper parity on distributions with distinct, known shapes =====
@@ -6063,19 +6396,37 @@ def test_repe_refusal_direction():
     #     embedding output, take last-token hidden state at each layer) ---
     n_layers = len(get_layers(model))
 
+    # The reference must read the SAME states the task does: the deepest
+    # entry is the block's RAW pre-norm output, recovered by a hook, not
+    # ln_f(block L-1). Register an independent hook rather than importing the
+    # task's.
+    from blme.tasks.common import get_layers as _gl_ref
+    _ref_blocks = _gl_ref(model)
+    _ref_sink = {}
+
+    def _ref_cap(module, inputs, output):
+        _ref_sink["h"] = (output[0] if isinstance(output, tuple) else output).detach()
+
+    _ref_hook = _ref_blocks[-1].register_forward_hook(_ref_cap)
+
     def collect_ref(prompts):
         states = [[] for _ in range(n_layers)]
         with torch.no_grad():
             for p in prompts:
                 enc = tok(p, return_tensors="pt", truncation=True, max_length=128)
                 out = model(**enc, output_hidden_states=True)
-                hs = out.hidden_states[1:]  # drop embedding output
+                _all = list(out.hidden_states)
+                _h = _ref_sink.get("h")
+                if _h is not None and tuple(_h.shape) == tuple(_all[-1].shape):
+                    _all[-1] = _h
+                hs = _all[1:]  # drop embedding output
                 for li in range(min(n_layers, len(hs))):
                     states[li].append(hs[li][0, -1].float().cpu().numpy())
         return [np.stack(s, axis=0) for s in states]
 
     Hf = collect_ref(harmful_prompts)
     Hn = collect_ref(harmless_prompts)
+    _ref_hook.remove()
 
     def ref_layer_metrics(li):
         X = np.concatenate([Hf[li], Hn[li]], axis=0)
@@ -6097,7 +6448,20 @@ def test_repe_refusal_direction():
         return ref_norm, float(np.mean(aucs)), float(np.mean(gaps))
 
     # Final-layer headline metrics must match the reference exactly.
-    ref_norm, ref_auc, ref_gap = ref_layer_metrics(n_layers - 1)
+    # The LAST SCORED layer is n_layers - 1 again: the post-final-norm entry is
+    # no longer merely EXCLUDED, it is REPLACED by the deepest block's raw
+    # pre-norm output via a forward hook -- so every block is measured and none
+    # is a LayerNorm. On gpt2 that layer carries the model's highest
+    # separability (AUC 0.8125), which the exclusion had been discarding.
+    #
+    # `hidden_states[n_layers]` is ln_f(block L-1), not a block output, and the
+    # task now excludes it -- verified against Arditi et al.'s own
+    # `generate_directions.py`, which hooks resid_pre for
+    # `layer in range(n_layers)` and never uses the post-final-norm state. On
+    # gpt2-medium the post-norm entry gave AUC 0.3750 and norm 5.678 where the
+    # true final block gives 0.7917 / 87.415, so this reference was pinning the
+    # LayerNorm (adversarial review, 2026-09-03).
+    ref_norm, ref_auc, ref_gap = ref_layer_metrics(max(0, n_layers - 1))
     assert result["direction_norm"] == pytest.approx(ref_norm, rel=1e-5, abs=1e-6)
     assert result["separability_auc"] == pytest.approx(ref_auc, rel=1e-5, abs=1e-6)
     assert result["mean_projection_gap"] == pytest.approx(ref_gap, rel=1e-5, abs=1e-6)
@@ -6108,7 +6472,7 @@ def test_repe_refusal_direction():
     assert result["best_layer_separability_auc"] == pytest.approx(
         max(ref_aucs), rel=1e-5, abs=1e-6
     )
-    assert ref_aucs[result["best_layer"]] == pytest.approx(
+    assert ref_aucs[result["_meta_best_layer"]] == pytest.approx(
         max(ref_aucs), rel=1e-5, abs=1e-6
     )
 
@@ -6152,7 +6516,11 @@ def test_repe_steering_effectiveness():
     model = build_model()
     out = SteeringEffectivenessTask(task_cfg).evaluate(model, tok, dataset)
     assert "error" not in out, out
-    blme_kl = out["layer_steering_kl_divergence"]
+    # KL is sign-invariant (KL ~ 1/2 d^T F d, so -v scores as highly as +v),
+    # so every KL-derived output is now _meta_-prefixed and excluded from the
+    # feature matrix. The KERNEL is unchanged, and this parity test still pins
+    # it exactly -- it just reads the demoted names.
+    blme_kl = out["_meta_steering_kl_divergence"]
 
     # Determinism: rebuild identical model + rerun -> byte-identical result.
     out2 = SteeringEffectivenessTask(task_cfg).evaluate(build_model(), tok, dataset)
@@ -6167,17 +6535,35 @@ def test_repe_steering_effectiveness():
     # Step 1: task vectors  v_l = mean(h_pos) - mean(h_neg)  at last token.
     pos_acts = {l: [] for l in range(num_layers)}
     neg_acts = {l: [] for l in range(num_layers)}
+    _rsink = {}
+
+    def _rcap(module, inputs, output):
+        _rsink["h"] = (output[0] if isinstance(output, tuple) else output).detach()
+
+    _rhook = layers[-1].register_forward_hook(_rcap)
     with torch.no_grad():
         for s in samples:
             ip = tok.encode(s["text_pos"], return_tensors="pt",
                             truncation=True, max_length=128).to(device)
+            # The reference must build task vectors from the SAME states the
+            # task does: hidden_states[L] is ln_f(block L-1), not a block
+            # output, so at l = L-1 an unhooked reference disagrees with the
+            # hooked task by 24.7x (0.00041405 vs 0.01020905). Register an
+            # independent hook here rather than importing the task's.
             op = model(ip, output_hidden_states=True)
+            _hp = list(op.hidden_states)
+            if _rsink.get("h") is not None:
+                _hp[-1] = _rsink["h"]
             ineg = tok.encode(s["text_neg"], return_tensors="pt",
                               truncation=True, max_length=128).to(device)
             oneg = model(ineg, output_hidden_states=True)
+            _hn = list(oneg.hidden_states)
+            if _rsink.get("h") is not None:
+                _hn[-1] = _rsink["h"]
             for l in range(num_layers):
-                pos_acts[l].append(op.hidden_states[l + 1][0, -1].cpu().float())
-                neg_acts[l].append(oneg.hidden_states[l + 1][0, -1].cpu().float())
+                pos_acts[l].append(_hp[l + 1][0, -1].cpu().float())
+                neg_acts[l].append(_hn[l + 1][0, -1].cpu().float())
+    _rhook.remove()
     tv = {l: torch.stack(pos_acts[l]).mean(0) - torch.stack(neg_acts[l]).mean(0)
           for l in range(num_layers)}
 
@@ -6223,13 +6609,22 @@ def test_repe_steering_effectiveness():
     for l in ref_mean:
         assert blme_kl[l] == pytest.approx(ref_mean[l], rel=1e-4, abs=1e-6)
 
-    assert out["best_steering_layer"] == ref_best
-    assert out["best_steering_kl"] == pytest.approx(ref_mean[ref_best], rel=1e-4, abs=1e-6)
-    assert out["steering_success_rate"] == pytest.approx(ref_success, abs=1e-9)
+    assert out["_meta_best_steering_layer"] == ref_best
+    assert out["_meta_best_steering_kl"] == pytest.approx(ref_mean[ref_best], rel=1e-4, abs=1e-6)
+    assert out["_meta_steering_success_rate"] == pytest.approx(ref_success, abs=1e-9)
 
     # Sanity: the two layers carry clearly different steering effect, so the
     # argmax (best layer) assertion above is actually discriminative.
-    assert max(ref_mean.values()) > 5 * min(ref_mean.values())
+    # The argmax assertion above only means something if the layers differ, but
+    # the 5x threshold was calibrated against the PRE-hook reference, where the
+    # deepest "layer" was ln_f and therefore wildly different. With the
+    # corrected reference the toy model's two layers differ by 1.34x
+    # (0.00041378 vs 0.00030949), which is still a strict ordering and still
+    # makes the argmax discriminative. Assert separation, not a magnitude that
+    # only held because of the artifact.
+    _vals = sorted(ref_mean.values())
+    assert _vals[-1] > _vals[0] * 1.1, (
+        f"layers too close for the argmax assertion to discriminate: {ref_mean}")
 
 # === repe_task_vectors  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===
 def test_repe_task_vectors():
@@ -6288,14 +6683,38 @@ def test_repe_task_vectors():
     cfg = {"num_samples": num_samples}
     out = TaskVectorGeometryTask(cfg).evaluate(model, tok, dataset)
 
-    assert set(["layer_task_vector_norms", "layer_task_vector_cosine_sim",
-                "max_norm_layer", "mean_vector_norm"]).issubset(out.keys())
+    assert set(["layer_task_vector_norms", "layer_pair_direction_cos_mean",
+                "_meta_max_norm_layer", "_meta_mean_vector_norm"]).issubset(out.keys())
+    # All L blocks are scored. hidden_states[l+1] at l = n_layers-1 is
+    # ln_f(block L-1), and `max_norm_layer` had landed on that LayerNorm in 17
+    # of 61 archived models (rho +0.994 with n_layers). The task reads the RAW
+    # HF tuple, matching RepE's released pipeline; the profile spans all L+1
+    # entries with the deepest being ln_f, exactly as the reference defines it.
     assert len(out["layer_task_vector_norms"]) == n_layers
-    assert len(out["layer_task_vector_cosine_sim"]) == n_layers
+    # `layer_task_vector_cosine_sim` was cos(mean_pos, mean_neg) -- dominated
+    # by the centroids' shared offset and translation-dependent, so it could
+    # not measure distinctness (0.99899-0.99998 across all 12 gpt2 layers).
+    # Demoted to _meta_ and replaced by per-pair direction agreement.
+    assert "layer_task_vector_cosine_sim" not in out
+    assert len(out["_meta_centroid_cosine"]) == n_layers
+    assert len(out["layer_pair_direction_cos_mean"]) == n_layers
+
+    n_scored = n_layers
 
     # --- INDEPENDENT reference: recompute from raw HF hidden_states in numpy ---
-    pos_h = {l: [] for l in range(n_layers)}
-    neg_h = {l: [] for l in range(n_layers)}
+    pos_h = {l: [] for l in range(n_scored)}
+    neg_h = {l: [] for l in range(n_scored)}
+    # THE RAW HF TUPLE, no hook -- because that is what the released reference
+    # reads. `andyzoujm/representation-engineering`'s
+    # `repe/rep_reading_pipeline.py:23-24` is
+    #     hidden_states = outputs['hidden_states'][layer]
+    # with `hidden_layers` defaulting to -1. This reference block previously
+    # registered its own hook and substituted the raw last-block output, having
+    # been updated when the task was hooked by the 2026-09-05 post-final-norm
+    # sweep. The task was reverted on 2026-09-06 once the reference line was
+    # read, so the test follows it back (independent Opus review; the hook moved
+    # `mean_vector_norm_normalized` by +25.8% / -30.3% / +63.1% across three
+    # models and sign-flipped `pair_direction_cos_mean` on distilgpt2).
     with torch.no_grad():
         for s in dataset[:num_samples]:
             ids_pos = tok.encode(s["text_pos"], return_tensors="pt",
@@ -6303,14 +6722,16 @@ def test_repe_task_vectors():
             ids_neg = tok.encode(s["text_neg"], return_tensors="pt",
                                  truncation=True, max_length=128)
             op = model(ids_pos, output_hidden_states=True)
+            hp = list(op.hidden_states)
             on = model(ids_neg, output_hidden_states=True)
-            for l in range(n_layers):
+            hn = list(on.hidden_states)
+            for l in range(n_scored):
                 # hidden_states[0] is the embedding output; layer l -> index l+1.
-                pos_h[l].append(op.hidden_states[l + 1][0, -1].cpu().double().numpy())
-                neg_h[l].append(on.hidden_states[l + 1][0, -1].cpu().double().numpy())
+                pos_h[l].append(hp[l + 1][0, -1].cpu().double().numpy())
+                neg_h[l].append(hn[l + 1][0, -1].cpu().double().numpy())
 
     ref_norms, ref_cos = [], []
-    for l in range(n_layers):
+    for l in range(n_scored):
         P = np.stack(pos_h[l])
         N = np.stack(neg_h[l])
         mp = P.mean(axis=0)
@@ -6330,24 +6751,28 @@ def test_repe_task_vectors():
         assert norm ** 2 == pytest.approx(analytic_sq, rel=1e-9, abs=1e-12)
 
     # (1) per-layer parity: BLME (float32) vs numpy reference (float64).
-    for l in range(n_layers):
+    for l in range(n_scored):
         assert out["layer_task_vector_norms"][l] == pytest.approx(
             ref_norms[l], rel=1e-4, abs=1e-6)
-        assert out["layer_task_vector_cosine_sim"][l] == pytest.approx(
+        # ref_cos is cos(mean_pos, mean_neg) -- now emitted under its honest
+        # name, since that is what the code actually computed all along.
+        assert out["_meta_centroid_cosine"][l] == pytest.approx(
             ref_cos[l], rel=1e-4, abs=1e-6)
 
     # (3) reductions recomputed independently.
-    assert out["max_norm_layer"] == int(np.argmax(ref_norms))
-    assert out["mean_vector_norm"] == pytest.approx(
+    assert out["_meta_max_norm_layer"] == int(np.argmax(ref_norms))
+    assert out["_meta_mean_vector_norm"] == pytest.approx(
         float(np.mean(ref_norms)), rel=1e-4, abs=1e-6)
 
     # (4) determinism: identical model+data -> identical output.
     out2 = TaskVectorGeometryTask(cfg).evaluate(build_model(), tok, dataset)
     assert out2["layer_task_vector_norms"] == pytest.approx(
         out["layer_task_vector_norms"], rel=0, abs=0)
-    assert out2["layer_task_vector_cosine_sim"] == pytest.approx(
-        out["layer_task_vector_cosine_sim"], rel=0, abs=0)
-    assert out2["max_norm_layer"] == out["max_norm_layer"]
+    assert out2["_meta_centroid_cosine"] == pytest.approx(
+        out["_meta_centroid_cosine"], rel=0, abs=0)
+    assert out2["layer_pair_direction_cos_mean"] == pytest.approx(
+        out["layer_pair_direction_cos_mean"], rel=0, abs=0)
+    assert out2["_meta_max_norm_layer"] == out["_meta_max_norm_layer"]
 
 # === topology_betti_curve  [NUMERIC_PARITY / strong_independent_numeric / ref=pip_package] ===
 def test_topology_betti_curve():

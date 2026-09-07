@@ -213,7 +213,14 @@ def _row_normalised_entropy(X: torch.Tensor) -> float:
         return float("nan")
     X = X[keep] / rn[keep]
     try:
-        S = torch.linalg.svdvals(X)
+        # `safe_svdvals`: numpy/torch compute the SVD internally and then CAST
+        # the singular values back to the input dtype, and that cast overflows
+        # to inf near 3.4e38 -- so a scale-FREE consumer downstream (effective
+        # rank, RankMe, IsoScore, alpha) returns NaN on data it should handle
+        # exactly. The helper factors out the max first, which only shifts
+        # exponents (2026-09-07).
+        from ..geometry.utils import safe_svdvals
+        S = safe_svdvals(X)
     except Exception:
         return float("nan")
     lam = (S * S) / float(X.shape[0])
@@ -259,76 +266,118 @@ class ActivationSinksTask(DiagnosticTask):
         # Per-sample aggregates
         sink_fracs = []
         bos_attn_means = []
-        massive_fracs_per_layer: Dict[int, List[float]] = {}
-        massive_max_ratios_per_layer: Dict[int, List[float]] = {}
-        entropy_per_layer: Dict[int, List[float]] = {}
+        # post-final-norm: SUBSTITUTED. `massive_fracs_per_layer` and the
+        # entropy trajectory below are PER-LAYER PROFILES -- the compression
+        # valley is read off their shape across depth -- so the deepest entry
+        # must be a block output like every other one. This site was found by an
+        # independent review AFTER the repo-wide sweep reported all-clear: it
+        # binds the tuple with `getattr(out, "hidden_states", None)`, a form the
+        # guard's alias detector did not recognise (2026-09-05). The guard now
+        # does.
+        _sink_h = {}
+        _pfn_hook = None
+        _pfn_fwd = _pfn_sub = 0
+        try:
+            from ..common import get_layers as _gl_pfn
+            _blocks_pfn = _gl_pfn(model)
+            if _blocks_pfn is not None and len(_blocks_pfn) > 0:
+                _pfn_hook = _blocks_pfn[-1].register_forward_hook(
+                    lambda mod, inp, outp: _sink_h.__setitem__(
+                        "h", (outp[0] if isinstance(outp, tuple)
+                              else outp).detach()))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info(f"activation_sinks: could not hook last block ({e})")
 
-        import torch as _torch
+        # post-final-norm / hook hygiene: a task that fails must leave the model exactly as it found it. A leaked forward hook is paid by every LATER task in the run and pins the last activation tensor alive (discovery-based leak test, 2026-09-05).
+        try:
+            massive_fracs_per_layer: Dict[int, List[float]] = {}
+            massive_max_ratios_per_layer: Dict[int, List[float]] = {}
+            entropy_per_layer: Dict[int, List[float]] = {}
 
-        with _torch.no_grad():
-            for s in samples:
-                text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(
-                    text, return_tensors="pt",
-                    truncation=True, max_length=max_length,
-                )
-                # BatchEncoding vs dict.
-                if hasattr(inputs, "to") and callable(inputs.to):
-                    inputs = inputs.to(device)
-                else:
-                    inputs = {k: (v.to(device) if hasattr(v, "to") else v)
-                              for k, v in inputs.items()}
+            import torch as _torch
 
-                try:
-                    out = model(
-                        **inputs,
-                        output_hidden_states=True,
-                        output_attentions=True,
+            with _torch.no_grad():
+                for s in samples:
+                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
+                    inputs = tokenizer(
+                        text, return_tensors="pt",
+                        truncation=True, max_length=max_length,
                     )
-                except Exception as e:
-                    logger.info(f"  forward failed: {type(e).__name__}: {e}")
-                    continue
+                    # BatchEncoding vs dict.
+                    if hasattr(inputs, "to") and callable(inputs.to):
+                        inputs = inputs.to(device)
+                    else:
+                        inputs = {k: (v.to(device) if hasattr(v, "to") else v)
+                                  for k, v in inputs.items()}
 
-                hs = getattr(out, "hidden_states", None)
-                attns = getattr(out, "attentions", None)
-
-                # ── Attention sink (needs attentions) ───────────────
-                if attns is not None and all(a is not None for a in attns):
-                    # Stack to (L, H, T, T).
                     try:
-                        a_stack = _torch.stack([a[0] for a in attns], dim=0)
-                        if a_stack.dim() == 4:
-                            sink_fracs.append(_sink_epsilon(a_stack, epsilon=sink_epsilon))
-                            # Mean attention weight on token 0 across
-                            # (L, H, queries).
-                            bos_attn_means.append(
-                                float(a_stack[:, :, :, 0].mean().item())
-                            )
+                        _sink_h.pop("h", None)
+                        out = model(
+                            **inputs,
+                            output_hidden_states=True,
+                            output_attentions=True,
+                        )
                     except Exception as e:
-                        logger.info(f"  attention-sink parse failed: {e}")
+                        logger.info(f"  forward failed: {type(e).__name__}: {e}")
+                        continue
 
-                # ── Massive activations (per-layer residual stream) ─
-                if hs is not None:
-                    # Skip the embedding-output entry (index 0).
-                    for li, h in enumerate(hs[1:]):
-                        if h is None:
-                            continue
-                        H_flat = h[0].detach().float()  # (T, D)
-                        frac = _massive_activation_fraction(H_flat, threshold_ratio=massive_ratio)
-                        ratio = _massive_activation_max_ratio(H_flat)
-                        massive_fracs_per_layer.setdefault(li, []).append(frac)
-                        massive_max_ratios_per_layer.setdefault(li, []).append(ratio)
-                        # Reuse the matrix-entropy formula for the
-                        # compression-valley trajectory.
-                        H_entropy = _row_normalised_entropy(H_flat)
-                        if np.isfinite(H_entropy):
-                            entropy_per_layer.setdefault(li, []).append(H_entropy)
+                    hs = getattr(out, "hidden_states", None)
+                    if hs is not None:
+                        hs = list(hs)
+                        _pfn_fwd += 1
+                        _h_pfn = _sink_h.get("h")
+                        if (_h_pfn is not None and len(hs) >= 2
+                                and _h_pfn.shape == hs[-1].shape):
+                            hs[-1] = _h_pfn
+                            _pfn_sub += 1
+                    attns = getattr(out, "attentions", None)
 
-        # ── Aggregate ───────────────────────────────────────────────
+                    # ── Attention sink (needs attentions) ───────────────
+                    if attns is not None and all(a is not None for a in attns):
+                        # Stack to (L, H, T, T).
+                        try:
+                            a_stack = _torch.stack([a[0] for a in attns], dim=0)
+                            if a_stack.dim() == 4:
+                                sink_fracs.append(_sink_epsilon(a_stack, epsilon=sink_epsilon))
+                                # Mean attention weight on token 0 across
+                                # (L, H, queries).
+                                bos_attn_means.append(
+                                    float(a_stack[:, :, :, 0].mean().item())
+                                )
+                        except Exception as e:
+                            logger.info(f"  attention-sink parse failed: {e}")
+
+                    # ── Massive activations (per-layer residual stream) ─
+                    if hs is not None:
+                        # Skip the embedding-output entry (index 0).
+                        for li, h in enumerate(hs[1:]):
+                            if h is None:
+                                continue
+                            H_flat = h[0].detach().float()  # (T, D)
+                            frac = _massive_activation_fraction(H_flat, threshold_ratio=massive_ratio)
+                            ratio = _massive_activation_max_ratio(H_flat)
+                            massive_fracs_per_layer.setdefault(li, []).append(frac)
+                            massive_max_ratios_per_layer.setdefault(li, []).append(ratio)
+                            # Reuse the matrix-entropy formula for the
+                            # compression-valley trajectory.
+                            H_entropy = _row_normalised_entropy(H_flat)
+                            if np.isfinite(H_entropy):
+                                entropy_per_layer.setdefault(li, []).append(H_entropy)
+
+            # ── Aggregate ───────────────────────────────────────────────
+        finally:
+            if _pfn_hook is not None:
+                _pfn_hook.remove()
+
         if not sink_fracs and not massive_fracs_per_layer and not entropy_per_layer:
             return {"error": "No usable outputs"}
 
-        result: Dict[str, object] = {}
+        result: Dict[str, object] = {
+            # Provenance, DERIVED from counts: True only if the substitution
+            # fired on EVERY forward.
+            "_meta_last_entry_is_block_output": bool(
+                _pfn_fwd > 0 and _pfn_sub == _pfn_fwd),
+        }
 
         if sink_fracs:
             result["sink_epsilon_fraction"] = float(np.mean(sink_fracs))

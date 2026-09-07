@@ -1,0 +1,30 @@
+{
+  "task": "repe_concept_separability",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "For finite binary-label inputs, the repaired estimator has no value-changing counterexample: the seed-37 caller path is 0.3333333 versus independent StratifiedKFold 0.3333333 (legacy 0.9166667), and the seed-16 masked-group path is 0.1666667 versus independent masked GroupKFold 0.1666667 (legacy 0.8333333). The materialized-fold boundary now fails closed without destroying valid layers: the two-group masked layer becomes NaN while its companion AUC is 0.8301209373 with reference delta 0.0, the explicit 6/3/3 grouping returns a controlled error, and the exact three-per-class/three-group boundary is 1.0000000 versus reference 1.0000000; the target estimator contains 0 norm calls, so no unsafe norm site remains in it.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "AUC has a common [0,1] scale, and direct isometric rotation plus zero-padding d=5 to d=4096 preserve the seed-37 result 0.3333333 exactly. Fixed-C liblinear is not invariant to function-preserving activation rescaling: the identical data score 0.5000000 at scales 1e-30, 1e-23, and 1e-15; 0.3333333 at 0.001, 0.01, 0.1, and 1; 0.8333333 at 10 and 100; and 0.9166667 at 1000, 1e10, and 1e20. None of tests/test_scale_invariance.py's 11 tests claims invariance for this estimator, so this is a cross-model comparability caveat rather than a failed safe-norm contract or a fidelity defect; a fresh 7-model panel also gives Spearman rho=+0.7093 with d_model (p=0.0743).",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_repo": "andyzoujm/representation-engineering",
+  "github_reason": "The fetched official current repe/rep_readers.py exposes exactly 3 direction readers (PCA, ClusterMean, Random) and 0 LogisticRegression estimators, while the official pipeline defaults to rep_token=-1, so there is no released held-out LR-CV AUC implementation for an estimator-level replay. The pinned commit-5455d8a parity fixture passed 5/5 locally: captured real PCARepReader versus the independent reconstruction has absolute cosine 0.9999999999997722, reconstructed PCA versus the planted direction is 0.968183908974311, and the BLME planted/negative-control AUCs are 0.9833333333/0.4400000000; this validates the RepE reader relationship but only partially validates BLME's refined estimator.",
+  "paper_number": "NONE",
+  "paper_reason": "Zou et al. Table 11 publishes 5 PCA/LAT accuracies--81.0, 85.0, 72.5, 92.6, and 90.7--whereas the current BLME gpt2 fact-pair run reports held-out logistic-CV mean AUC 0.7128999748. The model, stimuli, reader, pooling, and statistic differ; the source paper publishes 0 per-layer held-out LR-CV AUC values for this protocol and the BLME manuscript has 0 concrete result rows, so no relative error is defined.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "Fresh local mean AUCs across 7 models range from pythia-70m 0.5579806 to gpt2-medium 0.7706995. Spearman associations are d_model +0.7093 (p=0.0743), n_layers +0.4117 (p=0.3588), log(params) +0.3214 (p=0.4821), and vocab_size -0.6736 (p=0.0971); identical-architecture random GPT-2 seeds score 0.4697499, 0.5202507, and 0.4998110 versus trained gpt2 0.7129000, so architecture association is suspected on n=7 but architecture does not determine the statistic.",
+  "defects": [
+    "COMPARABILITY: fixed-C liblinear changes under uniform activation rescaling even though linear separability does not; on identical seed-37 data AUC moves 0.3333333 to 0.8333333 at scale 10 and 0.9166667 at scale 1000, while orthogonal rotation and d=5 to d=4096 zero-padding change it by exactly 0.0. This estimator is not covered by any of the 11 scale-invariance contract tests; all 11 tests themselves passed.",
+    "CONFIG/PROTOCOL: the effective defaults.yaml value is num_samples=20, so the task uses 20 of 39 pairs and 11 of 17 entity groups. On the identical gpt2 checkpoint, using all 39 pairs changes mean AUC 0.7129000 to 0.6247535 (absolute -0.0881465; relative -12.36%).",
+    "PROTOCOL/DOCUMENTATION: src/blme/tasks/representation_engineering.py:517-520 mean-pools all prompt tokens although the official RepE pipeline defaults to the last token. On gpt2, switching only the readout changes mean AUC 0.7129000 to 0.7123646, max AUC 0.8015873 to 0.8176493, and argmax layer 4 to 6; this is a disclosed refined-protocol choice, not an implementation-fidelity failure.",
+    "STATISTICS: no null or interval is emitted. A fresh seed-0, 100-draw within-pair label-permutation null on the exact gpt2 activations and encounter-order group IDs has mean 0.5096914, sample SD 0.0648926, p95 0.6123488, observed z=3.1315, and plus-one empirical p=0.0099010 for observed 0.7129000.",
+    "CODE ROBUSTNESS OUTSIDE THE PAPER DOMAIN: src/blme/tasks/representation_engineering.py:480-486 catches TypeError and ValueError but not OverflowError. Labels 0.9/1.9 and NaN return controlled errors, but a +Inf label raises 'OverflowError: cannot convert float infinity to integer'; this does not change any answer on the finite binary-label domain used for the GREEN fidelity verdict.",
+    "DOCUMENTATION: src/blme/tasks/representation_engineering.py:398-401 says the 39 fallback pairs form 19 independent groups, but independent union-find and the materialized task both give 17 total groups; the effective num_samples=20 prefix uses 11.",
+    "TEST COVERAGE: 40 focused tests, 1 real-model independent full-pipeline test, and all 11 scale-invariance contract tests pass, but 0 checked-in tests name the surviving-two-group or explicit 6/3/3 materialized-fold adversaries. Direct Round-4 harnesses show both defects are closed, but those exact closures are not regression-pinned."
+  ],
+  "fix": "",
+  "source_hash": "3639488e30f2dff0",
+  "shared_hash": "dde7eee9a4efad97"
+}

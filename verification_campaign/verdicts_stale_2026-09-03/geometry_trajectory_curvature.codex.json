@@ -1,0 +1,23 @@
+{
+  "task": "geometry_trajectory_curvature",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "src/blme/tasks/geometry/trajectory_curvature.py:72-109 implements the paper's angle between consecutive displacement vectors, and lines 112-145 implement its equal-weight mean of per-sentence means. It returns exactly 0, pi/2, and pi on straight, right-turn, and reversal anchors, and agrees with the fetched released kernel to maximum absolute error 8.88e-16 on 100 random trajectories; no value-changing implementation counterexample was found.",
+  "defect_location": "CONFIG",
+  "comparable": "YELLOW",
+  "comparable_reason": "The dimensionless straightening_ratio was globally weak against d_model, n_layers, and vocab_size across 65 checkpoints (|Pearson r|<=0.204), but within eight Pythia models it correlated with width at Spearman rho=0.814 (p=0.0138), consistent with the source paper's model-size result. curvature_slope was moderately width-linked globally (r=0.394, rho=0.366), and absolute overall curvature was strongly vocabulary-linked (r=-0.614, rho=-0.579); compare the ratio only under matched corpus/tokenization and retain scale controls.",
+  "normalized_variant": "straightening_ratio, curvature_slope",
+  "normalized_ok": "YELLOW",
+  "github": "YES",
+  "github_repo": "eghbalhosseini/sent_sampling",
+  "github_reason": "Fetched the authors' released trajectory-curvature code and executed the released angle/aggregation calculation and BLME on identical analytic and random inputs. The 100-random-trajectory maximum absolute difference was 8.88e-16, with exact agreement on the 0, pi/2, and pi anchors.",
+  "paper_number": "YES",
+  "paper_reason": "The paper's isotropic-Gaussian control is 119.99 degrees. A local streaming reproduction with 8,408 trajectories, d=1,600, and lengths 6-19 returned 120.000454 degrees using the paper protocol (relative error 8.71e-5); the shipped skip-one setting returned 119.997554 degrees (relative error 6.30e-5).",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Confounding is output-specific: overall curvature was strongly associated with vocab_size (rho=-0.579, p=4.27e-7), curvature_slope with d_model (rho=0.366, p=0.00270), and straightening_ratio with width inside Pythia (rho=0.814, p=0.0138). The global ratio itself was not detectably architecture-linked, so it remains usable with family, tokenizer, and corpus controls.",
+  "defects": [
+    "CONFIG src/blme/tasks/configs/defaults.yaml:123-125: skip_first_tokens=1 assumes a BOS token, but GPT-2 and Pythia sequences ordinarily begin with content; BLME therefore drops real data. On [[0,0],[1,0],[2,0],[1,0]], paper-protocol curvature is pi/2 while the effective default returns pi, a 100% change.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml:123-125: num_samples=100 WikiText passages is not the paper's 8,408-sentence Universal Dependencies protocol; this affects uncertainty and corpus comparability but not the curvature implementation."
+  ],
+  "fix": ""
+}

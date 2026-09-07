@@ -1,0 +1,27 @@
+{
+  "task": "repe_steering_effectiveness",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "The code forms the class-mean task vector, applies alpha*v to the last-token block output, and computes KL(base || steered), exactly the BLME definition and RepE linear-combination operator. On a deterministic tiny GPT-2, per-layer BLME KL values 0.000309175 and 0.010209191 matched an independent float64 calculation 0.000309488 and 0.010209047 (maximum absolute error 3.13e-7), while alpha=0 gave at most 2.9e-9; no formula counterexample was found.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The intervention dose is alpha times an unnormalized model-specific vector, so KL is not on a common cross-model scale. In current runs on gpt2, distilgpt2, pythia-70m, and pythia-160m, best_steering_kl was 0.03146, 0.03022, 0.56974, and 0.08686 and correlated with width at r=-0.995 (rho=-0.775); absolute best layer correlated with n_layers at r=0.961 (rho=0.894).",
+  "normalized_variant": "steering_success_rate",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "andyzoujm/representation-engineering",
+  "github_reason": "I fetched RepE's WrappedBlock implementation and compared its linear_comb/token_pos=end transformation with BLME on the same tensor; the maximum absolute difference was 0.0. The released RepE and ActAdd repositories do not compute BLME's KL maximum or thresholded success-rate summaries, and ActAdd's position-aligned pre-layer intervention is not this hook, so whole-task parity is only partial.",
+  "paper_number": "NONE",
+  "paper_reason": "Zou et al. and Turner et al. publish targeted behavioral steering results, not BLME's next-token true/false-vector KL or thresholded layer fraction. No published number corresponds to the task's outputs.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The raw layer index is mechanically depth-bounded and had r=0.961 with n_layers in the four current models. Fixed alpha also leaves architecture-dependent task-vector norm and downstream gain in the dose; the resulting best KL had |r|=0.995 with width in that small sweep, so the cross-model scale confound is confirmed even though family remains entangled.",
+  "defects": [
+    "METRIC VALIDITY: KL is unsigned perturbation sensitivity, not directional effectiveness; on gpt2 the sign-reversed vector previously produced 74% larger KL at layer 6 while moving the target log-odds in the wrong direction. This does not alter the GREEN formula verdict because the manuscript explicitly defines the unsigned KL shift.",
+    "COMPARABILITY: fixed alpha multiplies unnormalized task vectors, so neither intervention norm nor KL budget is matched across models.",
+    "COMPARABILITY: best_steering_layer is an absolute index, and steering_success_rate changes its denominator from every layer for L<=10 to five depth-sampled layers for L>10; no normalized best-layer depth is emitted.",
+    "NORMALIZATION: steering_success_rate is dimensionless but thresholds an unnormalized, dose-sensitive KL; alpha sweeps on gpt2 gave best KL 0.00764/0.03039/0.11973 at alpha -0.5/-1/-2 and 0.00775/0.03146/0.12819 at +0.5/+1/+2.",
+    "CODE: representation_engineering.py:466 and 486 materializes an input iterable twice, so a valid one-pass generator is consumed during preview and then produces a false empty-sample error.",
+    "PROVENANCE: the post-block last-token hook matches RepE, but not the cited ActAdd algorithm's pre-layer, position-aligned prompt-difference intervention or its behavioral controls."
+  ],
+  "fix": ""
+}

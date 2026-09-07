@@ -124,6 +124,11 @@ class ContrastiveConsistencyTask(DiagnosticTask):
                 else:
                     contrast_ratios.append(1.0)
                     
+        if not factual_probs:
+            # Every triple failed to score (e.g. all continuations unscoreable);
+            # returning NaN means silently would look like a real measurement.
+            return {"error": "No scoreable contrastive samples"}
+
         return {
             "mean_factual_prob": float(np.mean(factual_probs)),
             "mean_exclusive_prob": float(np.mean(exclusive_probs)),

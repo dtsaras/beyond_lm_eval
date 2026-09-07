@@ -141,14 +141,88 @@ def test_near_symmetry_and_range(fx):
 
 
 def test_topk_validation(fx):
-    """topk < 2 is rejected; n <= topk returns NaN (documented guard)."""
+    """topk < 2 is rejected; topk >= n CLAMPS rather than returning NaN.
+
+    CONTRACT CHANGE. This used to assert NaN for k >= n, which made the paper's
+    k -> n limit -- where CKNNA reduces to CKA, and its only closed-form anchor
+    -- unreachable through the task. The clamp now depends on the estimator:
+
+      * unbiased=True  -> k = n-1. The diagonal is -inf, so a self-masked row
+        has only n-1 finite entries and n-1 IS the largest meaningful
+        neighbourhood.
+      * unbiased=False -> k = n. The diagonal is NOT masked, so every column is
+        selected, the neighbour mask is all-ones, and CKNNA equals CKA exactly.
+        Clamping this case to n-1 instead missed the anchor by 2.69%
+        (0.5430548 against the official 0.5580957).
+    """
     X, _, _, _, topk = _tensors(fx)
     with pytest.raises(ValueError):
         _cknna(X, X, topk=1)
     n = X.shape[0]
-    assert np.isnan(_cknna(X, X, topk=n))       # k == n: no valid top-k
-    assert np.isnan(_cknna(X, X, topk=n + 5))   # k > n
+    # Finite, not NaN, at and beyond k = n.
+    for k in (n, n + 5):
+        for unbiased in (True, False):
+            v = _cknna(X, X, topk=k, unbiased=unbiased)
+            assert np.isfinite(v), f"topk={k} unbiased={unbiased} -> {v}"
+    # The biased k -> n limit IS CKA -- checked on a CROSS pair.
+    #
+    # A self-pair (X, X) is VACUOUS here: both CKNNA and CKA are identically
+    # 1.0 for any k, so the assertion passes under the old n-1 clamp too and
+    # discriminates nothing. A cross pair separates them: 7.2e-08 at k=n
+    # against 4.21% under the n-1 clamp.
+    Y = _tensors(fx)[1]
+    K = (X @ X.T).double().numpy()
+    L = (Y @ Y.T).double().numpy()
+    H = np.eye(n) - 1.0 / n
+    Kc, Lc = H @ K @ H, H @ L @ H
+    cka_cross = float((Kc * Lc).sum()
+                      / np.sqrt((Kc * Kc).sum() * (Lc * Lc).sum()))
+    got = _cknna(X, Y, topk=n, unbiased=False)
+    assert got == pytest.approx(cka_cross, rel=1e-6), (
+        f"biased k=n must equal CKA: {got} vs {cka_cross}")
+    # And the old n-1 clamp must NOT reach it, or the test is not discriminative.
+    assert _cknna(X, Y, topk=n - 1, unbiased=False) != pytest.approx(
+        cka_cross, rel=1e-4)
 
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_l2_normalize_preprocessing_matches_reference():
+    """Campaign-4 B6: _l2_normalize had zero coverage (fixture tensors are
+    pre-normalized) — dropping the normalization would leave all parity
+    tests green while changing every task output. Pin it bit-exact against
+    the reference preprocessing (F.normalize(x, p=2, dim=-1)) and assert
+    full-pipeline equality on UNNORMALIZED input."""
+    import torch.nn.functional as F
+    from blme.tasks.geometry.cknna import _cknna, _l2_normalize
+
+    torch.manual_seed(0)
+    X = torch.randn(40, 12) * 7.0 + 3.0        # deliberately unnormalized
+    Y = torch.randn(40, 9) * 0.2 - 1.0
+
+    ref_X = F.normalize(X.float(), p=2, dim=-1)
+    got_X = _l2_normalize(X)
+    # The +1e-12 guard only matters for zero rows; on nonzero rows the two
+    # must agree to float32 machine precision.
+    assert torch.allclose(got_X, ref_X, atol=1e-6, rtol=0.0)
+
+    full = _cknna(_l2_normalize(X), _l2_normalize(Y), topk=8)
+    ref = _cknna(ref_X, F.normalize(Y.float(), p=2, dim=-1), topk=8)
+    assert full == pytest.approx(ref, abs=1e-9)
+    # And normalization genuinely matters on this input:
+    raw = _cknna(X, Y, topk=8)
+    assert abs(raw - full) > 1e-6, "input cannot discriminate normalization"
+
+
+def test_distance_agnostic_raises_not_implemented():
+    """The reference option crashes identically in the official code at the
+    pinned commit; BLME raises an explicit NotImplementedError instead of
+    an obscure RuntimeError (campaign-4 B6)."""
+    from blme.tasks.geometry.cknna import _cknna
+
+    torch.manual_seed(1)
+    with pytest.raises(NotImplementedError):
+        _cknna(torch.randn(30, 5), torch.randn(30, 5), topk=5,
+               distance_agnostic=True)

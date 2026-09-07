@@ -58,9 +58,10 @@ _WEAT_TESTS: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-def _find_word_token_position(tokenizer, text: str, word: str):
+def _find_word_token_position(tokenizer, text: str, word: str, search_from: int = 0):
     """Locate the first token whose character span overlaps the first
-    occurrence of ``word`` in ``text`` via ``return_offsets_mapping``.
+    occurrence of ``word`` in ``text`` at or after ``search_from`` via
+    ``return_offsets_mapping``.
 
     Returns the token index, or ``None`` if the word is not in the text
     or the tokenizer doesn't expose offsets (slow tokenisers).
@@ -71,6 +72,12 @@ def _find_word_token_position(tokenizer, text: str, word: str):
     different token ids, so that approach silently hits the fallback
     and every word ends up attributed to the same end-of-sentence
     position.
+
+    ``search_from`` anchors the substring search at the template's
+    insertion point so that an attribute word which also occurs as a
+    substring of an *earlier* literal token is not matched by mistake
+    (e.g. ``"his"`` inside ``"This"`` in the default ``"This is {}."``
+    template).
     """
     try:
         enc = tokenizer(text, return_offsets_mapping=True,
@@ -80,7 +87,7 @@ def _find_word_token_position(tokenizer, text: str, word: str):
     offsets = enc.get("offset_mapping")
     if offsets is None:
         return None
-    char_start = text.find(word)
+    char_start = text.find(word, search_from)
     if char_start < 0:
         return None
     char_end = char_start + len(word)
@@ -100,11 +107,17 @@ def _embed_word(model, tokenizer, word: str, device, final_norm=None,
     enc = tokenizer(text, return_tensors="pt").to(device)
     input_ids = enc["input_ids"][0].tolist()
 
-    pos = _find_word_token_position(tokenizer, text, word)
+    # Anchor the word search at the template's insertion point so an
+    # attribute word that also occurs inside an earlier literal token
+    # (e.g. "his" inside "This") is not matched by mistake.
+    insert_off = template.index("{}") if "{}" in template else 0
+    word_start = text.find(word, insert_off)
+
+    pos = _find_word_token_position(tokenizer, text, word, search_from=insert_off)
     if pos is None or pos >= len(input_ids):
         # Prefix-length fallback: tokenise the *prefix* up to the word
         # and take the position right after it.
-        prefix = text[: text.find(word)] if word in text else text
+        prefix = text[:word_start] if word_start >= 0 else text
         prefix_len = len(tokenizer(prefix, add_special_tokens=True)["input_ids"])
         pos = max(0, min(prefix_len, len(input_ids) - 1))
 
@@ -118,6 +131,9 @@ def _embed_word(model, tokenizer, word: str, device, final_norm=None,
     # double-normalises the embedding and corrupts every WEAT d-value.
     # Keep the helper signature for API compatibility but do not
     # re-apply the norm.
+    # post-final-norm: DELIBERATELY post-norm -- this compares a model's
+    # OUTPUT representations of two prompts, which is the post-`ln_f`
+    # vector by definition.
     h = out.hidden_states[-1][0, pos]  # (D,) — already post-norm
     return h.float().detach().cpu().numpy()
 

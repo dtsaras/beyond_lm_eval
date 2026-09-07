@@ -40,13 +40,42 @@ class IntrinsicDimensionTask(DiagnosticTask):
             # Collect states from all layers
             logger.info("  Collecting hidden states...")
             # Use 'all' to get dict of {layer_idx: tensor}
+            # THE 14TH INSTANCE of the post-final-norm defect, and the one
+            # that reaches the most published numbers: `layerwise: true` is
+            # set in the study's `configs/tasks.yaml`, so this branch runs for
+            # every model in the archive, and all 66 `blme_verified_a/*.json`
+            # carry a `lid_layer_L` computed on `ln_f(b_{L-1})` rather than on
+            # a block output.
+            #
+            # Measured on the same 20k cached rows (red-team review,
+            # 2026-09-05), shipped `lid_layer_L` vs the true block-L output:
+            #
+            #   gpt2         8.8603 -> 6.9776  (+27.0% high)
+            #   distilgpt2   8.3975 -> 7.1351  (+17.7% high)
+            #   pythia-160m  7.8042 -> 7.8883  ( -1.1%)
+            #   pythia-70m   8.4167 -> 8.6839  ( -3.1%)
+            #
+            # The sign is architecture-family determined, so it does NOT
+            # cancel in a cross-model comparison. It also manufactures a
+            # qualitative claim: gpt2's reported final-layer ID EXPANSION
+            # (lid_layer_10 7.365 -> lid_layer_11 9.364, +26.9%) disappears
+            # entirely once the LayerNorm is removed -- true block-11 (6.978)
+            # is statistically identical to block-10 (6.982), a -0.1% step.
+            _id_status = {}
             if cache is not None and cache.is_populated and use_cache:
                 layer_activations = cache.get_hidden_states(
                     layer_idx="all",
                     num_samples=self.config.get("num_samples", 100),
+                    replace_final_norm=True,
                 )
+                _id_status["last_is_block"] = bool(
+                    getattr(cache, "_last_block_substituted", False))
             else:
-                layer_activations = collect_hidden_states(model, tokenizer, dataset, num_samples=self.config.get("num_samples", 100), layer_idx="all")
+                layer_activations = collect_hidden_states(
+                    model, tokenizer, dataset,
+                    num_samples=self.config.get("num_samples", 100),
+                    layer_idx="all", replace_final_norm=True,
+                    status=_id_status)
             
             results = {}
             # Compute ID for each layer
@@ -65,10 +94,36 @@ class IntrinsicDimensionTask(DiagnosticTask):
                     
                 lid_result = self._compute_id(X)
                 lid = lid_result["intrinsic_dimension"]
-                results[f"lid_layer_{layer_idx}"] = lid
+                # `_meta_` on the ABSOLUTE-INDEX names, plus depth-aligned
+                # twins below. Over 66 models these produce **64 distinct
+                # column names**, only 6 of which cover 100% of models, and
+                # **18 alias two different depth roles** -- `lid_layer_11` is
+                # the deepest layer at L=12 and the middle layer at L=22, so a
+                # regression fits two different quantities to one coefficient.
+                # `topology_homology` was fixed for exactly this on 2026-09-05
+                # and this sibling was missed (independent Opus review, same
+                # day).
+                results[f"_meta_lid_layer_{layer_idx}"] = lid
                 id_trend.append(lid)
                 
             results["lid_trend"] = id_trend
+            # Depth-aligned scalars: the same name means the same DEPTH ROLE on
+            # every model, which is what a cross-model feature matrix needs.
+            if id_trend:
+                _n = len(id_trend)
+                results["lid_first_layer"] = float(id_trend[0])
+                results["lid_mid_layer"] = float(id_trend[_n // 2])
+                results["lid_last_layer"] = float(id_trend[-1])
+                results["lid_depth_slope"] = (
+                    float(np.polyfit(np.linspace(0.0, 1.0, _n),
+                                     np.asarray(id_trend, dtype=float), 1)[0])
+                    if _n > 1 and np.all(np.isfinite(id_trend)) else float("nan"))
+            # Provenance: True only if the deepest entry is really the raw
+            # block output. Without this nothing in the output distinguished a
+            # LayerNorm-contaminated profile from a clean one -- which is why
+            # 66 archived envelopes carry one and no verdict file noticed.
+            results["_meta_last_entry_is_block_output"] = bool(
+                _id_status.get("last_is_block", False))
             return results
             
         else:
@@ -80,7 +135,12 @@ class IntrinsicDimensionTask(DiagnosticTask):
                  return {"error": "Could not extract embeddings"}
              
              E_np = E.float().cpu().numpy()
-             return self._compute_id(E_np, sample_size=self.config.get("sample_size", None))
+             # `sample_size`, not `_meta_sample_size`: the `_meta_` prefix marks
+             # OUTPUT provenance keys, so the old spelling could never be set
+             # by a config and this subsample knob was permanently dead (both
+             # reviewers, round 1). `None` keeps the previous behaviour.
+             return self._compute_id(
+                 E_np, sample_size=self.config.get("sample_size", None))
 
     def _compute_id(self, X, sample_size=None):
         """Two-NN intrinsic dimension of the point cloud ``X``.
@@ -91,11 +151,60 @@ class IntrinsicDimensionTask(DiagnosticTask):
         hosts. Returns the same ``{intrinsic_dimension, sample_size}``
         dict either way.
         """
+        # RESCALE TO UNIT MAX FIRST, both paths.
+        #
+        # Two-NN depends only on `mu = r2/r1`, so a positive global rescale
+        # cancels EXACTLY -- Facco's statistic cannot depend on it. The CPU
+        # fallback did: on a max-normalised `default_rng(0)` 500x32 Gaussian it
+        # returned 24.233986018 at scale 1, **16.927948590 at 1e-22 (-30.15%)**,
+        # and NaN at 1e-30, 1e-25, 1e25 and 2.406e38, because sklearn's kNN
+        # squares the coordinates and underflows. The CUDA path was unaffected,
+        # which is why this went unreproduced when it was first reported: the
+        # check was run on a GPU host and never exercised the fallback
+        # (gpt-5.6-sol review, 2026-09-06 and 2026-09-07; the second pass
+        # supplied the fixture and the CPU detail, and it reproduces to nine
+        # digits).
+        #
+        # Dividing by the max only shifts exponents, so the ratios below are
+        # bit-for-bit what they would have been -- and the estimate is now
+        # identical on both paths at every scale.
+        _g = float(np.max(np.abs(np.asarray(
+            X.detach().cpu() if isinstance(X, torch.Tensor) else X, dtype=np.float64))))
+        if np.isfinite(_g) and _g > 0:
+            X = (X / _g) if isinstance(X, torch.Tensor) else (np.asarray(X) / _g)
+
         # Accept torch.Tensor or numpy.ndarray.
         if isinstance(X, torch.Tensor):
             X_tensor = X.detach().float()
         else:
             X_tensor = torch.from_numpy(np.asarray(X, dtype=np.float32))
+
+        # DROP NON-FINITE ROWS, AND SAY SO.
+        #
+        # A matrix carrying inf/NaN previously produced a perfectly plausible
+        # number with no signal whatsoever: on real gpt2 layer 0 scaled to the
+        # top of float32, 51 of 307968 entries were inf and `_compute_id`
+        # returned **16.342547** against the clean 16.404143 -- publishable
+        # looking, and wrong. Layers 5 and 11 (38.1% and 81.3% non-finite)
+        # returned NaN, which is the correct answer for a destroyed input; it
+        # was the layer that did NOT fail that was dangerous.
+        #
+        # Note this is NOT a scale-invariance defect: the input overflowed
+        # float32 before the task ever saw it, so no rescale inside the task
+        # could recover it (this refines the round-9 report, which read the
+        # NaN as a surviving scale break). What the task owes the caller is a
+        # count, not a silent estimate over whatever rows happened to survive.
+        _finite_rows = torch.isfinite(X_tensor).all(dim=1)
+        _n_nonfinite = int((~_finite_rows).sum().item())
+        if _n_nonfinite:
+            logger.warning(
+                "intrinsic_dim: dropping %d/%d rows with non-finite entries",
+                _n_nonfinite, int(X_tensor.shape[0]))
+            X_tensor = X_tensor[_finite_rows]
+            if X_tensor.shape[0] < 4:
+                return {"intrinsic_dimension": float("nan"),
+                        "_meta_sample_size": int(X_tensor.shape[0]),
+                        "_meta_n_nonfinite_rows": _n_nonfinite}
 
         n_vocab = X_tensor.shape[0]
         if sample_size and sample_size < n_vocab:
@@ -105,29 +214,30 @@ class IntrinsicDimensionTask(DiagnosticTask):
 
         N = int(X_tensor.shape[0])
         if N < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         r1, r2 = _two_nearest_neighbor_distances(X_tensor)
         if r1 is None:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         # Drop exact duplicates (r1 = 0 → mu undefined). Near-duplicates
         # are kept; they're valid density samples.
         valid = r1 > 0
         r1, r2 = r1[valid], r2[valid]
         if r1.size < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         mus = r2 / r1
         # Filter numerical noise: mu must be ≥ 1 by construction.
         mus = mus[mus > 1.0]
         if mus.size < 4:
-            return {"intrinsic_dimension": float("nan"), "sample_size": N}
+            return {"intrinsic_dimension": float("nan"), "_meta_sample_size": N}
 
         intrinsic_dim = _twonn_linear_fit(mus)
         return {
             "intrinsic_dimension": float(intrinsic_dim),
-            "sample_size": N,
+            "_meta_sample_size": N,
+            "_meta_n_nonfinite_rows": _n_nonfinite,
         }
 
 
@@ -151,13 +261,19 @@ def _two_nearest_neighbor_distances(
 
     if device is not None:
         try:
-            X_dev = X.to(device)
+            # float64 + no-mm compute mode (audit 2026-07-16): the default
+            # f32 mm-mode cdist (x^2+y^2-2xy) catastrophically cancels when
+            # r1 << ||x||, inflating TwoNN by up to +23% on dense clouds and
+            # making results host-dependent (GPU vs CPU). f64 + direct
+            # euclidean brings the error to ~1e-11.
+            X_dev = X.to(device).double()
             N = X_dev.shape[0]
             r1 = np.zeros(N, dtype=np.float64)
             r2 = np.zeros(N, dtype=np.float64)
             for s in range(0, N, chunk_rows):
                 e = min(N, s + chunk_rows)
-                d = torch.cdist(X_dev[s:e], X_dev, p=2)  # (chunk, N)
+                d = torch.cdist(X_dev[s:e], X_dev, p=2,
+                                compute_mode="donot_use_mm_for_euclid_dist")
                 # Take top-3 smallest; index 0 is self (distance 0).
                 vals, _ = torch.topk(d, k=3, dim=1, largest=False, sorted=True)
                 r1[s:e] = vals[:, 1].detach().cpu().double().numpy()
@@ -196,10 +312,11 @@ def _twonn_linear_fit(mus: np.ndarray, tail_trim: float = 0.1) -> float:
     heavy upper tail on the slope. We do NOT trim the lower tail —
     small μ's (μ ≈ 1) are the most informative points, not noise.
 
-    We also do NOT floor the estimate at 1: the paper explicitly
-    observes the estimate dipping below 1 on near-degenerate geometries
-    (Fig. 3) and treats that as a diagnostic signal, not an error. If
-    the downstream analysis wants a lower bound it can apply one
+    We also do NOT floor the estimate at 1: the Two-NN Pareto model has
+    support d in (0, inf), so estimates below 1 are valid outputs on
+    near-degenerate geometries and carry diagnostic signal. (The paper
+    itself never discusses sub-1 estimates — no floor is implied by it.)
+    If the downstream analysis wants a lower bound it can apply one
     explicitly.
     """
     if mus.size == 0:

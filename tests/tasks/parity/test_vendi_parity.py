@@ -33,7 +33,10 @@ scipy 1.18.0, numpy 2.4.6).
 """
 import numpy as np
 import pytest
-from vendi_score import vendi  # OFFICIAL library, run live in these tests
+
+# OFFICIAL library, run live in these tests. Guarded so a fresh clone / CI
+# without vendi_score SKIPS this module instead of aborting collection.
+vendi = pytest.importorskip("vendi_score.vendi")
 
 from blme.tasks.geometry.vendi import (
     _vendi_score,

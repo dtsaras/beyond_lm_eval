@@ -1,0 +1,27 @@
+{
+  "task": "geometry_mahalanobis",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Lee et al. define per-class means, a pooled within-class empirical covariance, and a maximum class score; BLME instead fits one global Ledoit-Wolf Gaussian and reports its square-root distance. On a symmetric two-mode ID cloud with OOD at the global mean, Lee's construction gives AUROC 1.000 while BLME gives 0.354, so this is a different estimator.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Raw Mahalanobis distance is mechanically width-dependent: under identical N(0,I_d) train/test populations its mean rose 1.881, 2.741, 3.894, 5.640, 7.930, 11.291 for d=4,8,16,32,64,128 (rho=1.0, approximately sqrt(d)). In the 46-model table, even the dimensionless separation ratio has rho=0.557 with d_model and 0.501 with n_layers, while AUROC has rho=0.474 with both and 0.500 with vocab_size.",
+  "normalized_variant": "ood_separation_ratio",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "https://github.com/pokaxpoka/deep_Mahalanobis_detector",
+  "github_reason": "The authors' lib_generation.py was fetched and inspected: sample_estimator uses per-class means plus EmpiricalCovariance on pooled within-class residuals, and get_Mahalanobis_score takes the best class quadratic score. The released legacy CUDA/image pipeline could not be executed here; a local implementation of those equations exposed the 1.000-versus-0.354 counterexample. BLME also substitutes Ledoit-Wolf: even for C=1, distances differed from the released empirical-covariance equation by 33.5% mean and 55.1% maximum relative error on the same inputs.",
+  "paper_number": "NONE",
+  "paper_reason": "Lee et al. publish detector TNR/AUROC for trained CIFAR/SVHN/LSUN image classifiers and adversarial examples, not for a label-free single-centroid language representation scored against shuffled text. No published number is applicable to this adaptation.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The controlled isotropic null gives perfect monotonic dependence of raw distance on width (rho=1.0). Across 46 model rows, mean_mahalanobis_id has rho=-0.312 with width and -0.370 with depth, ood_separation_ratio has rho=0.557/0.501, and AUROC has rho=0.474/0.474 plus rho=0.500 with vocab_size; the proposed ratio therefore does not remove architecture dependence.",
+  "defects": [
+    "src/blme/tasks/geometry/mahalanobis.py:81-115 implements one global mean and Ledoit-Wolf precision, not Lee et al.'s per-class means, pooled within-class EmpiricalCovariance, and max-over-class score. The bimodal counterexample changes AUROC from 1.000 to 0.354.",
+    "Even the declared C=1 specialization does not match the released estimator: Ledoit-Wolf changes same-input distances by 33.5% on average and breaks Mahalanobis affine invariance (47.0% mean relative change under an invertible diagonal transform versus 3.73e-10 maximum for EmpiricalCovariance).",
+    "src/blme/tasks/geometry/mahalanobis.py:210-222 builds ID from the first corpus half but shuffles different documents from the second half. In an order-invariant bag-representation control this unpaired design reports AUROC 1.0 solely from the half split, whereas paired held-out originals and shuffles give exactly 0.5.",
+    "src/blme/tasks/geometry/mahalanobis.py:187-191 decodes shuffled token IDs and then re-tokenizes the string, so it does not guarantee preservation of the token multiset it claims to preserve.",
+    "With the effective num_samples=50, src/blme/tasks/geometry/mahalanobis.py:251-254 fits on only 25 sentence vectors in widths of hundreds to thousands; the model-dependent shrinkage target dominates this underdetermined covariance.",
+    "mean_mahalanobis_id and mean_mahalanobis_ood are uncalibrated sqrt(d)-scale distances, while ood_separation_ratio and AUROC remain strongly correlated with model architecture."
+  ],
+  "fix": "Either implement Lee et al. faithfully with semantic classes, pooled within-class empirical covariance, max-class scoring, multi-layer combination, and the published preprocessing, or rename this as a single-Gaussian shrinkage OOD proxy. For the proxy, score each held-out text against a shuffle of that same text, feed permuted token IDs directly, fit on far more independent ID items, expose shrinkage and d/n, and report a chi-square-calibrated squared distance; do not use the current ratio/AUROC as beyond-scale evidence without residualization."
+}

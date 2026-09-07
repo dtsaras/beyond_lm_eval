@@ -217,6 +217,17 @@ def test_isoscore_matches_rudman_reference_package():
     X = np.array(case["points"], dtype=np.float64)
     assert _isoscore(X) == pytest.approx(case["expected"], abs=case["tol"])
 
+    # Live official-package cross-check (campaign-4 B5). Includes the N<d
+    # zero-padding branch, which no test previously exercised — deleting
+    # the padding passed the whole suite. Official IsoScore takes
+    # (n_points, n_dims), same orientation as BLME.
+    iso_mod = pytest.importorskip("IsoScore.IsoScore")
+    rng = np.random.default_rng(0)
+    Xa = rng.standard_normal((200, 16)) * np.linspace(1, 4, 16)[None, :]
+    assert _isoscore(Xa) == pytest.approx(float(iso_mod.IsoScore(Xa)), abs=1e-6)
+    Xw = rng.standard_normal((40, 128))          # N < d
+    assert _isoscore(Xw) == pytest.approx(float(iso_mod.IsoScore(Xw)), abs=1e-6)
+
 
 def test_twonn_intrinsic_dim_recovers_known_dimension_and_tracks_skdim():
     """geometry_intrinsic_dim (Two-NN, Facco et al. 2017) — formula-faithful.
@@ -261,6 +272,40 @@ def test_persistence_landscape_matches_persim_library():
     )
     ref = np.asarray(pl.values[0], dtype=float)
     assert blme.tolist() == pytest.approx(ref.tolist(), abs=1e-9)
+
+
+def test_persistence_landscape_multibar_k4_matches_persim():
+    """Multi-bar, k>=2 persim parity: with overlapping bars the k-selection
+    (descending sort of tent values at each t) actually matters — a
+    sort-direction bug or missing max(0, .) clip is invisible on single-bar
+    diagrams but changes L_2..L_4 here. Verified 2026-07: max diff vs
+    persim 0.3.8 PersLandscapeApprox is ~8.9e-16 on this diagram.
+    """
+    persim = pytest.importorskip("persim")
+    from blme.tasks.topology.persistence_landscape import _compute_landscape
+
+    dgm = np.array([
+        [0.0, 4.0],
+        [1.0, 3.0],
+        [2.0, 6.0],
+        [2.5, 3.5],
+        [5.0, 5.5],
+    ])
+    K, n_points = 4, 241
+    blme = _compute_landscape(dgm, n_landscapes=K, n_points=n_points)
+    pl = persim.PersLandscapeApprox(
+        dgms=[dgm], hom_deg=0, start=0.0, stop=6.0, num_steps=n_points
+    )
+    ref = np.asarray(pl.values, dtype=float)  # (K_ref, n_points)
+    for k in range(min(K, ref.shape[0])):
+        assert blme[k].tolist() == pytest.approx(ref[k].tolist(), abs=1e-9), (
+            f"landscape k={k + 1} diverged from persim"
+        )
+    # Landscapes beyond the persim-emitted depth must be identically zero.
+    for k in range(ref.shape[0], K):
+        assert not blme[k].any()
+    # Sanity: the k-selection is non-trivial on this diagram (L2 != L1).
+    assert np.max(np.abs(blme[0] - blme[1])) > 0.1
 
 
 def test_calibration_ece_matches_torchmetrics_library():
@@ -446,3 +491,134 @@ def test_persistence_landscape_single_bar_tent_function():
     assert landscape[0].tolist() == pytest.approx(case["expected_first_landscape"])
     assert landscape[1].tolist() == pytest.approx(case["expected_second_landscape"])
 
+
+
+def test_contextualization_kernels_pin_values():
+    """Campaign-4 B7: 3 of 4 contextualization kernels had zero value-pinning
+    coverage (only IntraSim was pinned) — dropping MEV's centering or the
+    pairwise normalization passed the whole suite."""
+    from blme.tasks.geometry.contextualization import (
+        _baseline_anisotropy,
+        _cosine_pairwise_mean,
+        _max_explainable_variance,
+    )
+
+    rng = np.random.default_rng(0)
+    V = rng.standard_normal((30, 8)) + 0.5
+
+    # MEV == the official kawine/contextual `variance_explained_by_pc`, which
+    # is sklearn PCA's explained_variance_ratio_[0] -- i.e. CENTERED. The
+    # repo's own released gpt2/variance_explained.csv gives raw MEV 0.286-0.351
+    # over layers 2-11, reproducing the paper's "around 30% on average for
+    # layers 2 to 11"; the uncentered convention reads ~0.99 there.
+    #
+    # This test briefly pinned the UNCENTERED value on 2026-09-03. That was a
+    # regression against a parity previously verified to 3.3e-16, and the
+    # mutant check below now guards the correct direction.
+    sk = pytest.importorskip("sklearn.decomposition")
+    ref_mev = float(sk.PCA(n_components=1).fit(V).explained_variance_ratio_[0])
+    assert _max_explainable_variance(V) == pytest.approx(ref_mev, abs=1e-9)
+
+    # Mutant discrimination: the UNCENTERED variant must differ, so a silent
+    # removal of the centering fails here.
+    S_un = np.linalg.svd(V, full_matrices=False)[1]
+    uncentered_mev = float(S_un[0] ** 2 / (S_un ** 2).sum())
+    assert abs(uncentered_mev - ref_mev) > 1e-3
+
+    # SelfSim kernel (all-pairs regime) == independent full upper-triangle mean.
+    unit = V / np.linalg.norm(V, axis=1, keepdims=True)
+    sims = unit @ unit.T
+    ref_pair = float(sims[np.triu_indices(len(V), k=1)].mean())
+    assert _cosine_pairwise_mean(V) == pytest.approx(ref_pair, abs=1e-12)
+
+    # Anisotropy baseline: rows all along ONE direction (varied magnitudes)
+    # -> every pair cosine is exactly 1.
+    ray = np.outer(np.linspace(0.5, 3.0, 40), np.ones(6))
+    assert _baseline_anisotropy(ray) == pytest.approx(1.0, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Effective rank convention (Roy & Vetterli 2007, EUSIPCO).
+#
+# No test pinned this, which is how a change from raw sigma to sigma^2 --
+# roughly a 150x shift in the spectrum, and a SIGN FLIP in EDG, which is
+# derived from this profile -- passed the whole suite silently. Pin it.
+# ---------------------------------------------------------------------------
+
+def test_effective_rank_is_roy_vetterli_raw_sigma_not_squared():
+    """R&V Sec 2.1 Eq. (1): p_k = sigma_k / ||sigma||_1, then erank = exp(H(p)).
+
+    RAW singular values, L1-normalized. RankMe (Garrido et al. 2210.02885
+    Eq. 1-2), which explicitly attributes to Roy & Vetterli, uses the same.
+    """
+    import numpy as np
+    from blme.tasks.geometry.utils import effective_rank
+
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((500, 64))
+    Xc = X - X.mean(axis=0)
+    S = np.linalg.svd(Xc, compute_uv=False)
+
+    # Independent transcription of Eq. (1) + Definition 1.
+    p = S / np.sum(np.abs(S))
+    p = p[p > 0]
+    ref = float(np.exp(-np.sum(p * np.log(p))))
+
+    assert effective_rank(S) == pytest.approx(ref, rel=1e-9)
+
+    # And it must NOT be the squared convention.
+    q = (S ** 2) / np.sum(S ** 2)
+    q = q[q > 0]
+    ref_sq = float(np.exp(-np.sum(q * np.log(q))))
+    assert not np.isclose(ref, ref_sq, rtol=1e-3)
+
+    # R&V Property 1: 1 <= erank(A) <= rank(A).
+    assert 1.0 <= effective_rank(S) <= np.linalg.matrix_rank(Xc) + 1e-9
+
+
+def test_collapse_task_reports_roy_vetterli_convention():
+    """The task's erank_per_layer must use raw sigma; the squared spectrum is
+    exposed separately and must be named for what it is."""
+    import numpy as np
+    import torch
+    from scipy.linalg import svdvals
+    from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.collapse import RepresentationCollapseTask
+    from blme.tasks.geometry.utils import collect_hidden_states
+
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    cfg = GPT2Config(n_layer=2, n_head=2, n_embd=32, vocab_size=tok.vocab_size,
+                     n_positions=64, n_ctx=64)
+    model = GPT2LMHeadModel(cfg).eval()
+    dataset = [
+        {"text": "The quick brown fox jumps over the lazy dog and runs away."},
+        {"text": "A second distinct sentence with different tokens entirely here now."},
+        {"text": "Numbers one two three four five six seven eight nine ten eleven."},
+    ]
+    out = RepresentationCollapseTask(
+        config={"num_samples": 3, "use_cache": False}
+    ).evaluate(model, tok, dataset, cache=None)
+
+    # Match the task's layer set: the deepest profile point is the hooked RAW
+    # last-block output, not HF's ln_f(b_{L-1}) entry. Without this the
+    # reference differs from the task in exactly one element -- the last.
+    acts = collect_hidden_states(model, tok, dataset, num_samples=3,
+                                 layer_idx="all", replace_final_norm=True)
+
+    def ref(M, square):
+        M = np.asarray(M, dtype=np.float64)
+        M = M[np.all(np.isfinite(M), axis=1)]
+        sv = svdvals(M - M.mean(axis=0))
+        sv = sv ** 2 if square else sv
+        sv = sv[sv > 0]
+        q = sv / sv.sum()
+        return float(np.exp(-(q * np.log(q)).sum()))
+
+    keys = sorted(acts.keys())
+    assert out["erank_per_layer"] == pytest.approx(
+        [ref(acts[i].numpy(), False) for i in keys], rel=1e-6)
+    assert out["erank_sigma2_per_layer"] == pytest.approx(
+        [ref(acts[i].numpy(), True) for i in keys], rel=1e-6)
+    # The legacy misnamed key must be gone.
+    assert "erank_rawsigma_per_layer" not in out

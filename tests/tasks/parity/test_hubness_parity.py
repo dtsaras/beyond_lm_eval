@@ -22,9 +22,11 @@ verification harness using sklearn NearestNeighbors on 60 points in R^8
 """
 import numpy as np
 import pytest
+import torch
 from scipy import stats
 
 from blme.tasks.geometry.hubness import (
+    GlobalHubnessTask,
     _hubness_stats_from_occurrences,
     _gini_from_counts,
 )
@@ -81,11 +83,125 @@ def test_hubness_gini_parity():
     assert abs(_gini_from_counts(K_OCCURRENCE) - official) < TOL
 
 
-def test_zero_variance_skew_is_zero():
-    """BLME's documented special-case: constant occurrences -> skew 0."""
+def test_zero_variance_skew_is_nan_like_scipy():
+    """A CONSTANT occurrence vector has no skew: S_Nk is the standardized third
+    moment, so it is 0/0 there, and `scipy.stats.skew` returns NaN.
+
+    BLME used to special-case this to 0.0, which asserts "perfectly symmetric"
+    -- a measurement the data does not support and one that is indistinguishable
+    from a genuine symmetric distribution (adversarial review round 2,
+    2026-09-04). It now matches scipy.
+    """
+    from scipy.stats import skew as _scipy_skew
     flat = np.full(20, 3, dtype=np.int64)
     out = _hubness_stats_from_occurrences(flat, K)
-    assert out[f"hubness_k{K}_skew"] == 0.0
+    assert np.isnan(out[f"hubness_k{K}_skew"])
+    with np.errstate(invalid="ignore"):
+        assert np.isnan(float(_scipy_skew(flat)))
+
+
+
+# ---------------------------------------------------------------------------
+# Regression: neighbour ranking under a large common offset.
+#
+# Codex round 9 (2026-09-07) flagged that no test drove `evaluate()` on a
+# vocabulary sharing a strong common direction, so the suite was structurally
+# unable to see the defect it found. It was right.
+#
+# Cosine similarity is NOT translation invariant, so a common offset is a
+# genuinely different measurement -- the bug was never "the answer changed",
+# it was that the float32 DOT PRODUCT could no longer resolve the answer.
+# With every unit row nearly parallel, each u.v sits just below 1 and the
+# separating quantity 1 - u.v is obtained by cancelling two ~1.0 sums. At
+# offset 1e3 that left 41 distinct off-diagonal similarities out of 32888 and
+# put 212/257 occupancy bins wrong. Ranking direct chord distances instead
+# differences the coordinates BEFORE squaring, which is exact for nearby
+# floats, so the common component cancels harmlessly.
+# ---------------------------------------------------------------------------
+
+def _reference_occurrences(X, k):
+    """Independent float64 k-NN occurrence counts by direct chord distance.
+
+    Deliberately shares no code with the task: an explicit per-row loop, and
+    `lexsort` for the (distance, index) stable tie rule.
+    """
+    U = np.asarray(X, dtype=np.float64)
+    U = U / np.linalg.norm(U, axis=1, keepdims=True)
+    n = len(U)
+    idx = np.empty((n, k), dtype=np.int64)
+    for i in range(n):
+        d = ((U - U[i]) ** 2).sum(axis=1)
+        d[i] = np.inf                      # self-excluded
+        idx[i] = np.lexsort((np.arange(n), d))[:k]
+    return np.bincount(idx.ravel(), minlength=n).astype(np.int64)
+
+
+class _EmbeddingOnly(torch.nn.Module):
+    def __init__(self, X, dtype):
+        super().__init__()
+        self.emb = torch.nn.Embedding(*X.shape)
+        self.emb.weight.data = torch.from_numpy(X).to(dtype)
+
+    def get_input_embeddings(self):
+        return self.emb
+
+
+@pytest.mark.parametrize("offset", [0.0, 1e1, 1e3, 1e6, 1e8])
+def test_evaluate_matches_reference_under_common_offset(offset):
+    """`evaluate()` must equal the float64 reference at every common offset.
+
+    The reference is built from the float32-ROUNDED input, because that is what
+    the task is actually handed. Comparing against the un-rounded float64 array
+    would charge the task for precision the checkpoint never contained: at
+    offset 1e6 that phantom gap is 3.09e-02 in skew, and at 1e8 it is 2.92 --
+    entirely storage, nothing the ranking can recover.
+    """
+    from scipy.stats import skew as _scipy_skew
+
+    rng = np.random.default_rng(20260907)
+    X = rng.standard_normal((257, 24)) + offset
+
+    model = _EmbeddingOnly(X, torch.float32)
+    got = GlobalHubnessTask({"k_values": [K], "batch_size": 2000}).evaluate(
+        model, None, None)
+
+    seen = torch.from_numpy(X).to(torch.float32).numpy().astype(np.float64)
+    expected = _reference_occurrences(seen, K)
+
+    assert got[f"hubness_k{K}_skew"] == pytest.approx(
+        float(_scipy_skew(expected)), abs=1e-12), (
+        f"offset={offset:g}: neighbour ranking lost resolution")
+    assert got[f"hubness_k{K}_max"] == int(expected.max())
+    assert got[f"hubness_k{K}_gini"] == pytest.approx(
+        _gini_from_counts(expected), abs=1e-12)
+
+
+def test_offset_fixture_would_catch_a_dot_product_ranking():
+    """Guard on the guard: the offset fixture must actually be discriminating.
+
+    If someone reverts to normalized-dot-product ranking, the test above has to
+    fail. That only holds if the fixture is genuinely ill-conditioned for it, so
+    assert the condition directly rather than trusting the constant 1e3.
+    """
+    rng = np.random.default_rng(20260907)
+    X = rng.standard_normal((257, 24)) + 1e3
+    E = torch.from_numpy(X).to(torch.float32)
+    E = E / E.abs().amax(dim=1, keepdim=True)
+    E = E / E.norm(dim=1, keepdim=True)
+    sims = (E @ E.T).numpy()
+    off = sims[~np.eye(len(X), dtype=bool)]
+    # float32 dot products collapse this fixture to a handful of levels.
+    assert len(np.unique(off)) < 200, (
+        f"fixture no longer ill-conditioned for dot-product ranking "
+        f"({len(np.unique(off))} distinct similarities); it can no longer "
+        f"detect a regression")
+    # and the collapse must actually corrupt the ranking, not merely the values
+    dot_occ = np.bincount(
+        torch.argsort(torch.from_numpy(sims) - torch.eye(len(X)) * 1e9,
+                      dim=1, descending=True, stable=True)[:, :K]
+        .reshape(-1).numpy(), minlength=len(X))
+    seen = E.numpy().astype(np.float64)
+    assert int((dot_occ != _reference_occurrences(seen, K)).sum()) > 100
 
 
 if __name__ == "__main__":

@@ -80,6 +80,24 @@ def _make_clouds():
     }
 
 
+def _make_nondegenerate_clouds():
+    """Scenarios where the 'redundant-looking' metrics genuinely differ:
+    a layer with TWO disjoint circles separates h1_loop_layer_sum from
+    h1_total_layer_persistence, and two-cluster layers exercise the H0
+    metrics away from the constant 1.0 of the original scenarios.
+    (Not dionysus-anchored: ground truth is known by construction and
+    cross-checked against the independent reimplementation.)"""
+    base = _make_clouds()
+    circle = base["circle_all"][0]
+    line = base["no_loop"][0]
+    two_circles = np.concatenate([circle, circle + np.array([10.0, 0.0])])
+    two_lines = np.concatenate([line, line + np.array([0.0, 10.0])])
+    return {
+        "double_loop_mid": [circle, two_circles, circle],
+        "two_clusters_mid": [line, two_lines, two_lines, line],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Independent from-scratch reimplementation of the summary (different code path)
 # ---------------------------------------------------------------------------
@@ -268,7 +286,14 @@ def test_blme_matches_independent_reimplementation(name):
     blme = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
     indep = _independent_summary(clouds, n_neighbors=5, persistence_frac=0.3)
 
-    keys = [k for k in blme if not k.startswith("_meta_")]
+    # Compare on the keys the independent reimplementation defines. BLME also
+    # emits the identity-aware `zz_h1_*` family (GF(2) induced-rank matching
+    # across layers), which this reimplementation does not model; those have
+    # their own ground-truth tests. Assert coverage in that direction so a
+    # legacy key silently disappearing still fails here.
+    keys = [k for k in indep if not k.startswith("_meta_")]
+    missing = [k for k in keys if k not in blme]
+    assert not missing, f"BLME dropped reference keys: {missing}"
     max_diff = max(abs(float(blme[k]) - float(indep[k])) for k in keys)
     assert max_diff < 1e-12
 
@@ -276,6 +301,64 @@ def test_blme_matches_independent_reimplementation(name):
     fx = _fixture()["scenarios"][name]["blme_summary"]
     for k, v in fx.items():
         assert float(blme[k]) == pytest.approx(v, abs=1e-9), k
+
+
+# ===========================================================================
+# (A') Non-degenerate ground-truth anchors: metrics that the original four
+#      scenarios could not distinguish (loop multiplicity, H0 structure).
+# ===========================================================================
+def test_anchor_double_loop_separates_sum_from_persistence():
+    """Layer 1 holds TWO disjoint circles (2 loops), layers 0/2 one circle.
+    loops-per-layer = [1, 2, 1], so the loop-count SUM (4) must differ from
+    the #layers-with-a-loop count (3). A regression that conflates
+    loops.sum() with mask.sum() fails here and nowhere else."""
+    clouds = _make_nondegenerate_clouds()["double_loop_mid"]
+    loops = [h1 for _, h1 in (_layer_topology(X, 5, 0.3) for X in clouds)]
+    assert loops == [1, 2, 1]
+
+    s = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    assert s["h1_loop_layer_sum"] == 4.0
+    assert s["h1_total_layer_persistence"] == 3.0
+    assert s["h1_num_bands"] == 1.0
+    assert s["h1_max_band_length"] == 3.0
+    assert s["betti1_fraction_layers"] == 1.0
+    # H0 is non-constant too: components = [1, 2, 1].
+    assert s["h0_mean_components"] == pytest.approx(4.0 / 3.0, abs=1e-12)
+    assert s["h0_persistence_range"] == 1.0
+
+
+def test_anchor_two_clusters_h0_metrics():
+    """Middle layers split into two far-apart clusters: components per layer
+    = [1, 2, 2, 1]. Pins the H0 summary metrics away from the constant-1.0
+    degenerate regime of the original scenarios; no loops anywhere."""
+    clouds = _make_nondegenerate_clouds()["two_clusters_mid"]
+    s = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    assert s["h0_mean_components"] == 1.5
+    assert s["h0_persistence_range"] == 1.0
+    assert s["h0_first_layer_components"] == 1.0
+    assert s["h0_last_layer_components"] == 1.0
+    assert s["h1_num_bands"] == 0.0
+    assert s["h1_loop_layer_sum"] == 0.0
+    assert s["betti1_fraction_layers"] == 0.0
+
+
+@pytest.mark.parametrize("name", ["double_loop_mid", "two_clusters_mid"])
+def test_blme_matches_independent_reimpl_nondegenerate(name):
+    """(C) bit-exact independent-reimplementation parity on the
+    non-degenerate scenarios (no fixture entry: ground truth is analytic)."""
+    clouds = _make_nondegenerate_clouds()[name]
+    blme = _zigzag_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    indep = _independent_summary(clouds, n_neighbors=5, persistence_frac=0.3)
+    # Compare on the keys the independent reimplementation defines. BLME also
+    # emits the identity-aware `zz_h1_*` family (GF(2) induced-rank matching
+    # across layers), which this reimplementation does not model; those have
+    # their own ground-truth tests. Assert coverage in that direction so a
+    # legacy key silently disappearing still fails here.
+    keys = [k for k in indep if not k.startswith("_meta_")]
+    missing = [k for k in keys if k not in blme]
+    assert not missing, f"BLME dropped reference keys: {missing}"
+    max_diff = max(abs(float(blme[k]) - float(indep[k])) for k in keys)
+    assert max_diff < 1e-12
 
 
 # ===========================================================================
@@ -304,3 +387,169 @@ def test_fixture_records_parity_verdict():
     assert fx["independent_reimpl_pass"] is True
     assert fx["dionysus_anchor_pass"] is True
     assert fx["anchors"]["all_anchors_pass"] is True
+
+
+# ---------------------------------------------------------------------------
+# Identity-aware cross-layer H1 matching (GF(2) induced ranks).
+#
+# The band summary cannot distinguish "one loop persists across N layers" from
+# "N different loops, one per layer" -- both give a single band of length N.
+# These tests pin the distinction the `zz_h1_*` family exists to make.
+# ---------------------------------------------------------------------------
+
+def _circle(n, seed=None, jitter=0.01):
+    import numpy as _np
+    th = _np.linspace(0, 2 * _np.pi, n, endpoint=False)
+    X = _np.c_[_np.cos(th), _np.sin(th)]
+    if jitter:
+        X = X + jitter * _np.random.default_rng(seed).standard_normal((n, 2))
+    return X
+
+
+def test_same_loop_persists_and_shuffled_loop_does_not():
+    import numpy as np
+    from blme.tasks.topology.zigzag import _zigzag_summary
+
+    n, n_layers = 40, 6
+    circ = _circle(n, jitter=0.0)
+    rng = np.random.default_rng(0)
+
+    same = [circ + 0.01 * rng.standard_normal((n, 2)) for _ in range(n_layers)]
+    shuffled = [circ[rng.permutation(n)] + 0.01 * rng.standard_normal((n, 2))
+                for _ in range(n_layers)]
+
+    r_same = _zigzag_summary(same, n_neighbors=5)
+    r_shuf = _zigzag_summary(shuffled, n_neighbors=5)
+
+    # The legacy band summary is BLIND here: identical on both.
+    assert r_same["h1_num_bands"] == r_shuf["h1_num_bands"]
+    assert r_same["h1_max_band_length"] == r_shuf["h1_max_band_length"]
+
+    # The identity-aware family separates them.
+    assert r_same["_meta_zz_h1_survival_rate"] == pytest.approx(1.0)
+    assert r_same["zz_h1_turnover_rate"] == pytest.approx(0.0)
+    assert r_shuf["_meta_zz_h1_survival_rate"] == pytest.approx(0.0)
+    assert r_shuf["zz_h1_turnover_rate"] > 0.0
+
+
+def test_induced_rank_matches_hand_computed_homology():
+    """Direct check of the GF(2) machinery on a hand-checkable case."""
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+    from blme.tasks.topology.zigzag import (
+        _f2_rank, _fundamental_cycles, _graph_edges, _h1_persisting_across,
+    )
+
+    n = 24
+    X = _circle(n, jitter=0.0)
+    D = squareform(pdist(X))
+    eps = 0.30
+    edges = _graph_edges(D, eps)
+    edge_index = {e: i for i, e in enumerate(edges)}
+
+    # A single cycle graph on n vertices: |E| - |V| + c = n - n + 1 = 1.
+    cycles = _fundamental_cycles(edges, n, edge_index)
+    assert len(cycles) == len(edges) - n + 1
+
+    # Every returned mask must be an actual cycle: each vertex touched an
+    # even number of times (kernel of the GF(2) boundary map d1).
+    for mask in cycles:
+        deg = [0] * n
+        for e, i in edge_index.items():
+            if (mask >> i) & 1:
+                deg[e[0]] += 1
+                deg[e[1]] += 1
+        assert all(d % 2 == 0 for d in deg)
+
+    assert _f2_rank(cycles) == len(cycles)
+
+    # Same circle in both layers -> the class survives.
+    rf, rg, shared = _h1_persisting_across(D, D, eps)
+    assert (rf, rg, shared) == (1, 1, 1)
+
+    # Reviewer counterexample (2026-09-03) that the UNION construction fails
+    # and the paper's INTERSECTION construction gets right: a hexagon whose
+    # H1 class is nonzero in both layers, but whose union flag complex fills
+    # it in. Union reports 0 persisting; intersection reports 1.
+    from blme.tasks.topology.zigzag import _h1_persisting_edges
+    hexagon = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (0, 5)]
+    layer_a = hexagon + [(0, 6), (1, 6), (2, 6)]
+    layer_b = hexagon + [(3, 6), (4, 6), (5, 6)]
+    assert _h1_persisting_edges(layer_a, layer_b, 7) == (1, 1, 1)
+
+    # A different cycle on the SAME vertices -> nothing survives, even though
+    # both layers individually contain exactly one loop.
+    perm = np.random.default_rng(0).permutation(n)
+    D2 = squareform(pdist(_circle(n, jitter=0.0)[perm]))
+    rf2, rg2, shared2 = _h1_persisting_across(D, D2, eps)
+    assert rf2 == 1 and rg2 == 1
+    assert shared2 == 0
+
+
+def test_survival_rate_is_scale_stable_while_raw_counts_are_not():
+    """The raw H1 dimension of a kNN flag complex is cycle rank and grows with
+    the point count, so only the RATIO is comparable across models."""
+    import numpy as np
+    from blme.tasks.topology.zigzag import _zigzag_summary
+
+    rng = np.random.default_rng(0)
+    rates = []
+    for n in (40, 80, 160):
+        th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        circ = np.c_[np.cos(th), np.sin(th)]
+        layers = [circ + 0.01 * rng.standard_normal((n, 2)) for _ in range(6)]
+        r = _zigzag_summary(layers, n_neighbors=5)
+        rates.append(r["_meta_zz_h1_survival_rate"])
+    assert all(x == pytest.approx(1.0) for x in rates)
+
+    # And the raw count must NOT be exported as a feature.
+    r = _zigzag_summary(layers, n_neighbors=5)
+    assert "zz_h1_persisting_mean" not in r
+    assert "_meta_zz_h1_persisting_mean" in r
+
+
+def test_f2_intersect_is_a_correct_zassenhaus():
+    """GF(2) subspace intersection, against the dimension formula and by
+    explicit membership. This code had no coverage when it shipped."""
+    import numpy as np
+    from blme.tasks.topology.zigzag import _f2_intersect, _f2_rank
+
+    rng = np.random.default_rng(0)
+    n = 12
+    for _ in range(500):
+        U = [int(rng.integers(0, 1 << n))
+             for _ in range(int(rng.integers(1, 6)))]
+        W = [int(rng.integers(0, 1 << n))
+             for _ in range(int(rng.integers(1, 6)))]
+        inter = _f2_intersect(U, W, n)
+        # dim(U n W) = dim U + dim W - dim(U + W)
+        expected = _f2_rank(U) + _f2_rank(W) - _f2_rank(list(U) + list(W))
+        assert _f2_rank(inter) == expected
+        # and every returned vector really lies in both spans
+        for v in inter:
+            assert _f2_rank(list(U) + [v]) == _f2_rank(U)
+            assert _f2_rank(list(W) + [v]) == _f2_rank(W)
+
+
+def test_turnover_rate_is_bounded_and_scale_free():
+    """`zz_h1_turnover_rate` is a Jaccard distance on the two layers' H1
+    classes, so it is bounded in [0, 1] and does not grow with the point count.
+
+    Regression: dividing by `max(1, dim_a)` turned steps with no H1 class into
+    unnormalized COUNTS, and the mean went 12 -> 385 as N went 40 -> 400.
+    """
+    import numpy as np
+    from blme.tasks.topology.zigzag import _zigzag_summary
+
+    rng = np.random.default_rng(0)
+    for n in (40, 120, 400):
+        th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        circ = np.c_[np.cos(th), np.sin(th)]
+        # Alternate loop / no-loop layers: this is what produces dim_a == 0
+        # steps, the case that leaked raw counts.
+        layers = [circ + 0.01 * rng.standard_normal((n, 2)) if i % 2
+                  else rng.standard_normal((n, 2)) * 0.4
+                  for i in range(8)]
+        r = _zigzag_summary(layers, n_neighbors=5)
+        assert 0.0 <= r["zz_h1_turnover_rate"] <= 1.0
+        assert 0.0 <= r["_meta_zz_h1_survival_rate"] <= 1.0

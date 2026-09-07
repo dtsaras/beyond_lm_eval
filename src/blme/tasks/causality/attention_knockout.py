@@ -63,6 +63,27 @@ def _find_attn_module(layer):
     return None
 
 
+def _resolve_head_dim(config, in_features, num_heads):
+    """Per-head width for slicing the attention output projection.
+
+    ``num_heads * head_dim == in_features`` for standard architectures. When
+    ``in_features`` is not divisible by ``num_heads`` we fall back to the
+    config's ``head_dim`` — but ``getattr(config, "head_dim", default)`` returns
+    None when the attribute EXISTS and is None (some configs set it that way),
+    which used to make ``head_dim <= 0`` raise ``TypeError: '<=' not supported
+    between 'NoneType' and 'int'``. ``or`` guards that. Returns None when no
+    valid slicing exists (caller skips the layer).
+    """
+    if num_heads <= 0 or in_features <= 0:
+        return None
+    if in_features % num_heads == 0:
+        return in_features // num_heads
+    head_dim = getattr(config, "head_dim", None) or (in_features // num_heads)
+    if head_dim <= 0 or num_heads * head_dim > in_features:
+        return None
+    return head_dim
+
+
 def _find_out_proj(attn_module):
     """Return the output projection module (the one that consumes the
     concatenated per-head representations) and its ``in_features`` —
@@ -167,16 +188,10 @@ class AttentionKnockoutTask(DiagnosticTask):
             out_proj, in_features = _find_out_proj(attn)
             if out_proj is None or in_features <= 0:
                 continue
-            if in_features % num_heads != 0:
-                # Fall back to the config's head_dim if the projection
-                # uses a non-standard stride.
-                head_dim = getattr(
-                    model.config, "head_dim", in_features // num_heads
-                )
-                if head_dim <= 0 or num_heads * head_dim > in_features:
-                    continue
-            else:
-                head_dim = in_features // num_heads
+            head_dim = _resolve_head_dim(getattr(model, "config", None),
+                                         in_features, num_heads)
+            if head_dim is None:
+                continue
             layer_targets.append((l_idx, attn, out_proj, head_dim))
 
         if not layer_targets:

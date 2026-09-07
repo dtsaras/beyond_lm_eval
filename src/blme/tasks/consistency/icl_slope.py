@@ -119,7 +119,14 @@ class ICLSlopeTask(DiagnosticTask):
 
         with torch.no_grad():
             for item in items:
+                n_demos = len(item.get("demos", []))
                 for k in shot_counts:
+                    if k > n_demos:
+                        # Can't build a genuine k-shot prompt — demos[:k] would
+                        # silently truncate and mislabel the metric. Skip so this
+                        # k stays empty (-> NaN) rather than duplicating the
+                        # max-available-shot NLL.
+                        continue
                     prompt, target = _build_prompt(item, k)
                     res = score_continuation(model, tokenizer, prompt, target)
                     if res is None:

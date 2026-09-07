@@ -53,31 +53,13 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                     usable.append(item)
 
         if len(usable) < 1:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("coastalcph/mpararel", "en", split="train")
-                from collections import defaultdict
-                grouped = defaultdict(list)
-                for item in dset:
-                    grouped[item["relation_id"]].append(item["text"])
-                relations = list(grouped.keys())
-                num_rel = len(relations)
-                usable = []
-                for i in range(min(num_samples, 20)):
-                    rel = relations[i % num_rel]
-                    other_rel = relations[(i + 1) % num_rel]
-                    if len(grouped[rel]) >= 2 and len(grouped[other_rel]) >= 1:
-                        usable.append({
-                            "text1": grouped[rel][0],
-                            "text2": grouped[rel][1],
-                            "unrelated": grouped[other_rel][0],
-                        })
-            except Exception as e:
-                logger.info(
-                    f"Warning: mpararel unavailable ({type(e).__name__}); "
-                    "using bundled triples."
-                )
-                usable = _BUNDLED[:num_samples]
+            # NOTE: coastalcph/mpararel is NOT a usable source here — it has no
+            # 'en' config (only 'default') and its columns are relation/template/
+            # query, not relation_id/text — so the old load_dataset branch always
+            # raised and silently fell through to these bundled triples anyway.
+            # Use the bundled triples directly rather than making a failing
+            # network call on every dataset=None run.
+            usable = _BUNDLED[:num_samples]
 
         samples = list(usable)[:num_samples]
         if len(samples) < 1:
@@ -104,6 +86,9 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                 out2 = model(**inputs2, output_hidden_states=True)
                 out3 = model(**inputs3, output_hidden_states=True)
 
+                # post-final-norm: DELIBERATELY post-norm. These are SENTENCE
+                # EMBEDDINGS compared to each other -- the model's output
+                # representation is the object, not an intermediate block's.
                 rep1 = out1.hidden_states[-1][0, -1].float()
                 rep2 = out2.hidden_states[-1][0, -1].float()
                 rep3 = out3.hidden_states[-1][0, -1].float()

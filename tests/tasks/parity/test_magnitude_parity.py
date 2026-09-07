@@ -53,16 +53,14 @@ def _fixture() -> dict:
 # Locate an OFFICIAL magnipy checkout.
 # ---------------------------------------------------------------------------
 def _find_magnipy_dir():
-    cand = os.environ.get("BLME_MAGNIPY_DIR")
-    if cand and (Path(cand) / "magnipy" / "magnitude" / "compute.py").exists():
-        return cand
-    # scratchpad clone used during development
-    scratch = (
-        "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/"
-        "42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/refrepos/magnipy"
-    )
-    if (Path(scratch) / "magnipy" / "magnitude" / "compute.py").exists():
-        return scratch
+    # Documented env var, then the durable local-clone convention
+    # (~/.cache/blme-refrepos/, git clone https://github.com/aidos-lab/magnipy).
+    for cand in (
+        os.environ.get("BLME_MAGNIPY_DIR"),
+        str(Path.home() / ".cache/blme-refrepos/magnipy"),
+    ):
+        if cand and (Path(cand) / "magnipy" / "magnitude" / "compute.py").exists():
+            return cand
     return None
 
 
@@ -115,6 +113,7 @@ def _load_magnipy_refs(magnipy_dir):
 from blme.tasks.geometry.magnitude import (  # noqa: E402
     _magnitude,
     _magnitude_dimension,
+    _magnitude_summary,
     _median_heuristic_scale,
 )
 
@@ -127,6 +126,45 @@ def _dist_matrix(X):
     D = np.sqrt(d2)
     np.fill_diagonal(D, 0.0)
     return D
+
+
+def test_median_heuristic_includes_zero_distances():
+    """Campaign-3 DISCREPANCY: _median_heuristic_scale pre-filtered d>0, but
+    magnipy's median_heuristic_from_distances medians ALL upper-triangle
+    entries (including zeros between duplicate points). On a duplicate-heavy
+    cloud the two disagree; BLME must match magnipy."""
+    rng = np.random.default_rng(1)
+    base = rng.standard_normal((6, 3))
+    # 12-point cloud where half the points are exact duplicates -> zero
+    # off-diagonal distances appear in the upper triangle.
+    X = np.vstack([base, base])
+    D = _dist_matrix(X)
+    iu = np.triu_indices(D.shape[0], k=1)
+    magnipy_scale = 1.0 / np.sqrt(np.median(D[iu]) / 2.0)  # ALL off-diagonal
+    got = _median_heuristic_scale(D)
+    assert got == pytest.approx(magnipy_scale, rel=1e-12)
+    # and it must DIFFER from the old d>0-filtered median on this cloud
+    pos = D[iu][D[iu] > 0]
+    old = 1.0 / np.sqrt(np.median(pos) / 2.0)
+    assert abs(got - old) > 1e-6, "test cannot discriminate on this cloud"
+
+
+def test_magnitude_med_scale_evaluated_at_t_med():
+    """Campaign-3 DISCREPANCY: magnitude_med_scale was |tX| at the nearest
+    SAMPLED ladder scale (~0.774*t_med at defaults), not at the median-
+    heuristic scale t_med it is documented as. It must be _magnitude(D, t_med)."""
+    rng = np.random.default_rng(2)
+    D = _dist_matrix(rng.standard_normal((30, 5)))
+    n_scales, scale_span = 10, 10.0
+    summary = _magnitude_summary(D, n_scales, scale_span)
+    t_med = summary["magnitude_median_scale"]
+    assert summary["magnitude_med_scale"] == pytest.approx(_magnitude(D, t_med), rel=1e-12)
+    # and it must differ from the old nearest-ladder value
+    ts = np.geomspace(t_med / scale_span, t_med * scale_span, n_scales)
+    nearest = float(ts[int(np.argmin(np.abs(ts - t_med)))])
+    assert abs(summary["magnitude_med_scale"] - _magnitude(D, nearest)) > 1e-6, (
+        "test cannot discriminate t_med from the nearest ladder scale"
+    )
 
 
 needs_magnipy = pytest.mark.skipif(
@@ -273,3 +311,47 @@ def test_fixture_records_parity_verdict():
     assert anchors["single_point"]["pass"] is True
     assert anchors["two_points_large_t"]["pass"] is True
     assert anchors["n_separated_large_t"]["pass"] is True
+
+
+def test_median_heuristic_matches_magnipy_including_duplicates():
+    """Campaign-4 B5: the median-heuristic scale was never reference-pinned,
+    which hid a zero-distance pre-filter deviation on duplicate points
+    (BLME 1.0 vs magnipy 1.1547 on the probe cloud). BLME now matches
+    magnipy's median over ALL upper-triangle distances."""
+    scales = pytest.importorskip("magnipy.magnitude.scales")
+    from scipy.spatial.distance import pdist, squareform
+    from blme.tasks.geometry.magnitude import _median_heuristic_scale
+
+    rng = np.random.default_rng(0)
+    D_clean = squareform(pdist(rng.standard_normal((30, 5))))
+    assert _median_heuristic_scale(D_clean) == pytest.approx(
+        float(scales.median_heuristic_from_distances(D_clean)), abs=0.0
+    )
+
+    # Duplicate-point probe cloud from the campaign finding.
+    X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+    D_dup = squareform(pdist(X))
+    t_blme = _median_heuristic_scale(D_dup)
+    t_ref = float(scales.median_heuristic_from_distances(D_dup))
+    assert t_blme == pytest.approx(t_ref, abs=0.0)
+    assert t_blme == pytest.approx(1.1547005383792517, abs=1e-12)
+
+
+def test_duplicate_cloud_magnitude_matches_magnipy():
+    """Duplicate points make zeta singular; both BLME and magnipy fall back
+    to a perturbed/pinv solve. Pin the duplicate-cloud magnitude against
+    live magnipy (campaign measured 2.209641094842 from both)."""
+    magnipy_compute = pytest.importorskip("magnipy.magnitude.compute")
+    from scipy.spatial.distance import pdist, squareform
+    from blme.tasks.geometry.magnitude import _magnitude
+
+    X = np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+    D = squareform(pdist(X))
+    t = 1.0
+    got = _magnitude(D, t)
+    ref = float(np.sum(magnipy_compute.compute_magnitude_until_convergence(
+        D * t, ts=[1.0], method="cholesky", perturb_singularities=True,
+    )[0])) if hasattr(magnipy_compute, "compute_magnitude_until_convergence") else None
+    if ref is None:
+        pytest.skip("magnipy API changed; update reference call")
+    assert got == pytest.approx(ref, rel=1e-9)

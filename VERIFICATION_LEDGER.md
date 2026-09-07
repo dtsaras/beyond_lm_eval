@@ -126,15 +126,15 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `dynamics_gradient_flow` | PROXY_OK | refined-adaptation | 1211.5063 | (Pascanu et al. 2013) | MATCH |
 | `dynamics_interpolation` | CITATION_FIX | proxy-only | 1609.04468 ⚠ | scipy/Shoemake 1985 | MATCH |
 | `dynamics_sharpness` | FAITHFUL | refined-adaptation | 2010.01412 | amirgholami/PyHessian | MATCH |
-| `dynamics_stability` | CITATION_FIX | refined-adaptation | 1804.09692 ⚠ | (Wendlandt et al. 2018) | MATCH |
+| `dynamics_stability` | CITATION_FIX | proxy-only (label corrected 2026-07, was recorded refined-adaptation at audit time) | 1804.09692 ⚠ | (Wendlandt et al. 2018) | MATCH |
 | `geometry_categories` | PROXY_OK | proxy-only | — | scipy.spatial.distance | MATCH |
 | `geometry_cka` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_collapse` | CITATION_FIX | refined-adaptation | 2110.09348 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
-| `geometry_contextualization` | DISCREPANCY→fixed | formula-faithful | 1909.00512 | kawine/contextual (analyze.py) | fixed→MATCH |
+| `geometry_contextualization` | DISCREPANCY→fixed | refined-adaptation (ledger label corrected 2026-07; shipped metadata was always refined-adaptation) | 1909.00512 | kawine/contextual (analyze.py) | fixed→MATCH |
 | `geometry_correlation_dimension` | CITATION_FIX(refuted) | formula-faithful | — | CSchoel/nolds | MATCH |
 | `geometry_hsic` | VERIFIED_PARITY | parity-ready | 1905.00414 | google-research/representation_similarity | MATCH |
 | `geometry_hubness` | CITATION_FIX | parity-ready | (TKDE 2014) ⚠ | VarIr/scikit-hubness | MATCH |
-| `geometry_intrinsic_dim` | CITATION_FIX | parity-ready | 1803.06992 ⚠ | scikit-dimension | MATCH |
+| `geometry_intrinsic_dim` | CITATION_FIX | formula-faithful (label deliberately conservative: mu<=1 pre-filter, not bit-exact vs skdim) | 1803.06992 ⚠ | scikit-dimension | MATCH |
 | `geometry_isoscore` | VERIFIED_PARITY | parity-ready | 2108.07344 | bcbi-edu/p_eickhoff_isoscore | MATCH |
 | `geometry_lid` | FORMULA-FAITHFUL (agent's VERIFIED_PARITY refuted) | formula-faithful | 1801.02613 | xingjunm/lid_adversarial_subspace_detection / skdim | `-k` variant, ~k/(k-1) off skdim |
 | `geometry_lipschitz` | PROXY_OK | proxy-only | 1802.05957 | avirmaux/lipEstimation | MATCH |
@@ -143,14 +143,14 @@ Legend: ⚠ on arXiv = recorded citation was wrong (corrected above). Parity MAT
 | `geometry_mp_bulk_deviation` | VERIFIED_PARITY | parity-ready | math/0403022 | AlejandroSantorum/scikit-rmt | MATCH |
 | `geometry_neural_collapse` | VERIFIED_PARITY | formula-faithful | 2008.08186 | neuralcollapse/neuralcollapse | MATCH |
 | `geometry_perplexity` | FAITHFUL | formula-faithful | — | HF transformers perplexity | MATCH |
-| `geometry_positional_decay` | PROXY_OK | proxy-only | 2104.09864 ⚠ | (RoPE lit.) | MATCH |
+| `geometry_positional_decay` | PROXY_OK | proxy-only | 2104.09864 (verified correct 2026-07; stale flag removed) | (RoPE lit.) | MATCH |
 | `geometry_prediction_alignment` | PROXY_OK | proxy-only | 2303.08112 | AlignmentResearch/tuned-lens | MATCH |
 | `geometry_representation_sensitivity` | PROXY_OK | proxy-only | — ⚠ | torch.autograd | MATCH |
 | `geometry_rsa` | FAITHFUL | refined-adaptation | — | rsagroup/rsatoolbox | MATCH |
 | `geometry_schatten` | DISCREPANCY→fixed | refined-adaptation | 2410.10672 ⚠ | MLGroupJLU/MatrixNuclearNorm | fixed→MATCH |
 | `geometry_spectral` | PROXY_OK | refined-adaptation | 1810.01075 | CalculatedContent/WeightWatcher | MISMATCH (proxy) |
-| `geometry_svd` | FAITHFUL | refined-adaptation | 1909.00512 | EUSIPCO 2007 (eff. rank) | MATCH |
-| `geometry_tokenizer_efficiency` | CITATION_FIX | formula-faithful | 2012.15613 ⚠ | Rust et al. 2021 (ACL) | MATCH |
+| `geometry_svd` | FAITHFUL | refined-adaptation | 1909.00512 | EUSIPCO 2007 (eff. rank) | MATCH | *(avg_cosine_similarity historically deviated — centered states vs Eq. 4 raw; fixed + pinned in campaign-4 B5)*
+| `geometry_tokenizer_efficiency` | CITATION_FIX | proxy-only (ledger label corrected 2026-07, matches task_metadata) | 2012.15613 ⚠ | Rust et al. 2021 (ACL) | MATCH |
 | `geometry_trajectory_curvature` | VERIFIED_PARITY | parity-ready | 2311.04930 | Hosseini & Fedorenko 2023 | MATCH |
 | `geometry_unembedding` | CITATION_FIX | proxy-only | 2503.21073 ⚠ | EUSIPCO 2007 (eff. rank) | MATCH |
 | `geometry_weight_norms` | VERIFIED_PARITY | formula-faithful | 1901.08276 | CalculatedContent/WeightWatcher | MATCH |
@@ -292,3 +292,306 @@ The remaining ~28 `proxy-only`/`refined-adaptation` tasks — geometry (categori
 - **Value-changing / structural changes acted on:** `induction_heads` fixed to reproduce TransformerLens (→ regen); `attention_graph` citation corrected + `attention_rollout` added; citation/label tightenings for lipschitz, spectral, knowledge_neurons, edge_attribution; sae-lens API-drift flagged.
 - **Study regeneration required before the paper trusts these features:** `induction_score`/`prefix_match_score_*` (changed by the fix) + all 8 new-task feature groups (newly emitted). Everything else is additive test coverage / labels / citations with no feature-value change.
 - **Method:** every agent artifact (verify script + parity test) was re-run and line-audited by the lead; no `src/blme` change was made by any agent; heavy references ran in throwaway venvs so BLME gained **no** new dependency.
+
+## Campaign 4 — absolute-correctness batches (2026-07-10 →)
+
+Scope: the 47 structural-paper tasks (geometry/topology/dynamics/repe), resolving every
+standing Campaign-3 finding to the evidence standard in the campaign plan (official-code
+parity / analytic anchors / disclosed adaptations / no false attribution), with per-paper
+notes in `docs/tasks_<category>.md` and the paper appendix reconciled to the code.
+
+### B1 — Topology (5/5 tasks CLOSED) + verification infra
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `topology_homology` | ripser backend; GUDHI cross-backend ≤6.2e-8; scipy-MST H0 ≤9.6e-8; analytic anchors exact | dup-layer bug fixed (`d4daa1a`, prior session); Naitzat venue ICLR→JMLR in docstring; **new**: mean-pairwise-distance-normalized summaries emitted (paper tab:normalization claim now true in code); relation pinned in tests |
+| `topology_betti_curve` | triple-engine (networkx / GF(2) reduction / GUDHI) 0 mismatches; ground-truth anchors | zero-weight-edge bug fixed (`d4daa1a`, prior session); derived evaluate() stats now numerically pinned (was source-grep only); placeholder pseudo-citation removed; stale kNN comment corrected |
+| `topology_persistence_entropy` | executed giotto-tda 0.6.2 parity 2.7e-15 / 203 cases (C3); live scipy base-2 guard (gtda's own kernel) | 2 docstring citations fixed (wrong author set on the 2016 paper; "Entropy 2019" → Pattern Recognition 107:107509, 2020); target_layers deduped; **new**: relative PE (/log2 m) emitted, matching the appendix claim |
+| `topology_persistence_landscape` | persim 0.3.8 parity: single-bar + **new multi-bar K=4** case (~9e-16, k-selection sort now exercised); brute-force Bubenik reimpl 0.0 | docstring metric list corrected to actual keys; target_layers deduped |
+| `topology_zigzag_persistence` | 3-way: analytic anchors + recorded dionysus barcode + independent reimpl <1e-12, incl. **new non-degenerate scenarios** (two disjoint circles; two clusters) that separate `h1_loop_layer_sum` from `h1_total_layer_persistence` and exercise non-constant H0 | coverage-only findings closed; certification unchanged (declared faithful proxy) |
+
+Infra closed in B1: the 3 reference-parity tests (phd/lipschitz/magnitude) now fall back to
+the durable `~/.cache/blme-refrepos/` convention (cloned: GPTID@8c8759e,
+lipEstimation@336b6cc, magnipy@7d49b90) and **run green, not skip** (90 passed / 0 skipped
+with `tests/test_common.py`); `magnipy` pip-installed for the live half; giotto-tda has no
+py3.12 wheel — documented in REPRODUCE.md (scipy guard is the same kernel); unguarded HF
+tokenizer download in `tests/test_common.py` now skips cleanly offline.
+
+Paper-side reconciliation (B1): appendix `metrics_topology.tex` — homology definition now
+cites Zomorodian-Carlsson for the computation and states both raw + normalized summaries;
+PE formula states log2 + relative-PE normalization (+ Atienza citation); Betti entry now
+describes the actual geodesic-kNN construction, discloses the Eirene→ripser adaptation, and
+the SR formula was corrected to match the code (`late/early`, not `1 − late/early`) with the
+hypothesis reworded; `appendix_normalization.tex` gained the PE row; `references.bib`:
+naitzat2020topology venue fixed (ICLR→JMLR), rucco2016 entry type fixed, zomorodian2005computing
++ atienza2020stability added. Feature-value impact: **none to existing keys** — B1 only adds
+new `_norm` keys (regen will pick them up); the two prior-session bug fixes (d4daa1a) already
+required regen for ≤2-layer models' homology/betti features.
+
+### B2 — RepE (4/4 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `repe_task_vectors` | direction kernel == official RepE ClusterMeanRepReader (0.0 in fp64 fixture; ≤4.5e-7 rel e2e on distilgpt2); law-of-cosines analytic identity | PAPERS.md Ilharco author list completed (Gururangan restored); **new**: sqrt(d_model)-normalized norms emitted (appendix tab:normalization claim now true in code); appendix definition corrected (cosine is pos-vs-neg class means, NOT adjacent-layer task vectors) |
+| `repe_concept_separability` | per-layer AUC/acc == sklearn cross_val_score to 0.0 (controlled model); planted 20σ concept → AUC exactly 1.0; official PCA-LAT kernel recovers planted direction on same activations | **BUG fixed**: NaN layer poisoned max_auc_layer/max_auc/mean_auc → nan-aware `_auc_summary` + all-NaN error (regression test); **BUG fixed**: string labels crashed np.bincount → binary-int validation with error dict (regression test); doc + appendix reworded: held-out LR-CV probe, not PCA/LAT reading vector |
+| `repe_steering_effectiveness` | per-layer KL == fp64 KL(base‖steered) reference ≤1.7e-6; α=0 → KL≈0 analytic; hook == official RepE linear_comb/token_pos="end" | **BUG fixed**: bundled-pair fallback unreachable in default pipeline (core always passes text corpus) — task errored on EVERY study run, 0 steering columns in feature matrix; now falls back like siblings + mixed datasets error explicitly (regression tests); **BUG fixed**: in-place mutation of shared corpus dicts → deep-copy (regression test); dead code removed; success-rate denominator (≤5 sampled layers) documented; appendix normalization claim was fabricated ("std-dev units") → corrected to nats/fraction |
+| `repe_refusal_direction` | direction == official andyrdt get_mean_diff exactly (0.0, |cos|=1); official hook mechanism live vs BLME ≤5.9e-9; AUC/gap == independent recomputation exactly | DOC_GAP fixed: docstring promised a `per_layer` key evaluate() deliberately omits → documents actual depth-quantile outputs; appendix definition now states the held-out CV protocol |
+
+Feature-value impact: existing keys unchanged EXCEPT `repe_steering_effectiveness` now
+produces metrics in the default pipeline (previously all-error → the regen gains steering
+columns for the first time) and `repe_task_vectors` gains `*_normalized` keys. Suite: 102
+passed (test_repe + 3 repe parity files) before the normalized-norms addition; rerun after.
+Paper-side: `metrics_repe.tex` all four entries reconciled; `turner2023steering` added to
+references.bib; AUC range row fixed in `appendix_normalization.tex`.
+
+### B3 — Dynamics (6/6 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `dynamics_sharpness` | power iter == exact eigh <1e-9 (f64), == pip PyHessian <1e-5; NEW negative-dominant anchor (diag(-5,3) → **-5**, pins the signed-Rayleigh fix `2d01ae0`); SAM == analytic ρ‖θ‖+ρ²/2 exactly | Hutchinson citation fixed ('Bai & Demmel 1996' doesn't exist → Hutchinson 1990; Bai, Fahey & Golub 1996); SAM extracted to `_sam_sharpness` helper; parity tests now import the REAL helpers (were transcriptions of the pre-fix loop); **probe vectors now seeded** (config `seed`) — trace/top-eig were irreproducible run-to-run; real-evaluate() determinism test added |
+| `dynamics_gradient_flow` | norms == f64 central finite differences 1.1e-7 rel; entropy == scipy exact; slope == linregress 3e-17; analytic anchors | module docstring corrected (described the legacy argmax-logit metric and raw-index slope; code ships CE-loss + normalized depth); Pascanu section ref fixed in test docstring (Sec 1.1/2, not 3.1) |
+| `dynamics_coe` | == verbatim official CoEScoreInfo ≤1.9e-9 on Z_Mag≠1 chains | docstring corrected: M/A are the paper's Eq. 2 (not Eq. 1); CoE-C stated as the OFFICIAL normalized form, noting the paper is 3-way inconsistent (prose raw/raw, Alg-2 norm-mag/raw-ang, code norm/norm); false inline claim ('matched neither...') reworded; NEW Z_Mag≠1 regression test (old fixture had Z_Mag=1, masking the Eq. 3 normalization) |
+| `dynamics_interpolation` | _slerp == official dribnet/plat 8.9e-16 / 140 cases; e2e entropies == independent f64 ≤8.1e-6 | hang fixed previously (`c2911bf`); NEW endpoint-invariant test (lerp≡slerp entropy at α=0,1) pins the entropy kernel; White 2016 slerp provenance recorded in metadata/docs |
+| `dynamics_stability` | 3 independent numeric routes diff 0.0; self-reference analytic anchor exactly 1.0/0.0 | NEW reference_model-branch test (was zero coverage); ledger cert label corrected (proxy-only, not refined-adaptation); Wendlandt 2018 inspiration recorded; HELM date fixed in PAPERS.md (2022, not 2024) |
+| `dynamics_generation_diversity` | Self-BLEU == verbatim Texygen calc_bleu 2.8e-17; distinct-n == Li formula, 600 checks diff 0.0 | seed crash fixed previously (`7f9ba4c`) + FakeModel now rejects unknown generate() kwargs; Texygen author list fixed in PAPERS.md (last author Yong Yu, + SIGIR 2018) |
+
+Additional B3 finding (fixed): `dynamics_sharpness` was DEAD in the default
+pipeline — it needs second-order autograd (eager attention), but core's
+force-eager set only covered attention-reading tasks, so on a default (SDPA)
+model load the task always returned its SDPA error. `_DOUBLE_BACKWARD_TASKS`
+added to the force-eager union (+ infrastructure regression test); verified
+end-to-end on gpt2 via the default pipeline.
+
+Test-infra note (B3): conftest `DummyTokenizer` produced RANDOM ids on every call,
+making any output that depends on tokenized inputs irreproducible in tests — now
+deterministic (crc32-of-text-seeded local generator; also stops the tokenizer from
+consuming the global RNG). Paper-side: dynamics catalogue one-liners corrected
+(gradient_flow was described as an input-output Jacobian norm; stability as
+hidden-state noise injection — both wrong). Feature-value impact: sharpness
+trace/top-eig now deterministic per seed (values will shift once at regen, then be
+stable); everything else unchanged.
+
+Known pre-existing failures (out of campaign scope, per user 2026-07-10):
+`tests/tasks/test_interpretability.py::test_superposition_index` (11 mock
+architectures) and `test_task_results_independent_of_global_rng[...superposition...]`
+(same np.place dtype-cast root cause) fail at HEAD (numpy 'safe' cast TypeError in
+`superposition.py:47 _multimodality_score`, float64 vals into float32 arr via
+np.place) — interpretability family, deferred to the follow-up mech-interp
+paper. Full-suite status at B3 commit: 1217 passed, 11 failed (all this one
+test), 4 skipped.
+
+### B4 — Geometry: weights & spectra (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_spectral` | Hill kernel == weightwatcher-0.7.7 at forced x_min (α_σ = 2α_λ−1 identity exact); planted-spectrum anchors | stable-rank citation fixed (Bartlett 2017 NEVER defines it → Rudelson-Vershynin 2007 / Neyshabur 2018, in docstring + test); NEW real-task anti-drift test (parity file never imported blme); PAPERS.md Martin-Mahoney conflation split (1901.08278 SDM 2020 ≠ Martin-Peng-Mahoney Nat Comms 2021, Peng restored); fixture k=floor text fixed; appendix now discloses the singular-value-Hill proxy relation |
+| `geometry_weight_norms` | analytic planted-singular-value parity ≤1.2e-6; pip weightwatcher stable_rank agreement 9.2e-5 rel | 3-D fused-MoE bug fixed (prior session, slicing); docstring norm_uniformity clamp documented; cert reconciled ledger↔metadata → formula-faithful |
+| `geometry_mp_bulk_deviation` | closed-form/quad CDF parity ≤2.3e-5; BBP threshold analytic | both C3 BUGs fixed (prior session): γ>1 KS zero-atom handling (was ~1−1/γ constant) + γ=1 CDF singularity (was err 0.59); γ≥1 branch now regression-tested |
+| `geometry_hubness` | kernel == scikit-hubness line-for-line; NEW e2e evaluate() pin vs independent full-argsort numpy reference (self-mask regression guarded) | Tomašev title fixed in PAPERS.md ('Clustering' restored); k-occurrence wording fixed in docs; radovanovic2010hubs added to paper bib |
+| `geometry_lipschitz` | analytic 4-layer case exact; distilgpt2 == numpy reference; official lipEstimation power method run live | mean-vs-max aggregation DISCREPANCY resolved & documented (lipschitz_max = max over layers of token-means); docs \"How\" corrected (was described as input-space neighbor ratios) |
+| `geometry_schatten` | normalize+MNN == official MNN.py verbatim (0.0); NEW e2e per-sentence pipeline pin incl. the mnn/T fix (reverting /T passed all 31 tests before) | 'sqrt(D)' comment → d^(1/p); PAPERS.md checklist Wei 2025→Yusupov 2025; arXiv:2509.23024 author list corrected (Li, Agrawal, Ghosh, Teru, Santoro, Lajoie, Richards) |
+| `geometry_matrix_entropy` | NEW dedicated parity file vs verbatim official Diff-eRank fp64 transcription (≤1e-5, ln2 analytic anchor, mutant-discrimination check) — was the only parity-ready task with NO external-reference test | 512/128 cache/fresh truncation DISCREPANCY fixed (prior session, unified 512; official 2048 documented); appendix definition corrected (row-normalization step was omitted; now cites Wei et al.) |
+| `geometry_unembedding` | erank == f64 EUSIPCO re-derivation 5.4e-6 rel; purity == independent reference 1e-10 (C3); NEW exact orthogonal-cluster purity==1.0 anchor | tasks_geometry.md §17 rewritten (described angles/norms vs hidden states — the task touches neither); mean-centering now stated in PAPERS.md + paper appendix |
+
+### B5 — Geometry: dimension & diversity (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_svd` | erank/PR/AUC analytic (exact singular values, ≤1e-13); Roy-Vetterli Def. 1 verbatim | avg_cosine_similarity DISCREPANCY fixed (prior session): now Ethayarajh Eq. 4 on RAW states with self-pair rejection (centered version read ~0 even on gpt2's 0.973-anisotropy layer); B5 added the exact pin in comprehensive parity (was bound-only) + appendix/metadata/docs updated to the raw-state semantics (interpreting_results thresholds are now reachable) |
+| `geometry_isoscore` | Algorithm 1/Eq. 4.1 exact; k-of-n analytic anchors 2.2e-16; ≤4e-8 vs official IsoScore 2.0.1 | NEW live-package cases incl. the untested N<d zero-padding branch (9e-9); Rayne author initial fixed |
+| `geometry_lid` | _lid_mle bit-exact (0.0) vs official xingjunm mle_batch; pipeline ≤4.3e-7 | 2 CITATIONs fixed: fabricated Levina-Bickel title + the −k formula is Ma et al. 2018 Eq. 4 (not L-B, whose canonical form is −(k−1)) |
+| `geometry_intrinsic_dim` | bit-identical (0.0) to skdim _TwoNN transcription on analytic Pareto samples | fabricated "Fig. 3" sub-1-estimate attribution removed (paper never discusses it; honest rationale = Pareto support); ledger cert reconciled to formula-faithful; stale PAPERS.md weak-citation rows dropped |
+| `geometry_correlation_dimension` | matches official nolds.corr_dim (live) after removing nolds' self-match artifact | REPOSITORIES.md pointed at a NONEXISTENT giotto-tda CorrelationDimension → nolds/skdim; 4 stale pre-extraction line references updated |
+| `geometry_phd_dimension` | seed-matched bit-exact (0.0) vs official GPTID, default + non-default schedules + α=0.5 | docstring inversion formula was mathematically wrong (α/(α−m) → α/(1−m)); GPTID's α-independent 1/(1−m) noted; refrepo path fixed in B1 so parity RUNS |
+| `geometry_magnitude` | bit-exact vs 5 official magnipy paths (≤2.8e-14) + Leinster line closed form (8.9e-16) | BUG fixed: bare np.trapezoid crashed on numpy 1.x (REPRODUCE pins numpy<2) → lazy lookup + NEW source-guard test; 2 DISCREPANCIES fixed (prior session, now reference-pinned live vs magnipy in B5): median-heuristic includes zero distances (duplicate clouds), med_scale = |tX| AT t_med |
+| `geometry_vendi_score` | bit-exact vs official score_K/score_X (live pip) | docstring's false "unbiased estimate" claim → deterministic size-CAPPED estimate (VS ≤ max_points, eye(1000)@512 → 512 not 1000) |
+
+Docs: tasks_geometry.md gained paper summaries + verification for the 5 existing
+sections and NEW sections for magnitude/vendi/phd (§28–30; cknna + procrustes
+follow in B6). Paper appendix: svd cosine entry now states the raw-state Eq. 4
+sampler; isoscore catalogue row corrected (was described as a "geometric-mean
+eigenvalue ratio" — it is the normalized covariance-spectrum-defect score).
+Feature-value impact: magnitude AUC now computable under numpy 1.x; the three
+prior-session value-changing fixes (svd cosine, magnitude median/med-scale)
+regenerate with the pending rerun.
+
+### B6 — Geometry: similarity & depth profiles (8/8 tasks CLOSED)
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_cka` | CONFIRMED_CORRECT (C3): executed ACTUAL official Demo.ipynb — fixture bit-identical, BLME ≤1.8e-8 | notes/metadata provenance only |
+| `geometry_rsa` | CONFIRMED_CORRECT (C3): all 6 outputs == from-scratch Spearman AND rsatoolbox to 1.1e-16 | notes/metadata provenance only |
+| `geometry_procrustes_linearity` | CONFIRMED_CORRECT (C3): diff 0 vs ACTUAL pip llm_microscope 0.0.7 incl. rank-deficient + exact-linear anchor | NEW tasks_geometry.md section (§32) |
+| `geometry_cknna` | bit-exact vs official platonic-rep metrics.cknna @dcd76ba (C2) | B6: `_l2_normalize` preprocessing now covered (fixtures were pre-normalized — dropping it passed everything) + unnormalized full-pipeline equality; `distance_agnostic` documented non-functional (crashes in official code too) → explicit NotImplementedError; "identical inputs give 1.0" docstring corrected (~0.9999 with unbiased HSIC); NEW section §31 |
+| `geometry_hsic` | nHSIC == verbatim Kornblith cka() + explicit-H Gretton Def. 2 (3.3e-15) | B6 REFACTOR: evaluate() now calls the parity-pinned `_nhsic_from_grams` kernel (production path previously duplicated the formula inline while only an unused wrapper was pinned); docstring + docs + paper appendix corrected: anchor = FIRST BLOCK output, not input embedding |
+| `geometry_collapse` | erank == verbatim Roy-Vetterli + svdvals; analytic anchors exact | B6: max_drop/max_drop_layer now pinned (sign flip passed before); Queipo-de-Llano restored as first author (docstring/metadata/PAPERS.md); FABRICATED PAPERS.md row deleted (Thilak/Maddox + a physics arXiv id, cited nowhere in code); top-23→22; paper's collapse_ratio formula fixed (said r(L)/max, code is min/max) |
+| `geometry_neural_collapse` | NC1 == officially-RUN rhubarbwu/neural-collapse (diff 0.0) | docstring NC2-ETF proxy corrected (mean-absolute Fig. 4 measure, not "standard deviation"/Fig. 3); Eq. 3-4 pinpoint fixed (§2.9/Fig. 6, not §2.3); dead import removed; NEW behavioral evaluate() test (was string-guard only) |
+| `geometry_trajectory_curvature` | angle kernel == official curvature_utils.py 8.9e-16; aggregation == paper mean-of-per-sentence-means | DISC fixed (prior session) + NEW dedicated parity file with variable-length trajectories that DISCRIMINATE pooled vs per-sentence aggregation; docstring's false baseline-mismatch claim removed (cache layer 1 == paper L0) |
+
+Docs: tasks_geometry.md now covers all 32/32 geometry tasks (cknna §31 +
+procrustes §32 added). Feature-value impact: trajectory_curvature aggregation
+(prior session) regenerates with the rerun; hsic refactor is numerically
+identical; everything else doc/test-only.
+
+### B7 — Geometry: corpus & behavioral (8/8 tasks CLOSED) — CAMPAIGN COMPLETE
+
+| Task | Evidence | Batch actions |
+|---|---|---|
+| `geometry_perplexity` | NEW parity file: overall/rare/freq PPL + BPC reconstructed independently (f64 log-softmax, (count,id) bucket sort) ≤1e-4 on gpt2 | both C3 BUGs fixed (prior session) + now regression-pinned: BOS-tokenizer BPC desync (~13% low) via a BOS-emulating wrapper tokenizer; empty-text crash via a mixed corpus test; rare/freq buckets pinned (only finiteness-checked before) |
+| `geometry_mahalanobis` | kernel == official deep_Mahalanobis_detector (0.0); LW-vs-empirical proxy deviation quantified | held-out-duplicate BUG fixed (prior session, text-disjoint ID pool + test); NEW analytic pin for the sklearn-free pinv fallback (zero coverage — ridge/ddof drift was invisible); Eq. 2 (not Eq. 3) reference fixed ×2 |
+| `geometry_contextualization` | SelfSim/IntraSim/MEV == official kawine/contextual ≤3.3e-16 | NEW value pins for the 3 uncovered kernels (MEV vs sklearn PCA + centering-mutant check; pairwise-mean vs full triu; anisotropy exact ray anchor); MEV documented UNADJUSTED (paper headline adjusted — not comparable); ledger cert reconciled |
+| `geometry_tokenizer_efficiency` | analytic fake-tokenizer anchors exact | FABRICATED author list fixed ('Rajput, Chamberlain, Reese' → Ali, Fromm, Thellmann et al., arXiv:2310.08754); fertility credited to Ács 2019 via Rust et al.; +0.71→+0.71–0.77 range; ledger cert → proxy-only |
+| `geometry_positional_decay` | Spearman kernel == hand-written tie-averaged reference 1.1e-16 | stale ledger ⚠ flag removed (citations verified correct: RoFormer decay premise + ALiBi) |
+| `geometry_categories` | separation/purity already pinned | NEW coverage for never-executed kernels: relation consistency + analogy exact (constant-relation construction → both 1.0 analytically); hub_skew/hub_max vs independent k-occurrence recomputation |
+| `geometry_prediction_alignment` | tied model == pure-numpy cosine ≤7e-9 | NEW untied-head numeric pin (re-randomized lm_head: projection MUST be lm_head.weight — the central advertised claim was source-grep-guarded only) |
+| `geometry_representation_sensitivity` | closed form == f64 autograd + finite differences (1.1e-6 rel, fp32 round-off) | NEW bias-ful-head cross-check (the `logits += bias` branch had zero coverage); docstring's non-existent Amari (title, year) pairing → Natural Gradient Works Efficiently in Learning, Neural Computation 10(2) |
+
+## Campaign 4 — FINAL STATUS (2026-07-10)
+
+**All 47 structural-paper tasks closed** across 7 batches (B1 topology 5, B2 RepE 4,
+B3 dynamics 6, B4–B7 geometry 32). Every standing Campaign-3 BUG/DISCREPANCY for
+in-scope tasks is fixed with a regression test; every WEAK_TEST that guarded
+correctness is closed with a numeric pin (official code, analytic anchor, or
+independent reimplementation); every CITATION finding is corrected at source,
+in docs, and in the paper bibliography; every task carries a paper summary +
+verification-provenance entry in docs/tasks_<category>.md (geometry now 32/32).
+Out-of-scope (per user, 2026-07-10): interpretability/causality/consistency
+families — including the known-red test_superposition_index — deferred to the
+follow-up mech-interp paper.
+
+Value-changing fixes requiring results regeneration (already pending per the
+scope-reset plan): homology/betti (≤2-layer models), steering (first-ever
+values), task-vector norms (+normalized keys), sharpness (seeded + force-eager:
+first default-pipeline values), trajectory curvature (per-sentence aggregation),
+svd cosine (raw-state Eq. 4), magnitude (median scale + med-scale + numpy-1.x),
+mahalanobis (held-out), perplexity BPC (BOS models), topology _norm keys.
+
+## Campaign 4 — B8: gap-survey metrics (2026-07-10)
+
+Post-campaign metric-gap survey (3 parallel agents; synthesis at
+`beyond_benchmarks/docs/2026-07-10-metric-gaps-and-similar-studies.md`)
+identified 8 Tier-A additions. All implemented + verified to campaign-4
+standards in this batch. Registry 82 → 86. Paper's structural core 43 → 47
+(geometry 32→34, topology 5, dynamics 6→8; + RepE 4 appendix-only = 51
+verified overall; extensions live inside existing tasks).
+Per user decision: competing same-timeline studies (LPP arXiv:2605.30018,
+ABLE arXiv:2606.07524) are NOT cited.
+
+**New tasks (4):**
+
+| Task | Cert | Evidence |
+|---|---|---|
+| `geometry_superposition_strength` | formula-faithful | Liu-Liu-Gore 2025 (NeurIPS, 2505.10465; repo liuyz0/SuperpositionScaling). Anchors exact: orthonormal→0, simplex ETF == Welch bound (rel 1e-6), iid Gaussian→1/m; sampled≈exact. PROTOCOL: headline MSO on MEAN-CENTERED rows (gpt2: raw 0.075 vs centered 0.0025 ≈ 1.9×Welch — the paper's ~1/m only reproduces centered); raw emitted alongside; centering pinned by a task-level test |
+| `geometry_effective_depth` | formula-faithful | ShortGPT BI_l = 1−E[cos(h_l,h_{l+1})] (Men et al. 2403.03853) + Csordás-style effective_depth_90 (2505.13898). Anchors exact: identity→0, sign-flip→2, rotation≈1, concentrated stack→0.25 |
+| `dynamics_fractal` | refined-adaptation | Alabdulmohsin-Tran-Dehghani 2024 (NeurIPS, 2402.01825). R/S Hurst + Joseph + Hölder on the NLL stream; white-noise H≈0.5/J≈0.5, trending H>0.85; == nolds.hurst_rs ±0.1 (live pip). DEVIATION disclosed: concatenated eval-corpus stream vs paper's per-document 4K windows. gpt2 H=0.63 (paper: language ~0.70±0.09) |
+| `dynamics_perturbation_growth` | proxy-only | BLME formulation; QLE grounding Li et al. 2503.13530 (+ Fernando & Guitchounts context). Seeded per-token-relative input-embedding perturbation; linear gain-a stack slope exact (rel 1e-5 fp32 floor); contracting→negative |
+
+**Extensions to verified tasks (4):**
+
+| Host task | Extension | Evidence |
+|---|---|---|
+| `geometry_spectral` | official Clauset PL-MLE α with KS-optimal x_min on eigenvalues (`alpha_official`, `alpha_hat`) | planted Pareto α=3→2.994; == LIVE weightwatcher 0.7.7 to 5e-3 abs (2.253529 vs 2.253539); Clauset-Shalizi-Newman 2009 added to citations |
+| `geometry_mp_bulk_deviation` | lower-edge outliers for γ<1 (`lower_outlier_frac`/`lower_energy`; Staats-Thamm-Rosenow 2410.17770) | iid ≈0, planted correlated ≥0.04, γ≥1 → NaN (regression-pinned) |
+| `dynamics_sharpness` | critical step size η*/λ_c=2/η* (Kalra et al. 2601.16979; raw-gradient variant documented) | quadratic anchors λ∈{0.25,4,37.5} EXACT; param restoration asserted; zero-grad→NaN. (Fixed during dev: doubling budget + raw-vs-normalized gradient probe — normalized gives η*=2‖θ‖, wrong) |
+| `topology_homology` | scale-stratified fine/coarse persistence (Fay et al. 2505.20435) | constructed-diagram anchors (known fine/coarse membership); threshold 0.5×mean-pairwise-distance shared with the _norm keys |
+
+Test artifact: `tests/tasks/parity/test_b8_new_metrics_parity.py` (26 tests,
+analytic anchors + live weightwatcher/nolds parity). e2e on gpt2 (CPU,
+HF_HUB_OFFLINE): all 8 metrics finite & plausible. Citations web-verified
+2026-07-10 (incl. corrections: Kalra author list, Fay title). defaults.yaml,
+task_metadata.py, docs/tasks_{geometry,dynamics,topology}.md §§33-34/7-8 +
+extension bullets, PAPERS.md rows — all updated.
+
+## Campaign 4 — post-B8 completeness audit (2026-07-10, user-requested)
+
+Triggered by "are we certain nothing is missed / all correct?". Mechanical
+cross-checks run: paper task inventory vs registry (both directions), study
+configs vs the 47-task structural set, skip-reason identification for the
+category sweeps, CLI-pipeline e2e of the 4 new tasks.
+
+**Found & fixed:**
+1. `geometry_lipschitz` was counted in the paper's geometry tally but had
+   NEITHER a full appendix entry NOR a catalogue row (pre-B8 scope-reset
+   artifact: the SVD entry folded it in as "not a separate metric" while the
+   count included it). Fixed: catalogue row added (now 29 compact entries),
+   SVD-entry wording corrected. Inventory now closes exactly: 47/47 named,
+   0 paper-names missing from registry, 0 structural registry tasks missing
+   from the paper. Recompiled clean.
+2. The 3 sweep skips were all `test_sharpness_evaluate_end_to_end_deterministic`
+   silently skipping on gpt2/llama/bert — the only 3 conftest builders
+   without `attn_implementation="eager"` (SDPA cannot double-backward), so
+   the sharpness e2e NEVER ran on those architectures. Fixed: the 3 builders
+   now match the other 6 (eager); test passes 11/11 architectures, 0 skips.
+   Full 5-file sweep re-run green after the fixture change.
+3. CLI-pipeline e2e (blme evaluate, gpt2, CPU): all 4 new tasks OK through
+   the real pipeline/cache path; values match direct evaluate() calls
+   (centered MSO 0.00249, H=0.634, BI=0.158, growth_slope=1.122).
+
+**Found & reported (beyond_benchmarks repo; needs user direction):**
+- BOTH study-side task lists are stale vs the paper's 47 structural tasks:
+  `scripts/run_study.py` BLME_RESEARCH_TASKS misses 21/47 (incl. ALL 5
+  topology tasks — "excludes tasks needing ripser" — and every campaign-2
+  addition) + repe_steering; `configs/tasks.yaml` (run_blme.py) misses 26/47.
+  Local results/blme snapshots confirm: ~19-28 tasks per model, no
+  trajectory_curvature/vendi/magnitude/cknna/phd/procrustes/mp_bulk/
+  stability/interpolation/generation_diversity anywhere. The pending
+  regeneration MUST use a rebuilt 47+4 task list or the paper's X-variable
+  claim is false for ~half the suite.
+- Survey must-cite related-work batch (Yang KDD 2023, Skean ICML 2025,
+  Schaeffer ICML 2025, alpha-ReQ/LiDAR/Tsitsulin lineage, EmbedLLM, CPP,
+  Doimo, Cheng, weight-space-learning contrast) NOT yet in references.bib —
+  was outside B8's metric-citation scope. Survey §3 open decisions likewise
+  pending: Tier-B implementations, re-scoping sinks/kurtosis/compression-
+  valley into geometry, length-confound statement.
+
+## Campaign 4 — independent adversarial audit fleet (2026-07-16, user-requested)
+
+Six INDEPENDENT auditors (one per task family), instructed to distrust all
+prior verification claims: re-derive each formula from the source paper,
+re-verify citations against arXiv, probe test discrimination (would a sign
+flip/swap pass?), and run fresh numeric spot-checks vs official packages.
+Plus two clean-slate research scouts (missed metrics; missed categories).
+All 8 reports archived; research syntheses at
+`beyond_benchmarks/docs/2026-07-16-{missed-metrics-sweep,taxonomy-evaluation}.md`.
+
+### Substantive defects found & FIXED (with regression tests)
+
+| # | Task / file | Defect | Fix & validation |
+|---|---|---|---|
+| 1 | geometry_spectral `_pl_mle_alpha_ks` | KS scan used RIGHT-continuous empirical CDF (Clauset/plfit/WW = left-continuous) — invisible on planted spectra, real weights landed in different KS minima: mean |dα| 0.41 / max 3.64 vs live WW on gpt2 | left-continuous CDF + scan cap 200→2000: ALL 49 gpt2 modules now match live WW (mean 3e-4, max 2.1e-3) |
+| 2 | geometry_superposition_strength | Headline mean-centered rows, justified as "the paper's protocol" — official overlap-0.py NEVER centers (raw rows, all pairs); the ~1/m claim is a scaling trend | headline → RAW (official); centered → disclosed BLME auxiliary (`*_centered` keys); welch V uses post-filter count; protocol pinned by test |
+| 3 | geometry_effective_depth | Final transition used post-ln_f `hidden_states[-1]`: ~90% of gpt2's last-layer BI was the final-norm artifact (BI 0.737; effective_depth_90 0.917) | forward hook captures last block's PRE-norm output: BI 0.166, e_d_90 0.25; toy-model e2e regression test; effective_depth_90/0.05-threshold relabeled BLME summaries (not Csordás/ShortGPT metrics) |
+| 4 | dynamics_fractal metadata | WRONG AUTHOR LIST in task_metadata.py ("Tolstikhin & Zhang"; real: Alabdulmohsin, Tran & Dehghani) — the fabricated-author pattern again | fixed; module/docs/bib were already correct |
+| 5 | dynamics_sharpness `_critical_step_size` | Never-unstable search returned the η₀·2³⁰ CAP (1073.74…) indistinguishable from a real η*; no halving below η₀ | NaN on cap-hit; bidirectional (halving) search; both regression-pinned |
+| 6 | topology_zigzag `_layer_topology` | Missing 1e-12 zero-edge floor (betti_curve had it): duplicate points inflated β₀ (corpus with a repeated line: h0=7.0 vs 1.0) | floor added; the parity test's independent reimpl had COPIED the same omission (correlated error) — regression test with duplicate cluster |
+| 7 | repe_concept_separability | Imbalanced labels ([1,1,1,0]) crashed OUT of evaluate() (one-class train fold) — could kill a study run | pre-forward guard returns error dict; layers-None guard added; regression test |
+| 8 | geometry_contextualization | dataset=None fallback = 50 IDENTICAL sentences → SelfSim/MEV ≡ 1.0 (all fallback outputs artifacts); BOS tracked as a "word" (SelfSim=1.0 rows on BOS tokenizers); baseline pairs shared contexts | distinct-sentence fallback pool; special-token exclusion; baseline = one vector per sentence (reference protocol) |
+| 9 | geometry_perplexity + infra | BPC recount tokenized UNTRUNCATED vs the 512-truncating scoring paths (BPC bias grows with doc length); collect_prediction_stats had NO truncation (>n_positions doc crashed); cache crashed on empty docs; 2-observed-ids → ppl_freq=inf | truncation unified at 512 across cache/utils/recount (chars from truncated text); empty-doc skip in cache; freq-bucket guard; regression test |
+| 10 | geometry_representation_sensitivity | Closed form assumed a purely LINEAR head — silently wrong under Gemma-2-style logit softcapping (0.82 max gradient error demonstrated) | first-sample logits cross-check vs out.logits; clean error dict on mismatch |
+| 11 | geometry_intrinsic_dim GPU path | f32 mm-mode `torch.cdist` catastrophic cancellation: TwoNN +23% on dense clouds, host-dependent (GPU vs CPU) | f64 + donot_use_mm_for_euclid_dist (validated ~1e-11 by auditor's probe) |
+| 12 | geometry_cknna | No token cap: study defaults → 1e4–5e4-token Gram matrices, O(N³)×L² — OOM/infeasible; missing from core cache_hidden_tasks (spurious error when cache lacks hidden states; also procrustes) | max_cknna_tokens=2000 seeded shared-perm subsample (hsic pattern); both tasks added to cache_hidden_tasks |
+| 13 | geometry_lid | Duplicate-neighbor clamp gave ~k/23 (0.20) where official mle_batch gives 0.0 — passed the lid>0 filter, dragging lid_min/mean | ratios≤0 → 0.0 (matches official); regression test |
+| 14 | dynamics_stability / geometry_categories | `np.random.seed(42)` mutated GLOBAL numpy RNG (order-dependence hazard); sampling seed hardcoded | stability → local default_rng honoring config seed (categories left as known-minor, documented here) |
+| 15 | geometry_weight_norms | SVD-failure fallback FABRICATED spectral=frob, srank=1.0 | NaN + nanmean aggregation |
+| 16 | dynamics_generation_diversity | Per-prompt reseed replayed the same RNG stream every prompt; fallback "method1" smoothing was 1e-9 (NLTK: 0.1/denom → 0.004 vs 0.334); subword-vs-word Self-BLEU unit undisclosed; stale "no NLTK" docstring | seed once before loop; 0.1/denom smoothing; unit disclosed in docstring; docstring fixed |
+| 17 | dynamics_coe | `torch.acos(torch.tensor(c))` = f32 under default dtype (caps parity at ~1e-7, default-dtype-dependent) | math.acos with clamp |
+| 18 | geometry_phd_dimension | Fallback path indexed the raw hidden_states tuple (embedding at 0) — off-by-one vs the cache convention for explicit layer_idx ≥ 0 | +1 alignment with cache convention |
+
+### Citation / claim corrections
+- persistence_entropy: "relative persistent entropy" attribution to Atienza et al. removed (term/normalization not in the paper).
+- betti_curve metadata: "triple-engine networkx/GF(2)/GUDHI" overstated → networkx cross-check (as exists in repo).
+- schatten docstring: d^{1/p} + last-layer conventions wrongly attributed to Yusupov et al. (their paper: plain norms, MLP-internal activations) → BLME conventions.
+- tokenizer_efficiency: Ali et al. 2024 was cited as evidence tokenizer efficiency predicts capability; the paper finds the near-opposite → recharacterized. Non-list datasets no longer silently ignored.
+- vendi: "Def. 1" → "Definition 3.1". correlation_dimension: compressive-estimate caveat (true dim 6 → ~3.4 at R²>0.97) now in the task docstring.
+- gradient_flow / stability metadata: uncommitted-session parity figures relabeled as session artifacts; committed evidence stated instead.
+- Leak convention: `sample_size` (a TOP-15 predictor in the pre-reset run — pure vocab-size proxy), `n_layers`, `numerical_rank`, `max_drop_layer`, `rsa_min_continuity_layer`, `num_points`, `num_estimates`, `n_classes`/`n_samples` → `_meta_`-prefixed across 10 tasks (kept out of the analysis feature matrix).
+
+### Verified-clean highlights (independent evidence, not prior claims)
+cka/hsic/rsa/trajectory_curvature/neural_collapse/procrustes (formula), isoscore (≤3.3e-8 vs official on 7 fresh clouds), vendi (bit-exact fresh clouds), phd (bit-exact vs GPTID fresh clouds), magnitude (≤3.6e-15, incl. duplicate clouds), mp_bulk (CDF vs quad 6.4e-8), matrix_entropy (vs cloned official repo), gradient_flow (independent leaf-replacement recompute: exact), perturbation_growth, interpolation, positional_decay, mahalanobis (AUROC 0.869 non-degenerate held-out), homology, persistence_landscape, task_vectors, refusal_direction, steering (no hook leaks incl. forced-exception path). NO fabricated citations found in any of the 51 audited tasks beyond item 4.
+
+### Remaining accepted-risk notes (documented, not fixed)
+- procrustes_linearity float64 promotion vs the reference's native-dtype pipeline: values diverge in the ill-conditioned regime (0.42 observed); docstring claim amended — profile interpretation unchanged.
+- magnitude LU-vs-Cholesky singular fallback can differ from magnipy on near-singular clouds (BLME's branch is closer to dedup ground truth).
+- correlation_dimension is a compressive proxy at high dim (documented).
+- categories.py global np.random.seed + surface-form asymmetries (proxy-only task, cross_model_comparable=False).
+- Self-BLEU absolute values not cross-tokenizer comparable (disclosed).

@@ -1,0 +1,28 @@
+{
+  "task": "geometry_lid",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "The Ma et al. Eq. 4 MLE is unchanged and remains bit-exact against the official `mle_batch`; the round-7 change added `lid_first_layer` / `lid_mid_layer` / `lid_last_layer` to the layerwise branch and demoted the nested per-layer dict to `_meta_layer_metrics`. Driving the real evaluate() over 10 models at the study config (layerwise: true, k=20, num_samples=200) the estimator behaves as defined -- gpt2's profile runs 10.886, 10.067, 11.330, 12.276, 13.044, 13.268, 13.764, 13.714, 13.673, 13.557, 13.176, 13.685 across the 12 blocks, monotone-ish and in the expected 10-14 band. Nothing in the kernel changed and nothing computes something other than the paper's formula.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The top-level scalars are the deepest entry of a HOOKED profile, and pre-LayerNorm massive activations make that entry degenerate on some models: pythia-160m returns lid_mean = 23714.2 while its own layers 0-10 sit in [14.915, 17.659] -- a 1,400x jump at the last layer only -- and the SAME weights in single-layer (post-ln_f) mode return lid_mean = 18.6635, a 1,271x difference driven purely by which tensor the deepest layer is. Nine of ten models read 11.8-20.4 and one reads 23,714; lid_max reaches 1.185e+07 and lid_std 5.293e+05 on that model. No linear or rank model on this column is measuring anything but that one point.",
+  "normalized_variant": "lid_first_layer / lid_mid_layer / lid_last_layer (depth-aligned twins added in round 7)",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "xingjunm/lid_adversarial_subspace_detection (util.py mle_batch)",
+  "github_reason": "Verified bit-exact (0.0) against the released `mle_batch` in an earlier round on the positive-query population and on a centred cloud; that parity is pinned by the repo's own tests, which pass here. This round I re-drove evaluate() in both branches on three models to isolate the estimand, not the kernel.",
+  "paper_number": "PARTIAL",
+  "paper_reason": "Ma et al. publish LID distributions for adversarial-example detection on CIFAR/SVHN CNNs, not an LID value for a language model, so there is no scalar to reproduce. The estimator-level anchor holds (bit-exact vs the released mle_batch); the k/(k-1) offset from the Levina-Bickel form is documented and reproduces (+5.26% at k=20).",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Over 10 models: rho(lid_mean, n_layers) = -0.549 and rho(lid_mean, vocab_size) = +0.573, rho(lid_median, n_layers) = -0.617, rho(lid_first_layer, d_model) = +0.464 / vocab +0.549. Those are computed WITH the pythia-160m outlier included, so they are not trustworthy either -- which is itself the finding.",
+  "defects": [
+    "NEW EXACT DUPLICATE INTRODUCED BY THE ROUND-7 FIX: in layerwise mode `result = dict(per_layer[last_key])`, so `result['lid_mean']` IS `lid_mean_per_layer[-1]`, which is exactly what `lid_last_layer` is then set to. Measured: lid_mean == lid_last_layer on 10 of 10 models, bit-for-bit (e.g. distilgpt2 13.077225281689802 for both). Both pass feature_selection.is_excluded_predictor as KEPT, so the feature matrix now carries one degree of freedom under two names -- the same defect class the same sweep demoted `_meta_normalized_coe_c` and `_meta_slerp_convexity_gap` for.",
+    "ZERO-VARIANCE FEATURE-ELIGIBLE COLUMN: `lid_min` = 0.0 EXACTLY on all 10 models, std exactly 0, unprefixed and KEPT by is_excluded_predictor. Some query points have degenerate neighbourhoods and the estimator returns 0 for them, so the minimum is always the floor.",
+    "THE HEADLINE IS UNUSABLE ON AT LEAST ONE MODEL IN TEN: pythia-160m lid_mean = 23714.2 (layerwise) vs 18.6635 (single-layer, same weights, same corpus, same k) -- 1,271x. lid_max = 1.185e+07, lid_std = 5.293e+05. The per-layer profile shows the cause exactly: layers 0-10 in [14.915, 17.659], layer 11 (the hooked block output) 23714.213.",
+    "THE ESTIMAND IS STILL SELECTED BY CONFIG WITH NO FLAG. layerwise=true (study) takes the deepest entry of the hooked profile; layerwise=false (defaults.yaml) takes the post-ln_f output representation. Both write `lid_mean` / `lid_std` / `lid_max`. Emitted keys in layerwise mode contain NO convention flag (no `_meta_last_entry_is_block_output`, no `_meta_lid_layer_convention`) -- the sibling geometry_intrinsic_dim emits one. Flagged in the previous round; unfixed.",
+    "If layerwise=True but the cache is absent or unpopulated the code silently falls through to single-layer mode, so the estimand changes with cache availability and nothing records which branch ran.",
+    "Only max_queries = 500 query points are estimated regardless of cloud size (`_meta_num_estimates` = 500 on every model I ran) and no standard error is emitted.",
+    "task_metadata.py has no 2026-09-05 note for this task, although the layerwise branch's deepest layer is hooked and moves the headline by 1,271x on pythia-160m."
+  ],
+  "fix": "Set `lid_last_layer` from `lid_mean_per_layer[-1]` only when it is NOT already the value of `lid_mean`, or -- better -- stop copying the deepest layer's dict into the top level and give the two estimands distinct names (lid_mean_output_repr for the post-ln_f single-layer reading, lid_mean_block_last for the hooked profile's deepest layer); measured duplication is 10/10 models. Prefix `lid_min` with _meta_ (constant 0.0 on 10/10). Emit `_meta_last_entry_is_block_output` and a `_meta_lid_layer_convention` flag in layerwise mode. Add a robust dispersion (IQR or trimmed sd) beside lid_std, which reads 5.293e+05 on pythia-160m, and a _meta_lid_sem."
+}

@@ -59,25 +59,43 @@ def test_matrix_nuclear_norm_fast_formula_identities():
 
 
 def test_rankme_matches_garrido_definition():
-    """RankMe (Garrido 2023) normalises *raw* singular values:
-    ``p_i = σ_i / Σ σ_j`` then ``exp(H(p))``. This is the same
-    raw-singular-value convention used by Roy-Vetterli effective rank."""
+    """RankMe (Garrido 2023, Eq. 2) is ``exp(H(p))`` with
+
+        p_i = σ_i / Σ σ_j + ε          (epsilon ADDED to the ratio)
+
+    The epsilon placement matters and is the whole point of this test. BLME
+    shipped ``σ_i / (Σ σ_j + ε)`` -- a denominator epsilon, which is a uniform
+    rescale and therefore nearly invisible, but which is NOT scale-invariant:
+    on ``1e-20 * I_2`` it returned 1.000000368, a RANK-ONE answer for a
+    perfectly isotropic spectrum. It also used ε = 1e-12 where the RELEASED
+    implementation uses 1e-7 (independent Opus review, 2026-09-04).
+
+    Because ε is added to the ratio, RankMe is NOT identical to Roy-Vetterli
+    effective rank -- it is a small, bounded perturbation of it, and this test
+    pins that relationship rather than asserting an equality that only held
+    while the epsilon was in the wrong place.
+    """
     from blme.tasks.geometry.schatten import _rankme
 
     # For a rank-1 matrix (only one non-zero sigma), RankMe = 1.
     S = np.array([5.0, 0.0, 0.0, 0.0])
-    assert _rankme(S) == pytest.approx(1.0)
+    assert _rankme(S) == pytest.approx(1.0, rel=1e-5)
     # For a uniform spectrum (all equal σ), RankMe = N.
     S = np.array([2.0, 2.0, 2.0, 2.0])
-    assert _rankme(S) == pytest.approx(4.0)
-    # Must match the shared Roy-Vetterli effective_rank helper.
+    assert _rankme(S) == pytest.approx(4.0, rel=1e-6)
+    # Close to, but not identical to, the Roy-Vetterli effective rank: the gap
+    # IS the epsilon (measured 5.835e-08 here at the released ε = 1e-7).
     from blme.tasks.geometry.utils import effective_rank
     S = np.array([3.0, 2.0, 1.0])
     rm = _rankme(S)
     er = effective_rank(S)
-    assert rm == pytest.approx(er, rel=1e-12)
+    assert rm == pytest.approx(er, rel=1e-5)
+    assert rm != er, "epsilon must be ADDED to the ratio, not to the denominator"
     # Both should be in (1, 3].
     assert 1.0 < rm <= 3.0
+    # SCALE INVARIANCE is the property the epsilon placement protects.
+    for a in (1e0, 1e-13, 1e-20, 1e-30):
+        assert _rankme(np.array([a, a])) == pytest.approx(2.0, rel=1e-6), a
     assert 1.0 < er <= 3.0
 
 
@@ -126,16 +144,26 @@ def test_schatten_task_registers_and_returns_expected_fields():
     result = task.evaluate(model=StubModel(), tokenizer=StubTok(),
                            dataset=dataset, cache=None)
     # Headline keys (Schatten-2 omitted — content-free under row-L2 norm)
-    assert "row_normalized_schatten_1_last" in result
-    assert "row_normalized_schatten_4_last" in result
+    # The d-DIVIDED keys are `_meta_`-prefixed in the task output: the divisor
+    # introduces the width dependence it was meant to remove (raw Schatten is
+    # bit-identical across d = 16..4096 for an isometrically embedded cloud,
+    # while raw/d falls x256; on the 61-model archive the divided key has
+    # Spearman -0.950 with d_model against +0.289 undivided). The internal
+    # helper still returns the unprefixed names -- only the emission renames.
+    assert "_meta_row_normalized_schatten_1_last" in result
+    assert "_meta_row_normalized_schatten_4_last" in result
+    # The undivided, width-neutral keys ARE features.
+    assert "schatten_1_last" in result
+    assert "schatten_4_last" in result
     assert "row_normalized_schatten_inf_last" in result
     assert "row_normalized_matrix_nuclear_norm_last" in result
     assert "rankme_last" in result
     assert "schatten_2_last" not in result
     assert result.get("preprocessing") == "center_columns_then_row_l2_normalize"
     # Per-layer lists
-    assert "row_normalized_schatten_1_per_layer" in result
-    assert len(result["row_normalized_schatten_1_per_layer"]) == 3  # 3 blocks after embedding
+    assert "_meta_row_normalized_schatten_1_per_layer" in result
+    assert len(result["_meta_row_normalized_schatten_1_per_layer"]) == 3  # 3 blocks after embedding
+    assert len(result["schatten_1_per_layer"]) == 3
 
 
 def test_schatten_2_not_exposed_after_row_l2_normalization():

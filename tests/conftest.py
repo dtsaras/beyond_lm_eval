@@ -16,6 +16,30 @@ so that every task is tested against each structural variant:
 - Qwen3Next:  model.layers           (Qwen 3.5 architecture)
 """
 
+import os
+
+# OFFLINE BY DEFAULT.
+#
+# 19 test files call `from_pretrained`, so the suite reaches the HF hub, and a
+# proxy `ReadTimeout` there fails a test that has nothing to do with the code.
+# That is exactly what happened on the 2026-09-07 six-hour validation run:
+# `test_perplexity_bpc_correct_with_bos_tokenizer` and
+# `test_perplexity_survives_empty_text_sample` failed with
+# `httpcore.ReadTimeout` and then passed in isolation -- the classic shape of a
+# "test pollution" hunt that is really a network flake, and very likely the
+# source of this campaign's long-unidentified intermittent failures.
+#
+# Every model the suite needs is already in the local cache: the two failing
+# tests pass offline in **1.00 s** against 14.98 s online. Forcing offline
+# therefore makes the run deterministic AND faster, and a genuinely missing
+# artefact now fails loudly and immediately instead of hanging on a retry.
+#
+# Set the variables BEFORE importing transformers, which reads them at import
+# time. Overridable: export BLME_ALLOW_HF_NETWORK=1 to refresh the cache.
+if not os.environ.get("BLME_ALLOW_HF_NETWORK"):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import pytest
 import torch
 from transformers import (
@@ -83,6 +107,7 @@ except ImportError:
 def _build_gpt2():
     config = GPT2Config(
         vocab_size=1000, n_positions=128, n_embd=32, n_layer=2, n_head=2,
+        attn_implementation="eager",
     )
     return GPT2LMHeadModel(config), config.vocab_size
 
@@ -90,7 +115,7 @@ def _build_llama():
     config = LlamaConfig(
         vocab_size=1000, hidden_size=32, intermediate_size=64,
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=2,
-        max_position_embeddings=128,
+        max_position_embeddings=128, attn_implementation="eager",
     )
     return LlamaForCausalLM(config), config.vocab_size
 
@@ -99,6 +124,7 @@ def _build_bert():
         vocab_size=1000, hidden_size=32, num_hidden_layers=2,
         num_attention_heads=2, intermediate_size=64,
         max_position_embeddings=128, is_decoder=True,
+        attn_implementation="eager",
     )
     return BertLMHeadModel(config), config.vocab_size
 
@@ -202,19 +228,31 @@ def _available_archs():
 # ── Dummy tokenizer ─────────────────────────────────────────────────────
 
 class DummyTokenizer:
-    """Minimal tokenizer that produces valid tensor shapes for any model."""
+    """Minimal tokenizer that produces valid tensor shapes for any model.
+
+    DETERMINISTIC: ids are derived from the text content (crc32-seeded
+    local generator), so the same text always tokenizes identically and
+    the tokenizer neither consumes nor perturbs the global RNG. The old
+    torch.randint-per-call behavior made every task output that depends
+    on the tokenized ids irreproducible across runs, which masked (and
+    then falsely implicated) task-level determinism."""
 
     def __init__(self, vocab_size):
         self.vocab_size = vocab_size
         self.pad_token_id = 0
         self.eos_token_id = 1
 
+    def _ids_for(self, text, length=8):
+        import zlib
+        gen = torch.Generator()
+        gen.manual_seed(zlib.crc32(str(text).encode("utf-8")))
+        return torch.randint(0, self.vocab_size, (length,), generator=gen)
+
     def __call__(self, text, return_tensors="pt", **kwargs):
         is_list = isinstance(text, (list, tuple))
-        batch_size = len(text) if is_list else 1
-        length = 8
+        texts = list(text) if is_list else [text]
 
-        ids = torch.randint(0, self.vocab_size, (batch_size, length))
+        ids = torch.stack([self._ids_for(t) for t in texts])
         mask = torch.ones_like(ids)
 
         if return_tensors == "pt":
@@ -229,7 +267,7 @@ class DummyTokenizer:
         return {"input_ids": ids.tolist(), "attention_mask": mask.tolist()}
 
     def encode(self, text, return_tensors=None, **kwargs):
-        ids = torch.randint(0, self.vocab_size, (1, 8))
+        ids = self._ids_for(text).unsqueeze(0)
         if return_tensors == "pt":
             return ids
         return ids[0].tolist()

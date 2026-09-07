@@ -11,6 +11,223 @@ import torch
 import numpy as np
 
 
+def _perturb_global_rng():
+    """Advance the global torch + numpy RNG by an arbitrary amount, simulating
+    an earlier task in the same evaluate() run consuming RNG state."""
+    torch.manual_seed(999)
+    _ = torch.rand(1000)
+    np.random.seed(999)
+    _ = np.random.rand(1000)
+
+
+@pytest.mark.parametrize("task_path,cls_name,cfg,eager", [
+    ("blme.tasks.interpretability.head_roles", "HeadRolesTask",
+     {"num_samples": 3, "seq_len": 16}, True),
+    ("blme.tasks.interpretability.induction", "InductionHeadTask",
+     {"num_samples": 3, "seq_len": 16}, True),
+    ("blme.tasks.interpretability.superposition", "SuperpositionIndexTask",
+     {"num_samples": 2, "max_neurons": 8}, False),  # small so the subsample fires
+])
+def test_task_results_independent_of_global_rng(task_path, cls_name, cfg, eager):
+    """Campaign-3 release blocker: these tasks drew random inputs / subsampled
+    neurons from the GLOBAL RNG, so their results depended on how much RNG state
+    earlier tasks in the same evaluate() run had consumed. With a local seeded
+    generator, results must be identical regardless of global RNG state."""
+    import importlib
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    cls = getattr(importlib.import_module(task_path), cls_name)
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    kw = {"attn_implementation": "eager"} if eager else {}
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2", **kw).eval()
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    r1 = cls(config=cfg).evaluate(model, tok, None)
+    _perturb_global_rng()  # different global torch + numpy state for run 2
+    r2 = cls(config=cfg).evaluate(model, tok, None)
+
+    assert str(r1) == str(r2), f"{cls_name} results depend on global RNG state"
+
+
+def test_superposition_bc_includes_finite_sample_correction():
+    """Campaign-3 DISCREPANCY: the bimodality coefficient dropped the finite-
+    sample correction term its own docstring states, computing the asymptotic
+    form (~10% off at n=50). It must equal the SAS/Pfister formula with the
+    3(n-1)^2/((n-2)(n-3)) correction in the denominator."""
+    from scipy.stats import skew, kurtosis
+    from blme.tasks.interpretability.superposition import _multimodality_score
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(50)  # small n where the correction matters
+    n = 50
+    g1 = skew(x, bias=False)
+    g2 = kurtosis(x, fisher=True, bias=False)
+    expected = min(max((g1 ** 2 + 1) / (g2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))), 0.0), 1.0)
+    asymptotic = min(max((skew(x) ** 2 + 1) / kurtosis(x, fisher=False), 0.0), 1.0)
+
+    assert abs(expected - asymptotic) > 1e-3, "test cannot discriminate at this n"
+    got = _multimodality_score(x)
+    assert abs(got - expected) < 1e-9, (
+        f"BC {got:.6f} != SAS finite-sample {expected:.6f} (asymptotic {asymptotic:.6f})"
+    )
+
+
+def test_attention_entropy_truncates_long_inputs():
+    """Campaign-3 BUG: the direct forward path tokenized without truncation, so
+    an input longer than the model context raised IndexError. It must truncate
+    (to 512, matching the cache path) and produce a finite result."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.attention import AttentionEntropyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained(
+        "distilgpt2", attn_implementation="eager").eval()  # so attentions are returned
+    long_text = "the cat sat on the mat . " * 300  # ~2100 tokens >> 1024 context
+    r = AttentionEntropyTask(config={"num_samples": 1}).evaluate(
+        model, tok, dataset=[long_text])
+    assert "error" not in r
+    assert np.isfinite(r["avg_entropy_total"])
+
+
+def test_sparsity_handles_none_layers(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 BUG: get_layers(model) can return None on unrecognized
+    architectures; len(None) then crashed with TypeError. Must return an error
+    dict instead of crashing."""
+    import blme.tasks.interpretability.sparsity as sp
+
+    monkeypatch.setattr(sp, "get_layers", lambda model: None)
+    r = sp.ActivationSparsityTask(config={"num_samples": 1}).evaluate(
+        mock_model, mock_tokenizer, dataset=[{"text": "hi there"}])
+    assert isinstance(r, dict) and "error" in r
+
+
+def test_sae_hidden_state_index_rejects_invalid_hooks():
+    """Campaign-3 BUGs: _select_sae_hidden_state_index (1) silently mapped
+    hook_resid_mid to resid_post though HF exposes no such tensor and the
+    docstring claims rejection; (2) mapped the FINAL block's hook_resid_post to
+    hidden_states[num_layers] = ln_f(block output), a post-final-norm tensor;
+    (3) silently clamped an out-of-range block (the gpt2-small blocks.8 SAE on
+    distilgpt2's 6 layers) to the wrong layer. All three must raise."""
+    from blme.tasks.interpretability.sae_features import _select_sae_hidden_state_index
+
+    assert _select_sae_hidden_state_index("blocks.8.hook_resid_pre", 12) == (8, 8)
+    assert _select_sae_hidden_state_index("blocks.5.hook_resid_post", 12) == (5, 6)
+
+    with pytest.raises(ValueError):  # resid_mid has no HF tensor
+        _select_sae_hidden_state_index("blocks.5.hook_resid_mid", 12)
+    with pytest.raises(ValueError):  # final block resid_post is post-ln_f
+        _select_sae_hidden_state_index("blocks.11.hook_resid_post", 12)
+    with pytest.raises(ValueError):  # layer 8 does not exist on a 6-layer model
+        _select_sae_hidden_state_index("blocks.8.hook_resid_pre", 6)
+
+
+def test_sae_input_centered_when_metadata_requests():
+    """Campaign-3 DISCREPANCY: the SAE was fed RAW HF hidden states, but the
+    gpt2-small-res-jb SAE was trained on HookedTransformer activations with
+    center_writing_weights (residual stream mean-centered over d_model per
+    position); the raw feed inflated L0 ~37x. _prepare_sae_input must subtract
+    the per-token mean when the SAE metadata requests centering, and be a no-op
+    otherwise."""
+    from blme.tasks.interpretability.sae_features import _prepare_sae_input
+
+    h = torch.randn(4, 8) + 5.0  # strong non-zero per-token mean
+
+    class _Meta:
+        model_from_pretrained_kwargs = {"center_writing_weights": True}
+        prepend_bos = True
+
+    class _Cfg:
+        metadata = _Meta()
+
+    class _SAE:
+        cfg = _Cfg()
+
+    out = _prepare_sae_input(h, _SAE())
+    assert torch.allclose(out.mean(dim=-1), torch.zeros(4), atol=1e-6), (
+        "centering requested -> per-token mean must be ~0")
+
+    class _SAENoMeta:
+        cfg = None
+
+    assert torch.allclose(_prepare_sae_input(h, _SAENoMeta()), h), (
+        "no centering metadata -> input must be unchanged")
+
+
+def test_sae_gpt2_guard_rejects_distilgpt2():
+    """Campaign-3 BUG: the 'gpt2' substring guard let distilgpt2 through
+    ('gpt2' in 'distilgpt2'), so a gpt2-small SAE was applied to a different
+    model at a clamped layer. Compatibility must be an exact gpt2-small match."""
+    from blme.tasks.interpretability.sae_features import _is_gpt2_small
+
+    assert _is_gpt2_small("gpt2")
+    assert _is_gpt2_small("openai-community/gpt2")
+    assert not _is_gpt2_small("distilgpt2")
+    assert not _is_gpt2_small("gpt2-medium")
+
+
+def test_probing_subsample_is_reproducible():
+    """Campaign-3 BUG: the >max_probe_samples subsample used np.random.choice
+    (global, unseeded), so the default-config output was non-reproducible across
+    runs. Two identical evaluate() calls must give identical accuracies."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.probing import LinearProbingTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    dataset = [
+        "The river winds slowly through the ancient green valley below.",
+        "Machine learning systems can memorize surprising amounts of training data.",
+        "A quiet afternoon is perfect for reading a long detailed novel.",
+    ]
+    cfg = {"num_samples": 3, "max_tokens": 24, "max_probe_samples": 30}
+    r1 = LinearProbingTask(config=dict(cfg)).evaluate(model, tok, dataset)
+    r2 = LinearProbingTask(config=dict(cfg)).evaluate(model, tok, dataset)
+    assert r1["probing_accuracy_per_layer"] == r2["probing_accuracy_per_layer"], (
+        "probing accuracies differ across identical runs — subsample is unseeded"
+    )
+
+
+def test_probing_single_class_is_not_fabricated_zero():
+    """Campaign-3 BUG: `except Exception: acc = 0.0` fabricated a 0.0 accuracy
+    whenever the probe could not fit (e.g. a single label class), masking that
+    linear decodability was actually 100%. A degenerate single-class layer must
+    report the majority-class rate (1.0), not a fabricated 0.0."""
+    import numpy as np
+    from blme.tasks.interpretability.probing import _probe_accuracy
+
+    rng = np.random.default_rng(0)
+    X_train = rng.standard_normal((20, 8))
+    X_test = rng.standard_normal((6, 8))
+    y_train = np.zeros(20, dtype=int)   # single class
+    y_test = np.zeros(6, dtype=int)
+    acc = _probe_accuracy(X_train, y_train, X_test, y_test)
+    assert acc == 1.0, f"single-class decodability should be 1.0 (majority), got {acc}"
+
+
+def test_prediction_entropy_top5_independent_of_decisiveness_k():
+    """Campaign-3 BUG: mean_top5_prob was computed as topk_p[..., :min(5,k)]
+    where k=decisiveness_top_k, so with decisiveness_top_k<5 it silently
+    reported top-k mass under the top-5 name. mean_top5_prob must always be
+    the true top-5 mass (>= mean_top1_prob), regardless of decisiveness_top_k.
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from blme.tasks.interpretability.prediction_entropy import PredictionEntropyTask
+
+    tok = AutoTokenizer.from_pretrained("distilgpt2")
+    model = AutoModelForCausalLM.from_pretrained("distilgpt2").eval()
+    dataset = ["The quick brown fox jumps over the lazy dog near the river."]
+
+    task = PredictionEntropyTask(config={"num_samples": 1, "decisiveness_top_k": 1})
+    r = task.evaluate(model, tok, dataset)
+    # top-5 mass strictly exceeds top-1 mass for a real distribution; with the
+    # bug (k=1) mean_top5_prob == mean_top1_prob.
+    assert r["mean_top5_prob"] > r["mean_top1_prob"] + 1e-4, (
+        f"mean_top5_prob {r['mean_top5_prob']} collapsed to top-1 "
+        f"{r['mean_top1_prob']} — top5 wrongly capped at decisiveness_top_k"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (preserved)
 # ---------------------------------------------------------------------------

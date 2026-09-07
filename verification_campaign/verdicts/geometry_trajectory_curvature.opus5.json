@@ -1,0 +1,27 @@
+{
+  "task": "geometry_trajectory_curvature",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "Re-derived the discrete curvature from Hosseini & Fedorenko 2023 and re-implemented the released kernel (sent_sampling/utils/curvature_utils.py: torch.diff -> `normalized` -> dot -> arccos): BLME's `_trajectory_angles` agrees to max 8.882e-16 over 200 random trajectories, and the layer statistic is the reference's mean-of-per-sentence-means (`all_layer_curve.append([np.mean(x) for x in curvature])`). Analytic anchor: 31,696 angles from Gaussian walks in R^1600 give 119.9955 deg against arccos(-1/2) = 120.0000 deg (rel 3.7e-5). Drove the real evaluate() on the shared cache and reproduced the 2026-09-05 ledger EXACTLY at the package default: pythia-70m straightening_ratio 0.031299 -> 0.052134 (+66.6%) and curvature_slope -0.047855 -> -0.078498 (-64.0%), pythia-160m 0.045122 -> 0.067379 (+49.3%), gpt2 0.043095 -> 0.039696 (-7.9%), with _meta_last_entry_is_block_output False -> True.",
+  "defect_location": "CONFIG",
+  "comparable": "YELLOW",
+  "comparable_reason": "Over the 66-model archive the curvature summaries are not size proxies -- straightening_ratio Spearman -0.096 (d_model) / -0.127 (n_layers) / +0.005 (log vocab) / -0.141 (log params), curvature_mean_last_layer -0.003 / +0.094 / -0.375 / -0.044 -- but curvature_overall_mean carries rho -0.578 with log(vocab), and curvature_slope retains +0.366 with d_model and +0.351 with log(params). The vocab association is a protocol artefact (the cache truncates every model at 512 TOKENS, so a 256k-vocab tokenizer covers far more text than a 32k one), not geometry.",
+  "normalized_variant": "curvature_slope (OLS of per-layer curvature on NORMALIZED depth l/(n_layers-1))",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "eghbalhosseini/sent_sampling",
+  "github_reason": "Fetched https://raw.githubusercontent.com/eghbalhosseini/sent_sampling/master/sent_sampling/utils/curvature_utils.py and .../straightening/compute_curvature_and_surprisal_for_GPTModel.py, re-ran `compute_model_curvature`'s kernel on 200 random trajectories: max |BLME - released| = 8.882e-16. The reference's `compute_model_activations` takes `outputs['hidden_states']` verbatim, so its deepest layer IS HF's post-ln_f entry -- an incidental HF default, not a stated choice (contrast kawine/contextual, which explicitly pops the pre-norm entry). BLME's replace_final_norm=True is therefore a deliberate, disclosed deviation from an unconsidered convention, and is the correct side of the campaign's homogeneity rule for a layer_idx='all' profile.",
+  "paper_number": "YES",
+  "paper_reason": "Fig. S6 states the random-trajectory distribution 'peaks at ~120 degrees (119.99)'. BLME's kernel on 8,408-equivalent Gaussian trajectories of dimension 1600 and length 6-19 returns 119.9955 deg, rel 4.6e-5 vs the published 119.99 and 3.7e-5 vs the analytic 120.0000.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "Measured on the 66-model archive: straightening_ratio is essentially uncorrelated with every architecture scalar (|rho| <= 0.141), but curvature_overall_mean has rho -0.578 with log(vocab_size) and curvature_slope +0.366 with d_model / +0.351 with log(params). The vocab link is the fixed-512-token cache window, i.e. a protocol confound, not width or depth.",
+  "defects": [
+    "CONFIG (defaults.yaml): skip_first_tokens: 1 is commented 'drop BOS', but gpt2/distilgpt2/pythia/Qwen/SmolLM/OLMo/phi prepend NO special token, so for those families the setting discards a real content state while for OPT/Llama/Gemma/Mistral it correctly removes BOS. Unchanged since the prior round; the study config (num_samples: 200 only) does not override it.",
+    "NORMALIZED VARIANT FAILS FUNCTION PRESERVATION: appending 20 identity layers to the profile [2.1, 1.7, 1.6, 2.0] -- which leaves the computed function untouched -- moves curvature_slope from -0.120000 to +0.116000, a SIGN FLIP (+5 layers gives +0.173, +40 gives +0.072). straightening_ratio is exactly invariant under the same operation (0.047619 -> 0.047619) and is the better depth-neutral summary.",
+    "The released reference includes HF's post-ln_f entry as its deepest layer; BLME now substitutes the raw block output there. Disclosed via _meta_last_entry_is_block_output and defensible for a profile, but it moves straightening_ratio between -7.9% (gpt2) and +66.6% (pythia-70m) with an architecture-family-determined sign, so archived and current runs must not be pooled (task_metadata.py does carry this note).",
+    "The paper's defining quantity -- the per-layer change Delta C_l = C_l - C_0 and the layer of maximum drop -- is still not emitted; straightening_ratio and curvature_slope are BLME summaries."
+  ],
+  "fix": "Nothing is required for GREEN on implementation fidelity. Non-blocking: (1) defaults.yaml skip_first_tokens 1 -> 0, and instead strip a leading token only when input_ids[0] is actually in tokenizer.all_special_ids, so BOS-prepending and non-prepending tokenizers get identical treatment; (2) stop advertising curvature_slope as the depth-neutral twin -- it flips sign under a pure identity-layer insertion (-0.120 -> +0.116) while straightening_ratio does not move at all; (3) emit Delta C_l and the max-drop layer, which is what the paper actually reports.",
+  "source_hash": "7556a6781b159c5c",
+  "shared_hash": "2269442e56b00687"
+}

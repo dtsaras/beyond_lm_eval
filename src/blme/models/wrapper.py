@@ -68,12 +68,20 @@ def _resolve_dtype(dtype_str: str) -> Optional[torch.dtype]:
 
 def _parse_max_memory(value: str) -> Dict[Any, str]:
     """
-    Parse max_memory string like '0:20GiB,1:20GiB,cpu:40GiB'.
-    Returns dict for HuggingFace device_map.
+    Parse a max_memory string into a HuggingFace device_map dict.
+
+    Multiple devices must be separated by ';' (e.g. '0:20GiB;cpu:40GiB'),
+    because parse_model_args splits the whole model_args string on ',' first —
+    a comma-separated max_memory would be silently truncated to its first
+    device. Commas are still accepted here for the single-token case.
     """
+    import re
     mem = {}
-    for part in value.split(","):
-        dev, size = part.strip().split(":")
+    for part in re.split(r"[;,]", value):
+        part = part.strip()
+        if not part:
+            continue
+        dev, size = part.split(":")
         try:
             dev_key = int(dev)
         except ValueError:
@@ -102,7 +110,9 @@ def load_model_and_tokenizer(
         revision            - model revision / branch
         load_in_8bit        - true | false (bitsandbytes 8-bit)
         load_in_4bit        - true | false (bitsandbytes 4-bit)
-        max_memory           - per-device memory limit, e.g. '0:20GiB,cpu:40GiB'
+        max_memory           - per-device memory limit; separate devices with
+                               ';' e.g. '0:20GiB;cpu:40GiB' (commas are consumed
+                               by the model_args parser)
 
     Args:
         model_args_str: Comma-separated key=value string.
@@ -113,7 +123,18 @@ def load_model_and_tokenizer(
     """
     args = parse_model_args(model_args_str)
 
-    model_name = args.get("pretrained", "gpt2")
+    if "pretrained" not in args:
+        if model_args_str:
+            # A bare model name (e.g. "meta-llama/Llama-3-8B") or a typo has no
+            # '=', so parse_model_args drops it and we would silently load gpt2 —
+            # evaluating the wrong model. Fail loudly instead.
+            raise ValueError(
+                f"model_args={model_args_str!r} does not specify 'pretrained='. "
+                "Pass 'pretrained=<hf-id-or-path>' (a bare model name is ignored)."
+            )
+        model_name = "gpt2"  # explicit no-args default (demos/tests)
+    else:
+        model_name = args["pretrained"]
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -139,13 +160,14 @@ def load_model_and_tokenizer(
     # --- Model kwargs --------------------------------------------------------
     model_kwargs: Dict[str, Any] = {}
 
-    # dtype
+    # dtype  (transformers v5 renamed torch_dtype= -> dtype=; the old name
+    # prints a deprecation warning on every load)
     dtype_str = args.get("dtype", "auto")
     dtype = _resolve_dtype(dtype_str)
     if dtype == "auto":
-        model_kwargs["torch_dtype"] = "auto"
+        model_kwargs["dtype"] = "auto"
     elif dtype is not None:
-        model_kwargs["torch_dtype"] = dtype
+        model_kwargs["dtype"] = dtype
 
     # trust_remote_code
     if _parse_bool(args.get("trust_remote_code", "false")):
@@ -168,14 +190,18 @@ def load_model_and_tokenizer(
     if "max_memory" in args:
         model_kwargs["max_memory"] = _parse_max_memory(args["max_memory"])
 
-    # quantization (bitsandbytes)
-    if _parse_bool(args.get("load_in_8bit", "false")):
-        model_kwargs["load_in_8bit"] = True
+    # quantization (bitsandbytes). Passing load_in_8bit=/load_in_4bit= directly
+    # to from_pretrained was removed in transformers v5 (raises TypeError); they
+    # must be wrapped in a BitsAndBytesConfig passed as quantization_config=.
+    quant_8bit = _parse_bool(args.get("load_in_8bit", "false"))
+    quant_4bit = _parse_bool(args.get("load_in_4bit", "false"))
+    if quant_8bit or quant_4bit:
+        from transformers import BitsAndBytesConfig
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_8bit=quant_8bit,
+            load_in_4bit=quant_4bit and not quant_8bit,  # 8-bit takes priority
+        )
         use_device_map = True  # quantized models require device_map
-        model_kwargs.setdefault("device_map", "auto")
-    elif _parse_bool(args.get("load_in_4bit", "false")):
-        model_kwargs["load_in_4bit"] = True
-        use_device_map = True
         model_kwargs.setdefault("device_map", "auto")
 
     # --- Load model ----------------------------------------------------------

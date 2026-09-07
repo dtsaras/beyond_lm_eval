@@ -1,0 +1,25 @@
+{
+  "task": "geometry_spectral",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The Round-3 population and kernel repairs are real: Pythia-70m now averages all 25 Linear modules (avg_alpha_hat=5.596851), I_10 returns undefined Hill alpha, Conv1d stable rank matches a flattened reference within 4.27e-8, and a 4096-eigenvalue exhaustive reference differs by 0.000e+00. Two value-changing counterexamples remain: scaling diag(10,...,1) by 1e-24 leaves stable rank=3.850000 but BLME emits NaN, and on a 50-eigenvalue spectrum released WeightWatcher 0.7.7 selects n_tail=4 with alpha=16.176605 while BLME forbids that cutoff and emits 1.379708 (-91.471%).",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "The current output family is mixed on a fresh 8-model panel: avg_stable_rank tracks n_layers at Spearman rho=+0.827728 (p=0.01119) and d_model at rho=+0.659550, while avg_alpha_hat tracks vocab_size at rho=-0.822473 (p=0.01219). avg_alpha_official is comparatively architecture-flat (rho=+0.025367 with d_model, p=0.95246; rho=-0.036827 with vocab_size, p=0.93101), so that field is usable with controls, but the raw stable-rank and weighted-alpha fields are not general cross-architecture scalars; 0 normalized twins are registered.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "CalculatedContent/WeightWatcher; CalculatedContent/ww-trends-2021",
+  "github_reason": "I inspected and executed the hash-verified installed WeightWatcher 0.7.7 release. On GPT-2's 48 shared projection matrices, aggregate absolute deltas are 5.27e-6 for stable rank, 1.80e-6 for alpha, and 4.10e-6 for alpha_weighted; however, the 50x50 diagonal counterexample gives BLME/WeightWatcher alpha=1.379708/16.176605 (absolute delta 14.796897), exposing the omitted small-tail cutoffs.",
+  "paper_number": "PARTIAL",
+  "paper_reason": "Martin, Peng and Mahoney Table 2 publishes GPT2-small weighted alpha=9.62 over 49 treated matrices. Current all-Linear BLME reports 11.100881 (+15.3938%), while live WeightWatcher 0.7.7 reports 10.832655 (+12.6056%); the 48 shared projections agree within 5.27e-6, but the published aggregate is not reproduced because the treated population and reference/checkpoint version differ.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Across 8 freshly evaluated current-code checkpoints, avg_stable_rank has rho=+0.827728 with n_layers (p=0.01119) and rho=+0.659550 with d_model, while avg_alpha_hat has rho=-0.822473 with vocab_size (p=0.01219). The mechanism is direct: I_10 has stable rank=10.000000 exactly, whereas avg_alpha_official is width-flat on the same real-model panel at rho=+0.025367 (p=0.95246).",
+  "defects": [
+    "CODE, src/blme/tasks/geometry/spectral.py:40-52: the claimed every-order-statistic scan is still truncated: np.arange(0, n-min_tail) forbids all cutoffs leaving 8 or fewer eigenvalues. On a deterministic 50x50 diagonal spectrum, BLME chooses xmin=0.081658, n_tail=46, alpha=1.379708 and alpha_hat=1.593527, while released WeightWatcher 0.7.7 chooses xmin=12.035942, n_tail=4, alpha=16.176605 and alpha_hat=18.683562; the alpha error is -91.471%.",
+    "CODE, src/blme/tasks/geometry/spectral.py:179-203: avg_stable_rank still squares unscaled float32 singular values, so the Round-2 norm-underflow class remains in this task. diag(10,...,1) has exact stable rank 3.850000 at every nonzero scale, but BLME returns 4.000000 at 1e-23 (+3.896%) and NaN at 1e-24 even though avg_alpha=19.982452 and avg_alpha_official=1.507552 remain finite.",
+    "OUTPUT/CODE, src/blme/tasks/geometry/spectral.py:243-257 and 293-312: fit diagnostics are still computed and discarded; a key audit found 0 exported xmin/KS/n_tail/status fields. For Pythia-70m embed_out, the retained alpha_official=2.601242 omits xmin=45.063035, KS=0.023539 and n_tail=192, so an aggregate cannot be audited for pathological local fits.",
+    "DOC/TEST, tests/tasks/parity/test_spectral_parity.py:20-22 and 66-101 plus src/blme/task_metadata.py:69: the parity transcription and provenance text remain stale after the repairs. The focused run passes 19 and skips 1 even though its transcription gives 0.0 versus current 19.982433 on the 1e-8 diagonal, 0.0 versus NaN on I_10, and 20.0 versus 199.999283 on an uncapped tail; metadata says the head is excluded/48 GPT-2 modules while current code includes it and scans 49."
+  ],
+  "fix": "Port the released cutoff selection completely: for ordinary fits scan through the two-point tail and implement/reference the released small-N branch, or explicitly rename the current min-tail result as a different estimator. Compute stable rank from singular values rescaled by S[0] before squaring; export per-fit xmin, KS, n_tail and status/counts; and update the stale parity transcription, module-population metadata and anti-regression cases. Keep NORMALIZERS empty: zero-padding preserved raw stable rank at 15.937391 while a stable_rank/d candidate fell exactly 64x."
+}

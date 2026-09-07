@@ -1,0 +1,410 @@
+[
+ {
+  "task": "dynamics_coe",
+  "file": "src/blme/tasks/dynamics/coe.py",
+  "cert": "formula-faithful",
+  "papers": "Wang et al. 2025 (ICLR, arXiv:2410.13640)",
+  "repo": "Alsace08/Chain-of-Embedding",
+  "notes": "Prompt-side hidden-state variant by default. Follows OFFICIAL score.py (normalized mag AND angle in CoE-C); the paper prose/Algorithm-2/code are 3-way inconsistent. Parity <=1.9e-9 on Z_Mag!=1 chains (test_dynamics.py::test_chain_of_embedding_zmag_not_one...)."
+ },
+ {
+  "task": "dynamics_fractal",
+  "file": "src/blme/tasks/dynamics/fractal.py",
+  "cert": "refined-adaptation",
+  "papers": "Alabdulmohsin, Tran & Dehghani 2024 (NeurIPS, arXiv:2402.01825)",
+  "repo": "nolds (R/S cross-check)",
+  "notes": "Fractal parameters of the NLL 'language process' z_t = -log p(x_t|prefix): R/S Hurst, Joseph (sigma_tau ~ tau^J), Holder (p_eps(tau) ~ tau^-S, eps=5e-3). White-noise/trending anchors + nolds.hurst_rs agreement +-0.1. DEVIATION (disclosed): computed on the concatenated eval-corpus stream, not the paper's per-document 4K-token windows. gpt2 H=0.63 vs paper's ~0.70 for language."
+ },
+ {
+  "task": "dynamics_generation_diversity",
+  "file": "src/blme/tasks/dynamics/generation_diversity.py",
+  "cert": "parity-ready",
+  "papers": "Li et al. 2016 (NAACL); Zhu et al. 2018 (SIGIR, Texygen)",
+  "repo": "geek-ai/Texygen",
+  "notes": "Self-BLEU == verbatim Texygen calc_bleu to 2.8e-17; distinct-n == Li formula (per-completion scope flagged in output). Seeding via torch.manual_seed (generate() has no generator kwarg; 7f9ba4c)."
+ },
+ {
+  "task": "dynamics_gradient_flow",
+  "file": "src/blme/tasks/dynamics/gradient_flow.py",
+  "cert": "refined-adaptation",
+  "papers": "Pascanu et al. 2013 (ICML, arXiv:1211.5063)",
+  "repo": "",
+  "notes": "Depth-for-time adaptation: ||dL_CE/dh_l||_F. Norms verified against float64 central finite differences to 1.1e-7 rel (campaign-B3 session artifact; the committed suite pins entropy == scipy, slope == linregress, and an independent leaf-replacement autograd recomputation matched exactly in the 2026-07-16 audit). Slope over NORMALIZED depth. No repo parity claimed (official code is RNN training code)."
+ },
+ {
+  "task": "dynamics_interpolation",
+  "file": "src/blme/tasks/dynamics/trajectories.py",
+  "cert": "proxy-only",
+  "papers": "BLME convexity proxy; slerp kernel = White 2016 (arXiv:1609.04468)",
+  "repo": "dribnet/plat",
+  "notes": "_slerp == official plat interpolate.py to 8.9e-16; e2e entropies == independent f64 recompute <=8.1e-6; endpoint invariant (lerp==slerp at alpha 0/1) pinned. Hang on <2 usable rows fixed (c2911bf)."
+ },
+ {
+  "task": "dynamics_perturbation_growth",
+  "file": "src/blme/tasks/dynamics/perturbation_growth.py",
+  "cert": "proxy-only",
+  "papers": "Li et al. 2025 (arXiv:2503.13530, quasi-Lyapunov grounding); Fernando & Guitchounts 2025/26 (residual-stream dynamics context)",
+  "repo": "",
+  "notes": "BLME diagnostic (documented formulation, NOT the official QLE protocol): seeded per-token-relative Gaussian perturbation of input embeddings; growth_slope = LSQ slope of log divergence vs normalized depth. Analytic anchor: linear gain-a stack -> slope/(L-1) = ln|a| exact (fp32 floor rel 1e-5); contracting stack -> negative."
+ },
+ {
+  "task": "dynamics_sharpness",
+  "file": "src/blme/tasks/dynamics/sharpness.py",
+  "cert": "parity-ready",
+  "papers": "Foret 2021; Yao 2020; Hutchinson 1990",
+  "repo": "google-research/sam; amirgholami/PyHessian",
+  "notes": "Top Hessian eigenvalue = SIGNED Rayleigh quotient (PyHessian convention; negative-dominant anchor pins the sign) == exact eigh <1e-9 rel, == pip PyHessian <1e-5. SAM delta == analytic quadratic exactly. Probe vectors seeded (config seed, B3). tests/tasks/parity/test_sharpness_parity.py drives the REAL helpers. B8: critical step size eta* (raw-gradient doubling+bisection probe theta - eta*g, params restored) with lambda_c = 2/eta* (Kalra et al. 2026, arXiv:2601.16979 edge-of-stability framing); exact on quadratic anchors lambda in {0.25, 4, 37.5}."
+ },
+ {
+  "task": "dynamics_stability",
+  "file": "src/blme/tasks/dynamics/stability.py",
+  "cert": "proxy-only",
+  "papers": "BLME embedding-neighborhood diagnostic; inspired by Wendlandt et al. 2018 (arXiv:1804.09692)",
+  "repo": "",
+  "notes": "Jaccard = monotone transform of the paper's 10-NN overlap (J = o/(2k-o), verified). Independent torch.topk reimplementation matched exactly in the 2026-07-16 audit (the earlier 'triple route' figure was a session artifact, not a committed test); reference_model branch covered (self-ref -> exactly 1.0/0.0). Global-RNG seeding replaced with a local default_rng honoring config seed (audit fix)."
+ },
+ {
+  "task": "geometry_categories",
+  "file": "src/blme/tasks/geometry/categories.py",
+  "cert": "proxy-only",
+  "papers": "BLME category geometry",
+  "repo": "",
+  "notes": "Tokenizer/category dependent. B7: relation/analogy kernels now covered (exact constant-relation anchors) + hub kernel vs independent k-occurrence recomputation."
+ },
+ {
+  "task": "geometry_cka",
+  "file": "src/blme/tasks/geometry/cka.py",
+  "cert": "parity-ready",
+  "papers": "Kornblith et al. 2019 (ICML); Cortes et al. 2012",
+  "repo": "google-research/representation_similarity",
+  "notes": "CONFIRMED_CORRECT (C3): executed official Demo.ipynb code \u2014 fixture 0.450953881199808 bit-identical; BLME <=1.8e-8 (fp32)."
+ },
+ {
+  "task": "geometry_cknna",
+  "file": "src/blme/tasks/geometry/cknna.py",
+  "cert": "parity-ready",
+  "papers": "Huh et al. 2024 (ICML, Platonic Representation Hypothesis)",
+  "repo": "minyoungg/platonic-rep",
+  "notes": "Mutual k-NN conditional CKA (local-neighborhood alignment). Bit-exact vs platonic-rep metrics.cknna (unbiased+biased HSIC, both orderings); tests/tasks/parity/test_cknna_parity.py."
+ },
+ {
+  "task": "geometry_collapse",
+  "file": "src/blme/tasks/geometry/collapse.py",
+  "cert": "refined-adaptation",
+  "papers": "Jing et al. 2021 (ICLR 2022); Roy & Vetterli 2007; Queipo-de-Llano et al. 2025 (arXiv:2510.06477)",
+  "repo": "",
+  "notes": "erank profile == verbatim Roy-Vetterli Eq(1)/Def 1 + scipy svdvals; analytic anchors exact; B6 pinned max_drop/max_drop_layer. Compression-valley proxy, not the 2510.06477 pipeline."
+ },
+ {
+  "task": "geometry_contextualization",
+  "file": "src/blme/tasks/geometry/contextualization.py",
+  "cert": "refined-adaptation",
+  "papers": "Ethayarajh 2019 (EMNLP, arXiv:1909.00512)",
+  "repo": "kawine/contextual",
+  "notes": "SelfSim/IntraSim/MEV kernels == official formulas <=3.3e-16; B7 pinned the 3 previously uncovered kernels. MEV reported raw AND anisotropy-adjusted (paper headline is anisotropy-adjusted, not comparable \u2014 documented)."
+ },
+ {
+  "task": "geometry_correlation_dimension",
+  "file": "src/blme/tasks/geometry/correlation_dimension.py",
+  "cert": "formula-faithful",
+  "papers": "Grassberger & Procaccia 1983 (PRL 50(5):346-349)",
+  "repo": "CSchoel/nolds (corr_dim, executed live); skdim.id.CorrInt",
+  "notes": "Classical GP estimator; matches nolds after removing its diagonal self-match artifact. Kernel = _gp_correlation_dimension (module-level, imported by parity tests)."
+ },
+ {
+  "task": "geometry_effective_depth",
+  "file": "src/blme/tasks/geometry/effective_depth.py",
+  "cert": "formula-faithful",
+  "papers": "Men et al. 2024 (ShortGPT, arXiv:2403.03853); Csordas et al. 2025 (arXiv:2505.13898)",
+  "repo": "",
+  "notes": "Block Influence BI_l = 1 - E_t[cos(h_l, h_{l+1})] (ShortGPT Eq. 2, hidden-state form) + effective_depth_90, a BLME cumulative-contribution summary INSPIRED BY Csordas et al.'s depth-utilization analysis (their own metric is an importance-weighted depth score \u2014 not this). frac_low_influence threshold 0.05 is a BLME choice (ShortGPT ranks and prunes to a ratio, no threshold). Audit 2026-07-16: final transition now uses the last block's PRE-final-norm output via a forward hook (HF hidden_states[-1] is post-ln_f; on gpt2 ~90% of the old last-layer BI was the ln_f artifact). Analytic anchors exact: identity -> 0, sign flip -> 2, rotation ~ 1, concentrated stack -> 0.25."
+ },
+ {
+  "task": "geometry_hsic",
+  "file": "src/blme/tasks/geometry/mutual_info.py",
+  "cert": "parity-ready",
+  "papers": "Gretton et al. 2005 (ALT, Def. 2); Kornblith et al. 2019",
+  "repo": "",
+  "notes": "nHSIC == verbatim Kornblith cka() + explicit-H Gretton Def. 2 (3.3e-15). B6: evaluate() now calls the parity-pinned _nhsic_from_grams kernel; anchor layer = first block output (not input embedding), documented."
+ },
+ {
+  "task": "geometry_hubness",
+  "file": "src/blme/tasks/geometry/hubness.py",
+  "cert": "parity-ready",
+  "papers": "Radovanovic et al. 2010 (JMLR 11); Tomasev et al. 2014 (IEEE TKDE 26(3))",
+  "repo": "scikit-hubness",
+  "notes": "k-occurrence kernel == scikit-hubness (bincount+skew+Gini, self-hit filter); B4: e2e evaluate() pinned vs independent full-argsort reference (self-mask regression guarded)."
+ },
+ {
+  "task": "geometry_intrinsic_dim",
+  "file": "src/blme/tasks/geometry/intrinsic_dim.py",
+  "cert": "formula-faithful",
+  "papers": "Facco et al. 2017 (Sci Rep 7:12140); Ansuini et al. 2019",
+  "repo": "efacco/TWO-NN; scikit-dimension",
+  "notes": "Bit-identical to skdim _TwoNN fit on analytic Pareto samples; label kept conservative (mu<=1 pre-filter deviates on duplicate-heavy data). No sub-1 floor: Pareto support d in (0,inf) \u2014 the paper never discusses sub-1 estimates (B5 doc fix)."
+ },
+ {
+  "task": "geometry_isoscore",
+  "file": "src/blme/tasks/geometry/isotropy.py",
+  "cert": "parity-ready",
+  "papers": "Rudman et al. 2022 (Findings of ACL, arXiv:2108.07344)",
+  "repo": "bcbi-edu/p_eickhoff_isoscore",
+  "notes": "Algorithm 1/Eq 4.1 exact; k-of-n analytic anchors to 2.2e-16; <=4e-8 vs official IsoScore 2.0.1 incl. the N<d zero-padding branch (live-package test added B5)."
+ },
+ {
+  "task": "geometry_lid",
+  "file": "src/blme/tasks/geometry/lid.py",
+  "cert": "formula-faithful",
+  "papers": "Ma et al. 2018 Eq. 4 (-k MLE variant); derived from Levina & Bickel 2004",
+  "repo": "xingjunm/lid_adversarial_subspace_detection",
+  "notes": "Bit-exact (0.0) vs official mle_batch; -k variant is Ma et al. (biased k/(k-1) vs L-B -(k-1)), so NOT parity-ready with skdim.MLE. Docstring title+attribution fixed B5."
+ },
+ {
+  "task": "geometry_lipschitz",
+  "file": "src/blme/tasks/geometry/lipschitz.py",
+  "cert": "proxy-only",
+  "papers": "Miyato 2018; Scaman & Virmaux 2018 (motivation only)",
+  "repo": "avirmaux/lipEstimation (sigma_max cross-check)",
+  "notes": "Hidden-state relative-change diagnostic, NOT an operator-norm bound (disclaimed). lipschitz_max = max over layers of per-layer token MEANS (aggregation documented; C3 DISCREPANCY resolved). Analytic 4-layer case + distilgpt2 vs numpy reference."
+ },
+ {
+  "task": "geometry_magnitude",
+  "file": "src/blme/tasks/geometry/magnitude.py",
+  "cert": "parity-ready",
+  "papers": "Limbeck et al. 2024 (NeurIPS, arXiv:2311.16054)",
+  "repo": "aidos-lab/magnipy",
+  "notes": "Bit-exact vs magnipy cholesky/pinv/no_gpu + Leinster line closed form. B5: median-heuristic scale matches magnipy incl. duplicate clouds (zero-filter deviation fixed); med_scale = |tX| AT t_med; numpy-1.x trapezoid crash fixed + guarded. Scale ladder + log-log AUC are documented BLME choices."
+ },
+ {
+  "task": "geometry_mahalanobis",
+  "file": "src/blme/tasks/geometry/mahalanobis.py",
+  "cert": "refined-adaptation",
+  "papers": "Lee et al. 2018 (NeurIPS, Eq. 2; single-centroid C=1 adaptation with Ledoit-Wolf)",
+  "repo": "pokaxpoka/deep_Mahalanobis_detector",
+  "notes": "Sentence-level held-out OOD proxy; kernel == official sqrt(-2*term_gau) (0.0). Held-out-duplicate bug fixed (dataset=None pool now text-disjoint); B7 pinned the sklearn-free pinv fallback analytically."
+ },
+ {
+  "task": "geometry_matrix_entropy",
+  "file": "src/blme/tasks/geometry/matrix_entropy.py",
+  "cert": "parity-ready",
+  "papers": "Wei et al. 2024 (arXiv:2401.17139; v2 = Diff-eRank, NeurIPS 2024)",
+  "repo": "waltonfuture/Diff-eRank",
+  "notes": "B4: dedicated parity file vs verbatim official normalize/cal_cov/cal_entropy (<=1e-5 fp32, ln2 analytic anchor, mutant check). Cache/fresh truncation unified at 512 (official protocol: 2048, documented)."
+ },
+ {
+  "task": "geometry_mp_bulk_deviation",
+  "file": "src/blme/tasks/geometry/rmt_bulk.py",
+  "cert": "parity-ready",
+  "papers": "Marchenko & Pastur 1967; Baik et al. 2005 (BBP)",
+  "repo": "scikit-rmt (CDF cross-check)",
+  "notes": "Analytic MP bulk-edge/CDF tests + closed-form/quad parity <=2.3e-5. B4: gamma>1 KS atom handling + gamma=1 CDF singularity fixed with regression tests (previously wrong: KS ~1-1/gamma, CDF err 0.59). B8: lower-edge outlier fraction/energy below (1-tol)*MP lower edge for gamma<1 (Staats et al. 2024, arXiv:2410.17770 small-eigenvalue signal); NaN for gamma>=1 (edge=0); iid ~0 / correlated >=0.04 anchors."
+ },
+ {
+  "task": "geometry_neural_collapse",
+  "file": "src/blme/tasks/geometry/neural_collapse.py",
+  "cert": "refined-adaptation",
+  "papers": "Papyan et al. 2020",
+  "repo": "neuralcollapse/neuralcollapse",
+  "notes": "Bundled topic-label proxy; NC2 proxy only."
+ },
+ {
+  "task": "geometry_perplexity",
+  "file": "src/blme/tasks/geometry/perplexity.py",
+  "cert": "formula-faithful",
+  "papers": "Standard LM cross entropy/perplexity (HF guide protocol)",
+  "repo": "",
+  "notes": "B7: dedicated parity file \u2014 overall/rare/freq PPL + BPC reconstructed independently (<=1e-4); BOS-tokenizer BPC bug + empty-text crash fixed with regression tests."
+ },
+ {
+  "task": "geometry_phd_dimension",
+  "file": "src/blme/tasks/geometry/phd_dimension.py",
+  "cert": "parity-ready",
+  "papers": "Tulchinskii et al. 2023 (NeurIPS)",
+  "repo": "ArGintum/GPTID",
+  "notes": "Persistent-homology dimension from the MST-length (total H0 persistence) power-law E(n)~n^((d-1)/d). Seed-matched bit-exact vs GPTID PHD; stochastic estimator, RNG-pinned; tests/tasks/parity/test_phd_dimension_parity.py."
+ },
+ {
+  "task": "geometry_positional_decay",
+  "file": "src/blme/tasks/geometry/positional_decay.py",
+  "cert": "proxy-only",
+  "papers": "RoFormer (Su et al. 2021) decay premise; ALiBi (Press et al. 2021) context",
+  "repo": "",
+  "notes": "Long-context-only aggregate decay trend (documented); Spearman kernel == hand-written tie-averaged reference to 1.1e-16."
+ },
+ {
+  "task": "geometry_prediction_alignment",
+  "file": "src/blme/tasks/geometry/consistency.py",
+  "cert": "proxy-only",
+  "papers": "Output-projection geometry / logit-lens motivation (Belrose et al. 2023 tuned-lens as context)",
+  "repo": "",
+  "notes": "Cosine(final hidden, output-projection row of target token). B7: untied-head behavior numerically pinned (must use lm_head.weight, not the embedding table)."
+ },
+ {
+  "task": "geometry_procrustes_linearity",
+  "file": "src/blme/tasks/geometry/procrustes_linearity.py",
+  "cert": "parity-ready",
+  "papers": "Razzhigaev et al. 2024 (ACL, 'Your Transformer is Secretly Linear')",
+  "repo": "AIRI-Institute/LLM-Microscope",
+  "notes": "Per-adjacent-layer linear (pseudo-inverse) Procrustes similarity; bit-exact port of llm_microscope.procrustes_similarity. NOTE: the absolute value is conditioning-dependent (unguarded 1/S amplifies ~1e-17 singular values) \u2014 interpret the across-depth PROFILE, not a single value; tests/tasks/parity/test_procrustes_linearity_parity.py."
+ },
+ {
+  "task": "geometry_representation_sensitivity",
+  "file": "src/blme/tasks/geometry/information_geometry.py",
+  "cert": "proxy-only",
+  "papers": "Amari 1998, Natural Gradient Works Efficiently in Learning (Neural Computation 10(2)) \u2014 softmax score-function identity",
+  "repo": "",
+  "notes": "grad_h log P = W_y - E_p[W] == f64 autograd + finite differences; B7 covered the lm_head-bias branch (was untested). Docstring cited a non-existent title/year pairing \u2014 fixed."
+ },
+ {
+  "task": "geometry_rsa",
+  "file": "src/blme/tasks/geometry/rsa.py",
+  "cert": "refined-adaptation",
+  "papers": "Kriegeskorte, Mur & Bandettini 2008 (Front. Syst. Neurosci. 2:4)",
+  "repo": "rsatoolbox",
+  "notes": "CONFIRMED_CORRECT (C3): all 6 outputs == from-scratch Spearman AND rsatoolbox 0.3.2 to 1.1e-16."
+ },
+ {
+  "task": "geometry_schatten",
+  "file": "src/blme/tasks/geometry/schatten.py",
+  "cert": "refined-adaptation",
+  "papers": "Yusupov et al. 2025 (arXiv:2509.25359); Li et al. 2024 (arXiv:2410.10672); Garrido et al. 2023",
+  "repo": "MLGroupJLU/MatrixNuclearNorm",
+  "notes": "normalize+MNN kernels == official MNN.py verbatim (0.0); B4: per-sentence pipeline incl. mnn/T pinned e2e vs in-test official transcription. RankMe eps placement deviates O(1e-5), documented. Schatten-p reported /d^(1/p); p=2 dropped (content-free)."
+ },
+ {
+  "task": "geometry_spectral",
+  "file": "src/blme/tasks/geometry/spectral.py",
+  "cert": "refined-adaptation",
+  "papers": "Martin & Mahoney 2019/2021 (HT-SR); Martin, Peng & Mahoney 2021 (Nat Comms 12:4122)",
+  "repo": "CalculatedContent/WeightWatcher",
+  "notes": "Singular-value Hill proxy on fixed top-20% tail, not exact WW alpha (eigenvalues + KS-optimal xmin); at matched xmin alpha_sigma = 2*alpha_MM - 1 exactly (verified vs weightwatcher 0.7.7). Stable rank def: Rudelson & Vershynin 2007 (Bartlett misattribution fixed, B4). Real-task anti-drift test added. B8: OFFICIAL Clauset PL-MLE alpha with KS-optimal xmin on eigenvalues (alpha_official, alpha_hat = alpha*log10 lambda_max). Audit 2026-07-16 fixed the KS empirical-CDF convention (right->LEFT-continuous, the plfit/WW convention) + raised the xmin scan cap: == live weightwatcher 0.7.7 across ALL 49 gpt2 modules, mean |dalpha| 3e-4, max 2.1e-3 (pre-fix: mean 0.41, max 3.64); planted Pareto alpha=3 -> 2.994."
+ },
+ {
+  "task": "geometry_superposition_strength",
+  "file": "src/blme/tasks/geometry/superposition_strength.py",
+  "cert": "formula-faithful",
+  "papers": "Liu, Liu & Gore 2025 (NeurIPS, arXiv:2505.10465)",
+  "repo": "liuyz0/SuperpositionScaling",
+  "notes": "Welch-bound-normalized mean squared overlap of unembedding rows. Analytic anchors exact: orthonormal->0, simplex ETF == Welch bound (rel 1e-6), iid Gaussian -> 1/m. PROTOCOL (audit 2026-07-16): headline MSO on RAW rows per the official overlap-0.py (no centering); centered variant = disclosed BLME auxiliary; pinned by test_task_headline_follows_official_raw_protocol. E1 HEAD-TO-HEAD (2026-07-17): official script executed verbatim on gpt2 \u2014 exact E[cos^2] 0.07465654 vs BLME sampled 0.07476744, 0.15% rel (inside 200k-pair sampling error)."
+ },
+ {
+  "task": "geometry_svd",
+  "file": "src/blme/tasks/geometry/isotropy.py",
+  "cert": "refined-adaptation",
+  "papers": "Ethayarajh 2019 (Eq. 4 anisotropy); Roy & Vetterli 2007 (erank)",
+  "repo": "",
+  "notes": "erank/PR/AUC pinned analytically + vs official IsoScore pkg. avg_cosine_similarity = Eq. 4 on RAW states, self-pairs excluded (historic centered-states deviation read ~0 always; fixed + exact-pinned B5)."
+ },
+ {
+  "task": "geometry_tokenizer_efficiency",
+  "file": "src/blme/tasks/geometry/tokenizer_efficiency.py",
+  "cert": "proxy-only",
+  "papers": "Rust et al. 2021 (fertility, after Acs 2019); Ali et al. 2024 (arXiv:2310.08754)",
+  "repo": "",
+  "notes": "Whitespace-word micro-average fertility proxy (documented). Analytic fake-tokenizer anchors exact. B7: fabricated docstring author list (Rajput/Chamberlain/Reese) corrected to Ali et al."
+ },
+ {
+  "task": "geometry_trajectory_curvature",
+  "file": "src/blme/tasks/geometry/trajectory_curvature.py",
+  "cert": "parity-ready",
+  "papers": "Hosseini & Fedorenko 2023 (NeurIPS, arXiv:2311.04930)",
+  "repo": "eghbalhosseini/sent_sampling",
+  "notes": "Angle kernel == official curvature_utils.py (8.9e-16); layer aggregation = paper mean-of-per-sentence-means (pooled-angles deviation fixed; pinned by test_trajectory_curvature_parity.py with length-varying trajectories). First cached layer == paper L0 baseline."
+ },
+ {
+  "task": "geometry_unembedding",
+  "file": "src/blme/tasks/geometry/unembedding.py",
+  "cert": "proxy-only",
+  "papers": "Effective rank: Roy & Vetterli 2007 (EUSIPCO); purity/alignment are BLME diagnostics",
+  "repo": "",
+  "notes": "erank of MEAN-CENTERED W_out == f64 EUSIPCO re-derivation (5.4e-6 rel); B4: exact orthogonal-cluster purity==1.0 anchor added (was bound-checked only)."
+ },
+ {
+  "task": "geometry_vendi_score",
+  "file": "src/blme/tasks/geometry/vendi.py",
+  "cert": "parity-ready",
+  "papers": "Friedman & Dieng 2023 (TMLR, arXiv:2210.02410)",
+  "repo": "vertaix/Vendi-Score",
+  "notes": "Bit-exact vs official score_K/score_X; nonlinear kernel, distinct from erank/RankMe. Subsampling is a size-CAPPED (not unbiased) estimate \u2014 VS <= max_points (docstring fixed B5)."
+ },
+ {
+  "task": "geometry_weight_norms",
+  "file": "src/blme/tasks/geometry/weight_norms.py",
+  "cert": "formula-faithful",
+  "papers": "Standard definitions: Frobenius; sigma_max; stable rank (Rudelson & Vershynin 2007)",
+  "repo": "CalculatedContent/WeightWatcher (stable_rank cross-check)",
+  "notes": "Analytic planted-spectrum parity + WW stable_rank agreement 9.2e-5 rel; 3-D fused-MoE params handled by slicing (B4). norm_uniformity = max(0, 1-CV)."
+ },
+ {
+  "task": "repe_concept_separability",
+  "file": "",
+  "cert": "refined-adaptation",
+  "papers": "Zou et al. 2023",
+  "repo": "andyzoujm/representation-engineering",
+  "notes": "Held-out LR-CV separability probe (paper Sec 5.1 linear-reading family), NOT the PCA/LAT reading vector. Per-layer AUC/acc == sklearn cross_val_score to 0.0; planted-concept analytic AUC=1.0. B2 (2026-07): nan-aware summaries + binary-int label validation."
+ },
+ {
+  "task": "repe_refusal_direction",
+  "file": "",
+  "cert": "refined-adaptation",
+  "papers": "Arditi et al. 2024; Zou et al. 2023",
+  "repo": "andyrdt/refusal_direction",
+  "notes": "Refusal direction = difference-of-means (harmful - harmless) == official andyrdt/refusal_direction get_mean_diff exactly (0.0); |cos|=1 (tests/tasks/parity/test_repe_refusal_direction_parity.py)."
+ },
+ {
+  "task": "repe_steering_effectiveness",
+  "file": "",
+  "cert": "proxy-only",
+  "papers": "Zou et al. 2023; Turner et al. 2023 (ActAdd, arXiv:2308.10248)",
+  "repo": "",
+  "notes": "Hook == official RepE linear_comb @ token_pos='end'; per-layer KL == fp64 reference <=1.7e-6; alpha=0 -> KL~0. KL effectiveness/success-rate summary is BLME's own. B2 (2026-07): fallback now reachable on the default text corpus (was dead in every study run) + no caller-dataset mutation."
+ },
+ {
+  "task": "repe_task_vectors",
+  "file": "",
+  "cert": "refined-adaptation",
+  "papers": "Zou et al. 2023; Ilharco et al. 2023",
+  "repo": "andyzoujm/representation-engineering",
+  "notes": "Reading-vector direction = class mean-difference == official RepE ClusterMeanRepReader to 2.2e-16; |cos|=1 (tests/tasks/parity/test_repe_task_vectors_parity.py)."
+ },
+ {
+  "task": "topology_betti_curve",
+  "file": "src/blme/tasks/topology/betti_curve.py",
+  "cert": "refined-adaptation",
+  "papers": "Naitzat et al. 2020 (JMLR 21(184))",
+  "repo": "topnn/topnn_framework",
+  "notes": "Geodesic-kNN adaptation (ripser, not Eirene; normalized-persistence beta_1) \u2014 deviation disclosed. networkx connected-components cross-check + ground-truth anchors (4 blobs/circle/figure-8/hi-dim noise); derived stats numerically pinned (test_topology.py::test_betti_curve). (An earlier note claimed GF(2)/GUDHI engines that are not in the repo \u2014 corrected, audit 2026-07-16.)"
+ },
+ {
+  "task": "topology_homology",
+  "file": "src/blme/tasks/topology/homology.py",
+  "cert": "parity-ready",
+  "papers": "Zomorodian & Carlsson 2005; Edelsbrunner & Harer 2008; Naitzat et al. 2020 (JMLR)",
+  "repo": "ripser.py; GUDHI",
+  "notes": "Persistence-summary reference test vs analytic unit-square + GUDHI; also emits mean-pairwise-distance-normalized summaries (paper tab:normalization). B8: scale-stratified fine/coarse persistence summaries (death vs frac*mean-pairwise-distance; Fay et al. 2026, arXiv:2505.20435 topology-compression signal), anchored on constructed diagrams."
+ },
+ {
+  "task": "topology_persistence_entropy",
+  "file": "src/blme/tasks/topology/persistence_entropy.py",
+  "cert": "parity-ready",
+  "papers": "Rucco et al. 2016 (ECCS 2014); Chintakunta et al. 2015; Atienza et al. 2020 (Pattern Recognition 107:107509)",
+  "repo": "giotto-tda",
+  "notes": "log2 Def 3.1; executed-gtda-0.6.2 parity 2.7e-15 over 203 cases (campaign 3); live guard = scipy.stats.entropy(base=2), gtda's own kernel. Also emits relative PE (/log2 m)."
+ },
+ {
+  "task": "topology_persistence_landscape",
+  "file": "src/blme/tasks/topology/persistence_landscape.py",
+  "cert": "parity-ready",
+  "papers": "Bubenik 2015 (JMLR 16:77-102)",
+  "repo": "persim",
+  "notes": "persim parity incl. multi-bar K=4 case (k-selection exercised) at ~9e-16; analytic single/two-bar anchors exact."
+ },
+ {
+  "task": "topology_zigzag_persistence",
+  "file": "src/blme/tasks/topology/zigzag.py",
+  "cert": "refined-adaptation",
+  "papers": "Gardinazzi et al. 2025 (ICML, arXiv:2410.11042)",
+  "repo": "RitAreaSciencePark/ZigZagLLMs",
+  "notes": "Across-layer topological-persistence summary (ripser, existing dep). FAITHFUL PROXY: feature layer-lifetimes anchored EXACTLY to the paper's dionysus zigzag engine on ground-truth constructions (loop in a contiguous layer band -> one zigzag bar), not a bit-exact barcode port of raw short-bar multiplicity; tests/tasks/parity/test_zigzag_parity.py."
+ }
+]

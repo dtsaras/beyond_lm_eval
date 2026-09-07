@@ -202,7 +202,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 |------|-----------|-------|-------------------|
 | `repe_task_vectors` | `mean_vector_norm` | ≥0 | Average magnitude of contrastive task vectors across layers. Larger = stronger task direction. |
 | `repe_concept_separability` | `max_auc` | 0–1 | Peak linear separability of concept pairs across layers. Higher = more linearly decodable concepts. |
-| `repe_steering_effectiveness` | `steering_success_rate` | 0–1 | Fraction of layers where steering vectors produce a measurable output shift (KL > threshold). Higher = model is more steerable. |
+| `repe_steering_effectiveness` | `steering_success_rate` | 0–1 | Fraction of **tested** layers where steering vectors produce a measurable output shift (KL > threshold). Models deeper than 10 layers test 5 depth-sampled layers (0, n/4, n/2, 3n/4, n−1), so the denominator is ≤5 there. Higher = model is more steerable. |
 | `repe_refusal_direction` | `separability_auc`, `mean_projection_gap` | 0–1 / any | Linear separability and projection gap between harmful/harmless prompts along the refusal direction. |
 
 ---

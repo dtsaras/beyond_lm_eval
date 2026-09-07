@@ -1,0 +1,25 @@
+{
+  "task": "dynamics_generation_diversity",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Li et al. define Distinct-n by pooling unique n-grams across all generated responses and dividing by all generated tokens, but generation_diversity.py:224-226 computes each completion's ratio and then averages it. Duplicating the internally unique response [1, 2] makes BLME return Distinct-1 = 1.0 while the paper formula returns 0.5, and K duplicates create an arbitrary K-fold error.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "In 61 stored results, Distinct-1/2/3 had maximum absolute Spearman rho 0.207 with d_model, n_layers, vocab_size, or parameter count, but Self-BLEU had rho = 0.274 with vocab_size (p = 0.0327). Retokenizing identical English completions changed Self-BLEU from 0.06029 with GPT-2 BPE to 0.05618 with Pythia's tokenizer (7.3%), so subword scores require a fixed tokenizer before cross-model comparison.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "https://github.com/geek-ai/Texygen",
+  "github_reason": "Fetched Texygen's utils/metrics/SelfBleu.py and executed its exact NLTK sentence_bleu plus method1-smoothing call on the same token fixtures; BLME matched with worst absolute error 0 over 50 random sets. End-to-end settings differ: Texygen tokenizes words, defaults to 3-grams, and uses hundreds of references, and no released Li et al. Distinct-n code was found.",
+  "paper_number": "NONE",
+  "paper_reason": "Li et al. publish Twitter Distinct-1/2 = 0.023/0.107 and OpenSubtitles = 0.0056/0.0136, but the exact generated corpora and checkpoints were not released for a matched rerun. Those values expose rather than reproduce the bug: for nonempty 6-18-token responses, BLME's per-completion Distinct-1 is at least 1/18 = 0.0556 and cannot produce the published 0.0056.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "The 61-model-size correlations are weak for Distinct-n, but Self-BLEU has a significant vocab-size association and a controlled same-text tokenizer swap moved it 7.3%. Fixed token-count generation also represents different word counts across tokenizer families, so the apparent diversity can encode architecture/tokenization without yet proving dominant size control.",
+  "defects": [
+    "CODE src/blme/tasks/dynamics/generation_diversity.py:224-226 and 292-294 average per-completion Distinct-n ratios instead of pooling n-grams and denominators over the generated response set.",
+    "PROTOCOL Self-BLEU uses model-specific subword IDs and five sibling references rather than the released implementation's word tokens and large reference set, so exact helper parity does not make the exported numbers comparable to Texygen.",
+    "CONFIG the effective 32-subword-token generation budget corresponds to different word counts across tokenizer families, coupling all response-level diversity statistics to tokenizer choice.",
+    "STALE TEST tests/tasks/test_dynamics.py:377 still requires entropy_collapse_delta after the correct rename to sampling_entropy_collapse_delta; the focused run was 37 passed and 1 stale-key failure."
+  ],
+  "fix": "Pool n-gram sets and token denominators across the full generated response corpus, matching Li et al.; retain prompt-level or per-completion statistics only under explicit alternate names. Offer a fixed word-tokenizer and word-count budget for cross-model Self-BLEU. The recent torch.special.entr repair and sampling_entropy renaming are correct and should be retained."
+}

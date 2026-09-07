@@ -1,0 +1,26 @@
+{
+  "task": "geometry_collapse",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The Roy-Vetterli implementation is otherwise faithful: the published rho=0.5 example is 3.079201435678004 versus 3.0792014356780038 (relative error 1.44e-16), 200 adversarial spectra have maximum relative error 3.24e-16, cache and fresh profiles agree at 0.000e+00 and with independent SciPy SVD to at most 4.49e-7 relative, and the full task is bit-identical after an exact rescaling to 7.52e-37. YELLOW is solely for collapse.py:188 computing min/(max+1e-12), not the defined min/max: two identical rank-one layers return 0.9999999999989999 instead of 1.0 (absolute error 1.00009e-12).",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The raw bundle contains dimension counts: at fixed N=513 under an iid no-collapse null, erank rises 7.981403 -> 411.708221 from d=8 -> 512 with Spearman rho=+1.000, while erank/d reverses the association to rho=-1.000. Collapse ratio alone survives the direct width intervention: zero-padding identical three-layer clouds from d=8 to d=512 changes all four raw summaries by 0.000e+00, while the demoted /d diagnostics move by exactly 64.0x; NORMALIZERS has 0 registrations and the task emits 0 first-class *_frac keys.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_repo": "facebookresearch/directclr",
+  "github_reason": "I verified current upstream HEAD a86f64c9b0815ff19cfea9929cb7dc6bc293b5d4 and fetched/inspected the official 147-line spectrum.py: it contains 0 Roy-effective-rank or collapse-ratio routines and instead row-L2-normalizes activations before returning the singular values of np.cov(z). Thus 0 same-input scalar comparisons exist; 2 fresh local clone attempts exited 128 under the network sandbox, and the released ImageNet/checkpoint/CUDA pipeline is not the BLME scalar.",
+  "paper_number": "YES",
+  "paper_reason": "Roy and Vetterli Section 2.3's rho=0.5 example has spectrum [2.25, 0.75, 0.75, 0.25], giving independent erank 3.0792014356780038; BLME returns 3.079201435678004 (absolute error 4.44e-16, relative error 1.44e-16). Property 1 also returns k for k=1,2,3,5,10,50 with maximum relative error 5.68e-16; collapse_ratio and max_drop have 0 published numerical counterparts because they are BLME extensions.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Width is causally confirmed by the fixed-N=513 null: raw erank has rho(d_model)=+1.000 over d=8..512, while erank/d has rho=-1.000 and falls 0.997675 -> 0.804118. Observation count is independently confirmed on the same current GPT-2 cache: 78/159/322 token rows move max_erank 57.879550 -> 107.634194 -> 200.958259 and max_drop -30.288476 -> -54.029696 -> -93.221454, although collapse_ratio stays in the narrower 0.125360-0.130357 range.",
+  "defects": [
+    "CODE/FIDELITY, src/blme/tasks/geometry/collapse.py:188: collapse_ratio adds an undocumented absolute 1e-12 to a denominator that is at least 1 on every valid nonzero Roy-Vetterli spectrum. An equal two-layer rank-one profile should give exactly 1.0 but returns 0.9999999999989999 (absolute error 1.00009e-12); an all-zero centered profile is undefined but is fabricated as 0.0.",
+    "ROBUSTNESS/CODE, src/blme/tasks/geometry/collapse.py:73-219: an empty activation mapping still reaches layers[0] and raises IndexError('list index out of range'); the measured structured-result count is 0.",
+    "DOCUMENTATION, src/blme/tasks/geometry/collapse.py:240-245: the return-site comment still calls erank_sigma2_per_layer a raw-singular-value spectrum and says the /d profile does not scale with width. On the measured layer the sigma2 and raw values are 3.624904005 and 5.783143891, respectively, and zero-padding d=8 -> 512 moves every /d diagnostic by exactly 64.0x.",
+    "DOCUMENTATION/NORMALIZATION: the manuscript still prescribes erank/d_model in metrics_geometry.tex:154 and appendix_normalization.tex:14, but the current task correctly has 0 first-class normalized outputs after direct zero-padding left raw max/min/drop/ratio unchanged to 0.000e+00 while the proposed twins moved 64.0x.",
+    "PROTOCOL/COMPARABILITY, src/blme/tasks/configs/defaults.yaml:31-32: resolve_task_config confirms the effective default is 100 documents, not a fixed point count. In the current GPT-2 prefix measurement, 5/10/20 documents realize 78/159/322 tokens and move max_erank by 3.47x (57.879550 -> 200.958259), so raw dimension counts cannot be pooled without matching the realized point population."
+  ],
+  "fix": "Remove the +1e-12 from collapse_ratio and return NaN when max_erank is non-finite or non-positive; return a structured error before indexing an empty layer list. Correct the sigma2 and /d comments, keep all failed /d fields under _meta_, reconcile the manuscript's stale normalization claim, and require a matched realized token population when comparing raw erank counts."
+}

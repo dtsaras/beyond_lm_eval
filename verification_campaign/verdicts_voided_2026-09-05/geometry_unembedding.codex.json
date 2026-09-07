@@ -1,0 +1,29 @@
+{
+  "task": "geometry_unembedding",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Roy and Vetterli define p_k = sigma_k / sum(sigma) and erank(A) = exp(-sum p_k log p_k) on A itself; the current headline takes svdvals(W_out) and applies exactly that formula. Through the full task, the paper's rho=0.5 and rho=0.9 examples were 3.079201561699 versus 3.079201435678 (relative error 4.09e-08) and 1.487401288968 versus 1.487401275304 (9.19e-09); k-equal spectra for k=1,2,3,5,10 were exact to 1.78e-15 absolute, 20 random matrices agreed with an independent NumPy SVD to 5.09e-08 relative, and all 4 permitted real checkpoints agreed with an independent Gram-eigendecomposition to at most 1.80e-07 relative, leaving no value-changing counterexample for the paper-defined quantity.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Raw effective rank is a dimension count: equal-spectrum isotropic matrices gave erank = d exactly from d=8 to 256 (Spearman rho=+1.000), and a fixed-N=2048 iid Gaussian sweep rose from 7.996646 to 251.753545 over the same widths (rho=+1.000, Pearson r=+0.999990). On the 4 permitted checkpoints, raw erank still had rho(d_model)=+0.774597 and Pearson r=+0.879353; purity is also vocabulary-composition dependent, moving 1.0 to 0.0 when V changed 21 to 441 by adding only unlabeled exact-copy rows while all 21 labeled rows were fixed.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "The official Zenodo record contains exactly 1 artifact, the 875.5 kB five-page PDF, and the paper contains 0 code or repository links; 3 targeted title/author/GitHub searches located 0 author-released implementations. Therefore there were 0 same-input upstream code runs to perform, and parity was checked against the paper's analytic example instead.",
+  "paper_number": "YES",
+  "paper_reason": "For Roy and Vetterli Section 2.3, the published closed form exp(2 H((1+|rho|)/2,(1-|rho|)/2)) gives 3.079201435678 at rho=0.5 and 1.487401275304 at rho=0.9. The current full task returned 3.079201561699 and 1.487401288968, relative errors 4.09e-08 and 9.19e-09; its k-equal-singular-value property also returned k=1,2,3,5,10 with maximum relative error 1.78e-16.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Width is confirmed by the controlled d=8..256 isotropic and fixed-N sweeps (raw rho=+1.000 in both) and is visible, though underpowered, in the 4-model local panel (rho=+0.774597, p=0.225; Pearson r=+0.879353, p=0.121). Vocabulary composition is separately confirmed: holding 21 labeled vectors and k=20 fixed while adding 420 unlabeled duplicates changed purity 1.0 to 0.0, and the tokenizer mapping itself produced 815/815/818/818 labeled token IDs on gpt2/distilgpt2/pythia-70m/pythia-160m; the tying flag also matched the architecture setting on 4/4 real models.",
+  "defects": [
+    "CODE: src/blme/tasks/geometry/unembedding.py:106-112 initializes only eff_rank after an SVD exception, while line 218 always reads eff_rank_centered; forcing torch.linalg.svdvals to fail produced UnboundLocalError in 1/1 trials instead of returning the intended two NaNs.",
+    "DOCUMENTATION: src/blme/task_metadata.py:73 and the BLME manuscript's unembedding definition still call the headline mean-centered, while current lines 215/218 emit raw and centered values separately; on gpt2 they were 685.969154 and 714.365174, a +4.1395% difference.",
+    "TEST: tests/tasks/test_comprehensive_parity.py:4405-4471 still documents and asserts a centered headline. The focused selection passed 13/13 only because its fixture's raw 31.490601972 and centered 31.489970199 differ by 0.00063177, below the approximately 0.003149 relative-tolerance budget, so the test does not pin the semantic fix.",
+    "DOCUMENTATION/NORMALIZATION: the manuscript promises effective_rank/d_model, but the current registry has 0 geometry_unembedding entries and add_normalized added 0 keys. The omission is correct under the strict bar: zero-padding the identical operator from d=8 to 256 left raw erank exactly 7.957869 while erank/d fell 0.994734 to 0.031085 (32.0x, rho=-1.000); update the manuscript rather than restore this failed twin.",
+    "CODE: cross_model_comparable describes only whether category labels were found, not the whole result dict: with tokenizer=None it was True on all 4 real checkpoints despite raw erank's measured width dependence, while the 21-label purity probes returned False. Rename or scope the flag to purity.",
+    "CODE: unembedding_is_tied tests np.allclose rather than parameter sharing. Independently cloned equal weights with distinct pointers and config.tie_word_embeddings=False returned True, and a maximum perturbation of 9.06e-06 still returned True; this is latent on the measured zoo, where value, pointer and config checks agreed on 4/4 models.",
+    "COMPARABILITY: with effective defaults num_samples=2000 and k=20, adding 420 unlabeled exact-copy rows while preserving all 21 labeled vectors changed unembedding_purity_mean from 1.0 to 0.0. This is faithful to the implemented all-vocabulary-neighbor definition but makes the field a vocabulary-coverage statistic as well as a geometry statistic.",
+    "REPRODUCIBILITY: the current CPU task returned gpt2 erank 685.969154105, versus 685.973595296 recorded by Opus, an absolute gap of 0.00444119 (relative 6.47e-06); the CPU value agreed with the independent float64 Gram result 685.969144541 to 1.39e-08 relative, so the small backend-dependent gap does not alter the GREEN formula verdict."
+  ],
+  "fix": ""
+}

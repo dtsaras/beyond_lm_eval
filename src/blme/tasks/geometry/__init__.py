@@ -30,3 +30,6 @@ from .phd_dimension import PHDimensionTask
 from .cknna import CKNNATask
 from .magnitude import MagnitudeTask
 from .procrustes_linearity import ProcrustesLinearityTask
+# Campaign-4 B8 additions (2026-07, gap-survey metrics)
+from .superposition_strength import SuperpositionStrengthTask
+from .effective_depth import EffectiveDepthTask

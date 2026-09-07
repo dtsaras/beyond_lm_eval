@@ -1,0 +1,23 @@
+{
+  "task": "topology_zigzag_persistence",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The new GF(2) calculation is correct for one adjacent type-A3 step, but adjacent multiplicities do not determine Gardinazzi et al.'s full zigzag barcode or all-pairs persistence similarity. Two explicit three-layer flag-complex sequences both produce BLME survival=0.75 and turnover=0.5, although one has one full-depth H1 bar and the other has none.",
+  "github": "PARTIAL",
+  "github_repo": "RitAreaSciencePark/ZigZagLLMs",
+  "github_reason": "Fetched the authors' zigzag_DL.py, post_process.py, and plotting notebook: they construct the full 2L-1 intersection zigzag, compute its barcode with Dionysus/FastZigZag, and derive an all-pairs layer matrix. FastZigZag is omitted from the repo for licensing and Dionysus is unavailable here, so the engine could not be run on the same input; code inspection and an analytic same-input comparison show that BLME is not output-equivalent.",
+  "paper_number": "NONE",
+  "paper_reason": "Figures 3 and 4 publish only graphical persistence-similarity matrices and layerwise average-similarity curves, not a numeric value for BLME's custom transition-averaged survival or Jaccard turnover scalars. Because BLME does not compute the plotted all-pairs quantity, no honest published-number reproduction is available.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "On the same 40-point circle repeated for L=2,4,8,16 layers, the first-class h1_total_layer_persistence and h1_max_band_length were exactly 2,4,8,16 (Spearman rho=1.000 with n_layers). The new rates were not significantly width-correlated in a Gaussian D=2..1024 sweep (rho=0.370 and -0.394, p=0.293 and 0.260), but at fixed D=32 changing N from 20 to 160 moved survival 0.188 to 0.524 and turnover 0.899 to 0.644 (both absolute rho=1.000); no stored current-task model outputs were available for a vocab_size correlation.",
+  "defects": [
+    "Adjacent matches do not compose into a multi-layer barcode: for A=square1, B=square1 plus square2, and C=square1 versus C=square2, both adjacent triples are (dim_a,dim_b,shared)=[(1,2,1),(2,1,1)] and every BLME scalar is identical, yet the correct full-depth-bar multiplicity is 1 versus 0.",
+    "The source definition is S_p(i,j)=number of full-barcode intervals covering both i and j divided by beta_p(i), followed by an average over every target layer j; BLME computes only S_p(i,i+1)-like terms and averages transitions, so it cannot reproduce the paper's path-dependent all-pairs descriptor.",
+    "Seven legacy H1 presence/band values and four layerwise H0 counts remain first-class outputs even though they do not track feature identity; h1_total_layer_persistence and h1_max_band_length are direct n_layers proxies.",
+    "When every layer has H1 dimension zero, both headline rates are NaN; json.dumps(..., allow_nan=False) fails, whereas the authors' notebook assigns a zero row when beta_p(i)=0.",
+    "The claimed sample-count independence is false on a stationary correlated-Gaussian construction: N=20 to 160 changes mean survival by 2.79x and turnover by 28.4%, monotonically.",
+    "The effective protocol uses only 40 mean-pooled prompts, while the paper uses last-token representations and datasets of roughly 10,000 prompts; BLME also mixes raw intermediate block outputs with a final post-normalized hidden state.",
+    "Task metadata and remaining module/test prose still claim exact or faithful zigzag anchoring, although the current test suite checks only adjacent pairs or per-layer presence and misses the three-layer counterexample."
+  ],
+  "fix": "Compute the interval decomposition of the complete sequence K_0 <- K_0 intersect K_1 -> K_1 <- ... -> K_{L-1}. From those intervals form C_p(i,j), the number covering every node between layers i and j, then S_p(i,j)=C_p(i,j)/beta_p(i) (with an explicit finite convention when beta_p(i)=0) and Sbar_p(i)=L^-1 sum_j S_p(i,j), as in the source. Keep the current A3 value only as a clearly named adjacent diagnostic, demote or remove all legacy bands, enforce finite outputs, adopt the last-token/large-sample protocol or label the deviation, and add the two-square composition and sample-size convergence tests."
+}

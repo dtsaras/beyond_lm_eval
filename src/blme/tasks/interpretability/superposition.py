@@ -39,14 +39,25 @@ def _multimodality_score(activations):
     if len(activations) < 4:
         return 0.0
 
-    s = skew(activations)
-    k = scipy_kurtosis(activations, fisher=False)  # excess=False => Pearson
-
     n = len(activations)
-    if n < 4 or k == 0:
+    # SAS / Pfister et al. 2013 bimodality coefficient with the finite-sample
+    # correction term in the denominator (the old code dropped it — using the
+    # asymptotic n->inf form — which deviated ~10% at n=50). g1 = sample
+    # skewness, g2 = sample EXCESS kurtosis (both bias-corrected).
+    # float64 before scipy. On a float32 input, scipy's bias-corrected skew /
+    # kurtosis path calls np.place with a float64 replacement value and raises
+    # `TypeError: Cannot cast array data from dtype('float64') to
+    # dtype('float32') according to the rule 'safe'`. Hidden states arrive as
+    # float32, so this fired on every real model (pre-existing failure of
+    # test_interpretability_superposition, found during the 2026-09-03 campaign).
+    activations = np.asarray(activations, dtype=np.float64)
+    g1 = skew(activations, bias=False)
+    g2 = scipy_kurtosis(activations, fisher=True, bias=False)
+    denom = g2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))
+    if denom == 0:
         return 0.0
 
-    bc = (s ** 2 + 1) / k
+    bc = (g1 ** 2 + 1) / denom
     # Clamp between 0 and 1
     bc = min(max(bc, 0.0), 1.0)
     return float(bc)
@@ -65,6 +76,9 @@ class SuperpositionIndexTask(DiagnosticTask):
         logger.info("Running Superposition Index Analysis...")
         num_samples = self.config.get("num_samples", 5)
         max_neurons = self.config.get("max_neurons", 256)
+        # Local RNG for the neuron subsample so results don't depend on global
+        # RNG state consumed by earlier tasks in the same evaluate() run.
+        rng = np.random.default_rng(int(self.config.get("seed", 42)))
 
         device = next(model.parameters()).device
 
@@ -144,7 +158,7 @@ class SuperpositionIndexTask(DiagnosticTask):
             # Subsample neurons if dim is large
             neuron_indices = np.arange(dim)
             if dim > max_neurons:
-                neuron_indices = np.random.choice(dim, max_neurons, replace=False)
+                neuron_indices = rng.choice(dim, max_neurons, replace=False)
 
             # 1. Multimodality scores per neuron
             bimodality_scores = []

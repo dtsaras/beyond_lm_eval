@@ -113,13 +113,17 @@ class InductionHeadTask(DiagnosticTask):
         vocab_size = tokenizer.vocab_size
         seq_len = self.config.get("seq_len", 30) # Short sequence
         num_samples = self.config.get("num_samples", 20)
-        
+
+        # Local RNG so results don't depend on how much global-RNG state earlier
+        # tasks consumed in the same evaluate() run (order-independence).
+        gen = torch.Generator().manual_seed(int(self.config.get("seed", 42)))
+
         scores = [] # (L, H)
-        
+
         with torch.no_grad():
             for _ in tqdm(range(num_samples), desc="Analyzing Heads"):
                 # Generate random sequence
-                rand_tokens = torch.randint(0, vocab_size, (1, seq_len))
+                rand_tokens = torch.randint(0, vocab_size, (1, seq_len), generator=gen)
                 
                 # Repeat it: [A B C ... A B C ...]
                 input_ids = torch.cat([rand_tokens, rand_tokens], dim=1).to(model.device)

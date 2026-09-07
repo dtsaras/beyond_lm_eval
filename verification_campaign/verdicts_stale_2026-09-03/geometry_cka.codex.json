@@ -1,0 +1,26 @@
+{
+  "task": "geometry_cka",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "For every nondegenerate pair checked, BLME computes Kornblith et al.'s column-centered linear CKA exactly: the biased and released feature-space debiased formulas agreed to 6.21e-8 and 4.78e-9 absolute, respectively, and independent Gaussian nulls behaved analytically. The remaining implementation caveat is real but narrow: with only one representation the task emits avg_adjacent_cka=0.0 although the average over an empty pair set is undefined and every sibling field correctly emits NaN.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The headline adjacent-layer average is mechanically depth-resolution dependent: sampling one fixed smooth representation path at 4 versus 64 layers changed biased average-adjacent CKA from 0.779650 to 0.999437 and debiased CKA from 0.747595 to 0.999356. In 66 real models avg_adjacent_cka correlates with d_model at rho=+0.546 (p=2.13e-6), n_layers at rho=+0.588 (p=2.06e-7), and parameter count at rho=+0.525 (p=6.00e-6).",
+  "normalized_variant": "debiased_avg_adjacent_cka, debiased_mean_offdiag_cka, debiased_min_offdiag_cka, debiased_early_late_cka",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "google-research/google-research/tree/master/representation_similarity",
+  "github_reason": "Fetched and executed the released Demo.ipynb formulas. On the fresh 41x13 fixture BLME biased CKA was 0.2997742766 versus official 0.2997742146 (absolute error 6.21e-8); on a second fixture BLME debiased CKA was 0.1281914659 versus official 0.1281914611 (relative error 3.73e-8). The released feature-space estimator is now the production route.",
+  "paper_number": "NONE",
+  "paper_reason": "Kornblith et al. publish heatmaps and network-identification summaries, but no scalar CKA value together with the exact activation pair needed to reconstruct it. The 0.55761 and 0.51346 values in the released notebook are official-code artifacts, not numbers printed in the paper.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Both a controlled fixed-path experiment and the 66-model table confirm architecture dependence of adjacent summaries. Debiasing removes the d/N null floor (at N=256 independent Gaussian CKA rose 0.0354 to 0.6672 across d=8 to 512, while debiased stayed between -0.0059 and 0.0068) but does not remove the layer-count dependence of an adjacent average.",
+  "defects": [
+    "CODE cka.py:284 returns the valid-looking value 0.0 for avg_adjacent_cka when n_layers=1; the correct result is NaN because no adjacent pair exists.",
+    "COMPARABILITY: average adjacent CKA approaches one as the same continuous path is sampled at more layers; the separately named debiased outputs fix estimator bias, not this depth-resolution confound.",
+    "CODE the biased summaries propagate any degenerate-pair NaN via np.mean/min/max while debiased summaries silently drop it via np.nanmean/nanmin, so the two variants summarize different pair populations.",
+    "DOC cka.py:128-129 still calls debiased CKA cross-model-comparable even though the later task comment and direct measurements correctly refute that claim.",
+    "PROTOCOL num_samples counts documents rather than a common aligned row budget, so tokenizer-dependent N changes the finite-sample floor of the biased estimator."
+  ],
+  "fix": "Change the empty avg_adjacent_cka fallback to NaN and make the biased/debiased NaN policy explicit and identical. Keep pairwise biased and debiased CKA unchanged, but for cross-model work compare fixed normalized-depth locations or interpolate every trajectory onto the same depth grid; relabel debiased outputs as null-floor-corrected rather than architecture-normalized and enforce a common aligned row budget."
+}

@@ -1,0 +1,28 @@
+{
+  "task": "dynamics_interpolation",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "The demotion is done and complete. Driving the real evaluate() over 18 models at the study config, the ONLY feature-eligible column this task now contributes is `convexity_gap`: every per-alpha entropy is emitted as `_meta_interp_entropy_*` / `_meta_slerp_entropy_*`, and `_meta_slerp_convexity_gap` and `_meta_convexity_gap_endpoint_entropy_mean` are prefixed too (all confirmed against feature_selection.is_excluded_predictor: convexity_gap KEPT, everything else EXCLUDED). The stated identity holds exactly: convexity_gap == interp_entropy_0.5 - (interp_entropy_0.0 + interp_entropy_1.0)/2 with max |difference| EXACTLY 0.0 over all 18 models, and the slerp twin agrees at pearson 1 - 1.6e-13, max rel 1.9e-06. The slerp kernel itself is the official plat/slerp formula, verified in an earlier round.",
+  "defect_location": "NONE",
+  "comparable": "YELLOW",
+  "comparable_reason": "convexity_gap is a difference of two entropies of the SAME model, so it has no vocabulary or width normalisation problem: over 18 models rho(convexity_gap, d_model) = -0.439, n_layers -0.406, vocab_size -0.062. It IS heavy-tailed and sign-changing (-1.271 to +1.864 over 18 models), so a rank method is safer than a linear one on it.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "dribnet/plat",
+  "github_reason": "The slerp kernel was verified bit-for-bit against the released `plat` slerp implementation in an earlier round; the task summary (entropy at each alpha, convexity gap) is BLME's own and has no released counterpart. Nothing new to fetch this round -- the round-7 change was purely which keys are emitted as features.",
+  "paper_number": "NONE",
+  "paper_reason": "There is no published number for 'next-token entropy along a slerp path between two prompt embeddings'; the construction is BLME's.",
+  "confounds": "NONE",
+  "confounds_reason": "rho(convexity_gap, vocab_size) = -0.062 (n=18), d_model -0.439, n_layers -0.406, n_params -0.558 -- none significant at n=18 after the multiple columns considered, and the quantity is a within-model difference so the usual scale mechanisms do not apply.",
+  "defects": [
+    "THE LEAK IS REDUCED, NOT ELIMINATED, AND THE SOURCE COMMENT'S NUMBER STILL DOES NOT REPRODUCE. The comment says convexity_gap is 'pearson +0.398' with the excluded endpoint entropy 'across 6 models'. Over my 18 models I measure pearson +0.2365 and spearman +0.5645 with `_meta_convexity_gap_endpoint_entropy_mean`. More to the point, convexity_gap is pearson +0.8887 / spearman +0.8906 with `interp_entropy_0.5` -- a member of the very family just demoted for being a capability measure -- so the gap is essentially the midpoint entropy re-centred by a term it correlates with only 0.24. Answering the question directly: convexity_gap is the RIGHT single contribution (it is the estimand, and its association with the EXCLUDED endpoint quantity is only +0.24), but it is not leak-free, and the -1 coefficient on an excluded quantity is still there.",
+    "The demotion is entirely on the BLME side; feature_selection.LEAKY_PREFIXES in the study repo still lists only interp_entropy_0.0/_1.0 and slerp_entropy_0.0/_1.0. That list is now redundant but also now MISLEADING -- it names four columns that no longer exist under those names.",
+    "I re-confirmed the near-copy that motivated the demotion: spearman(interp_entropy_0.111111, (e0+e1)/2) = +0.9649 and pearson +0.9256 over 18 models (the ledger recorded +0.9394). The demotion was correct.",
+    "CODE (latent): the alpha grid is np.linspace(0,1,steps) unioned with {0,0.5,1}, so at even `steps` the emitted key set changes shape (steps=10 gives 11 alphas). Harmless at the shipped steps=10 but the column set is not a simple function of `steps`.",
+    "CONFIG: the study sets num_samples: 50, so pairs are drawn from 50 WikiText passages spanning ~4 distinct articles; at num_pairs=200 from a 50-item pool only 1225 distinct unordered pairs exist, which is why pool size no longer moves the noise floor."
+  ],
+  "fix": "Nothing is required for GREEN. Replace the '+0.398 across 6 models' figure in the source comment with a value that reproduces (+0.2365 pearson / +0.5645 spearman over 18 models here) and add the number that actually matters: convexity_gap is pearson +0.8887 with interp_entropy_0.5. Prune the now-dead interp_entropy_0.0/_1.0/slerp_* entries from LEAKY_PREFIXES in the study repo, or leave them with a note that the task no longer emits those names.",
+  "source_hash": "ba87a86ce99437e2",
+  "shared_hash": "2269442e56b00687"
+}

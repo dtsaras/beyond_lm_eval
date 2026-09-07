@@ -120,6 +120,122 @@ class TestLoadModelAndTokenizer:
         mock_model.eval.assert_called_once()
         assert tokenizer.pad_token == "<eos>"
 
+
+class TestModelKwargsCompat:
+    """Campaign-3 release blockers in the model loader (transformers v5)."""
+
+    def _model_kwargs_for(self, model_args):
+        with patch("blme.models.wrapper.AutoTokenizer") as mock_tok_cls, \
+             patch("blme.models.wrapper._load_model") as mock_load:
+            mock_model = MagicMock()
+            mock_param = MagicMock()
+            mock_param.dtype = torch.float32
+            mock_param.device = torch.device("cpu")
+            mock_model.parameters.return_value = iter([mock_param])
+            mock_model.to.return_value = mock_model
+            mock_load.return_value = mock_model
+            tok = MagicMock()
+            tok.pad_token = None
+            tok.eos_token = "<eos>"
+            tok.eos_token_id = 2
+            mock_tok_cls.from_pretrained.return_value = tok
+            from blme.models.wrapper import load_model_and_tokenizer
+            load_model_and_tokenizer(model_args, device="cpu")
+            return mock_load.call_args[0][1]  # the model_kwargs dict
+
+    def test_dtype_kwarg_replaces_deprecated_torch_dtype(self):
+        """transformers v5 deprecates torch_dtype= in favour of dtype=; passing
+        torch_dtype prints a deprecation warning on every load."""
+        kw = self._model_kwargs_for("pretrained=gpt2,dtype=bfloat16")
+        assert kw.get("dtype") == torch.bfloat16
+        assert "torch_dtype" not in kw
+
+    def test_dtype_auto_uses_dtype_kwarg(self):
+        kw = self._model_kwargs_for("pretrained=gpt2,dtype=auto")
+        assert kw.get("dtype") == "auto"
+        assert "torch_dtype" not in kw
+
+    def test_max_memory_semicolon_survives_as_multi_device(self):
+        """Comma-delimited max_memory is mangled by parse_model_args (which
+        splits on ','); the documented semicolon form must survive intact."""
+        kw = self._model_kwargs_for("pretrained=gpt2,max_memory=0:20GiB;cpu:40GiB")
+        assert kw["max_memory"] == {0: "20GiB", "cpu": "40GiB"}
+
+    def test_load_in_8bit_uses_quantization_config(self):
+        """Passing load_in_8bit= directly to from_pretrained raises TypeError on
+        transformers v5; it must be wrapped in a BitsAndBytesConfig."""
+        from transformers import BitsAndBytesConfig
+        kw = self._model_kwargs_for("pretrained=gpt2,load_in_8bit=true")
+        assert "load_in_8bit" not in kw
+        assert isinstance(kw.get("quantization_config"), BitsAndBytesConfig)
+        assert kw["quantization_config"].load_in_8bit is True
+
+    def test_load_in_4bit_uses_quantization_config(self):
+        from transformers import BitsAndBytesConfig
+        kw = self._model_kwargs_for("pretrained=gpt2,load_in_4bit=true")
+        assert "load_in_4bit" not in kw
+        assert isinstance(kw.get("quantization_config"), BitsAndBytesConfig)
+        assert kw["quantization_config"].load_in_4bit is True
+
+
+def test_force_eager_covers_all_attention_tasks():
+    """Campaign-3 release blocker: the force-eager list was incomplete
+    (missing geometry_positional_decay and interpretability_attention_rollout),
+    so those tasks got SDPA's all-None attentions and silently failed on a
+    default model load. Every task that reads outputs.attentions /
+    cache.get_attentions() must be in _ATTENTION_TASKS."""
+    import re
+    from pathlib import Path
+    from blme.core import _ATTENTION_TASKS
+
+    tasks_root = Path(__file__).resolve().parents[1] / "src" / "blme" / "tasks"
+    consuming = set()
+    for py in tasks_root.rglob("*.py"):
+        src = py.read_text()
+        if "output_attentions=True" in src or ".attentions" in src or "get_attentions" in src:
+            for name in re.findall(r'register_task\(\s*"([a-z_]+)"', src):
+                consuming.add(name)
+
+    missing = consuming - set(_ATTENTION_TASKS)
+    assert not missing, (
+        f"attention-consuming tasks not forced to eager attention: {sorted(missing)}"
+    )
+    # the two the finding flagged must be present
+    assert "geometry_positional_decay" in _ATTENTION_TASKS
+    assert "interpretability_attention_rollout" in _ATTENTION_TASKS
+
+
+def test_task_timeout_survives_broad_except():
+    """Campaign-3 release blocker: the SIGALRM handler raised TimeoutError, which
+    a task's own `except Exception` swallowed, silently defeating the per-task
+    timeout (the timed-out task was then reported OK). TaskTimeout must derive
+    from BaseException so `except Exception` cannot catch it."""
+    from blme.core import TaskTimeout
+
+    assert issubclass(TaskTimeout, BaseException)
+    assert not issubclass(TaskTimeout, Exception)
+
+    swallowed = False
+    try:
+        try:
+            raise TaskTimeout("timeout")  # as the SIGALRM handler now raises
+        except Exception:                 # a task's broad handler
+            swallowed = True
+    except TaskTimeout:
+        pass  # the core loop catches it here
+    assert not swallowed, "TaskTimeout must not be catchable by `except Exception`"
+
+
+def test_load_model_rejects_bare_name_instead_of_loading_gpt2():
+    """Campaign-3 release blocker: a bare model name (no 'pretrained=') was
+    dropped by the parser and silently fell back to gpt2 — evaluating the wrong
+    model. It must raise instead."""
+    import pytest
+    from blme.models.wrapper import load_model_and_tokenizer
+
+    with pytest.raises(ValueError, match="pretrained"):
+        load_model_and_tokenizer("meta-llama/Llama-3-8B", device="cpu")
+
     @patch("blme.models.wrapper.AutoTokenizer")
     @patch("blme.models.wrapper._load_model")
     def test_dtype_passed_through(self, mock_load, mock_tok_cls):
@@ -224,6 +340,23 @@ class TestBuildResultsEnvelope:
         )
         assert env["errors"] is None
 
+    def test_error_dict_result_counted_as_failure(self):
+        """Campaign-3 release blocker: a task returning {"error": ...} was
+        stored in task_results and counted as completed, so failed_tasks=0 and
+        errors=None despite the failure. It must count as a failure and surface
+        in errors."""
+        env = build_results_envelope(
+            model_args="pretrained=gpt2",
+            tasks_requested=["good", "bad", "raised"],
+            task_results={"good": {"metric": 1.0}, "bad": {"error": "boom"}},
+            task_errors={"raised": "exception text"},
+            device="cpu",
+        )
+        assert env["summary"]["completed_tasks"] == 1, "only 'good' truly completed"
+        assert env["summary"]["failed_tasks"] == 2, "'bad' (error dict) + 'raised'"
+        assert env["errors"]["bad"] == "boom"
+        assert env["errors"]["raised"] == "exception text"
+
 
 class TestPrintResultsTable:
     def test_no_crash(self, capsys):
@@ -293,7 +426,7 @@ class TestRegistry:
         # (74 + 8 Campaign-2 additions: vendi, phd, cknna, magnitude,
         #  procrustes_linearity, activation_kurtosis, zigzag_persistence,
         #  attention_rollout).
-        assert len(tasks) == 82
+        assert len(tasks) == 86
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks
@@ -361,7 +494,7 @@ class TestCLI:
         with patch.object(sys, "argv", ["blme", "list-tasks", "--group", "geometry", "--json"]):
             main()
         payload = json.loads(capsys.readouterr().out)
-        assert payload["count"] == 32
+        assert payload["count"] == 34
         first = payload["tasks"][0]
         assert {"name", "group", "status", "papers"} <= set(first)
         assert all(task["group"] == "geometry" for task in payload["tasks"])
@@ -448,4 +581,52 @@ class TestNumpyTrapezoidCompat:
         import numpy as np
         from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
         m = _svd_metrics_for_layer(torch.randn(50, 8))
-        assert m is not None and np.isfinite(m["svd_auc"])
+        assert m is not None and np.isfinite(m["_meta_svd_auc"])
+
+    def test_no_bare_np_trapezoid_calls_in_source(self):
+        """Campaign-4 B5: magnitude.py called np.trapezoid(...) directly,
+        which is NumPy>=2.0-only — REPRODUCE.md pins numpy<2.0, so
+        evaluate() crashed with AttributeError there. Every call site must
+        use the lazy `np.trapezoid if hasattr(np, "trapezoid") else
+        np.trapz` selection instead of a bare call."""
+        import pathlib
+        import re
+
+        src = pathlib.Path(__file__).resolve().parents[1] / "src" / "blme"
+        bare_call = re.compile(r"np\.trapezoid\s*\(")
+        offenders = []
+        for py in src.rglob("*.py"):
+            for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if bare_call.search(line):
+                    offenders.append(f"{py}:{i}")
+        assert not offenders, (
+            f"bare np.trapezoid( calls (crash on NumPy 1.x): {offenders}"
+        )
+
+    def test_magnitude_summary_runs_under_installed_numpy(self):
+        import numpy as np
+        from blme.tasks.geometry.magnitude import _magnitude_summary
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((20, 4))
+        sq = np.sum(X * X, axis=1)
+        D = np.sqrt(np.maximum(sq[:, None] + sq[None, :] - 2 * X @ X.T, 0.0))
+        np.fill_diagonal(D, 0.0)
+        out = _magnitude_summary(D, 6, 10.0)
+        assert np.isfinite(out["magnitude_auc"])
+
+
+def test_force_eager_covers_double_backward_tasks():
+    """Regression (campaign-4 B3): dynamics_sharpness needs SECOND-order
+    autograd (HVPs), which SDPA/Flash kernels don't implement — on a default
+    model load the task always returned its SDPA error and the study got no
+    sharpness features. The diagnostic loop must force eager for it."""
+    from blme.core import _ATTENTION_TASKS, _DOUBLE_BACKWARD_TASKS
+
+    assert "dynamics_sharpness" in _DOUBLE_BACKWARD_TASKS
+    # And the union actually reaches the force-eager check.
+    import inspect
+    from blme import core
+    src = inspect.getsource(core)
+    assert "_ATTENTION_TASKS | _DOUBLE_BACKWARD_TASKS" in src

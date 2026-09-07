@@ -1,0 +1,27 @@
+{
+  "task": "repe_task_vectors",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Re-derivation gives v_l=(1/n) sum_i(h_i^+-h_i^-)=mean(h^+)-mean(h^-), which is exactly the implemented direction and RepE ClusterMeanRepReader. On identical captured activations, BLME and the released class agreed to maximum absolute error 2.22e-16 with cosine 1.0, and swapping classes produced -v exactly; no value-changing formula counterexample was found.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "In 43-46 archived model rows, raw mean_vector_norm correlated with d_model at r=0.6012 (rho=0.6675) and n_layers at r=0.6016 (rho=0.7539), while max_norm_layer correlated with n_layers at r=0.9392 (rho=0.8536). Dividing norm by sqrt(d_model) reduced but did not remove the associations (r=0.4723 with width and r=0.5131 with depth), and the task has no normalized peak-depth output.",
+  "normalized_variant": "layer_task_vector_norms_normalized; mean_vector_norm_normalized",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "andyzoujm/representation-engineering",
+  "github_reason": "I fetched RepE at commit 5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e and ran all four parity tests against activations captured from the real ClusterMeanRepReader. The direction matched to 2.22e-16 maximum absolute error and |cos|=1; the YES applies to the RepE activation-space reader, not Ilharco's distinct weight-space task arithmetic.",
+  "paper_number": "NONE",
+  "paper_reason": "Zou et al. publish downstream reading/control accuracies and Ilharco et al. publish weight-space task-arithmetic performance, but neither publishes activation-direction norms or centroid cosines for BLME's five factual pairs. There is no matching paper number.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The archived sweep confirms architectural association in raw norm (rho=0.6675 with width), raw peak layer (rho=0.8536 with depth), and centroid cosine mean (r=-0.7102 with width). The sqrt(width) norm remains associated with width and depth, while converting peak layer to layer/(L-1) in a clean-room check reduced its depth correlation to r=-0.0367 (rho=-0.0901), but BLME does not emit that variant.",
+  "defects": [
+    "COMPARABILITY: mean_vector_norm and the per-layer raw norms remain width/depth proxies; the explicit sqrt(d_model) variants reduce but do not remove the measured associations.",
+    "COMPARABILITY: max_norm_layer is a raw architecture index; a separately computed max_norm_layer/(n_layers-1) removed the observed depth correlation, but the task does not emit it.",
+    "METRIC VALIDITY: layer_task_vector_cosine_sim is cos(mean_pos,mean_neg), not agreement between per-pair task directions; adding a common centroid offset can drive it toward 1 without changing v or separability.",
+    "PROTOCOL: the five factual contrasts had near-zero direction agreement at gpt2's peak layer in the prior live check (mean pairwise cosine 0.00566, minimum -0.139), yet the task emits no direction-stability or held-out control.",
+    "CODE: representation_engineering.py:72 and 82 materializes an iterable twice; a valid one-pass generator is consumed by the preview and then returns a false empty-sample error.",
+    "PROVENANCE: the task name can be confused with Ilharco's parameter-space vector theta_finetuned-theta_pretrained; the implemented quantity is Zou's activation-space ClusterMean reading direction."
+  ],
+  "fix": ""
+}

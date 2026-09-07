@@ -53,19 +53,20 @@ it's cited. Sorted alphabetically by first author.
 | **Guo, Pleiss, Sun, Weinberger 2017** — *On Calibration of Modern Neural Networks* | `consistency_calibration` | ICML 2017 | `consistency/calibration.py` |
 | **Holtzman, Buys, Du, Forbes, Choi 2020** — *The Curious Case of Neural Text Degeneration* | `interpretability_prediction_entropy` | arXiv:1904.09751 | `interpretability/prediction_entropy.py` |
 | **Hosseini, Fedorenko 2023** — *Large language models implicitly learn to straighten neural sentence trajectories to construct a predictive representation of natural language* | `geometry_trajectory_curvature` | arXiv:2311.04930 (NeurIPS 2023) | `geometry/trajectory_curvature.py` |
-| **Ilharco, Ribeiro, Wortsman, Schmidt, Hajishirzi, Farhadi 2023** — *Editing Models with Task Arithmetic* | `repe_task_vectors` | ICLR 2023 | `representation_engineering.py` |
+| **Ilharco, Ribeiro, Wortsman, Gururangan, Schmidt, Hajishirzi, Farhadi 2023** — *Editing Models with Task Arithmetic* | `repe_task_vectors` | ICLR 2023, arXiv:2212.04089 | `representation_engineering.py` |
 | **Kornblith, Norouzi, Lee, Hinton 2019** — *Similarity of Neural Network Representations Revisited* | `geometry_cka`, `geometry_hsic` | arXiv:1905.00414 | `geometry/cka.py`, `geometry/mutual_info.py` |
 | **Kriegeskorte, Mur, Bandettini 2008** — *Representational Similarity Analysis* | `geometry_rsa` | *Front. Syst. Neurosci.* 2 | `geometry/rsa.py` |
 | **Lee, Lee, Lee, Shin 2018** — *A Simple Unified Framework for Detecting OOD Samples and Adversarial Attacks* | `geometry_mahalanobis` | NeurIPS 2018 | `geometry/mahalanobis.py` |
 | **Levina, Bickel 2004** — *Maximum Likelihood Estimation of Intrinsic Dimension* | `geometry_lid` | NeurIPS 2004 | `geometry/lid.py` |
 | **Li, Galley, Brockett, Gao, Dolan 2016** — *A Diversity-Promoting Objective Function* (Distinct-n) | `dynamics_generation_diversity` | NAACL 2016 | `dynamics/generation_diversity.py` |
 | **Li, Xia, Chang, Wu 2024** — *Large Language Model Evaluation via Matrix Nuclear-Norm* | `geometry_schatten.row_normalized_matrix_nuclear_norm` | arXiv:2410.10672 | `geometry/schatten.py` |
-| **Li, Lizhi, Sondak, Wang 2025** — *Tracing the Representation Geometry of Language Models from Pretraining to Post-training* | metrics already implemented via `geometry_schatten.rankme` + `geometry_spectral.avg_alpha` | arXiv:2509.23024 | `geometry/schatten.py` (comment) |
+| **Li, Agrawal, Ghosh, Teru, Santoro, Lajoie, Richards 2025** — *Tracing the Representation Geometry of Language Models from Pretraining to Post-training* | metrics already implemented via `geometry_schatten.rankme` + `geometry_spectral.avg_alpha` | arXiv:2509.23024 | `geometry/schatten.py` (comment) |
 | **Liu, Lin, Hu, Manning, Liang 2023** — *Lost in the Middle: How Language Models Use Long Contexts* | `consistency_position_sensitivity` | arXiv:2307.03172 | `consistency/position_sensitivity.py` |
 | **Ma, Li, Wang, Erfani, Wijewickrema, Schoenebeck, Song, Houle, Bailey 2018** — *Characterizing Adversarial Subspaces Using Local Intrinsic Dimensionality* | `geometry_lid` | ICLR 2018 | `geometry/lid.py` |
 | **Marchenko, Pastur 1967** — *Distribution of eigenvalues for some sets of random matrices* | `geometry_mp_bulk_deviation` | *Mat. Sb.* 72(114):4, 507–536; English transl. *Math. USSR-Sb.* 1(4), 457–483 | `geometry/rmt_bulk.py` |
 | **Martin, Mahoney 2019a** — *Traditional and Heavy-Tailed Self Regularization in Neural Network Models* | `geometry_spectral.avg_alpha` | arXiv:1901.08276 | `geometry/spectral.py` |
-| **Martin, Mahoney 2019b / 2021** — *Heavy-Tailed Universality Predicts Trends in Test Accuracies* (Nature Comms. 2021) | `geometry_spectral.avg_alpha` | arXiv:1901.08278, Nat. Comms. 12:4122 | `geometry/spectral.py` |
+| **Martin, Mahoney 2020** — *Heavy-Tailed Universality Predicts Trends in Test Accuracies* (SDM 2020) | `geometry_spectral.avg_alpha` | arXiv:1901.08278 | `geometry/spectral.py` |
+| **Martin, Peng, Mahoney 2021** — *Predicting trends in the quality of state-of-the-art neural networks without access to training or testing data* | `geometry_spectral.avg_alpha` | arXiv:2002.06716, Nat. Comms. 12:4122 | `geometry/spectral.py` |
 | **May, Wang, Bordia, Bowman, Rudinger 2019** — *On Measuring Social Biases in Sentence Encoders* (SEAT) | `consistency_bias_weat` | arXiv:1903.10561 | `consistency/bias.py` |
 | **Meng, Bau, Andonian, Belinkov 2022** — *Locating and Editing Factual Associations in GPT* (ROME) | `causality_tracing` | arXiv:2202.05262 | `causality/tracing.py` |
 | **Michel, Levy, Neubig 2019** — *Are Sixteen Heads Really Better than One?* | `causality_attention_knockout` | NeurIPS 2019 | `causality/attention_knockout.py` |
@@ -74,15 +75,14 @@ it's cited. Sorted alphabetically by first author.
 | **Olsson, Elhage, Nanda, Joseph, DasSarma, Henighan, Mann, Askell, Bai, Chen, Conerly, Drain, Ganguli, Hatfield-Dodds, Hernandez, Johnston, Jones, Kernion, Lovitt, Ndousse, Amodei, Brown, Clark, Kaplan, McCandlish, Olah 2022** — *In-context Learning and Induction Heads* | `interpretability_induction_heads`, `interpretability_head_roles` | Transformer Circuits 2022 | `interpretability/induction.py`, `head_roles.py` |
 | **Papyan, Han, Donoho 2020** — *Prevalence of neural collapse during the terminal phase of deep learning training* | `geometry_neural_collapse` | arXiv:2008.08186 (PNAS 117) | `geometry/neural_collapse.py` |
 | **Pascanu, Mikolov, Bengio 2013** — *On the difficulty of training recurrent neural networks* | `dynamics_gradient_flow` | ICML 2013 | `dynamics/gradient_flow.py` |
-| **Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv 2025** — *Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin* | `interpretability_activation_sinks.valley_*` | arXiv:2510.06477 | `interpretability/activation_sinks.py` |
+| **Queipo-de-Llano, Arroyo, Barbero, Dong, Bronstein, LeCun, Shwartz-Ziv 2025** — *Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin* | `interpretability_activation_sinks.valley_*` | arXiv:2510.06477 | `interpretability/activation_sinks.py` |
 | **Roy, Vetterli 2007** — *The Effective Rank: A Measure of Effective Dimensionality* | `geometry_svd.effective_rank`, `geometry/utils.effective_rank` | EUSIPCO 2007 | `geometry/utils.py`, `collapse.py` |
 | **Rudman, Gillman, Rayne, Eickhoff 2022** — *IsoScore: Measuring the Uniformity of Embedding Space Utilization* | `geometry_isoscore` | arXiv:2108.07344 (Findings of ACL 2022) | `geometry/isotropy.py` |
 | **Sclar, Choi, Tsvetkov, Suhr 2023** — *Quantifying Language Models' Sensitivity to Spurious Features in Prompt Design* | `consistency_format_robustness` | arXiv:2310.11324 | `consistency/format_robustness.py` |
 | **Shi, Ajith, Xia, Huang, Liu, Blevins, Chen, Zettlemoyer 2023** — *Detecting Pretraining Data from Large Language Models* (Min-K % Prob) | `consistency_contamination` | arXiv:2310.16789 | `consistency/contamination.py` |
 | **Sun, Chen, Kolter, Liu 2024** — *Massive Activations in Large Language Models* | `interpretability_activation_sinks.massive_activation_*` | arXiv:2402.17762 | `interpretability/activation_sinks.py` |
 | **Syed, Rager, Conmy 2024** — *Attribution Patching Outperforms Automated Circuit Discovery* (EAP) | `causality_edge_attribution` | arXiv:2310.10348 (BlackboxNLP 2024) | `causality/edge_attribution.py` |
-| **Thilak, Maddox 2021** — *The Low-Rank Simplicity Bias in Deep Networks* | `geometry_collapse` (effective rank context) | arXiv:2011.09348 | `geometry/collapse.py` |
-| **Tomašev, Radovanović, Mladenić, Ivanović 2014** — *The Role of Hubness in High-Dimensional Data* | `geometry_hubness` | IEEE TKDE 2014 | `geometry/hubness.py` |
+| **Tomašev, Radovanović, Mladenić, Ivanović 2014** — *The Role of Hubness in Clustering High-Dimensional Data* | `geometry_hubness` | IEEE TKDE 2014 | `geometry/hubness.py` |
 | **Voita, Talbot, Moiseev, Sennrich, Titov 2019** — *Analyzing Multi-Head Self-Attention: Specialized Heads Do the Heavy Lifting* | `causality_attention_knockout`, `interpretability_head_roles` | ACL 2019 | `causality/attention_knockout.py`, `head_roles.py` |
 | **Wang, Wei, Schuurmans, Le, Chi, Zhou 2022** — *Self-Consistency Improves Chain of Thought Reasoning* | `consistency_self_consistency` | arXiv:2203.11171 | `consistency/self_consistency.py` |
 | **Wang, Zhang, Yang, Wong, Wang 2025** — *Latent Space Chain-of-Embedding Enables Output-free LLM Self-Evaluation* (ICLR 2025) | `dynamics_coe` | arXiv:2410.13640 | `dynamics/coe.py` |
@@ -91,7 +91,7 @@ it's cited. Sorted alphabetically by first author.
 | **Xiao, Tian, Chen, Han, Han 2023** — *Efficient Streaming Language Models with Attention Sinks* | attention-sink motivation, cited in `activation_sinks.py` | arXiv:2309.17453 | `interpretability/activation_sinks.py` |
 | **Yao, Gholami, Keutzer, Mahoney 2020** — *PyHessian: Neural Networks Through the Lens of the Hessian* | `dynamics_sharpness` (Hutchinson trace) | arXiv:1912.07145 | `dynamics/sharpness.py` |
 | **Yeom, Giacomelli, Fredrikson, Jha 2018** — *Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting* | `consistency_membership_inference` | arXiv:1709.01604 | `consistency/membership_inference.py` |
-| **Zhu, Lu, Zheng, Guo, Zhang, Wang, Zhang 2018** — *Texygen: A Benchmarking Platform for Text Generation Models* (Self-BLEU) | `dynamics_generation_diversity` | arXiv:1802.01886 | `dynamics/generation_diversity.py` |
+| **Zhu, Lu, Zheng, Guo, Zhang, Wang, Yu 2018** — *Texygen: A Benchmarking Platform for Text Generation Models* (Self-BLEU) | `dynamics_generation_diversity` | arXiv:1802.01886 | `dynamics/generation_diversity.py` |
 | **Zou, Phan, Chen, Campbell, Guo, Ren, Pan, Yin, Mazeika, Dombrowski, Goel, Li, Byun, Wang, Mallen, Basart, Koyejo, Song, Fredrikson, Kolter, Hendrycks 2023** — *Representation Engineering: A Top-Down Approach to AI Transparency* | `repe_concept_separability`, `repe_refusal_direction`, `repe_steering_effectiveness` | arXiv:2310.01405 | `representation_engineering.py` |
 
 ### Topology
@@ -101,7 +101,9 @@ it's cited. Sorted alphabetically by first author.
 | **Bubenik 2015** | `topology_persistence_landscape` | arXiv:1207.6437 | `topology/persistence_landscape.py` |
 | **Bubenik, Dlotko 2017** | `topology_persistence_landscape` implementation reference | arXiv:1501.00179 | `topology/persistence_landscape.py` |
 | **Chazal, Fasy, Lecci, Michel, Rinaldo, Wasserman 2015** — *Subsampling Methods for Persistent Homology* | `topology_persistence_landscape` (bootstrap idea) | arXiv:1406.1901 | `topology/persistence_landscape.py` (cited) |
-| **Rucco, Castiglione, Merelli, Pettini 2016** — *Characterisation of the Idiotypic Immune Network Through Persistent Entropy* | `topology_persistence_entropy` | Springer 2016 | `topology/persistence_entropy.py` |
+| **Rucco, Castiglione, Merelli, Pettini 2016** — *Characterisation of the Idiotypic Immune Network Through Persistent Entropy* | `topology_persistence_entropy` | Springer 2016 (Proc. ECCS 2014) | `topology/persistence_entropy.py` |
+| **Chintakunta, Gentimis, Gonzalez-Diaz, Jimenez, Krim 2015** — *An entropy-based persistence barcode* | `topology_persistence_entropy` | Pattern Recognition 48(2):391-401 | `topology/persistence_entropy.py` |
+| **Atienza, Gonzalez-Diaz, Soriano-Trigueros 2020** — *On the stability of persistent entropy and new summary functions for TDA* | `topology_persistence_entropy` (canonical log2 Def. 3.1) | Pattern Recognition 107:107509; arXiv:1803.08304 | `topology/persistence_entropy.py` |
 | **Zomorodian, Carlsson 2005** — *Computing Persistent Homology* | `topology_homology` | Discrete & Computational Geometry | `topology/homology.py` |
 
 ### Campaign-2 additions (2026-07) — new methods, official-code parity-verified
@@ -119,6 +121,15 @@ landing (see `VERIFICATION_LEDGER.md` and `tests/tasks/parity/`).
 | **Akhondzadeh, Bojchevski, Eleftheriou, Dazzi 2025** — *KurTail: Kurtosis-based LLM Quantization* | `interpretability_activation_kurtosis` | arXiv:2503.01483 (Findings of EMNLP 2025) | `interpretability/activation_kurtosis.py` |
 | **Abnar, Zuidema 2020** — *Quantifying Attention Flow in Transformers* (attention rollout) | `interpretability_attention_rollout` | arXiv:2005.00928 (ACL 2020) | `interpretability/attention_rollout.py` |
 | **Gardinazzi, Viswanathan, Panerai, Ansuini, Cazzaniga, Biagetti 2025** — *Persistent Topological Features in Large Language Models* (zigzag persistence) | `topology_zigzag_persistence` | arXiv:2410.11042 (ICML 2025) | `topology/zigzag.py` |
+| **Liu, Liu, Gore 2025** — *Superposition Yields Robust Neural Scaling* | `geometry_superposition_strength` | arXiv:2505.10465 (NeurIPS 2025) | `geometry/superposition_strength.py` |
+| **Men et al. 2024** — *ShortGPT: Layers in Large Language Models are More Redundant Than You Expect* (Block Influence) | `geometry_effective_depth` | arXiv:2403.03853 | `geometry/effective_depth.py` |
+| **Csordás, Manning, Potts 2025** — *Do Language Models Use Their Depth Efficiently?* | `geometry_effective_depth` | arXiv:2505.13898 (NeurIPS 2025) | `geometry/effective_depth.py` |
+| **Alabdulmohsin, Tran, Dehghani 2024** — *Fractal Patterns May Illuminate the Success of Next-Token Prediction* | `dynamics_fractal` | arXiv:2402.01825 (NeurIPS 2024) | `dynamics/fractal.py` |
+| **Li et al. 2025** — *Cognitive Activation and Chaotic Dynamics in LLMs: A Quasi-Lyapunov Analysis* (grounding) | `dynamics_perturbation_growth` | arXiv:2503.13530 | `dynamics/perturbation_growth.py` |
+| **Staats, Thamm, Rosenow 2024** — *Small Singular Values Matter: A Random Matrix Analysis of Transformer Models* (MP lower-edge extension) | `geometry_mp_bulk_deviation` | arXiv:2410.17770 | `geometry/rmt_bulk.py` |
+| **Kalra, Gagnon-Audet, Gromov, Mediratta, Niu, Miller, Shvartsman 2026** — *A Scalable Measure of Loss Landscape Curvature for Analyzing the Training Dynamics of LLMs* (critical step size; critical-sharpness extension) | `dynamics_sharpness` | arXiv:2601.16979 | `dynamics/sharpness.py` |
+| **Fay, García-Redondo, Wang, Dubossarsky, Monod 2026** — *The Shape of Adversarial Influence: Characterizing LLM Latent Spaces with Persistent Homology* (scale-stratified PH extension) | `topology_homology` | arXiv:2505.20435 | `topology/homology.py` |
+| **Clauset, Shalizi, Newman 2009** — *Power-Law Distributions in Empirical Data* (official PL-MLE + KS x_min, spectral extension) | `geometry_spectral` | arXiv:0706.1062 (SIAM Review 51(4)) | `geometry/spectral.py` |
 
 ### Metrics with weak citation — paper-provenance documented but not in docstring
 
@@ -132,13 +143,10 @@ for paper-ready release.
 | `consistency_knowledge_capacity` | Tirumala et al. 2022 / Carlini et al. 2023 memorization framing; BLME reports exact-vs-rephrased likelihood proxy, not Allen-Zhu knowledge-capacity scaling |
 | `dynamics_stability` | Wendlandt, Kummerfeld & Mihalcea 2018 (kNN-neighborhood embedding instability), arXiv:1804.09692 |
 | `dynamics_interpolation` (`trajectories.py`) | Shoemake 1985 slerp (SIGGRAPH); latent-space interpolation White 2016, arXiv:1609.04468 |
-| `geometry/hubness.py` | Tomašev et al. 2014 (cited above) |
-| `geometry/lid.py` | Levina-Bickel 2004 (cited above) |
 | `geometry/rsa.py` | Kriegeskorte 2008 (cited above) |
-| `geometry/intrinsic_dim.py` | Facco 2017 (cited above) |
 | `geometry/perplexity.py` | Shannon 1948 (bits-per-character); standard cross-entropy |
 | `geometry/tokenizer_efficiency.py` | Rust et al. 2021 for fertility; Ali et al. 2024 for tokenizer-choice/training-cost effects |
-| `geometry/unembedding.py` | effective rank (Roy & Vetterli 2007, EUSIPCO) on the unembedding matrix; alignment/purity are BLME diagnostics |
+| `geometry/unembedding.py` | effective rank (Roy & Vetterli 2007, EUSIPCO) of the MEAN-CENTERED unembedding matrix (centering changes the value ~4%); alignment/purity are BLME diagnostics |
 | `geometry/weight_norms.py` | Martin-Mahoney 2019 style per-layer diagnostic |
 | `geometry/positional_decay.py` | Press et al. 2021 *ALiBi* — positional bias concept |
 | `interpretability/attention_graph.py` | Abnar & Zuidema 2020 *Attention Rollout* (topology part) + standard PageRank |
@@ -262,7 +270,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `geometry_prediction_alignment` (alias `geometry/consistency.py`) 📝 BLME-custom; no canonical paper
 - `geometry_representation_sensitivity` (alias `information_geometry.py`) 📝 add Amari 2016
 - `geometry_rsa` 📝 add Kriegeskorte 2008
-- `geometry_schatten` ✅ Wei 2025, Li 2024, Garrido 2023
+- `geometry_schatten` ✅ Yusupov 2025 (arXiv:2509.25359), Li 2024, Garrido 2023
 - `geometry_spectral` ✅ Martin-Mahoney 2019/2021
 - `geometry_svd` — standard SVD diagnostics
 - `geometry_tokenizer_efficiency` ✅ Rust 2021 fertility; Ali et al. 2024 tokenizer-choice effects (round 10)
@@ -302,7 +310,7 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `dynamics_gradient_flow` ✅ Pascanu 2013
 - `dynamics_interpolation` (alias `trajectories.py`) 📝 slerp = Shoemake 1985 (SIGGRAPH); latent interpolation White 2016 (arXiv:1609.04468)
 - `dynamics_sharpness` ✅ Foret 2021; Yao 2020
-- `dynamics_stability` 📝 BLME-custom; add Liang et al. 2024 *Holistic Evaluation of Language Models* if comparable
+- `dynamics_stability` 📝 BLME-custom; add Liang et al. 2022 (arXiv:2211.09110, TMLR 2023) *Holistic Evaluation of Language Models* if comparable
 
 **Consistency (12 tasks)**:
 - `consistency_bias_weat` ✅ Caliskan 2017; May 2019
@@ -324,11 +332,12 @@ metric is a BLME diagnostic or trivial engineering helper).
 - `repe_steering_effectiveness` ✅ Zou 2023; Turner 2023
 - `repe_task_vectors` ✅ Zou 2023 RepE + Ilharco 2023 Task Arithmetic (round 10)
 
-**Topology (4 tasks)**:
-- `topology_betti_curve` 📝 add Naitzat et al. 2020 (JMLR 21(184):1-40, 2020) to docstring
-- `topology_homology` ✅ Zomorodian-Carlsson 2005; Naitzat 2020; Edelsbrunner-Harer 2008
-- `topology_persistence_entropy` 📝 add Rucco 2016
-- `topology_persistence_landscape` ✅ Bubenik 2015; Chazal 2015
+**Topology (5 tasks — citation audit closed 2026-07, campaign B1)**:
+- `topology_betti_curve` ✅ Naitzat, Zhitnikov & Lim 2020 (JMLR 21(184):1-40)
+- `topology_homology` ✅ Zomorodian-Carlsson 2005; Naitzat 2020 (JMLR, venue fixed); Edelsbrunner-Harer 2008
+- `topology_persistence_entropy` ✅ Rucco et al. 2016 (ECCS 2014/Springer); Chintakunta et al. 2015; Atienza et al. 2020 (Pattern Recognition — was mis-cited as "Entropy 2019")
+- `topology_persistence_landscape` ✅ Bubenik 2015; Bubenik-Dlotko toolbox; Chazal 2015
+- `topology_zigzag_persistence` ✅ Gardinazzi et al. 2025 (ICML, arXiv:2410.11042); Carlsson-de Silva 2010
 
 ### Citation-audit summary
 

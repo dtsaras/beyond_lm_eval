@@ -72,7 +72,12 @@ class PredictionEntropyTask(DiagnosticTask):
                 # Top-k probabilities and decisiveness metrics
                 k = min(decisiveness_k, probs.shape[-1])
                 topk_p = torch.topk(probs, k=k, dim=-1).values  # (B, T, k)
-                top5_sum = topk_p[..., :min(5, k)].sum(dim=-1)  # (B, T)
+                # top-5 mass is computed from its OWN top-5, independent of
+                # decisiveness_k — otherwise decisiveness_top_k<5 silently
+                # reports top-k mass under the mean_top5_prob name.
+                top5_sum = torch.topk(
+                    probs, k=min(5, probs.shape[-1]), dim=-1
+                ).values.sum(dim=-1)  # (B, T)
                 all_top5_probs.extend(top5_sum[0].cpu().tolist())
 
                 # Renormalised top-k distribution and its entropy

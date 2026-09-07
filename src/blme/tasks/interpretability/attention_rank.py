@@ -41,7 +41,14 @@ def _effective_rank(matrix: np.ndarray) -> float:
     try:
         # SVD of attention matrix. Note: attention matrices are stochastic
         # (rows sum to 1) but not symmetric, so we can't use eigh.
-        S = np.linalg.svd(matrix, compute_uv=False)
+        # `safe_svdvals`: numpy/torch compute the SVD internally and then CAST
+        # the singular values back to the input dtype, and that cast overflows
+        # to inf near 3.4e38 -- so a scale-FREE consumer downstream (effective
+        # rank, RankMe, IsoScore, alpha) returns NaN on data it should handle
+        # exactly. The helper factors out the max first, which only shifts
+        # exponents (2026-09-07).
+        from ..geometry.utils import safe_svdvals
+        S = safe_svdvals(matrix)
     except np.linalg.LinAlgError:
         return float("nan")
     s = S.sum()

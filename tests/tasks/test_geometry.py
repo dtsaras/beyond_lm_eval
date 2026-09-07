@@ -10,6 +10,275 @@ import tempfile
 import os
 
 
+def test_positional_decay_annotations_are_py39_safe():
+    """Campaign-3 release blocker: `float | None` (PEP 604) is evaluated eagerly
+    at def-time and raises TypeError on Python 3.9 (the advertised minimum),
+    crashing task registration. `from __future__ import annotations` keeps
+    annotations lazy (strings), so the union is never evaluated."""
+    from blme.tasks.geometry.positional_decay import _row_distance_correlation
+
+    assert _row_distance_correlation.__annotations__.get("return") == "float | None", (
+        "annotation must be a lazy string (from __future__ import annotations) "
+        "so the PEP-604 union does not evaluate at import on py3.9"
+    )
+
+
+def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokenizer, monkeypatch):
+    """Campaign-3 DISCREPANCY: the fresh path truncated at config max_length
+    (default 128) while the shared-cache path truncates at 512 (cache.py:352),
+    so the SAME config gave different entropy depending on whether a cache was
+    populated. The fresh default must match the cache's 512."""
+    import blme.tasks.geometry.matrix_entropy as me
+
+    captured = {}
+
+    def spy(model, tokenizer, samples, max_length):
+        captured["max_length"] = max_length
+        # (per_layer, post_norm_last) since 2026-09-05: the fresh collector
+        # returns BOTH tensors, because the profile is hooked and the headline
+        # follows the released reference's post-norm state.
+        return {}, []
+
+    monkeypatch.setattr(me, "_collect_per_sample_layer_tokens_fresh", spy)
+    me.MatrixEntropyTask(config={"num_samples": 2}).evaluate(
+        mock_model, mock_tokenizer, dataset=[{"text": "hello world"}])
+    assert captured.get("max_length") == 512, (
+        "fresh-path default max_length must be 512 to match the shared cache")
+
+
+def test_trajectory_curvature_is_mean_of_per_sentence_means():
+    """Campaign-3 DISCREPANCY: layer curvature pooled ALL angles across samples
+    (length-weighted), over-weighting longer sentences. The paper (Hosseini &
+    Fedorenko) means each sentence's angles first, then means over sentences."""
+    from blme.tasks.geometry.trajectory_curvature import (
+        _pooled_layer_curvature, _trajectory_angles,
+    )
+
+    rng = np.random.default_rng(3)
+    long_chunk = np.vstack([[9.0, 9.0], rng.standard_normal((20, 2))])   # BOS + long
+    short_chunk = np.vstack([[9.0, 9.0], rng.standard_normal((4, 2))])   # BOS + short
+    aL = _trajectory_angles(long_chunk[1:])
+    aS = _trajectory_angles(short_chunk[1:])
+    pooled = float(np.mean(np.concatenate([aL, aS])))
+    per_sentence = float(np.mean([np.mean(aL), np.mean(aS)]))
+    assert abs(pooled - per_sentence) > 1e-3, "test cannot discriminate the two"
+
+    got = _pooled_layer_curvature([torch.tensor(long_chunk), torch.tensor(short_chunk)],
+                                  skip_first=1)
+    assert abs(got - per_sentence) < 1e-6, (
+        f"got {got:.6f} — expected per-sentence mean {per_sentence:.6f}, "
+        f"not the length-weighted pool {pooled:.6f}"
+    )
+
+
+def test_svd_avg_cosine_uses_raw_states_not_centered():
+    """Campaign-3 DISCREPANCY: avg_cosine_similarity (the Ethayarajh 2019
+    anisotropy baseline) was computed on MEAN-CENTERED states, which reads ~0
+    by construction. It must be computed on the RAW representations (Eq. 4)."""
+    from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
+
+    rng = np.random.default_rng(0)
+    # Strongly anisotropic cloud: a large shared offset + small noise, so raw
+    # cosines are ~1 while centered cosines are ~0.
+    X = np.ones((200, 16), dtype=np.float64) * 3.0 + rng.standard_normal((200, 16)) * 0.05
+    r = _svd_metrics_for_layer(torch.tensor(X))
+    assert r["avg_cosine_similarity"] > 0.8, (
+        f"avg_cosine_similarity {r['avg_cosine_similarity']:.3f} — computed on "
+        f"centered states (reads ~0) instead of the raw Ethayarajh baseline"
+    )
+
+
+def test_sharpness_top_eigenvalue_is_signed():
+    """Campaign-3 DISCREPANCY: top_eigenvalue_estimate reported ||Hv|| (unsigned
+    magnitude), so a dominant NEGATIVE-curvature direction (saddle) was
+    misreported as positive. Like PyHessian, it must return the SIGNED
+    largest-magnitude eigenvalue (Rayleigh quotient at the eigenvector)."""
+    from blme.tasks.dynamics.sharpness import _power_iteration_top_eigenvalue
+
+    diag = torch.tensor([-5.0, 3.0, 1.5])  # dominant-magnitude eigenvalue is -5
+
+    def hvp(v):
+        return [diag * v[0]]
+
+    lam = _power_iteration_top_eigenvalue(hvp, [torch.tensor([1.0, 1.0, 1.0])], 100)
+    assert abs(lam - (-5.0)) < 1e-3, f"expected signed -5.0 (PyHessian), got {lam}"
+
+
+def test_perplexity_bpc_correct_with_bos_tokenizer():
+    """Campaign-3 BUG: BPC re-tokenised with add_special_tokens=False while
+    scoring used the default (True), so on a BOS-adding tokenizer the recount
+    dropped the BOS and undercounted tokens by one per doc -> BPC ~13% low.
+    With aligned tokenisation, BPC must equal the textbook nll_bits / chars."""
+    from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.perplexity import RarePPLTask
+
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    tok.add_bos_token = True  # simulate a Llama/Gemma-style BOS tokenizer
+    model = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+    docs = [
+        "The capital of France is Paris and it is a beautiful city.",
+        "Machine learning models can memorize training data in surprising ways.",
+        "Photosynthesis converts sunlight into chemical energy inside plant cells.",
+    ]
+    dataset = [{"text": d} for d in docs]
+
+    task = RarePPLTask(config={"num_samples": 3, "use_cache": False})
+    r = task.evaluate(model, tok, dataset)
+    bpc = r["bits_per_char"]
+
+    # Independent textbook BPC under the protocol actually used: ONE
+    # "\n\n"-joined stream scored in a single pass, total NLL in bits over
+    # every predicted token, divided by the characters of that same span (the
+    # joined text minus the first token, which is never predicted).
+    #
+    # This test originally summed per-document NLL and per-document chars,
+    # matching the old per-document scoring. That protocol is gone: documents
+    # are no longer scored from a cold start, no longer truncated at 512, and
+    # BPC no longer re-tokenizes anything -- so the BOS misalignment this test
+    # guards is now structurally impossible rather than merely fixed. The
+    # assertion below still catches any drift between the scored token window
+    # and the character denominator, which is what the bug actually was.
+    import torch
+    import torch.nn.functional as F
+    corpus = "\n\n".join(docs)
+    with torch.no_grad():
+        ids = tok(corpus, return_tensors="pt")["input_ids"]
+        logits = model(ids).logits[:, :-1, :]
+        labels = ids[:, 1:]
+        nll = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                              labels.reshape(-1), reduction="sum").item()
+    # SOURCE-OFFSET span, not `len(decode(first_id))`.
+    #
+    # This reference used to subtract the DECODED length of the first token,
+    # which on a BOS tokenizer is `'<|endoftext|>'` -- 13 characters that are
+    # not in the corpus at all. It therefore encoded the very defect the task
+    # was fixed for (adversarial review round 2, 2026-09-04). The correct
+    # denominator is the source span the SCORED targets actually cover, which
+    # is what `strided_perplexity` now derives from the offset mapping.
+    _off = tok(corpus, return_offsets_mapping=True)["offset_mapping"]
+    _scored_chars = sum(b - a for (a, b) in _off[1:] if b > a)
+    expected = (nll / np.log(2)) / _scored_chars
+    assert abs(bpc - expected) < 1e-3, (
+        f"BPC {bpc:.5f} != textbook {expected:.5f} — scored token window and "
+        f"character denominator misaligned on a BOS tokenizer"
+    )
+
+    # The whole corpus fits in one window here, so the strided pass must have
+    # scored exactly (n_tokens - 1) tokens: no double-count, no skip.
+    assert r["_meta_n_tokens_strided"] == ids.shape[1] - 1
+
+
+def test_perplexity_survives_empty_text_sample():
+    """Campaign-3 BUG: an empty-text doc crashed the scoring forward pass
+    ('cannot reshape tensor of 0 elements'). Empty rows (common in wikitext)
+    must be skipped, not crash the task."""
+    from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.perplexity import RarePPLTask
+
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    model = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+    dataset = [{"text": ""}, {"text": "A full sentence with several tokens here."},
+               {"text": "Another complete sentence for the perplexity estimate."}]
+    task = RarePPLTask(config={"num_samples": 3, "use_cache": False})
+    r = task.evaluate(model, tok, dataset)
+    assert np.isfinite(r["ppl_overall"]) and r["ppl_overall"] > 1.0
+
+
+def test_weight_norms_handles_3d_fused_params():
+    """Campaign-3 BUG: a >2-D parameter (fused MoE experts, shape (E, in, out))
+    passed the ndim<2 filter, then float(S[0].item()) crashed on the batched
+    singular-value vector and fell back to spectral=Frobenius (3x high) and
+    stable_rank=1.0. Each expert must be treated as its own matrix."""
+    from blme.tasks.geometry.weight_norms import _weight_matrix_stats
+
+    torch.manual_seed(0)
+    W = torch.randn(4, 8, 8)  # 4 experts, 8x8 each
+    # _weight_matrix_stats also returns the two dimensionless companions
+    # (stable_rank/min(m,n) and ||W||_F/sqrt(mn)), which divide the matrix-shape
+    # term out of quantities that otherwise track d_model at rho +0.683.
+    frobs, specs, sranks, sranks_norm, rms = _weight_matrix_stats(W)
+    assert len(specs) == 4, "each fused expert must yield its own spectral norm"
+    for i in range(4):
+        true_sigma = float(torch.linalg.svdvals(W[i])[0])
+        assert abs(specs[i] - true_sigma) < 1e-4, "spectral must be the real sigma_max"
+        assert specs[i] < frobs[i], "sigma_max < Frobenius for this matrix"
+        assert sranks[i] > 1.5, f"stable_rank must be real, not the fabricated 1.0 ({sranks[i]})"
+
+    # 2-D input is unchanged (single matrix)
+    W2 = torch.randn(6, 10)
+    
+    # The companions must be per-matrix and correctly bounded.
+    import numpy as _np
+    assert len(sranks_norm) == len(sranks) and len(rms) == len(frobs)
+    for _sr, _srn, _fr, _rms, _M in zip(sranks, sranks_norm, frobs, rms,
+                                        (W.reshape(-1, W.shape[-2], W.shape[-1])
+                                         if W.ndim > 2 else W.unsqueeze(0))):
+        _m, _n = int(_M.shape[-2]), int(_M.shape[-1])
+        assert 0.0 <= _srn <= 1.0 + 1e-9, f"normalized stable rank out of [0,1]: {_srn}"
+        assert _srn == pytest.approx(_sr / min(_m, _n), rel=1e-9)
+        assert _rms == pytest.approx(_fr / _np.sqrt(_m * _n), rel=1e-9)
+
+    f2, s2, r2, rn2, rms2 = _weight_matrix_stats(W2)
+    assert len(s2) == 1 and abs(s2[0] - float(torch.linalg.svdvals(W2)[0])) < 1e-4
+
+
+def test_mahalanobis_default_id_pool_is_distinct():
+    """Campaign-3 BUG: the dataset=None fallback built dataset_id by cycling
+    5 sentences (id_texts[i % 5]), so the index-split 'held-out' ID score rows
+    were exact duplicates of the fit rows -> artificial ~0 ID Mahalanobis and a
+    spurious AUROC=1.0. The default ID pool must supply enough DISTINCT
+    sentences that a 50/50 split is genuinely held out (no duplicated rows)."""
+    from blme.tasks.geometry.mahalanobis import _default_id_dataset
+
+    texts = [d["text"] for d in _default_id_dataset(40)]
+    assert len(texts) >= 20, "need >=20 samples for a stable held-out split"
+    assert len(set(texts)) == len(texts), (
+        "default ID texts must be distinct (cycling duplicates fit into the "
+        "held-out score split)"
+    )
+
+
+def test_mp_ks_distance_handles_zero_atom():
+    """Campaign-3 BUG: for gamma>1 the empirical spectrum has ~(D-N) zero
+    eigenvalues (the rank-deficiency atom). _ks_distance compared F(0)=point
+    mass 1-1/gamma against 0 at each of them and returned ~1-1/gamma regardless
+    of fit. iid-MP data must yield a SMALL KS distance."""
+    from blme.tasks.geometry.rmt_bulk import _ks_distance
+
+    rng = np.random.default_rng(0)
+    N, D = 200, 600  # gamma = D/N = 3  -> ~400 zero eigenvalues
+    X = rng.standard_normal((N, D))
+    Z = (X - X.mean(0)) / X.std(0)
+    C = Z.T @ Z / N
+    eigs = np.linalg.eigvalsh(C)
+    ks = _ks_distance(eigs, gamma=D / N)
+    assert ks < 0.06, (
+        f"KS distance {ks:.4f} for iid-MP data — the zero atom is mishandled "
+        f"(old code returns ~1-1/gamma = {1 - 1/3:.4f})"
+    )
+
+
+def test_mp_cdf_accurate_at_gamma_one():
+    """Campaign-3 BUG: at gamma==1 the MP density ~ t^-1/2 at t=0; the uniform
+    trapezoid grid put a huge spurious spike at the first node (max CDF error
+    0.593). The CDF must match a direct scipy.quad integration."""
+    from scipy.integrate import quad
+
+    from blme.tasks.geometry.rmt_bulk import _mp_cdf, _mp_bulk_edge, _mp_lower_edge
+
+    gamma = 1.0
+    a, b = _mp_lower_edge(gamma), _mp_bulk_edge(gamma)  # 0, 4
+
+    def dens(t):
+        return np.sqrt(max((b - t) * (t - a), 0.0)) / (2 * np.pi * gamma * t) if t > 1e-15 else 0.0
+
+    xs = np.linspace(0.05, b, 40)
+    ref = np.array([quad(dens, a, x, limit=400)[0] for x in xs])
+    got = _mp_cdf(xs, gamma)
+    err = float(np.max(np.abs(got - ref)))
+    assert err < 1e-3, f"gamma=1 MP CDF max error {err:.4f} (singularity mishandled)"
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (preserved)
 # ---------------------------------------------------------------------------
@@ -20,10 +289,10 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     task = SVDIsotropyTask(config={"num_samples": 5})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
-    assert "svd_auc" in results
+    assert "_meta_svd_auc" in results
     assert "cond_number" in results
-    assert results["svd_auc"] > 0
-    assert results["svd_auc"] <= 1.0
+    assert results["_meta_svd_auc"] > 0
+    assert results["_meta_svd_auc"] <= 1.0
     assert results["cond_number"] >= 1.0
 
 
@@ -354,9 +623,14 @@ def test_lipschitz(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     assert "error" not in results
-    assert "lipschitz_max" in results
-    assert "lipschitz_mean" in results
-    assert results["lipschitz_max"] >= 0
+    # `lipschitz_*` are now `_meta_`-prefixed aliases: they were
+    # bit-identical duplicates of `relative_change_*` (eight keys, four
+    # values), and the name was wrong -- this is the relative-change
+    # ratio, not an operator Lipschitz constant.
+    assert "relative_change_max" in results
+    assert "_meta_lipschitz_max" in results
+    assert "_meta_lipschitz_mean" in results
+    assert results["_meta_lipschitz_max"] >= 0
 
 
 def test_cka(mock_model, mock_tokenizer):
@@ -376,7 +650,7 @@ def test_cka(mock_model, mock_tokenizer):
     assert "layers" not in results
     # Paper-faithful scalar summaries.
     for k in ("avg_adjacent_cka", "mean_offdiag_cka", "early_late_cka",
-              "first_middle_cka", "n_layers"):
+              "first_middle_cka", "_meta_n_layers"):
         assert k in results, f"missing {k}"
     assert 0 <= results["avg_adjacent_cka"] <= 1.0
 
@@ -452,8 +726,17 @@ def test_correlation_dimension_reframes_hidden_state_gp_method():
 
     assert "error" not in result, result
     assert "correlation_dimension" in result
-    assert result["hidden_state_correlation_dimension"] == result["correlation_dimension"]
-    assert result["correlation_dimension_method"] == "hidden_state_grassberger_procaccia"
+    # NaN-aware: the two are ALIASES, and with only 25 stub points the
+    # scaling-region fit is legitimately censored to NaN -- and `nan == nan` is
+    # False, so a bare equality check fails on a correct result.
+    _a = result["_meta_hidden_state_correlation_dimension"]
+    _b = result["correlation_dimension"]
+    assert (_a == _b) or (np.isnan(_a) and np.isnan(_b)), (_a, _b)
+    # The primary key is now the SCALING-REGION fit -- the old 5th-95th
+    # percentile window sat in the saturation region and missed GP 1983's
+    # published D2 = 2.05 by -27.7% on a Lorenz attractor.
+    assert result["correlation_dimension_method"] == (
+        "hidden_state_grassberger_procaccia_scaling_region")
     assert result["correlation_dimension_point_space"] == "mean_pooled_hidden_states"
 
 
@@ -551,9 +834,15 @@ def test_positional_decay_uniform_causal_attention_is_null():
 
         def forward(self, input_ids=None, output_attentions=False, **kwargs):
             seq_len = input_ids.shape[1]
+            # WELL-FORMED causal attention: every row sums to 1 over keys
+            # 0..i INCLUSIVE. The previous fixture wrote `attn[i, :i] = 1/i`,
+            # which left the DIAGONAL at 0 and row 0 entirely empty, so no row
+            # summed to 1 -- it was not an attention pattern at all, and the
+            # number this test reported for the pooled estimand was measured on
+            # that malformed input (independent Opus review, 2026-09-04).
             attn = torch.zeros(1, 2, seq_len, seq_len)
-            for i in range(1, seq_len):
-                attn[:, :, i, :i] = 1.0 / i
+            for i in range(seq_len):
+                attn[:, :, i, :i + 1] = 1.0 / (i + 1)
 
             class Out:
                 attentions = (attn,)
@@ -577,7 +866,16 @@ def test_positional_decay_uniform_causal_attention_is_null():
     )
 
     assert "error" not in result, result
+    # The HEADLINE (rowwise) must be exactly 0 on this null.
     assert result["mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
+    # And the MANUSCRIPT'S pooled estimand must NOT be, which is why the
+    # headline is the rowwise one. Pinned so the evidence for overriding the
+    # paper survives: the pooled null bias converges to about -0.467 as the
+    # context grows (-0.4344766895 at L=8, -0.4666215371 at L=256).
+    _pooled = result["mean_positional_decay_correlation_pooled"]
+    assert _pooled < -0.3, (
+        f"pooled estimand no longer shows its null bias ({_pooled}); if this "
+        f"changed, revisit which estimand should be the headline")
     assert result["layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
 
 
@@ -727,17 +1025,48 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     assert "error" not in res
 
     # Normalised entropy must be in [0, 1].
-    assert 0 <= res["matrix_entropy_normalized"] <= 1.01, (
-        f"H_normalized out of [0, 1]: {res['matrix_entropy_normalized']}"
+    # `_meta_` prefixed: the H / log(d) twin was demoted on 2026-09-04 because
+    # zero-padding d=512 -> 4096 (an exact isometry) moves it 0.721317 ->
+    # 0.540988 and it makes the archive width association WORSE than the raw
+    # value. Still emitted, still bounded, just not feature-eligible.
+    # `matrix_entropy` IS the normalised H (Wei et al. Def. 4.3); the
+    # `_meta_..._normalized` aliases were removed on 2026-09-05 because they
+    # carried the IDENTICAL float under a second name -- the "demotion" they
+    # documented never took effect (independent Opus review).
+    assert 0 <= res["matrix_entropy"] <= 1.01, (
+        f"H_normalized out of [0, 1]: {res['matrix_entropy']}"
     )
-    assert 0 <= res["mean_matrix_entropy_normalized"] <= 1.01
+    assert 0 <= res["mean_matrix_entropy"] <= 1.01
+    assert "_meta_matrix_entropy_normalized" not in res
+    assert res["matrix_entropy_raw"] >= 0.0
 
-    # Headline == last-layer entropy.
+    # Headline == last-layer entropy, in the NORMALISED convention.
+    #
+    # `matrix_entropy` now holds H / log d, which is Wei et al.'s Definition
+    # 4.3 and the quantity their tables report: on their protocol pythia-70m's
+    # published 0.7003 matches the normalised 0.6659 (-4.9%), against a raw
+    # H of 4.1542 (+493%). The raw value is retained under a _meta_ key.
     last_key = max(
         res["layer_matrix_entropies"].keys(),
         key=lambda k: int(k.split("_")[1]),
     )
-    assert res["matrix_entropy"] == res["layer_matrix_entropies"][last_key]
+    # THE HEADLINE IS NO LONGER THE PROFILE'S LAST ENTRY, deliberately.
+    #
+    # Wei et al.'s released recipe is `AutoModel(...)[0]` == `hidden_states[-1]`
+    # == `ln_f(b_{L-1})`, so the headline is a single-layer estimand the
+    # REFERENCE defines as the post-norm state, while the per-layer PROFILE is
+    # hooked so it is homogeneous. They are different tensors on purpose
+    # (2026-09-05). Asserting they are equal is asserting the defect that made
+    # this task RED: hooking the headline moved gpt2 +93.3% off the reference
+    # and turned a published 70m-vs-160m gap from +6.3% into +105.5%.
+    assert res["_meta_headline_is_post_final_norm"] is True
+    # The profile's deepest entry is the HOOKED one, so it must differ from the
+    # headline on any model with a real final norm -- if these ever coincide,
+    # the substitution silently stopped happening.
+    assert res["matrix_entropy"] != res["layer_matrix_entropies_normalized"][last_key]
+    assert res["matrix_entropy_raw"] != res["layer_matrix_entropies"][last_key]
+    # The headline must be the normalised one, not the raw one.
+    assert 0 <= res["matrix_entropy"] <= 1.01
 
 
 def test_matrix_entropy_uses_per_sample_cache():
@@ -953,7 +1282,12 @@ def test_mp_bulk_iid_null():
     assert "error" not in m
     assert m["outlier_frac"] <= 0.01, f"iid null produced outliers: {m}"
     assert m["ks_distance"] < 0.05, f"KS too large for iid null: {m}"
-    assert np.isclose(m["gamma"], 0.1)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 200 / 1999)
 
 
 def test_mp_bulk_planted_spike_detected():
@@ -991,7 +1325,12 @@ def test_mp_bulk_constant_dimension_dropped():
     for key in ("outlier_frac", "spike_energy", "ks_distance", "gamma",
                 "outlier_frac_g25", "spike_energy_g25", "ks_distance_g25"):
         assert np.isfinite(m[key]), f"{key} is NaN after dropping dim: {m}"
-    assert np.isclose(m["gamma"], 99 / 1000)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 99 / 999)
 
 
 def test_mp_bulk_edge_and_cdf_sanity():
@@ -1018,8 +1357,15 @@ def test_mp_bulk_edge_and_cdf_sanity():
     rng = np.random.default_rng(3)
     m = _mp_layer_metrics(rng.standard_normal((800, 200)),
                           edge_tol=0.05, fixed_gamma=None)
-    assert np.isclose(m["gamma"], 0.25)
-    assert np.isclose(_mp_bulk_edge(m["gamma"]), 2.25, atol=1e-9)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 200 / 799)
+    # (1 + sqrt(gamma))^2 at the corrected gamma.
+    assert np.isclose(_mp_bulk_edge(m["gamma"]),
+                      (1 + (200 / 799) ** 0.5) ** 2, atol=1e-9)
 
 
 def test_mp_bulk_integration(mock_model, mock_tokenizer):
@@ -1042,3 +1388,342 @@ def test_mp_bulk_integration(mock_model, mock_tokenizer):
         assert results[f"_meta_mp_gamma_{tag}"] > 0
         assert results[f"_meta_mp_n_tokens_{tag}"] > 0
     assert np.isfinite(results["mp_ks_distance_mean"])
+
+
+# ---------------------------------------------------------------------------
+# Campaign-4 B4: numeric pins for the weights-and-spectra kernels that were
+# previously only key-presence / bound-checked.
+# ---------------------------------------------------------------------------
+
+class _EmbOnlyModel(torch.nn.Module):
+    """Fake model exposing just an input-embedding matrix."""
+
+    def __init__(self, E):
+        super().__init__()
+        self.emb = torch.nn.Embedding.from_pretrained(E.clone(), freeze=True)
+
+    def get_input_embeddings(self):
+        return self.emb
+
+
+def test_hubness_evaluate_matches_independent_knn_reference():
+    """Regression (campaign-4 B4): the evaluate() k-occurrence kernel was
+    never numerically pinned — removing the self-mask changed skew/gini and
+    every test still passed. Full independent numpy reference: cosine kNN,
+    self excluded, occurrence counts -> scipy skew + sorted-rank Gini."""
+    from scipy.stats import skew as scipy_skew
+    from blme.tasks.geometry.hubness import GlobalHubnessTask
+
+    torch.manual_seed(0)
+    V, d, k = 257, 24, 5
+    E = torch.randn(V, d)
+    task = GlobalHubnessTask(config={"k_values": [k], "batch_size": 40})
+    out = task.evaluate(_EmbOnlyModel(E), None, dataset=None)
+    assert "error" not in out
+
+    # Independent reference (numpy float64, full argsort — no argpartition).
+    En = E.double().numpy()
+    En = En / np.linalg.norm(En, axis=1, keepdims=True)
+    sims = En @ En.T
+    np.fill_diagonal(sims, -np.inf)               # self-mask
+    counts = np.zeros(V, dtype=np.int64)
+    for i in range(V):
+        for j in np.argsort(sims[i])[-k:]:
+            counts[j] += 1
+    ref_skew = float(scipy_skew(counts))
+    x = np.sort(counts.astype(np.float64))
+    n = len(x)
+    ref_gini = float(
+        (2.0 * np.arange(1, n + 1) - n - 1.0) @ x / (n * x.sum())
+    )
+
+    assert out[f"hubness_k{k}_skew"] == pytest.approx(ref_skew, abs=1e-6)
+    assert out[f"hubness_k{k}_gini"] == pytest.approx(ref_gini, abs=1e-6)
+    assert out[f"hubness_k{k}_max"] == counts.max()
+
+
+def test_schatten_per_sentence_matches_official_mnn_pipeline():
+    """Regression (campaign-4 B4): nothing pinned _per_sentence_measurements
+    (preprocessing + MNN + the 2026-06-22 '/T' fix) — reverting mnn/T to
+    mnn/d passed all 31 schatten tests. Reference: verbatim transcription of
+    MLGroupJLU/MatrixNuclearNorm MNN.py (normalize L32-38, MNN L41-49,
+    per-token division L195) @ e7a9188."""
+    from blme.tasks.geometry.schatten import (
+        _normalise_matrix,
+        _per_sentence_measurements,
+    )
+
+    torch.manual_seed(0)
+    Z = torch.randn(24, 16)
+
+    # --- verbatim official reference ---
+    def official_normalize(R):
+        R = R - R.mean(dim=0, keepdim=True)
+        return R / R.norm(dim=1, keepdim=True)
+
+    def official_mnn(X):
+        D = min(X.shape)
+        col = X.norm(dim=0)
+        return float(col.sort(descending=True).values[:D].sum())
+
+    Zn_ref = official_normalize(Z.clone())
+    ref_mnn_over_T = official_mnn(Zn_ref) / Z.shape[0]
+
+    # Preprocessing must be BIT-identical to the official normalize().
+    assert torch.equal(_normalise_matrix(Z.clone()), Zn_ref)
+
+    out = _per_sentence_measurements(Z.clone())
+    assert out["row_normalized_matrix_nuclear_norm"] == pytest.approx(
+        ref_mnn_over_T, rel=1e-6
+    )
+
+
+def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
+    """Analytic anchor (campaign-4 B4): two orthogonal category clusters in
+    the unembedding matrix -> top-k purity EXACTLY 1.0 (purity was only
+    bound-checked before; formula drift like match/(k+1) was invisible)."""
+    import json as _json
+    from blme.tasks.geometry.unembedding import UnembeddingDiagnosticsTask
+
+    words_a = ["aa", "bb", "cc", "dd"]
+    words_b = ["ee", "ff", "gg", "hh"]
+    vocab = {w: i + 2 for i, w in enumerate(words_a + words_b)}  # ids 2..9
+
+    class _Tok:
+        def encode(self, text, add_special_tokens=False):
+            t = text.strip()
+            if t in vocab:
+                return [vocab[t]]
+            return [0, 1]  # multi-token -> skipped by the label loader
+
+    V, d = 12, 8
+    W = torch.zeros(V, d)
+    for w in words_a:
+        W[vocab[w], 0] = 1.0          # category A -> e1
+    for w in words_b:
+        W[vocab[w], 1] = 1.0          # category B -> e2
+    W[0, 2] = 1.0                      # unlabeled distractors, orthogonal
+    W[1, 3] = 1.0
+    W[10, 4] = 1.0
+    W[11, 5] = 1.0
+
+    class _HeadModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lm_head = torch.nn.Linear(d, V, bias=False)
+            with torch.no_grad():
+                self.lm_head.weight.copy_(W)
+
+    cats = tmp_path / "categories.json"
+    cats.write_text(_json.dumps({"cat_a": words_a, "cat_b": words_b}))
+
+    # k = cluster size - 1: every neighbor slot must be same-category.
+    task = UnembeddingDiagnosticsTask(config={
+        "categories_path": str(cats), "k": 3, "num_samples": 0,
+    })
+    out = task.evaluate(_HeadModel(), _Tok(), dataset=None)
+
+    assert out["_meta_unembedding_n_category_tokens"] == 8
+    assert out["unembedding_purity_mean"] == 1.0
+
+
+def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):
+    """Behavioral coverage (campaign-4 B6): no test previously ran
+    NeuralCollapseTask.evaluate() on a model — the double-norm regression
+    guard was a string match on one exact spelling. Drive the real task and
+    assert finite, plausible outputs."""
+    from blme.tasks.geometry.neural_collapse import NeuralCollapseTask
+
+    task = NeuralCollapseTask(config={"num_samples": 4})
+    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    if "error" in results:
+        pytest.skip(f"unsupported architecture: {results['error']}")
+
+    for key, val in results.items():
+        if isinstance(val, float):
+            assert np.isfinite(val), f"{key} not finite"
+    assert any("nc1" in k for k in results), results.keys()
+    r2 = NeuralCollapseTask(config={"num_samples": 4}).evaluate(
+        mock_model, mock_tokenizer, dataset=None)
+    for key, val in results.items():
+        if isinstance(val, float):
+            assert val == pytest.approx(r2[key], abs=0.0), f"{key} not deterministic"
+
+
+def test_mahalanobis_pinv_fallback_matches_closed_form(monkeypatch):
+    """Campaign-4 B7: the HAS_SKLEARN=False pinv fallback had zero coverage —
+    dropping the ridge or the ddof would pass the suite. Analytic anchor:
+    symmetric 4-point cloud has a DIAGONAL ddof-1 covariance, so the
+    Mahalanobis distance has a closed form."""
+    import blme.tasks.geometry.mahalanobis as mah
+
+    monkeypatch.setattr(mah, "HAS_SKLEARN", False)
+    a, b = 1.5, 0.5
+    X_train = np.array([[a, 0.0], [-a, 0.0], [0.0, b], [0.0, -b]])
+    query = np.array([[a, b]])
+    d = mah._compute_mahalanobis_distances(X_train, query)
+
+    var_x = 2 * a * a / 3.0     # ddof=1 over 4 zero-mean points
+    var_y = 2 * b * b / 3.0
+    ridge = 1e-6
+    expected = np.sqrt(a * a / (var_x + ridge) + b * b / (var_y + ridge))
+    assert d[0] == pytest.approx(float(expected), rel=1e-9)
+
+
+def test_prediction_alignment_uses_output_projection_when_untied():
+    """Campaign-4 B7: the untied-head behavior (the task's central advertised
+    claim) was guarded only by a source grep — a regression to
+    `return get_embeddings(model)` passed. Pin it numerically: on an untied
+    model with a re-randomized head, the projection weight must be the
+    lm_head tensor and must NOT be the input embedding table."""
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.geometry.consistency import _get_output_projection_weight
+
+    torch.manual_seed(0)
+    cfg = GPT2Config(n_layer=1, n_embd=16, n_head=2, vocab_size=97,
+                     n_positions=32, tie_word_embeddings=False)
+    model = GPT2LMHeadModel(cfg).eval()
+    with torch.no_grad():
+        model.lm_head.weight.normal_(std=0.3)   # decouple from wte for sure
+
+    W = _get_output_projection_weight(model)
+    assert torch.equal(W, model.lm_head.weight.detach())
+    assert not torch.allclose(W, model.transformer.wte.weight.detach())
+
+
+def test_categories_relation_hubness_and_analogy_kernels():
+    """Campaign-4 B7: the relation-consistency and analogy kernels never
+    executed in tests, and hub_skew/hub_max were computed but unasserted.
+    Constructed embedding: pairs relate by an EXACT constant vector r, so
+    consistency == 1.0 and analogy top-1 == 1.0 analytically; hubness is
+    recomputed independently."""
+    from scipy.stats import skew as scipy_skew
+    from blme.tasks.geometry.categories import CategoryGeometryTask
+
+    rng = np.random.default_rng(0)
+    V, d = 40, 12
+    E = rng.standard_normal((V, d)) * 5.0
+    r = np.zeros(d); r[0] = 30.0                 # exact relation vector
+    pairs = []
+    for i in range(6):                           # ids 0..5 -> 20..25
+        a_id, b_id = i, 20 + i
+        E[b_id] = E[a_id] + r
+        pairs.append((a_id, b_id))
+
+    task = CategoryGeometryTask(config={})
+    out = task._compute_relation_consistency(E, {"rel": pairs}, tokenizer=None)
+
+    assert out["rel_consistency"] == pytest.approx(1.0, abs=1e-9)
+    assert out["_meta_rel_analogy_acc_top1"] == pytest.approx(1.0, abs=1e-12)
+    assert out["_meta_rel_analogy_acc_top5"] == pytest.approx(1.0, abs=1e-12)
+
+    # Hubness kernel vs an independent recomputation on a category.
+    tids = list(range(10, 20))
+    hub = task._compute_hubness(E, None, {"cat": tids}, k_cat=3)
+    E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-10)
+    Ec = E_norm[np.array(tids)]
+    n_occ = np.zeros(len(tids))
+    for i in range(len(tids)):
+        sims = Ec @ Ec[i]
+        sims[i] = -np.inf
+        for idx in np.argsort(sims)[-3:]:
+            n_occ[idx] += 1
+    assert hub["cat_hub_max"] == int(n_occ.max())
+    ref_skew = 0.0 if n_occ.std() == 0 else float(scipy_skew(n_occ))
+    assert hub["cat_hub_skew"] == pytest.approx(ref_skew, abs=1e-9)
+
+
+def test_representation_sensitivity_bias_head_matches_autograd():
+    """Campaign-4 B7: the lm_head-bias branch (logits += bias) had zero
+    coverage — both existing tests use GPT-2's bias-free head, so flipping
+    the '+' to '-' passed the suite. Cross-check the closed-form gradient
+    against autograd on a model whose head HAS a bias."""
+    from transformers import GPT2Config, GPT2LMHeadModel
+    from blme.tasks.geometry.information_geometry import (
+        RepresentationSensitivityTask,
+    )
+
+    torch.manual_seed(0)
+    vocab = 211
+    cfg = GPT2Config(n_layer=1, n_embd=16, n_head=2, vocab_size=vocab,
+                     n_positions=32, tie_word_embeddings=False)
+    model = GPT2LMHeadModel(cfg).eval()
+    model.lm_head = torch.nn.Linear(16, vocab, bias=True)
+    with torch.no_grad():
+        model.lm_head.weight.normal_(std=0.2)
+        model.lm_head.bias.normal_(std=0.5)   # non-trivial bias
+
+    class _Tok:
+        pad_token_id = 0
+        eos_token_id = 1
+        def __call__(self, text, return_tensors="pt", **kw):
+            import zlib
+            g = torch.Generator().manual_seed(zlib.crc32(text.encode()))
+            ids = torch.randint(2, vocab, (1, 10), generator=g)
+            class BD(dict):
+                def to(self, dev): return self
+            return BD({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+    texts = [{"text": f"probe sentence {i}"} for i in range(3)]
+    task = RepresentationSensitivityTask(config={"num_samples": 3})
+    out = task.evaluate(model, _Tok(), dataset=texts)
+    if "error" in out:
+        pytest.skip(f"unsupported: {out['error']}")
+    blme_val = out["representation_sensitivity"]
+
+    # Independent autograd reference on the same texts/ids/hidden states.
+    W = model.lm_head.weight.detach().double()
+    b = model.lm_head.bias.detach().double()
+    sq_norms = []
+    with torch.no_grad():
+        pass
+    for row in texts:
+        enc = _Tok()(row["text"])
+        with torch.no_grad():
+            hs = model(input_ids=enc["input_ids"],
+                       output_hidden_states=True).hidden_states[-1][0]
+        ids = enc["input_ids"][0]
+        for pos in range(hs.shape[0] - 1):
+            h = hs[pos].detach().double().requires_grad_(True)
+            logp = torch.log_softmax(W @ h + b, dim=-1)[ids[pos + 1]]
+            (grad,) = torch.autograd.grad(logp, h)
+            sq_norms.append(float((grad ** 2).sum()))
+    ref = float(np.mean(sq_norms))
+    assert blme_val == pytest.approx(ref, rel=1e-4), (
+        f"bias-branch closed form diverged from autograd: {blme_val} vs {ref}"
+    )
+
+
+def test_every_geometry_task_actually_runs():
+    """Smoke test: each registered geometry task must EXECUTE.
+
+    `geometry_vendi_score` once shipped a `NameError` on every call -- a
+    reference to an out-of-scope loop variable -- while its parity suite stayed
+    9/9 green, because no test invoked `evaluate()`. A task that cannot run is
+    the most severe failure there is, and nothing caught it.
+    """
+    import blme.tasks.geometry  # noqa: F401
+    from blme.registry import list_tasks, get_task
+
+    from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
+    import torch
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    model = GPT2LMHeadModel(GPT2Config(
+        n_layer=3, n_head=2, n_embd=32, vocab_size=tok.vocab_size,
+        n_positions=64, n_ctx=64)).eval()
+    dataset = [{"text": "The quick brown fox jumps over the lazy dog."},
+               {"text": "A second sentence with entirely different tokens here."},
+               {"text": "Numbers one two three four five six seven eight nine."}]
+
+    failures = []
+    for name in sorted(t for t in list_tasks() if t.startswith("geometry_")):
+        cls = get_task(name)
+        if cls is None:
+            continue
+        try:
+            cls(config={"num_samples": 3, "use_cache": False}).evaluate(
+                model, tok, dataset, cache=None)
+        except Exception as exc:  # noqa: BLE001 - we want the type and message
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+    assert not failures, "geometry tasks that raise on a minimal input:\n" + "\n".join(failures)

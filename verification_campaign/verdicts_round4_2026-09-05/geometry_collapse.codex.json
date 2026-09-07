@@ -1,0 +1,27 @@
+{
+  "task": "geometry_collapse",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The Roy-Vetterli path returns 3.079201435678004 against the 80-digit rho=0.5 anchor 3.0792014356780040774 (relative error 3.82e-17), while cache/fresh profiles differ by 0.000e+00 and the maximum independent-SVD relative discrepancy is 6.69e-7. YELLOW is solely because collapse.py:188 computes min/(max+1e-12), not the defined min/max: two identical rank-one layers return 0.99999999999899991 instead of 1.0 (absolute error 1.0000889e-12).",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The bundle mixes a scale-free ratio with raw dimension counts. At fixed N=513 under an iid no-collapse null, raw erank rises 7.9849285631 -> 411.8821579949 over d=8 -> 512 with Spearman rho=+1.000, while erank/d falls 0.9981160704 -> 0.8044573398 with rho=-1.000; direct zero-padding changes all four raw profile summaries by 0.000e+00 but moves every /d diagnostic by exactly 64.0x. NORMALIZERS has 0 registrations and this task has 0 first-class normalized outputs, so the raw count fields remain RED across models even though collapse_ratio itself survives the isometry.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_repo": "facebookresearch/directclr",
+  "github_reason": "The retained fetched-upstream record for commit a86f64c9b0815ff19cfea9929cb7dc6bc293b5d4 contains a 147-line spectrum.py with 0 Roy-effective-rank or collapse-ratio routines; it row-L2-normalizes activations and returns a covariance singular spectrum instead. Thus there are 0 same-input scalar comparisons to run, 2 fresh local fetch attempts exited 128 under the network sandbox, and the Roy-Vetterli release supplies 0 code artifacts, so upstream verification is PARTIAL rather than YES.",
+  "paper_number": "YES",
+  "paper_reason": "Roy and Vetterli Section 2.3's rho=0.5 example specifies spectrum [2.25, 0.75, 0.75, 0.25], whose 80-digit effective rank is 3.0792014356780040774; BLME returns 3.079201435678004 (absolute error 1.18e-16, relative error 3.82e-17). Property 1 returns k for k=1,2,3,5,10,50 with maximum relative error 5.68e-16; the BLME collapse_ratio and max_drop extensions have 0 published numerical counterparts.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Width association is confirmed at fixed N=513: raw erank has rho(d_model)=+1.000 over d=8..512, whereas erank/d merely moves the association to rho=-1.000. Point-count dependence is independently confirmed at fixed d=512: nested N=32,64,128,256,513 clouds move erank 30.7223561076 -> 411.2892343476 (13.3873x; Spearman rho=+1.000). Exact zero-padding changes the raw summaries by 0.000e+00, so this is a population/architecture confound rather than a failure of isometric invariance.",
+  "defects": [
+    "CODE/FIDELITY, src/blme/tasks/geometry/collapse.py:183-188: the manuscript defines CR=min_erank/max_erank, but code adds 1e-12. Two valid identical rank-one layers have eranks [1.0, 1.0] and exact CR=1.0; current CR is 0.99999999999899991 (absolute error 1.0000889e-12).",
+    "ROBUSTNESS/CODE, src/blme/tasks/geometry/collapse.py:73,183-219: two all-zero centered layers produce eranks [0.0, 0.0] and a fabricated finite CR=0.0 although the ratio is 0/0, while an empty activation mapping reaches layers[0] and raises IndexError('list index out of range'), yielding 0 structured result fields.",
+    "TEST COVERAGE, tests/tasks/test_comprehensive_parity.py:2922,3033: the parity test explicitly defines and asserts min/(max+1e-12), so 13/13 focused collapse tests pass while preserving the paper mismatch; the equal-rank counterexample above is absent and would distinguish 0.99999999999899991 from 1.0.",
+    "DOCUMENTATION, src/blme/tasks/geometry/collapse.py:240-245: erank_sigma2_per_layer is labelled a raw-singular-value spectrum even though it receives S**2, and the /d profile is said not to scale with width. For S=[4,2,1], raw erank is 2.6004900059896596 but this squared-spectrum diagnostic is 1.9503675044922451 (difference 0.6501225014974146); zero-padding d=8 -> 512 moves /d by exactly 64.0x.",
+    "DOCUMENTATION/NORMALIZATION, /home/dtsaras/projects/beyond_benchmarks/paper/sections/metrics_geometry.tex:154: the manuscript still prescribes erank/d_model, but the current task emits 0 first-class normalized twins and NORMALIZERS contains 0 registrations. The direct d=8 -> 512 zero-padding intervention changes raw max/min/drop/ratio by 0.000e+00 while the proposed /d twins move 64.0x, so their removal is supported and the prose is stale.",
+    "PROTOCOL/COMPARABILITY, src/blme/tasks/configs/defaults.yaml:31-32: runtime resolution confirms num_samples=100 documents, not a fixed activation-row count. At fixed d=512, changing N=32 -> 513 changes erank 30.7223561076 -> 411.2892343476 (13.3873x; rho=+1.000), so raw count outputs require matched realized point populations for cross-model use."
+  ],
+  "fix": "At collapse.py:188 compute min_erank/max_erank exactly when both are finite and max_erank>0, otherwise return NaN; treat a zero singular-value sum as an invalid layer rather than an erank of 0. Return a structured error before indexing an empty layer list, replace the +1e-12 parity reference with an exact equal-rank regression, correct the sigma2 and /d comments, reconcile the manuscript while keeping the failed /d twins demoted, and match realized activation-row counts when comparing raw erank fields."
+}

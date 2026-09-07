@@ -35,6 +35,13 @@ The toy features (K=3 tight Gaussian blobs in R^5, 30 pts/class, seed 0,
 spread 0.15) and the OFFICIAL expected NC1 are reproduced from the wave1
 harness, which RAN the rhubarbwu library directly.
 
+The three NC2 statistics are emitted under a `_meta_` prefix, which excludes
+them from the analysis feature matrix: all three lie inside their own 200-draw
+label-permutation null on every model measured (best p = 0.095 over nine
+tests), while NC1 passes at p = 0/200. That is a POWER problem at the shipped
+5-class x 8-sentence bundle, not a formula error -- the formulas below verify
+exactly -- so the parity assertions still pin them, under the demoted names.
+
 NC2-ETF caveat: BLME's `nc2_etf_cosine_deviation_proxy` is an explicitly
 documented PROXY (mean |cos - (-1/(K-1))| over centered class-mean pairs), a
 DIFFERENT definition from the reference `simplex_etf_error` (Frobenius norm of
@@ -57,7 +64,12 @@ OFFICIAL_NC1_PINV = 0.00409094387203806
 # metric="svd" (Han et al. 2022) agreed to machine epsilon.
 OFFICIAL_NC1_SVD = 0.004090943872038059
 # BLME's own stated NC2 metrics on this toy (verified against their definitions).
-BLME_NC2_EQUINORM_CV = 0.00784386467284082
+# Updated 2026-09-04: the equinorm CV now uses ddof=1, matching the released
+# Papyan notebook's `torch.std`. The old ddof=0 value was 0.00784386467284082,
+# low by exactly sqrt(K/(K-1)) -- 1.224744871 = sqrt(3/2) on this K=3 toy, and
+# 1.154700538 = sqrt(4/3) on the reviewer's K=4 fixtures. The two values differ
+# by that factor and nothing else.
+BLME_NC2_EQUINORM_CV = 0.00960673302995146
 BLME_NC2_ETF_PROXY = 0.011144638743029825
 
 
@@ -165,9 +177,13 @@ def test_nc2_proxies_match_stated_definitions():
 
     # NC2-equinorm: CV of centered class-mean norms (std/mean).
     norms = np.linalg.norm(M, axis=1)
-    equinorm_cv = float(np.std(norms) / norms.mean())
-    assert abs(out["nc2_equinorm_cv"] - equinorm_cv) < TOL
-    assert abs(out["nc2_equinorm_cv"] - BLME_NC2_EQUINORM_CV) < TOL
+    # ddof=1, matching the released Papyan notebook's `torch.std` and the
+    # task. `np.std`'s default ddof=0 is low by exactly sqrt(K/(K-1)) --
+    # 1.154701 at K=4 -- and on gpt2 gave 0.155268 against the official
+    # 0.173595 (independent Opus review, 2026-09-04).
+    equinorm_cv = float(np.std(norms, ddof=1) / norms.mean())
+    assert abs(out["_meta_nc2_equinorm_cv"] - equinorm_cv) < TOL
+    assert abs(out["_meta_nc2_equinorm_cv"] - BLME_NC2_EQUINORM_CV) < TOL
 
     # NC2-ETF proxy: mean |cos - (-1/(K-1))| over centered class-mean pairs.
     Mu = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
@@ -175,8 +191,8 @@ def test_nc2_proxies_match_stated_definitions():
     iu = np.triu_indices(Kc, k=1)
     target = -1.0 / (Kc - 1)
     etf_proxy = float(np.mean(np.abs(cos[iu] - target)))
-    assert abs(out["nc2_etf_cosine_deviation_proxy"] - etf_proxy) < TOL
-    assert abs(out["nc2_etf_cosine_deviation_proxy"] - BLME_NC2_ETF_PROXY) < TOL
+    assert abs(out["_meta_nc2_etf_cosine_deviation_proxy"] - etf_proxy) < TOL
+    assert abs(out["_meta_nc2_etf_cosine_deviation_proxy"] - BLME_NC2_ETF_PROXY) < TOL
 
 
 if __name__ == "__main__":

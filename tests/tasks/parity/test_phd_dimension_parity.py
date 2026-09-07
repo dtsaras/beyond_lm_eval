@@ -31,6 +31,7 @@ the recorded numbers).
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,16 +45,20 @@ FIXTURE_PATH = (
     / "fixtures/reference_parity/parity/phd_dimension.json"
 )
 
-# Candidate locations for the cloned official GPTID repo (holds IntrinsicDim.py).
+# Location of the cloned official GPTID repo (holds IntrinsicDim.py): the
+# documented env var, falling back to the durable local-clone convention
+# ~/.cache/blme-refrepos/ (git clone --depth 1
+# https://github.com/ArGintum/GPTID there). Absent -> the reference-backed
+# cases skip cleanly.
 _REF_CANDIDATES = [
-    "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/"
-    "42dc090a-aa6d-4f5b-bd0f-fb7213022dc9/scratchpad/refrepos/GPTID",
+    os.environ.get("BLME_GPTID_DIR", ""),
+    str(Path.home() / ".cache/blme-refrepos/GPTID"),
 ]
 
 
 def _load_reference():
     for d in _REF_CANDIDATES:
-        if (Path(d) / "IntrinsicDim.py").exists():
+        if d and (Path(d) / "IntrinsicDim.py").exists():
             if d not in sys.path:
                 sys.path.insert(0, d)
             import IntrinsicDim  # noqa: WPS433

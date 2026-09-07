@@ -24,6 +24,41 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _dataset_mean_states(model, layers, encodings, num_layers):
+    """Per-layer dataset-mean of each transformer block's RAW output, captured
+    via forward hooks. This is the representation the mean-ablation hook
+    replaces. Using ``hidden_states[l+1]`` instead was wrong for the LAST layer
+    because HF's final entry is ``ln_f(block output)`` (post-final-norm), giving
+    a mean in a different representation than the raw residual stream it ablates.
+    Returns ``{l_idx: mean (1, 1, D)}``.
+    """
+    captured = {}
+
+    def _mk(l_idx):
+        def hook(module, inputs, output):
+            captured[l_idx] = (output[0] if isinstance(output, tuple) else output).detach()
+        return hook
+
+    sums = {l_idx: None for l_idx in range(num_layers)}
+    counts = {l_idx: 0 for l_idx in range(num_layers)}
+    with torch.no_grad():
+        for ids in encodings:
+            handles = [layers[l_idx].register_forward_hook(_mk(l_idx))
+                       for l_idx in range(num_layers)]
+            try:
+                model(ids)
+            finally:
+                for h in handles:
+                    h.remove()
+            for l_idx in range(num_layers):
+                h = captured[l_idx]  # (1, T, D) raw block output
+                sums[l_idx] = (h.sum(dim=1) if sums[l_idx] is None
+                               else sums[l_idx] + h.sum(dim=1))
+                counts[l_idx] += h.shape[1]
+    return {l_idx: (sums[l_idx] / counts[l_idx]).unsqueeze(1)
+            for l_idx in range(num_layers) if counts[l_idx] > 0}
+
+
 def _observed_layer_minimality(layer_importances, circuit_layers) -> float:
     """Combine compactness with the observed importance captured by selected layers."""
     importances = np.maximum(0.0, np.asarray(layer_importances, dtype=np.float64))
@@ -99,26 +134,12 @@ class CircuitQualityTask(DiagnosticTask):
 
         baseline_mean_loss = float(np.mean(baseline_losses))
 
-        # Step 2: Compute *dataset-mean* hidden state per layer (averaged
-        # across all encodings, not per-sequence). This is closer to a true
-        # mean-ablation baseline and avoids contaminating layer importance
-        # with per-sequence content.
-        dataset_mean_states = {}
-        with torch.no_grad():
-            sums = {l_idx: None for l_idx in range(num_layers)}
-            counts = {l_idx: 0 for l_idx in range(num_layers)}
-            for ids in encodings:
-                clean_out = model(ids, output_hidden_states=True)
-                for l_idx in range(num_layers):
-                    h = clean_out.hidden_states[l_idx + 1]  # (1, T, D)
-                    # Sum over tokens, accumulate count
-                    sums[l_idx] = (h.sum(dim=1) if sums[l_idx] is None
-                                   else sums[l_idx] + h.sum(dim=1))
-                    counts[l_idx] += h.shape[1]
-            for l_idx in range(num_layers):
-                if counts[l_idx] > 0:
-                    # shape (1, 1, D) — broadcastable to any (1, T, D)
-                    dataset_mean_states[l_idx] = (sums[l_idx] / counts[l_idx]).unsqueeze(1)
+        # Step 2: Compute *dataset-mean* block output per layer (averaged
+        # across all encodings, not per-sequence). Captured from the RAW block
+        # outputs the ablation hook replaces — NOT hidden_states[l+1], whose
+        # last entry is ln_f(block output) and would give the final layer a
+        # post-final-norm mean in the wrong representation.
+        dataset_mean_states = _dataset_mean_states(model, layers, encodings, num_layers)
 
         # Step 3: Measure causal importance of each layer via dataset-mean ablation
         layer_importances = []
