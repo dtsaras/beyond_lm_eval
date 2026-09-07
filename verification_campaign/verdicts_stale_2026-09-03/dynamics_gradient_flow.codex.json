@@ -1,0 +1,25 @@
+{
+  "task": "dynamics_gradient_flow",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The hooks and backward pass correctly compute each retained hidden state's Frobenius norm ||dL_CE/dh_l||, a faithful transformer adaptation of the gradient quantity motivating Pascanu et al. However, the task's interpretation is reversed: a scalar chain with multiplier 0.5 gives slope +3.465736 for backward vanishing, while multiplier 2 gives -3.465736 for backward explosion, opposite gradient_flow.py:20-21.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "On one identical text, raw mean gradient norms spanned 25x across the four permitted models; slope correlated r = 0.962 with log d_model and raw entropy r = 0.852 with log n_layers (n = 4, descriptive only). More decisively, the function-preserving reparameterization W1' = 100 W1, W2' = W2/100 leaves outputs identical but scales the intermediate activation gradient norm by 0.01, so these numbers are not function-invariant across parameterizations.",
+  "normalized_variant": "gradient_flow_entropy_norm",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "pascanur/trainingRNNs",
+  "github_reason": "Fetched and inspected the authors' legacy Theano RNN.py. It implements recurrent-state gradients for the paper's norm-preservation regularizer and parameter-gradient clipping, but no per-transformer-layer profile, entropy, threshold ratio, or depth regression; there is therefore no same-input scalar to execute head-to-head.",
+  "paper_number": "NONE",
+  "paper_reason": "Pascanu et al. publish synthetic-task success curves and analytic recurrent-Jacobian conditions, but no per-layer activation-gradient entropy, 10%-threshold ratio, or log-norm depth slope for a model. No published number exists for the BLME summaries.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The exact gauge counterexample proves dependence on arbitrary hidden-coordinate scaling even at identical model function. The four-model measurements also show large architecture associations: slope r = 0.962 with log width, entropy r = 0.852 with log depth, and a 25x raw-norm range.",
+  "defects": [
+    "CODE src/blme/tasks/dynamics/gradient_flow.py:19-21 reverses the sign semantics of the emitted slope: positive forward-depth slope means earlier-layer gradients are smaller and hence backward vanishing, not explosion.",
+    "PROVENANCE Pascanu et al. define temporal recurrent Jacobian products and sufficient conditions, not BLME's transformer-layer entropy, normalized-depth slope, or 10%-of-maximum fraction; these must remain labelled adaptations.",
+    "CODE gradient_flow_entropy_norm = exp(H)/n_layers is not an architecture normalization: on measured real profiles its spread was 4.15x versus 1.88x for raw entropy, and in the four-model rerun it had r = -0.984 with log vocab_size.",
+    "CODE all absolute activation-gradient norms are vulnerable to function-preserving reciprocal rescaling of adjacent layers."
+  ],
+  "fix": "Reverse the documented slope interpretation (positive = backward vanishing, negative = backward explosion), keep all summaries explicitly labelled BLME adaptations rather than Pascanu metrics, and do not advertise exp(H)/n_layers as normalized. For cross-model work, add a separately named gauge-aware quantity based on invariant products or controlled parameterization rather than silently redefining the raw norm."
+}

@@ -55,8 +55,8 @@ def test_interpolation(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "convexity_gap" in results
-    assert "interp_entropy_0.0" in results
-    assert "interp_entropy_0.5" in results
+    assert "_meta_interp_entropy_0.0" in results
+    assert "_meta_interp_entropy_0.5" in results
 
 
 def test_interpolation_default_steps_include_true_midpoint(mock_model, mock_tokenizer):
@@ -70,9 +70,9 @@ def test_interpolation_default_steps_include_true_midpoint(mock_model, mock_toke
     task = LatentInterpolationTask(config={"num_pairs": 1})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=["left", "right"])
 
-    assert "interp_entropy_0.5" in results
-    expected_gap = results["interp_entropy_0.5"] - (
-        results["interp_entropy_0.0"] + results["interp_entropy_1.0"]
+    assert "_meta_interp_entropy_0.5" in results
+    expected_gap = results[f"_meta_interp_entropy_0.5"] - (
+        results[f"_meta_interp_entropy_0.0"] + results[f"_meta_interp_entropy_1.0"]
     ) / 2
     assert results["convexity_gap"] == pytest.approx(expected_gap)
 
@@ -209,9 +209,9 @@ def test_chain_of_embedding_emits_paper_scores():
     assert np.isfinite(res["coe_c"])
 
     # Normalised magnitude/angle — also reported per Eq. 3.
-    assert "mean_normalized_magnitude" in res
+    assert "_meta_mean_normalized_magnitude" in res
     assert "mean_normalized_angle" in res
-    assert np.isfinite(res["mean_normalized_magnitude"])
+    assert np.isfinite(res["_meta_mean_normalized_magnitude"])
     assert np.isfinite(res["mean_normalized_angle"])
 
 
@@ -265,7 +265,10 @@ def test_chain_of_embedding_is_layerwise(mock_model, mock_tokenizer):
     assert results.get("axis") == "layers"
     # And for the mock model (2 layers), each chain has exactly
     # num_layers steps between hidden states.
-    assert results.get("chain_length_per_sample") == 2
+    # `_meta_`-prefixed: with the full h_0..h_L chain this equals n_layers
+    # EXACTLY, so unprefixed it was a perfect depth proxy in the feature matrix.
+    assert results.get("_meta_chain_length_per_sample") == 2
+    assert "chain_length_per_sample" not in results
 
 
 def test_generation_diversity_seed_and_trims_special_tokens():
@@ -325,7 +328,13 @@ def test_generation_diversity_seed_and_trims_special_tokens():
     assert not model.generator_was_passed
     assert result["seed"] == 123
     assert result["completion_filter"] == "trim_at_eos_drop_special"
-    assert result["distinct_n_scope"] == "per_completion_mean"
+    # Both scopes are emitted now: `distinct_n` is Li et al.'s collection-level
+    # ratio (ten duplicate completions -> 0.100000) and `mean_distinct_n` is
+    # the per-completion mean (-> 1.000000). The old string named only the
+    # second while the first is the paper's definition.
+    assert result["distinct_n_scope"] == (
+        "corpus (distinct_n) + per_completion_mean (mean_distinct_n)")
+    assert result["self_bleu_scope"] == "all_pairs_over_collection"
     assert result["mean_distinct_1"] == pytest.approx(1.0)
 
 
@@ -374,7 +383,7 @@ def test_generation_diversity_entropy_masks_post_eos_positions():
         "max_new_tokens": 6,
     }).evaluate(FakeModel(), Tok(), dataset=["prompt"])
 
-    assert result["entropy_collapse_delta"] == pytest.approx(0.0, abs=1e-6)
+    assert result["sampling_entropy_collapse_delta"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_chain_of_embedding_zmag_not_one_pins_normalization():
@@ -464,7 +473,8 @@ def test_interpolation_endpoints_lerp_equals_slerp(mock_model, mock_tokenizer):
         pytest.skip(f"unsupported architecture: {results['error']}")
 
     for a in ("0.0", "1.0"):
-        li, sl = results[f"interp_entropy_{a}"], results[f"slerp_entropy_{a}"]
+        li, sl = (results[f"_meta_interp_entropy_{a}"],
+                  results[f"_meta_slerp_entropy_{a}"])
         assert li == pytest.approx(sl, rel=1e-6), (
             f"lerp/slerp entropies differ at endpoint alpha={a}")
         assert np.isfinite(li) and li >= 0.0

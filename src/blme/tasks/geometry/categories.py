@@ -8,7 +8,15 @@ from scipy.spatial.distance import cosine as cosine_dist
 from scipy.stats import skew
 from typing import Dict, List, Tuple
 import logging
+import hashlib
+from .utils import safe_unit_rows as _safe_unit_rows
 logger = logging.getLogger("blme")
+
+# Category size used by the MATCHED purity variant. Every model is compared at
+# this many tokens per category and this many neighbours, so neither k nor the
+# category size can differ across tokenizers.
+_MATCHED_CAT_SIZE = 10
+
 
 @register_task("geometry_categories")
 class CategoryGeometryTask(DiagnosticTask):
@@ -47,6 +55,9 @@ class CategoryGeometryTask(DiagnosticTask):
         logger.info(" Computing Separation...")
         sep_results = self._compute_separation(E, cat_tokens)
         results.update(sep_results)
+        # Tokens claimed by more than one category, dropped from all of them.
+        results["_meta_n_ambiguous_tokens"] = int(
+            getattr(self, "_n_ambiguous_tokens", 0))
         
         # Purity
         k = self.config.get("k_purity", 20)
@@ -74,8 +85,12 @@ class CategoryGeometryTask(DiagnosticTask):
 
         n_mapped = sum(len(tids) for tids in cat_tokens.values())
         results["n_category_tokens_mapped"] = int(n_mapped)
-        results["cross_model_comparable"] = False
-        results["comparability_note"] = (
+        # `_meta_`: a CONSTANT `False` emitted unprefixed alongside ~100
+        # numeric keys, so it gated nothing in the analysis pipeline and
+        # contributed a zero-variance feature column instead
+        # (red-team review, 2026-09-05).
+        results["_meta_cross_model_comparable"] = False
+        results["_meta_comparability_note"] = (
             "tokenizer_dependent_category_token_mapping"
         )
 
@@ -135,6 +150,34 @@ class CategoryGeometryTask(DiagnosticTask):
                                 cat_tokens[cat_name].append(tid)
                                 cat_labels[tid] = cat_name
                                 
+        # AMBIGUOUS TOKENS ARE DROPPED FROM EVERY CATEGORY, not assigned to
+        # whichever one the JSON happened to list first.
+        #
+        # `if tid not in cat_labels` is a FIRST-WINS rule, so the result
+        # depended on asset key order: 14 gpt2 token ids are claimed by two
+        # categories, and swapping two keys in the taxonomy file moved
+        # `pronouns_purity` -23.6%, `determiners_purity` +45.9% and
+        # `pronouns_purity_matched` +120% (independent Opus review,
+        # 2026-09-04). A token with two labels has no unambiguous label, so
+        # purity for it is not defined at all; excluding it is the only answer
+        # that does not depend on file order. The count is reported.
+        _claims = {}
+        for _c, _items in categories.items():
+            for _w in ([] if not isinstance(_items, list) else _items):
+                if not isinstance(_w, str):
+                    continue
+                for _v in (_w, " " + _w):
+                    _ids = tokenizer.encode(_v, add_special_tokens=False)
+                    if len(_ids) == 1:
+                        _claims.setdefault(_ids[0], set()).add(_c)
+        _ambiguous = {t for t, cs in _claims.items() if len(cs) > 1}
+        if _ambiguous:
+            for _c in list(cat_tokens):
+                cat_tokens[_c] = [t for t in cat_tokens[_c] if t not in _ambiguous]
+            for t in _ambiguous:
+                cat_labels.pop(t, None)
+        self._n_ambiguous_tokens = int(len(_ambiguous))
+
         return cat_tokens, cat_labels
 
     def _compute_separation(self, E, cat_tokens):
@@ -156,6 +199,14 @@ class CategoryGeometryTask(DiagnosticTask):
             replace=False
         )
         
+        # SCALE-EXACT unit rows, then 1 - dot. `scipy.spatial.distance.cosine`
+        # squares in the input dtype, so on float32 embeddings at magnitude
+        # <= 1e-19 it returns exactly 0.0 -- and ALL 42 intra/inter/separation
+        # values collapsed to 0.0 where the true cosine distance is 0.9587836
+        # (independent Opus review, 2026-09-04). This was the last unfixed site
+        # of the round-2 class in this file.
+        _U = _safe_unit_rows(E)
+
         for cat_name, tids in cat_tokens.items():
             if len(tids) < 3: continue
             
@@ -163,7 +214,7 @@ class CategoryGeometryTask(DiagnosticTask):
             intra_dists = []
             for i in range(len(tids)):
                 for j in range(i + 1, len(tids)):
-                    d = cosine_dist(E[tids[i]], E[tids[j]])
+                    d = 1.0 - float(_U[tids[i]] @ _U[tids[j]])
                     intra_dists.append(d)
             intra = np.mean(intra_dists) if intra_dists else 0
             
@@ -171,7 +222,7 @@ class CategoryGeometryTask(DiagnosticTask):
             inter_dists = []
             for tid in tids:
                 for rtid in random_tids[:10]:
-                    d = cosine_dist(E[tid], E[rtid])
+                    d = 1.0 - float(_U[tid] @ _U[rtid])
                     inter_dists.append(d)
             inter = np.mean(inter_dists) if inter_dists else 0
             
@@ -182,28 +233,104 @@ class CategoryGeometryTask(DiagnosticTask):
         return results
 
     def _compute_purity(self, E, cat_tokens, cat_labels, k=20):
-        # Normalize E for fast cosine sim
-        E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-10)
+        # EXACT cosine normalisation -- divide by the norm, never add to it.
+        # `norm + 1e-10` biases every small-but-valid row toward the origin and
+        # breaks the scale invariance cosine has by definition. Measured: a
+        # two-token category with row norms 1e-12/2e-12 returned purity 0.0
+        # against an exact-cosine 1.0, and exactly parallel relation
+        # differences returned 0.5625 at scale 1e-10 and 0.0008483363 at 1e-12
+        # instead of 1.0 (adversarial review, 2026-09-04).
+        E_norm = _safe_unit_rows(E)
         results = {}
         
         for cat_name, tids in cat_tokens.items():
             if len(tids) < 2: continue
             
+            # ADAPTIVE k. With a fixed k, a category holding m tokens can
+            # never exceed a purity of (m-1)/k, because at most m-1 neighbours
+            # can share its label. That is a CEILING set by the tokenizer, not
+            # by the geometry: the currencies category maps to 3-34 tokens
+            # across 16 tokenizers, so its ceiling ranges 0.10 to 1.00 and two
+            # models can differ 10x on this feature with identical geometry.
+            # Verified on constructed ground truth: four perfectly separated
+            # clusters score 1.0000 at k = 9 and 0.4500 at the shipped k = 20.
+            #
+            # Capping k at m-1 makes the ceiling exactly 1.0 for every category
+            # and every tokenizer, so the number means the same thing everywhere.
+            k_eff = max(1, min(int(k), len(tids) - 1))
+
             purities = []
             for tid in tids:
                 sims = E_norm @ E_norm[tid]
                 sims[tid] = -np.inf
-                top_k = np.argsort(sims)[-k:]
-                
+                top_k = np.argsort(sims)[-k_eff:]
+
                 same_cat = sum(1 for t in top_k if cat_labels.get(t) == cat_name)
-                purities.append(same_cat / k)
-                
+                purities.append(same_cat / k_eff)
+
             results[f"{cat_name}_purity"] = float(np.mean(purities))
+
+            # MATCHED variant: the same k AND the same category size on every
+            # model. Capping k at m-1 fixes the CEILING at 1.0, but k_eff still
+            # varies with the tokenizer, and that alone reverses real orderings
+            # -- GPT-2 vs Llama digits read 0.542105 (k=19) against 0.900000
+            # (k=9), while at a matched k=9 the same pair reads 0.916667
+            # against 0.900000 (adversarial review, 2026-09-04). Subsampling
+            # the category to a fixed size with a fixed seed matches m as well,
+            # so nothing tokenizer-dependent is left in the comparison.
+            _m_fix = _MATCHED_CAT_SIZE
+            if len(tids) >= _m_fix:
+                # DETERMINISTIC across processes. `hash()` on a str is salted
+                # by PYTHONHASHSEED, so the subsample -- and therefore the
+                # matched purity -- changed run to run on identical weights:
+                # digits_purity_matched read 0.455556 / 0.444444 / 0.455556 /
+                # 0.433333 for PYTHONHASHSEED 1..4 (adversarial review round 2,
+                # 2026-09-04). blake2b is stable everywhere.
+                _seed = int.from_bytes(
+                    hashlib.blake2b(cat_name.encode("utf-8"),
+                                    digest_size=4).digest(), "big")
+                _rng = np.random.default_rng(_seed)
+                _sub = sorted(_rng.choice(np.asarray(tids), size=_m_fix,
+                                          replace=False).tolist())
+                _sub_set = set(_sub)
+                _k_m = _m_fix - 1
+                _pm = []
+                for tid in _sub:
+                    sims = E_norm @ E_norm[tid]
+                    sims[tid] = -np.inf
+                    top_k = np.argsort(sims)[-_k_m:]
+                    _pm.append(sum(1 for t in top_k if t in _sub_set) / _k_m)
+                # `_meta_`: THIS TWIN FAILS THE CAMPAIGN'S OWN BAR, measured.
+                #
+                # A normalized twin must show a MEASURED REDUCTION in the
+                # architecture association that does not merely relocate it.
+                # Over 20 models (vocab 49k-262k, d_model 512-2048) the matched
+                # form makes it WORSE: mean |spearman| with vocab_size 0.327
+                # raw -> 0.386 matched, and with d_model 0.151 -> 0.241. Per
+                # category the worst cases get much worse -- currencies -0.425
+                # -> -0.789, units -0.248 -> -0.674, prepositions -0.313 ->
+                # -0.511 (independent Opus review, 2026-09-05).
+                #
+                # The mechanism is understood: fixing m and k removes the
+                # CEILING artifact, which was real, but the fixed-size
+                # subsample is still drawn from a TOKENIZER-DEPENDENT pool, so
+                # which 10 tokens get compared still varies by model. That is
+                # the association relocating, not reducing. All 11 previously
+                # registered twins were removed on exactly this ground; this
+                # one is emitted as a diagnostic, not as a feature.
+                results[f"_meta_{cat_name}_purity_matched"] = float(np.mean(_pm))
+                results[f"_meta_{cat_name}_k_matched"] = int(_k_m)
+            else:
+                results[f"_meta_{cat_name}_purity_matched"] = float("nan")
+            # The tokenizer-dependent quantities that set the ceiling, so a
+            # reader can tell a small category from a poorly clustered one.
+            results[f"_meta_{cat_name}_k_eff"] = int(k_eff)
+            results[f"_meta_{cat_name}_n_tokens"] = int(len(tids))
             
         return results
         
     def _compute_hubness(self, E, tokenizer, cat_tokens, k_cat=5):
-        E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-10)
+        E_norm = _safe_unit_rows(E)
         results = {}
         
         for cat_name, tids in cat_tokens.items():
@@ -221,8 +348,17 @@ class CategoryGeometryTask(DiagnosticTask):
                 for idx in top_k:
                     n_occ[idx] += 1
             
+            # NaN, not 0.0, for a constant occurrence vector -- exactly as
+            # `geometry_hubness` already does. S_Nk is the standardized third
+            # moment, so a constant vector makes it 0/0 and `scipy.stats.skew`
+            # returns NaN; 0.0 asserts "perfectly symmetric", which the data
+            # does not support and which is indistinguishable from a genuine
+            # symmetric distribution. Unreachable at the shipped taxonomy (the
+            # smallest scored category has 10 tokens, and the branch needs
+            # m in {5, 6}), but the two tasks must not disagree on a convention
+            # (codex round 5 / independent Opus review, 2026-09-05).
             results[f"{cat_name}_hub_skew"] = float(
-                0.0 if n_occ.std() == 0 else skew(n_occ)
+                float("nan") if n_occ.std() == 0 else skew(n_occ)
             )
             results[f"{cat_name}_hub_max"] = int(n_occ.max())
             
@@ -231,22 +367,33 @@ class CategoryGeometryTask(DiagnosticTask):
     def _compute_relation_consistency(self, E, relation_pairs, tokenizer):
         results = {}
         # Normalize E specifically for cosine sim
-        E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-10)
+        E_norm = _safe_unit_rows(E)
         
         for cat_name, pairs in relation_pairs.items():
             if len(pairs) < 2: continue
             
             # 1. Cosine Consistency of Difference Vectors
+            # DIFFERENCES IN DOUBLE. `v2 - v1` in the embedding's own dtype
+            # OVERFLOWS when the two coordinates have opposite signs near the
+            # top of the range: 2.4e38 - (-2.4e38) = 4.8e38 > float32's 3.4e38,
+            # so the difference vector becomes inf and `_safe_unit_rows` then
+            # returns NaN. On 4 exact constant-relation pairs at
+            # 2.406159650500376e38 -- every input finite -- the task returned
+            # consistency/top-1/top-5 = NaN/0.0/1.0 where the definition gives
+            # 1.0/1.0/1.0, while all six lower rungs were exact (gpt-5.6-sol
+            # round 9, 2026-09-07).
+            #
+            # The relation statistics are cosines of difference vectors, so
+            # they are scale-free and this only ever removes error. Promoting a
+            # float32/bf16 embedding to double is exact.
+            _E64 = np.asarray(E, dtype=np.float64)
             diff_vectors = []
             for t1, t2 in pairs:
-                v1 = E[t1]
-                v2 = E[t2]
-                diff = v2 - v1
-                diff_vectors.append(diff)
+                diff_vectors.append(_E64[t2] - _E64[t1])
             
             diff_vectors = np.array(diff_vectors)
             # Normalize diff vectors to compute their cosine similarity
-            diff_norm = diff_vectors / (np.linalg.norm(diff_vectors, axis=1, keepdims=True) + 1e-10)
+            diff_norm = _safe_unit_rows(diff_vectors)
             
             # Compute pairwise similarities
             sim_matrix = diff_norm @ diff_norm.T
@@ -316,7 +463,7 @@ class CategoryGeometryTask(DiagnosticTask):
                 target_vec = vec_b - vec_a + vec_c
                 
                 # Normalize target for cosine search
-                target_norm = target_vec / (np.linalg.norm(target_vec) + 1e-10)
+                target_norm = _safe_unit_rows(target_vec[None, :])[0]
                 
                 # Search in E_norm
                 sims = E_norm @ target_norm
@@ -338,11 +485,20 @@ class CategoryGeometryTask(DiagnosticTask):
                 total += 1
             
             if total > 0:
-                results[f"{cat_name}_analogy_acc_top1"] = float(correct_top1 / total)
-                results[f"{cat_name}_analogy_acc_top5"] = float(correct_top5 / total)
+                # `_meta_`: ANALOGY ACCURACY IS A CAPABILITY MEASURE -- "can
+                # this model complete word analogies" -- so it is exactly what
+                # the study is trying to PREDICT, not a structural predictor of
+                # it. The analysis pipeline blocks performance-like columns by
+                # regex, but the pattern requires `.acc` and these spell
+                # `_acc`, so all four returned KEPT (rho -0.665 with
+                # vocab_size; independent Opus review, 2026-09-05). The regex
+                # is being widened too; a task declaring its own non-features
+                # is the half that does not depend on the consumer.
+                results[f"_meta_{cat_name}_analogy_acc_top1"] = float(correct_top1 / total)
+                results[f"_meta_{cat_name}_analogy_acc_top5"] = float(correct_top5 / total)
             else:
-                results[f"{cat_name}_analogy_acc_top1"] = 0.0
-                results[f"{cat_name}_analogy_acc_top5"] = 0.0
+                results[f"_meta_{cat_name}_analogy_acc_top1"] = 0.0
+                results[f"_meta_{cat_name}_analogy_acc_top5"] = 0.0
 
         return results
 

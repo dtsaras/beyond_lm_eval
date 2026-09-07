@@ -16,6 +16,30 @@ so that every task is tested against each structural variant:
 - Qwen3Next:  model.layers           (Qwen 3.5 architecture)
 """
 
+import os
+
+# OFFLINE BY DEFAULT.
+#
+# 19 test files call `from_pretrained`, so the suite reaches the HF hub, and a
+# proxy `ReadTimeout` there fails a test that has nothing to do with the code.
+# That is exactly what happened on the 2026-09-07 six-hour validation run:
+# `test_perplexity_bpc_correct_with_bos_tokenizer` and
+# `test_perplexity_survives_empty_text_sample` failed with
+# `httpcore.ReadTimeout` and then passed in isolation -- the classic shape of a
+# "test pollution" hunt that is really a network flake, and very likely the
+# source of this campaign's long-unidentified intermittent failures.
+#
+# Every model the suite needs is already in the local cache: the two failing
+# tests pass offline in **1.00 s** against 14.98 s online. Forcing offline
+# therefore makes the run deterministic AND faster, and a genuinely missing
+# artefact now fails loudly and immediately instead of hanging on a retry.
+#
+# Set the variables BEFORE importing transformers, which reads them at import
+# time. Overridable: export BLME_ALLOW_HF_NETWORK=1 to refresh the cache.
+if not os.environ.get("BLME_ALLOW_HF_NETWORK"):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import pytest
 import torch
 from transformers import (

@@ -184,7 +184,16 @@ def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
     assert norm_keys, "normalized persistence keys missing"
     for key in norm_keys:
         prefix = key[: -len("_mean_persistence_h0_norm")]
-        mpd = results[f"{prefix}_mean_pairwise_distance"]
+        # The mean pairwise distance is a RAW SCALE, so it is emitted under
+        # `_meta_` only (2026-09-05); the depth-aligned `first/mid/last_layer_*`
+        # names added the same day sit alongside the absolute-index ones.
+        _mpd_key = f"{prefix}_mean_pairwise_distance"
+        if _mpd_key not in results:
+            _alt = (f"_meta_{prefix}_mean_pairwise_distance"
+                    if not prefix.startswith("_meta_")
+                    else prefix[len("_meta_"):] + "_mean_pairwise_distance")
+            _mpd_key = _alt
+        mpd = results[_mpd_key]
         assert mpd > 0
         for stat in ("mean_persistence_h0", "max_persistence_h0",
                      "mean_persistence_h1"):
@@ -231,3 +240,42 @@ def test_scale_stratified_boundary_and_infinite_bars():
     assert out["h1_fine_count"] == 1 and out["h1_coarse_count"] == 0
     total = 0.5 + 1.0 + 1.5
     assert out["h0_fine_persistence_frac"] == pytest.approx(0.5 / total)
+
+
+def test_betti_h1_is_computed_per_connected_component():
+    """H_1 of a disjoint union is the direct sum of the components' H_1.
+
+    Regression: connecting components before running ripser distorted the
+    geodesic metric enough to destroy the loops being counted -- c separated
+    noisy circles (truth beta_1 = c) returned beta_1 = 0 for every c >= 2.
+    """
+    import numpy as np
+    from blme.tasks.topology.betti_curve import _count_betti
+
+    rng = np.random.default_rng(0)
+    th = np.linspace(0, 2 * np.pi, 150, endpoint=False)
+    for c in (1, 2, 3, 5):
+        X = np.vstack([
+            np.c_[np.cos(th) + 40 * i, np.sin(th)]
+            + 0.03 * rng.standard_normal((150, 2))
+            for i in range(c)
+        ])
+        assert _count_betti(X) == (c, c), f"{c} separated circles"
+
+
+def test_betti_is_permutation_invariant():
+    """Row order must not change the topology."""
+    import numpy as np
+    from blme.tasks.topology.betti_curve import _count_betti
+
+    rng = np.random.default_rng(0)
+    th = np.linspace(0, 2 * np.pi, 150, endpoint=False)
+    X = np.vstack([
+        np.c_[np.cos(th) + 40 * i, np.sin(th)]
+        + 0.03 * rng.standard_normal((150, 2))
+        for i in range(3)
+    ])
+    base = _count_betti(X)
+    for seed in (1, 2, 3):
+        perm = np.random.default_rng(seed).permutation(len(X))
+        assert _count_betti(X[perm]) == base

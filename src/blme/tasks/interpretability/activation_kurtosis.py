@@ -222,10 +222,20 @@ class ActivationKurtosisTask(DiagnosticTask):
 
         # ── Gather per-layer hidden states {layer_idx: (N_tokens, D)} ───
         per_layer: Optional[Dict[int, object]] = None
+        # POST-FINAL-NORM: `layer_idx="all"` builds a PER-LAYER PROFILE, and
+        # HF's last entry is `ln_f(b_{L-1})`. One LayerNorm output inside a
+        # profile of block outputs is a category error under either
+        # convention -- the profile's slope, extremes and quantiles all
+        # compare it against entries of a different kind. Repo-wide sweep,
+        # 2026-09-05: 24 of 39 call sites were missing this opt-in.
+        _ak_status = {}
         if cache is not None and cache.is_populated and use_cache:
             per_layer = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples,
+                replace_final_norm=True,
             )
+            _ak_status["last_is_block"] = bool(
+                getattr(cache, "_last_block_substituted", False))
 
         if per_layer is None:
             # Fallback: own forward pass via the geometry collector, which
@@ -238,6 +248,7 @@ class ActivationKurtosisTask(DiagnosticTask):
             per_layer = collect_hidden_states(
                 model, tokenizer, dataset,
                 num_samples=num_samples, layer_idx="all",
+                replace_final_norm=True, status=_ak_status,
             )
 
         if not per_layer:

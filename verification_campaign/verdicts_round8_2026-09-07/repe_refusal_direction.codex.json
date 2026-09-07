@@ -1,0 +1,29 @@
+{
+  "task": "repe_refusal_direction",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Arditi et al.'s defining estimator is the harmful-mean minus harmless-mean activation direction, and an independent recomputation from the current hooked block states matched direction_norm, fold AUC, fold gap, and best-layer AUC with maximum absolute discrepancy 0.000e+00 on gpt2, distilgpt2, pythia-70m, and pythia-160m. The actual released upstream accumulator body agreed on the same activation fixture to maximum absolute error 2.220e-16 and cosine 0.9999999999999999; all 4 live task runs reported _meta_last_entry_is_block_output=true, so I found no value-changing implementation counterexample.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "The AUC family is dimensionless, but the raw magnitude family is parameterization-dependent: on current gpt2 a c=2 deepest-block rescaling changed logits by at most 6.104e-05, doubled direction_norm 50.632961 to 101.265923 and mean_projection_gap 30.952469 to 61.904938 exactly, and left separability_auc and best_layer_separability_auc unchanged at 0.812500. Across the 4 measured models direction_norm had Spearman rho +0.775 with d_model and -0.894 with vocab_size, while 30-seed final-AUC standard deviations ranged from 0.08975 to 0.14709; therefore AUCs are comparable with substantial finite-probe uncertainty, whereas raw norms/gaps are not.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "andyrdt/refusal_direction",
+  "github_reason": "I inspected the locally fetched upstream checkout at commit 9d852fae1a9121c78b29142de733cb1340770cc3 and executed its unchanged get_mean_activations_pre_hook accumulator body plus harmful-minus-harmless reduction on the same fixture; BLME versus upstream differed by at most 2.220e-16 with cosine 0.9999999999999999. On 4 cached models each BLME block_output[k] also equalled upstream resid_pre[k+1] at maximum absolute error 0.000e+00; the full layer policy is deliberately different, with gpt2 best CV AUC 0.812500 for BLME's block-output set versus 0.770833 over the upstream resid-pre set and 0.729167 after upstream's last-20-percent pruning.",
+  "paper_number": "NONE",
+  "paper_reason": "Arditi et al. publish no direction norm, projection gap, or held-out separability AUC to compare like-for-like. Their Table 5 Llama-3 8B entry reports position -5, layer 12/32, bypass -9.715, induce 7.681, and KL 0.064 from intervention-based selection, whereas this local gpt2 run reports direction_norm 50.632961 and CV AUC 0.812500, so a relative error would compare different estimands.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The bundled labels confound refusal with prompt topic: non-instruction-tuned base gpt2 and distilgpt2 already score CV AUC 0.812500 and 0.916667, versus 0.562500 and 0.541667 on pythia-70m and pythia-160m. Parameterization is also causal for the magnitudes: the c=2 gpt2 intervention changed logits by only 6.104e-05 but doubled direction_norm and projection gap exactly, and the 4-model panel gave rho(direction_norm,d_model)=+0.775 and rho(direction_norm,vocab_size)=-0.894.",
+  "defects": [
+    "PROTOCOL/PROVENANCE: the released code forms candidates at resid_pre[0..L-1] and select_direction.py discards the last 20 percent of layers, while BLME scores block_output[0..L-1]=resid_pre[1..L] and headlines the deepest block. On matched prompts, BLME versus all-upstream-state versus pruned-upstream-state best CV AUC was 0.812500/0.770833/0.729167 on gpt2 and 0.916667/0.812500/0.604167 on distilgpt2. This is a value-changing but declared refined-adaptation protocol difference, not an error in the mean-difference estimator.",
+    "OUTPUT CONTRACT (CODE/DOCUMENTATION): the BLME manuscript says refusal-direction norms are divided by sqrt(d_model), but the current task emits only raw direction_norm; gpt2 emits 50.632961 where that stated quotient is 1.827060 at d_model=768. Current NORMALIZERS contains 0 registrations, so normalized_variant is correctly scored ABSENT rather than crediting an untested twin.",
+    "CONTRACT TEST (CODE, REPO-WIDE): test_post_final_norm_declaration.py passes its 3 tests and sees 40 collector calls with 0 unmarked live direct sites, but its own _subscripts detector caught the literal positive control once and caught 0 of 6 unsafe alias forms tested: AnnAssign, chained assignment, IfExp, BoolOp, closure capture, and dict-comprehension storage. No such missed form was found live in this task, whose 4 measured outputs all declared the recovered final block, so this test gap does not alter the task verdict.",
+    "CONFIG/UNCERTAINTY: the effective study route supplies seed 42, while the task uses the code fallback cv_splits=3 and bundled 12 harmful plus 12 harmless prompts. Across seeds 0..29, final AUC ranged 0.395833-0.854167 on gpt2, 0.625000-0.979167 on distilgpt2, 0.270833-0.666667 on pythia-70m, and 0.104167-0.750000 on pythia-160m, with population SD 0.08975-0.14709; no interval is emitted.",
+    "CONSTRUCT CONFOUND: the 12-versus-12 prompt contrast is also a topic classifier, as shown by AUC 0.812500 on base gpt2 and 0.916667 on base distilgpt2 despite neither model having an instruction-tuned refusal policy. This limits interpretation and comparability but is not a fidelity defect.",
+    "MINOR OUTPUT HYGIENE (CODE): separability_validation and metric_interpretation are 2 constant strings emitted without _meta_ even though the task correctly demotes the 4 structural/protocol scalars (_meta_best_layer, _meta_n_harmful, _meta_n_harmless, _meta_cv_splits); the downstream numeric feature gate prevents the strings from becoming predictors."
+  ],
+  "fix": "",
+  "source_hash": "4515e6e8f09a7fad",
+  "shared_hash": "2269442e56b00687"
+}

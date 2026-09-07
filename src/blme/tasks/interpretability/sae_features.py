@@ -216,6 +216,10 @@ class SAEFeatureDimensionalityTask(DiagnosticTask):
 
                 # Get the target hidden state. For hook_resid_pre this is the
                 # input to the parsed block, i.e. hidden_states[target_layer].
+                # post-final-norm: `hidden_state_index` is the SAE's hook point
+                # (hook_resid_pre -> the INPUT to block `target_layer`), so it reaches
+                # the post-`ln_f` entry only for a hook parsed at layer L -- which no
+                # released SAE has, since there is no block L to be the input of.
                 h = out.hidden_states[hidden_state_index][0] # shape (seq_len, hidden_dim)
                 # Match the SAE's training-time activation convention
                 # (center_writing_weights) before encoding.

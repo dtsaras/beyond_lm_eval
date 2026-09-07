@@ -1,0 +1,25 @@
+{
+  "task": "geometry_weight_norms",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "For each finite matrix the code computes ||W||_F, sigma_max(W), and srank(W)=||W||_F^2/sigma_max(W)^2, exactly the stated definitions. On diag(4,3,2,1), BLME returned 5.47722578, 4.0, and 1.87500014 versus closed forms 5.47722558, 4.0, and 1.875 (maximum relative error 7.50e-8), and WeightWatcher returned stable rank 1.875 exactly; no value-changing formula counterexample was found.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The raw outputs are not cross-architecture quantities: over 46 archived models mean_stable_rank correlated with d_model at Pearson r=0.8968 (Spearman rho=0.8221) and with n_layers at r=0.7486, while mean_frobenius_norm had r=0.5248 with width. The nominally normalized norm_uniformity had weak size correlations, but a function-preserving reciprocal rescaling changed it from 1.0 to 0.00019998, so it is not a valid rescue.",
+  "normalized_variant": "norm_uniformity",
+  "normalized_ok": "RED",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "Rudelson and Vershynin released a mathematical definition, not an implementation. As an auxiliary rather than original-code check, I installed and ran CalculatedContent/WeightWatcher 0.7.7 on the same planted spectrum; its stable_rank was 1.875 versus BLME 1.87500014.",
+  "paper_number": "NONE",
+  "paper_reason": "The source gives the stable-rank formula but no published transformer-block aggregate to reproduce. The diagonal-matrix result above is an analytic anchor, not a published paper number.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "mean_stable_rank is bounded by matrix dimension and showed r=0.8968 with d_model across 46 models; mean_frobenius_norm showed r=0.5248. Identity matrices make the mechanism exact: srank(I_d)=d and ||I_d||_F=sqrt(d), whereas srank(I_d)/d=1.",
+  "defects": [
+    "COMPARABILITY: src/blme/tasks/geometry/weight_norms.py:124-131 exports raw dimension-bounded stable rank and raw Frobenius/spectral means without separately named per-shape normalizations.",
+    "CODE: src/blme/tasks/geometry/weight_norms.py:58-64 and 109-111 silently exclude failed or non-finite SVD results via nanmean and emit no attempted/succeeded matrix counts; a block with I_4 plus an all-NaN weight is indistinguishable from I_4 alone in spectral/stable-rank output.",
+    "COMPARABILITY: layer-wise reciprocal rescaling of two consecutive linear maps leaves their composed function unchanged but changed mean Frobenius 2.0 to 100.01, mean spectral 1.0 to 50.005, and norm_uniformity 1.0 to 0.00019998.",
+    "ARCHITECTURE: averaging parameter tensors equally makes the aggregate depend on module fusion/layout; representing I_4 as one matrix versus two 2x4 row blocks changed mean Frobenius by 29.3% and mean stable rank by 50%."
+  ],
+  "fix": ""
+}

@@ -1,0 +1,26 @@
+{
+  "task": "geometry_tokenizer_efficiency",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The Ali et al. fertility numerator and denominator are implemented correctly, but the vocabulary-normalized outputs are not valid fractions for tokenizers with added tokens. src/blme/tasks/geometry/tokenizer_efficiency.py:126-132 uses tokenizer.vocab_size rather than the full usable ID inventory; with five uniformly observed IDs and vocab_size=2, BLME reports normalised_token_entropy=2.321928 and vocab_utilization=2.500000, although both definitions require values at most 1.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "After collapsing identical tokenizer-output rows to eight unique tokenizers, fertility itself was not a vocabulary-size proxy (Spearman rho=0.084), but token_entropy, normalised_token_entropy, and vocab_utilization were dominated by vocabulary size (rho=-1.000, -0.994, and -0.994 respectively). Thus the source-faithful fertility field is comparable with a fixed corpus/language caveat, while the task's normalized and utilization outputs are not comparable as reported.",
+  "normalized_variant": "normalised_token_entropy",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "Adapter-Hub/hgiyt",
+  "github_reason": "Fetched Rust et al.'s official repository and verified its fertility definition and whitespace-word denominator against BLME. The historical environment/data pipeline could not be run end-to-end with its original artifacts, and no official Ali et al. implementation was found, so there was no same-input numerical reference run.",
+  "paper_number": "NONE",
+  "paper_reason": "Ali et al. define fertility on 10,000 held-out documents and publish aggregate plots, but do not provide a pinned text sample plus tokenizer artifact yielding a like-for-like BLME scalar. Rust et al.'s released pipeline likewise depends on unbundled historical datasets/models, so no reproducible published number for this task's corpus was available.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "After collapsing identical tokenizer-output rows to eight unique tokenizers, normalised_token_entropy retained Pearson r=-0.967 and Spearman rho=-0.994 with vocab_size, and vocab_utilization had r=-0.884 and rho=-0.994. This directly contradicts the normalization's intended removal of vocabulary size; fertility remained nearly flat (rho=0.084), so the confound is not grounds to reject that submetric.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/tokenizer_efficiency.py:126-132: tokenizer.vocab_size excludes added tokens for common Hugging Face tokenizers; use len(tokenizer), or a validated usable-ID count, for entropy bounds and utilization.",
+    "CODE src/blme/tasks/geometry/tokenizer_efficiency.py:119-120: max(1,total_words) fabricates a finite fertility for wordless input; three spaces producing three tokens returns fertility=3 instead of NA/error.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml:120-121: the effective default is only 20 documents, not Ali et al.'s 10,000. On cached WikiText-103 validation, first-20 versus all-1,747 changed fertility by +5.68%, entropy by -23.2%, and utilization by -96.6%; this is a shipped-config defect, not a fertility-code defect.",
+    "CODE src/blme/tasks/geometry/tokenizer_efficiency.py:84-87: converting an arbitrary iterable to a complete list before slicing consumes the entire dataset and can hang on an unbounded iterator.",
+    "CODE src/blme/tasks/geometry/tokenizer_efficiency.py:112: len(text) counts Unicode code points, so the documented 'UTF-8 character' denominator is not UTF-8 bytes; the denominator must be named and specified unambiguously for multilingual comparison."
+  ],
+  "fix": "Use the tokenizer's complete usable vocabulary size, validate every emitted token ID against it, and assert both normalized outputs lie in [0,1]. Return NA/error when the word or character denominator is zero, slice iterables lazily, and explicitly name the compression denominator as Unicode code points or UTF-8 bytes. Raise the configured corpus to the paper protocol or label the 20-document result as a high-variance proxy; preserve fertility as its own source-faithful output."
+}

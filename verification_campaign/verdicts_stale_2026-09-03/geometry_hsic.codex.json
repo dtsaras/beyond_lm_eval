@@ -1,0 +1,27 @@
+{
+  "task": "geometry_hsic",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The paper defines raw linear HSIC=(n-1)^-2 tr(KcLc), but every code path divides by sqrt(HSIC(X,X)HSIC(Y,Y)) and therefore computes linear CKA; for Y=2X, paper HSIC changes by 4x while BLME remains 1. The compression formula also differs: on X0=X, X1=0.9X+0.1E, XL=2X, paper HSIC(0,L)/HSIC(0,0)=4 while BLME returns 1.009823.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Although CKA removes isotropic activation scale, the exported adjacent mean is mechanically layer-resolution dependent. Sampling the same fixed-endpoint path at L=4,8,16,32,64 increased avg_adjacent_hsic from 0.7697 to 0.9540,0.9898,0.9976,0.9994 (Spearman rho=1), so models with more sampled layers are not comparable as reported.",
+  "normalized_variant": "normalized linear HSIC (all emitted *_hsic values; equivalent to linear CKA)",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "google-research/google-research/representation_similarity",
+  "github_reason": "Fetched and executed Kornblith et al.'s official Demo.ipynb equations on identical inputs. BLME returned 0.4509538811998047 versus official 0.4509538811998080 (relative error 7.3e-15), and 0.5576132703 versus the notebook fixture 0.5576132566 (2.45e-8); this proves the implementation is CKA, not the raw HSIC specified by the BLME paper.",
+  "paper_number": "NONE",
+  "paper_reason": "Gretton et al. publish independence-test experiments and Kornblith et al. publish similarity heatmaps/aggregates, but neither gives a hidden-layer scalar for this model/input protocol. The notebook's 0.55761 is released-code parity evidence, not a paper table or figure value.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The fixed-path experiment proves an n_layers proxy independent of representation endpoints (rho=1). Archived real-model evidence agrees: adjacent_hsic.mean had Spearman rho=0.549 with d_model (p=7.73e-5) and 0.562 with n_layers (p=4.73e-5), while vocab_size was not significant (rho=-0.175,p=0.244).",
+  "defects": [
+    "All reported HSIC values are normalized linear CKA; the raw (n-1)^-2 HSIC defined in the paper is never emitted.",
+    "hsic_compression_ratio divides CKA(first,last) by CKA(first,second), not the stated raw HSIC(first,last)/HSIC(first,first); the analytic construction gives 1.009823 instead of 4.",
+    "Dropping the post-final-norm hidden-state entry also drops access to the true raw final block output, which Hugging Face does not expose separately; the reported last layer is therefore the penultimate block unless a pre-final-norm hook is used.",
+    "A linear kernel is not characteristic: deterministic Y=X^2 on X=[-2,-1,1,2] has zero linear CKA, so the statistical-dependence/independence wording is invalid.",
+    "The absolute 1e-12 denominator breaks scale invariance near zero; scaling both fixed feature matrices by 1e-4 changed a score from 0.968616 to 0.497182.",
+    "The adjacent mean is a layer-count/resolution proxy even for an unchanged continuous representation path."
+  ],
+  "fix": "Emit the paper-defined raw HSIC with its (n-1)^-2 factor and compute compression exactly as HSIC(first,last)/HSIC(first,first). Keep CKA only as a separate explicitly named normalized output. Capture the true final block output with a hook, use a relative degeneracy test rather than an absolute epsilon, restrict dependence claims to the chosen kernel, and replace resolution-dependent adjacent means with fixed normalized-depth comparisons."
+}

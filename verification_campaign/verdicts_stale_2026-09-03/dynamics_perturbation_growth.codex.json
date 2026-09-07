@@ -1,0 +1,25 @@
+{
+  "task": "dynamics_perturbation_growth",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Li et al. Eq. 9 defines lambda_(m,n) = log(||delta_(m,n)||/||delta_m||)/(n-m), but _growth_profile exports the undivided log ratio and a regression over normalized depth. In constant-gain 1.15 stacks it returns 0.279524 for two transitions and 1.677143 for twelve, while the paper-defined per-layer value is log(1.15) = 0.139762; perturbation_growth.py:123 also omits the final transformer block, changing live log ratios by 0.326-1.006.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "For matched constant per-block gain, growth_slope and growth_log_ratio equal (L-1) log|a|, giving an exact depth correlation rather than an architecture-free rate. Live current-slice ratios also separate families (GPT-2/DistilGPT-2 2.219/2.158 versus Pythia-70M/160M 5.805/5.603), while restoring the omitted block shifts them another 10.6-17.3%.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "Fetched arXiv:2503.13530 and searched the exact title, authors, arXiv identifier, and distinctive experiment text; the paper contains no repository link and no author implementation was found. There is no released original code to execute.",
+  "paper_number": "NONE",
+  "paper_reason": "The paper gives no numeric QLE scalar: Figure 6 is a qualitative Qwen2-14B convergence/divergence heatmap. Its published 0.27 and 0.075 coefficients describe unperturbed activation-magnitude growth, not QLE, so using them as reproduction targets would be invalid.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The linear-stack anchor proves exact multiplication by transition count under identical local dynamics, hence direct n_layers confounding. Divergence norms also change under invertible hidden-coordinate rescaling, and the four-model live measurements show a strong architecture-family split.",
+  "defects": [
+    "CODE src/blme/tasks/dynamics/perturbation_growth.py:41-61 omits the 1/(n-m) factor from Li et al. Eq. 9; both exported summaries accumulate growth with stack depth.",
+    "CODE src/blme/tasks/dynamics/perturbation_growth.py:123 uses block_output_count on raw hidden states and retains only embedding through block L-2, silently omitting the final transformer block; the live error is 10.6-17.3% in log ratio.",
+    "CODE the task perturbs input embeddings with a random relative-norm direction, whereas Li Eq. 10 defines an elementwise magnitude-adapted perturbation at intermediate layer m; the interventions are not equivalent.",
+    "PROVENANCE the module calls normalized-depth regression a quasi-Lyapunov exponent even though the cited source defines an endpoint log-growth average and evaluates intermediate-layer perturbations."
+  ],
+  "fix": "Capture every block's pre-final-norm output, permit perturbation at source layer m using the paper's Eq. 10 construction, and report log(||delta_n||/||delta_m||)/(n-m). Retain the current input-embedding regression only under a clearly separate BLME proxy name, and add a per-block-index slope rather than normalized-depth accumulated growth."
+}

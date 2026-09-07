@@ -581,7 +581,7 @@ class TestNumpyTrapezoidCompat:
         import numpy as np
         from blme.tasks.geometry.isotropy import _svd_metrics_for_layer
         m = _svd_metrics_for_layer(torch.randn(50, 8))
-        assert m is not None and np.isfinite(m["svd_auc"])
+        assert m is not None and np.isfinite(m["_meta_svd_auc"])
 
     def test_no_bare_np_trapezoid_calls_in_source(self):
         """Campaign-4 B5: magnitude.py called np.trapezoid(...) directly,

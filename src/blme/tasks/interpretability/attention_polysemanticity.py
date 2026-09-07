@@ -104,7 +104,14 @@ class AttentionEffectiveRankTask(DiagnosticTask):
                                 continue
                             # torch.svd is deprecated; linalg is the
                             # recommended replacement.
-                            S = torch.linalg.svdvals(mat)
+                            # `safe_svdvals`: numpy/torch compute the SVD internally and then CAST
+                            # the singular values back to the input dtype, and that cast overflows
+                            # to inf near 3.4e38 -- so a scale-FREE consumer downstream (effective
+                            # rank, RankMe, IsoScore, alpha) returns NaN on data it should handle
+                            # exactly. The helper factors out the max first, which only shifts
+                            # exponents (2026-09-07).
+                            from ..geometry.utils import safe_svdvals
+                            S = safe_svdvals(mat)
                             total = torch.sum(S)
                             if total <= 0:
                                 continue

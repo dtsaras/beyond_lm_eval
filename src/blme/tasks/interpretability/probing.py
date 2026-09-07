@@ -62,71 +62,104 @@ class LinearProbingTask(DiagnosticTask):
 
         # Collect representations and labels from all layers
         all_labels = []
-        layer_features = {}
-
-        with torch.no_grad():
-            for i, sample in enumerate(
-                tqdm(dataset[:num_samples], desc="Collecting Probing Data")
-            ):
-                text = sample.get("text", "") if isinstance(sample, dict) else sample
-                inputs = tokenizer(
-                    text,
-                    return_tensors="pt",
-                    max_length=max_tokens,
-                    truncation=True,
-                ).to(model.device)
-
-                outputs = model(
-                    **inputs, output_hidden_states=True
-                )
-                hidden_states = outputs.hidden_states  # tuple of (B, T, D)
-
-                # Labels: next token prediction (shift by 1)
-                input_ids = inputs.input_ids[0]  # (T,)
-                if len(input_ids) < 2:
-                    continue
-
-                # Use tokens [0..T-2] as inputs, [1..T-1] as labels
-                labels = input_ids[1:].cpu().numpy()
-                all_labels.append(labels)
-
-                for layer_idx, hs in enumerate(hidden_states):
-                    # .float() first: numpy doesn't accept bf16.
-                    feats = hs[0, :-1, :].float().cpu().numpy()  # (T-1, D)
-                    if layer_idx not in layer_features:
-                        layer_features[layer_idx] = []
-                    layer_features[layer_idx].append(feats)
-
-        if not all_labels:
-            return {"error": "No data collected"}
-
-        # Concatenate
-        all_labels = np.concatenate(all_labels, axis=0)
-
-        # Subsample if too large (probing is expensive)
-        max_probe_samples = self.config.get("max_probe_samples", 5000)
-        if len(all_labels) > max_probe_samples:
-            # Seeded subsample so the default-config output is reproducible.
-            _rng = np.random.default_rng(int(self.config.get("seed", 42)))
-            idx = _rng.choice(len(all_labels), max_probe_samples, replace=False)
-        else:
-            idx = np.arange(len(all_labels))
-
-        labels = all_labels[idx]
-
-        # Train/test split (80/20)
-        n = len(labels)
-        n_train = int(0.8 * n)
-        train_idx = idx[:n_train]
-        test_idx = idx[n_train:]
-        train_labels = all_labels[train_idx]
-        test_labels = all_labels[test_idx]
-
-        # Evaluate each layer
+        # post-final-norm: SUBSTITUTED. `layer_features` is a PER-LAYER PROFILE
+        # -- probe accuracy is reported at every depth and compared across
+        # depths -- so its deepest entry must be a block output like the rest.
+        # Found by an independent review AFTER the repo-wide sweep and two
+        # rounds of guard-hardening reported all-clear: this site binds the
+        # tuple with `for layer_idx, hs in enumerate(hidden_states)`, and the
+        # guard tracked only `Assign` targets (2026-09-05). It now follows
+        # for-loop targets, comprehensions, tuple unpacks and walrus binds.
+        _pb_sink, _pb_hook, _pb_fwd, _pb_sub = {}, None, 0, 0
         try:
-            from sklearn.linear_model import SGDClassifier
-        except ImportError:
-            return {"error": "scikit-learn is required for probing. Install via: pip install scikit-learn"}
+            from ..common import get_layers as _gl_pb
+            _blocks_pb = _gl_pb(model)
+            if _blocks_pb is not None and len(_blocks_pb) > 0:
+                _pb_hook = _blocks_pb[-1].register_forward_hook(
+                    lambda mod, inp, outp: _pb_sink.__setitem__(
+                        "h", (outp[0] if isinstance(outp, tuple)
+                              else outp).detach()))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info(f"probing: could not hook last block ({e})")
+
+        # post-final-norm / hook hygiene: a task that fails must leave the model exactly as it found it. A leaked forward hook is paid by every LATER task in the run and pins the last activation tensor alive (discovery-based leak test, 2026-09-05).
+        try:
+            layer_features = {}
+
+            with torch.no_grad():
+                for i, sample in enumerate(
+                    tqdm(dataset[:num_samples], desc="Collecting Probing Data")
+                ):
+                    text = sample.get("text", "") if isinstance(sample, dict) else sample
+                    inputs = tokenizer(
+                        text,
+                        return_tensors="pt",
+                        max_length=max_tokens,
+                        truncation=True,
+                    ).to(model.device)
+
+                    _pb_sink.pop("h", None)
+
+                    outputs = model(
+                        **inputs, output_hidden_states=True
+                    )
+                    hidden_states = list(outputs.hidden_states)  # (B, T, D) each
+                    _pb_fwd += 1
+                    _h_pb = _pb_sink.get("h")
+                    if (_h_pb is not None and len(hidden_states) >= 2
+                            and _h_pb.shape == hidden_states[-1].shape):
+                        hidden_states[-1] = _h_pb
+                        _pb_sub += 1
+
+                    # Labels: next token prediction (shift by 1)
+                    input_ids = inputs.input_ids[0]  # (T,)
+                    if len(input_ids) < 2:
+                        continue
+
+                    # Use tokens [0..T-2] as inputs, [1..T-1] as labels
+                    labels = input_ids[1:].cpu().numpy()
+                    all_labels.append(labels)
+
+                    for layer_idx, hs in enumerate(hidden_states):
+                        # .float() first: numpy doesn't accept bf16.
+                        feats = hs[0, :-1, :].float().cpu().numpy()  # (T-1, D)
+                        if layer_idx not in layer_features:
+                            layer_features[layer_idx] = []
+                        layer_features[layer_idx].append(feats)
+
+            if not all_labels:
+                return {"error": "No data collected"}
+
+            # Concatenate
+            all_labels = np.concatenate(all_labels, axis=0)
+
+            # Subsample if too large (probing is expensive)
+            max_probe_samples = self.config.get("max_probe_samples", 5000)
+            if len(all_labels) > max_probe_samples:
+                # Seeded subsample so the default-config output is reproducible.
+                _rng = np.random.default_rng(int(self.config.get("seed", 42)))
+                idx = _rng.choice(len(all_labels), max_probe_samples, replace=False)
+            else:
+                idx = np.arange(len(all_labels))
+
+            labels = all_labels[idx]
+
+            # Train/test split (80/20)
+            n = len(labels)
+            n_train = int(0.8 * n)
+            train_idx = idx[:n_train]
+            test_idx = idx[n_train:]
+            train_labels = all_labels[train_idx]
+            test_labels = all_labels[test_idx]
+
+            # Evaluate each layer
+            try:
+                from sklearn.linear_model import SGDClassifier
+            except ImportError:
+                return {"error": "scikit-learn is required for probing. Install via: pip install scikit-learn"}
+        finally:
+            if _pb_hook is not None:
+                _pb_hook.remove()
 
         layers = sorted(layer_features.keys())
         accuracies = []
@@ -142,6 +175,12 @@ class LinearProbingTask(DiagnosticTask):
         return {
             "probing_accuracy_per_layer": accuracies,
             "max_probing_accuracy": float(np.nanmax(acc_arr)) if has_finite else 0.0,
-            "best_layer": int(np.nanargmax(acc_arr)) if has_finite else -1,
+            # `_meta_` + a depth-comparable twin, matching the same fix in
+            # `repe_refusal_direction`: a BARE ABSOLUTE LAYER INDEX is an
+            # n_layers proxy wearing a structural name.
+            "_meta_best_layer": int(np.nanargmax(acc_arr)) if has_finite else -1,
+            "best_layer_fraction": (
+                float(np.nanargmax(acc_arr)) / max(1.0, float(len(acc_arr) - 1))
+                if has_finite and len(acc_arr) > 1 else float("nan")),
             "num_classes": int(len(np.unique(all_labels))),
         }

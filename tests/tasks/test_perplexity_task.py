@@ -66,12 +66,19 @@ def test_ppl_rare_and_freq_are_finite_when_corpus_is_small():
         dataset=[{"text": "dummy"}],
         cache=_DummyCache(stats),
     )
-    assert np.isfinite(result["ppl_overall"])
+    # `ppl_overall` MEANS the strided value. This fixture supplies model=None,
+    # so the strided pass cannot run at all and the key is NaN by contract --
+    # it is no longer silently re-pointed at the per-document number, which
+    # made the two indistinguishable in the output (adversarial review round 3,
+    # 2026-09-04). The per-document value keeps its own name and must be finite.
+    assert not np.isfinite(result["ppl_overall"])
+    assert result["_meta_ppl_protocol"] == "per_document"
+    assert np.isfinite(result["ppl_overall_perdoc"])
     assert np.isfinite(result["ppl_rare"]), (
         "ppl_rare must be computed over observed rare tokens, not full vocab"
     )
     assert np.isfinite(result["ppl_freq"])
-    assert result["n_tokens_scored"] > 0
+    assert result["_meta_n_tokens_scored"] > 0
 
 
 def test_ppl_rare_distinguishes_rare_from_freq():

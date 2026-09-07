@@ -114,6 +114,10 @@ class EdgeAttributionTask(DiagnosticTask):
                 with torch.no_grad():
                     c_out = model(corrupted_ids, output_hidden_states=True)
                     # hidden_states[1:] are per-layer outputs
+                    # post-final-norm: the `ln_f` entry is never READ. The consumer below
+                    # indexes `corrupted_hs[li - 1]` for li in 1..n_layers-1, so the
+                    # deepest element it touches is `hidden_states[n_layers - 1]`, i.e.
+                    # block output L-2.
                     corrupted_hs = [h.detach() for h in c_out.hidden_states[1:]]
 
                 # --- Clean pass: capture residual-stream inputs at each layer

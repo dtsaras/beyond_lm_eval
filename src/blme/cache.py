@@ -28,6 +28,13 @@ from tqdm import tqdm
 logger = logging.getLogger("blme")
 
 
+# The window the shared cache tokenises at. Tasks whose value depends on the
+# window MUST compare their own `max_length` against this and self-collect when
+# it differs -- `geometry_schatten` declared 128 while every archived run
+# silently used this 512 (red-team review, 2026-09-05).
+CACHE_TOKENIZER_MAX_LENGTH = 512
+
+
 class ModelOutputCache:
     """
     Cache model outputs from a single dataset pass.
@@ -54,6 +61,14 @@ class ModelOutputCache:
         self._logits: Optional[List[torch.Tensor]] = None
         self._labels: Optional[List[torch.Tensor]] = None
         self._sample_lengths: List[int] = []
+        # INITIALISED HERE, not created lazily inside populate(). All three
+        # were absent on a fresh instance, so a partially populated cache
+        # raised AttributeError from get_hidden_states(include_embedding=True)
+        # and the substitution flag could not be read at all (adversarial
+        # review round 2, 2026-09-04).
+        self._embedding_states: Optional[torch.Tensor] = None
+        self._last_block_raw: Optional[torch.Tensor] = None
+        self._last_block_substituted: bool = False
 
         # Feature flags — set by populate() or by first get_* call
         self._need_hidden: bool = False
@@ -95,6 +110,8 @@ class ModelOutputCache:
         layer_idx: Union[int, str] = "all",
         num_samples: Optional[int] = None,
         per_sample: bool = False,
+        replace_final_norm: bool = False,
+        include_embedding: bool = False,
     ) -> Union[torch.Tensor, Dict[int, torch.Tensor], List[torch.Tensor], Dict[int, List[torch.Tensor]]]:
         """
         Return cached hidden states.
@@ -123,8 +140,35 @@ class ModelOutputCache:
         if self._hidden_states is None:
             return None
 
+        # Opt-in: substitute the deepest block's RAW output for HF's
+        # ln_f(block L-1) entry. Off by default so existing consumers are
+        # untouched; a task that profiles BLOCKS (rather than the raw tuple)
+        # asks for it explicitly.
+        _hs = self._hidden_states
+        if include_embedding and self._embedding_states is not None:
+            # Shift by one so the embedding is index 0 and block i is i+1.
+            _hs = {0: self._embedding_states}
+            for _k, _v in self._hidden_states.items():
+                _hs[_k + 1] = _v
+        # `_last_block_substituted` records whether the swap ACTUALLY HAPPENED,
+        # not merely whether a hooked tensor exists. Callers derived
+        # `_last_is_block` from `_last_block_raw is not None`, which is a
+        # weaker condition: a (30, 9) raw tensor against a (31, 9) cached final
+        # tensor is correctly REJECTED here, yet the task still reported
+        # `_meta_last_entry_is_block_output = true` (adversarial review round 2,
+        # 2026-09-04).
+        self._last_block_substituted = False
+        if replace_final_norm and self._last_block_raw is not None:
+            _keys = sorted(_hs.keys())
+            if _keys:
+                _lastk = _keys[-1]
+                if tuple(self._last_block_raw.shape) == tuple(_hs[_lastk].shape):
+                    _hs = dict(_hs)
+                    _hs[_lastk] = self._last_block_raw
+                    self._last_block_substituted = True
+
         if layer_idx == "all":
-            sliced = self._slice_hidden_states(self._hidden_states, num_samples)
+            sliced = self._slice_hidden_states(_hs, num_samples)
             if per_sample:
                 return {
                     li: self._split_by_samples(tensor, num_samples)
@@ -136,7 +180,7 @@ class ModelOutputCache:
         # Resolve negative / out-of-range index against the highest
         # available layer key (not len()), because populate() may leave
         # gaps if some forward passes failed mid-run.
-        keys = sorted(self._hidden_states.keys())
+        keys = sorted(_hs.keys())
         if not keys:
             return [] if per_sample else None
         max_layer = keys[-1]
@@ -144,7 +188,7 @@ class ModelOutputCache:
         actual = max(keys[0], min(actual, max_layer))
 
         sliced = self._slice_hidden_states(
-            {actual: self._hidden_states.get(actual)}, num_samples
+            {actual: _hs.get(actual)}, num_samples
         )
         tensor = sliced.get(actual, None)
         if per_sample:
@@ -296,6 +340,8 @@ class ModelOutputCache:
     def clear(self) -> None:
         """Release all cached data."""
         self._hidden_states = None
+        self._last_block_raw = None
+        self._embedding_states = None
         self._attentions = None
         self._logits = None
         self._labels = None
@@ -354,53 +400,119 @@ class ModelOutputCache:
             f"(hidden={self._need_hidden}, attn={self._need_attentions})"
         )
 
-        self._sample_lengths = []
-        with torch.no_grad():
-            for text in tqdm(samples, desc="Caching model outputs", unit="sample"):
-                inputs = self.tokenizer(
-                    text, return_tensors="pt", truncation=True, max_length=512,
-                ).to(device)
-                # Skip empty/whitespace docs: a 0-token forward pass crashes
-                # ("cannot reshape tensor of 0 elements"); mirrors the
-                # non-cache path's skip (audit 2026-07-16).
-                if "input_ids" in inputs and inputs["input_ids"].shape[1] < 1:
-                    continue
-                if "input_ids" in inputs:
-                    seq_len = inputs["input_ids"].shape[1]
-                    self._sample_lengths.append(int(seq_len))
+        # Capture the deepest block's RAW (pre-final-norm) output alongside the
+        # HF tuple. HF's last hidden_states entry is ln_f(block L-1), so the
+        # deepest block is not otherwise observable. Stored as an ADDITIONAL
+        # accumulator -- never substituted into _hidden_states -- so every
+        # existing cache consumer reads exactly what it read before, and a task
+        # opts in via get_hidden_states(replace_final_norm=True).
+        _last_raw_accum: List[torch.Tensor] = []
+        _emb_accum: List[torch.Tensor] = []
+        _sink: Dict[str, torch.Tensor] = {}
+        _hook = None
+        if self._need_hidden:
+            try:
+                from .tasks.common import get_layers as _gl
+                _blocks = _gl(self.model)
+                if _blocks is not None and len(_blocks) > 0:
+                    def _cap_last(module, inputs, output):
+                        _sink["h"] = (output[0] if isinstance(output, tuple)
+                                      else output).detach()
+                    _hook = _blocks[-1].register_forward_hook(_cap_last)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.info(f"cache: could not hook last block ({e})")
 
-                outputs = self.model(**inputs, **forward_kwargs)
+        # try/FINALLY, and this is the WORST-PLACED instance of the leak.
+        #
+        # `core.py` populates ONE shared cache for a whole run, so a hook
+        # left on `layers[-1]` here is paid by EVERY later task on every
+        # forward, and the closure pins the last activation tensor alive.
+        # Measured: raise on the second forward during `populate()` and
+        # `layers[-1]._forward_hooks` goes 0 -> 1 permanently, exposed via
+        # geometry_procrustes_linearity, geometry_trajectory_curvature and
+        # geometry_vendi_score (independent Opus review, 2026-09-06).
+        #
+        # `tests/tasks/test_forward_hook_leaks.py` STRUCTURALLY CANNOT see
+        # it: its discovery maps `inspect.getfile(cls)` over the task
+        # registry, and `cache.py` defines no task class. The check written
+        # to replace a hand-maintained list had a hand-list-shaped hole one
+        # indirection further out.
+        try:
+            self._sample_lengths = []
+            with torch.no_grad():
+                for text in tqdm(samples, desc="Caching model outputs", unit="sample"):
+                    inputs = self.tokenizer(
+                        text, return_tensors="pt", truncation=True,
+                        max_length=CACHE_TOKENIZER_MAX_LENGTH,
+                    ).to(device)
+                    # Skip empty/whitespace docs: a 0-token forward pass crashes
+                    # ("cannot reshape tensor of 0 elements"); mirrors the
+                    # non-cache path's skip (audit 2026-07-16).
+                    if "input_ids" in inputs and inputs["input_ids"].shape[1] < 1:
+                        continue
+                    if "input_ids" in inputs:
+                        seq_len = inputs["input_ids"].shape[1]
+                        self._sample_lengths.append(int(seq_len))
 
-                # --- Hidden states ---
-                if self._need_hidden and hasattr(outputs, "hidden_states") and outputs.hidden_states:
-                    hs = outputs.hidden_states  # tuple[Tensor], len = layers + 1
-                    n_layers = len(hs) - 1  # skip embedding layer
-                    for li in range(n_layers):
-                        h = hs[li + 1]  # skip embedding output
-                        h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
-                        hidden_accum.setdefault(li, []).append(h_flat)
+                    outputs = self.model(**inputs, **forward_kwargs)
 
-                # --- Attentions ---
-                if self._need_attentions and hasattr(outputs, "attentions") and outputs.attentions:
-                    for li, attn in enumerate(outputs.attentions):
-                        if attn is not None:
-                            attn_accum.setdefault(li, []).append(
-                                attn.squeeze(0).float().detach().cpu()
-                            )
+                    if _hook is not None and "h" in _sink:
+                        _h = _sink.pop("h")
+                        _last_raw_accum.append(
+                            _h.reshape(-1, _h.shape[-1]).float().cpu())
 
-                # --- Logits (only when a logits-consuming task needs them) ---
-                if self._need_logits and hasattr(outputs, "logits") and outputs.logits is not None:
-                    logits_accum.append(outputs.logits.detach().cpu())
+                    # --- Hidden states ---
+                    if self._need_hidden and hasattr(outputs, "hidden_states") and outputs.hidden_states:
+                        hs = outputs.hidden_states  # tuple[Tensor], len = layers + 1
+                        n_layers = len(hs) - 1  # skip embedding layer
+                        # The EMBEDDING output, kept separately. Some transition
+                        # metrics need the embedding->block0 step, which is a real
+                        # layer transformation but is dropped by the `li + 1`
+                        # indexing everywhere else. Stored apart so no existing
+                        # consumer's layer numbering shifts.
+                        _e = hs[0]
+                        _emb_accum.append(
+                            _e.reshape(-1, _e.shape[-1]).float().detach().cpu())
+                        # post-final-norm: THE CACHE'S OWN STORE. `hs[-1]` was
+                        # already substituted above when the caller asked for it,
+                        # so what is written here is whichever representation the
+                        # caller declared.
+                        for li in range(n_layers):
+                            h = hs[li + 1]  # skip embedding output
+                            h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
+                            hidden_accum.setdefault(li, []).append(h_flat)
 
-                # --- Labels ---
-                if "input_ids" in inputs:
-                    labels_accum.append(inputs["input_ids"].detach().cpu())
+                    # --- Attentions ---
+                    if self._need_attentions and hasattr(outputs, "attentions") and outputs.attentions:
+                        for li, attn in enumerate(outputs.attentions):
+                            if attn is not None:
+                                attn_accum.setdefault(li, []).append(
+                                    attn.squeeze(0).float().detach().cpu()
+                                )
+
+                    # --- Logits (only when a logits-consuming task needs them) ---
+                    if self._need_logits and hasattr(outputs, "logits") and outputs.logits is not None:
+                        logits_accum.append(outputs.logits.detach().cpu())
+
+                    # --- Labels ---
+                    if "input_ids" in inputs:
+                        labels_accum.append(inputs["input_ids"].detach().cpu())
+
+        finally:
+            if _hook is not None:
+                _hook.remove()
 
         # Concatenate hidden states
         if hidden_accum:
             self._hidden_states = {
                 li: torch.cat(tensors, dim=0) for li, tensors in hidden_accum.items()
             }
+
+        # Deepest block's RAW output, kept SEPARATE from _hidden_states.
+        self._last_block_raw = (torch.cat(_last_raw_accum, dim=0)
+                                if _last_raw_accum else None)
+        self._embedding_states = (torch.cat(_emb_accum, dim=0)
+                                  if _emb_accum else None)
 
         # Store attentions as lists (not concatenated — shapes may differ)
         if attn_accum:
@@ -451,9 +563,38 @@ class ModelOutputCache:
         return chunks
 
 
-def load_default_corpus(num_samples: int) -> list:
+def load_default_corpus(num_samples: int, diverse: bool = False) -> list:
     """
-    Load diverse text passages from WikiText-103 validation split.
+    Load text passages from the WikiText-103 validation split.
+
+    NOT "diverse text passages", which is what this docstring used to claim.
+    It returns the FIRST ``num_samples`` passages of at least 50 characters, and
+    WikiText stores whole articles consecutively, so a small sample is a small
+    number of articles. Measured against the article headings in the split
+    (red-team review, 2026-09-05; re-measured here):
+
+        num_samples =   20  ->   1 distinct article  ("Homarus gammarus")
+                        50  ->   4
+                       100  ->   5
+                       200  ->   6
+                       500  ->  22
+                      1000  ->  37     (the whole split is 1747 passages)
+
+    That single fact is the root cause of three separate findings: the
+    `topology_homology` H0 outlier at its shipped ``num_samples: 20`` (gpt2's
+    `h0_fine_persistence_frac` = 0.8600 lies outside the entire [0.32, 0.78]
+    range of 30 random 20-of-200 resamples), the `geometry_tokenizer_efficiency`
+    measurement domain (1,400 words of one lobster article, WikiText ``@-@``
+    artifacts included), and the `geometry_mahalanobis` fit/score split, where
+    a contiguous half-and-half cut put DIFFERENT ARTICLES on the two sides and
+    made the "in-distribution" baseline a topic shift.
+
+    ``diverse=True`` takes an evenly spaced stride across the whole split
+    instead of a prefix, which at ``num_samples=20`` spans ~20 articles rather
+    than 1. It is OPT-IN and defaults to False: every archived run used the
+    prefix, and silently changing the corpus would silently change every
+    number. Callers that want breadth should ask for it, and say so in their
+    provenance.
 
     Falls back to a small hardcoded corpus **with an explicit warning** if
     WikiText loading fails (e.g. ``datasets`` not installed or no network).
@@ -472,8 +613,25 @@ def load_default_corpus(num_samples: int) -> list:
             if isinstance(row.get("text"), str) and len(row["text"]) >= 50
         ]
         if passages:
-            result = passages[:num_samples]
-            logger.info(f"Loaded {len(result)} passages from WikiText-103 validation")
+            if diverse and num_samples < len(passages):
+                # Evenly spaced across the whole split, so a small sample is
+                # drawn from many articles rather than from the first one.
+                step = len(passages) / float(num_samples)
+                result = [passages[min(len(passages) - 1, int(i * step))]
+                          for i in range(num_samples)]
+            else:
+                result = passages[:num_samples]
+            logger.info(
+                f"Loaded {len(result)} passages from WikiText-103 validation "
+                f"({'evenly spaced' if diverse else 'prefix'})")
+            if not diverse and num_samples <= 200:
+                # A prefix this short is a handful of articles; say so once,
+                # rather than leaving it to be rediscovered a fourth time.
+                logger.info(
+                    f"  NOTE: the first {num_samples} passages of WikiText-103 "
+                    f"validation span very few ARTICLES (20 -> 1, 100 -> 5, "
+                    f"200 -> 6). Pass diverse=True for an evenly spaced draw "
+                    f"if the estimand depends on topic breadth.")
             return result
         logger.warning("WikiText-103 returned no usable passages; using fallback corpus")
     except Exception as e:

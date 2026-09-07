@@ -101,6 +101,9 @@ class LogitLensTask(DiagnosticTask):
                 # logit-lens accuracy/entropy (reviewer-visible:
                 # pre-fix accuracy dipped on the last layer for every
                 # GPT-2 / Pythia / OLMo / Phi-2).
+                # post-final-norm: DELIBERATELY post-norm, and argued above -- the lens
+                # applies `final_norm` itself, so re-norming an already-normed last
+                # entry would double-norm it.
                 per_layer_states = outputs.hidden_states[1:]
                 last_state_is_normed = len(outputs.hidden_states) == n_layers + 1
                 if len(per_layer_states) < n_layers:

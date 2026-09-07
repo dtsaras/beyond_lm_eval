@@ -1,0 +1,27 @@
+{
+  "task": "geometry_contextualization",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "SelfSim, IntraSim, and centered per-word MEV reproduce the released scipy/sklearn formulas to at most 3.3e-16, and the released GPT-2 artifacts confirm that centered PCA is the intended MEV convention. The caveat is that mev_baseline_pool1k uses centered PCA while the released baseline path uses TruncatedSVD; on the same real first-layer GPT-2 pool they are 0.181347 and 0.0106901 (16.96x), respectively.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "Across 10 current models, no active metric was a significant width/depth/vocabulary proxy: Pearson r with d_model was -0.079 for corrected SelfSim, -0.005 for corrected IntraSim, +0.012 for size-matched corrected MEV, +0.094 for raw MEV, and -0.119 for anisotropy; layer-count Spearman correlations lay between -0.33 and +0.34. However, subtraction can over-correct: corrected SelfSim correlated -0.967 with its baseline (raw SelfSim +0.864), so cross-model use requires reporting raw and baseline components and fixing the corpus/tokenization protocol.",
+  "normalized_variant": "self_similarity_corrected; intra_sentence_similarity_corrected; mev_corrected_sizematched; mev_corrected_pool1k",
+  "normalized_ok": "YELLOW",
+  "github": "YES",
+  "github_repo": "kawine/contextual",
+  "github_reason": "Fetched analyze.py, preprocess.py, and the released GPT-2 CSV/JSON outputs and ran the runnable formulas on identical arrays. BLME SelfSim, IntraSim, and per-word MEV matched to <=3.3e-16; the official pool baseline's TruncatedSVD divergence was also executed and quantified. The unreleased embedding dumps prevent exact end-to-end corpus parity, but the available released code was run rather than merely inspected.",
+  "paper_number": "PARTIAL",
+  "paper_reason": "For GPT-2, BLME SelfSim at official layers 1/3/6/9/12 was 0.9058/0.8903/0.8158/0.7645/0.9489 versus released 0.9205/0.9080/0.8495/0.8397/0.9854 (1.6%-9.0% low), and the relevant-layer anisotropy mean was 0.6183 versus the paper's roughly 0.6. Raw MEV was 0.6962/0.5005/0.3881/0.3814/0.8111 versus 0.1601/0.3022/0.2974/0.3082/0.7131 (14%-335% high), so only part of the published profile reproduces.",
+  "confounds": "NONE",
+  "confounds_reason": "In the 10-model sweep, all active outputs had |Pearson r(d_model)|<=0.253, |Spearman rho(n_layers)|<=0.38, and |rho(log vocab_size)|<=0.66, with none significant. The pure tokenizer count is now named _meta_n_words_tracked and excluded from feature selection, so the measured evidence does not establish an active architectural-size proxy.",
+  "defects": [
+    "mev_baseline_pool1k is not the released estimator: it applies centered PCA, whereas kawine/contextual uses TruncatedSVD(n_components=100); the same real first-layer pool differs 0.181347 versus 0.0106901.",
+    "The evaluation groups BPE token IDs, punctuation, and subword fragments in WikiText passages rather than lexical word types in sentence contexts. Restricting to one occurrence per passage changed MEV by only <=1.1%, so the residual published-number gap is primarily tracking unit/corpus, not duplicate contexts.",
+    "Raw MEV fails the released GPT-2 layer profile by 14%-335%, despite exact helper parity; consumers must not treat the adapted corpus result as a reproduction of the original experiment.",
+    "The two MEV correction protocols can disagree in sign because per-token occurrence groups are much smaller than the 1K pool; both are named, but neither is directly paper-comparable on this corpus.",
+    "Corrected SelfSim and its emitted anisotropy baseline are nearly anti-collinear across models (r=-0.967), showing that subtraction can replace the raw signal with baseline variation.",
+    "layers_reported contains numpy.int64 values; the harness's default=str serialization turns layer indices into strings rather than JSON numbers."
+  ],
+  "fix": "Add an explicitly named TruncatedSVD pool-1K baseline, retain the size-matched PCA null under its distinct name, and never call either an exact paper reproduction without the original population. Split passages into sentences, track lexical word spans with pooled subword states, exclude punctuation, cast layer indices to int, and report raw/baseline/corrected components together so over-correction is visible."
+}

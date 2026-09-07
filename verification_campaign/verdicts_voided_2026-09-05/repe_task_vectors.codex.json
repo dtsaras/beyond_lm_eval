@@ -1,0 +1,27 @@
+{
+  "task": "repe_task_vectors",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Zou et al. Appendix B.3 defines the mean-difference direction v_l = Mean(X_l^high) - Mean(X_l^low), and the current implementation computes that object at the paper's default decoder last-token position. On GPT-2, an independent all-block hook reproduced all 12 emitted vector norms with max absolute error 0.0, the executed official ClusterMeanRepReader reproduced all 12 reconstructed directions with max absolute and norm-relative error 0.0, and final_norm(hooked block 11) reproduced hidden_states[-1] with max error 0.0; no paper-domain value-changing counterexample remains.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "In a fresh local four-model panel, max_norm_layer was [2, 5, 11, 11] at depths [6, 6, 12, 12], with Spearman rho = 0.9428 and Pearson r = 0.9623 against n_layers; max_norm_layer/(L-1) was exactly 1.0 in 3/4 models. GPT-2 and Pythia-160M have the same d_model=768 and L=12 but mean_vector_norm was 4.631703 versus 0.349279 (13.2607x), and an exactly function-preserving scale test with max |delta logits|=0 doubled both the raw and sqrt(d)-normalized values by 2.0, so the raw task outputs are not comparable across architectures or residual-scale conventions.",
+  "normalized_variant": "mean_vector_norm_normalized and layer_task_vector_norms_normalized (raw norm / sqrt(d_model))",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "andyzoujm/representation-engineering",
+  "github_reason": "Fetched and inspected the official repe/rep_readers.py and repe/rep_reading_pipeline.py, then executed ClusterMeanRepReader.get_rep_directions locally on the same five-pair GPT-2 block activations used by current BLME. Its H_pos_mean - H_neg_mean output matched the independently reconstructed BLME direction at all 12 layers with max absolute error 0.0 and max relative norm error 0.0; BLME's mean norm was 4.631703 and the official/reference mean norm was 4.631703.",
+  "paper_number": "NONE",
+  "paper_reason": "The paper publishes 0 intrinsic direction norms, pair-direction cosines, or max-norm layer indices to reproduce. Its numeric results are downstream behavioural quantities instead, including TruthfulQA average 32.3 to 60.6 and LAT accuracies Utility=81.0 and Probability=92.6; current BLME's GPT-2 values 4.631703 (mean norm) and -0.00228960 (pair cosine) therefore have no published scalar counterpart.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Depth is directly exposed by max_norm_layer (fresh n=4 Spearman rho=0.9428 with n_layers), while residual-coordinate scale is a free convention: with identical logits to max absolute error 0, scaling the hidden representation by 2 made mean_vector_norm and mean_vector_norm_normalized exactly 2.0x. A seed-0 random-init GPT-2 also returned max_norm_layer=11, identical to trained GPT-2, and mean norm 4.165217 versus 4.631703 (only 10.07% lower), confirming that the headline values are weakly tied to training-specific concept structure.",
+  "defects": [
+    "CODE/EDGE at representation_engineering.py:206-215: zero-norm per-pair differences are normalized to the zero vector and then counted as cosine 0. On the direct directions [e1, 0, e1], valid-direction agreement is 1.0 but pair_direction_cos_mean is 0.33333334 and pair_direction_cos_min is 0.0. This is a defect in BLME's paper-external agreement diagnostic, not in the paper-defined mean-difference vector, so it does not change the implementation-faithfulness verdict.",
+    "NORMALIZED VARIANT: the sqrt(d_model) twin fails both required mechanisms. Under a function-preserving residual rescaling it changes by exactly 2.0x with max |delta logits|=0; under an isometric zero-padding from d=8 to d=32, logits again agree exactly and the raw norm ratio is 1.00000017, but the normalized ratio is 0.50000008. On the fresh four-model panel it also leaves Spearman associations unchanged: rho(d_model) +0.2582 to +0.2582 and rho(n_layers) 0.0000 to 0.0000.",
+    "COMPARABILITY/DEPTH: max_norm_layer has fresh-panel Spearman rho=+0.9428 with n_layers and its depth fraction is the constant 1.0 in 3/4 models; it is principally an absolute depth index, not a cross-model structural quantity.",
+    "PROTOCOL: the merged default is num_samples=5 and uses five distinct pairs, but overrides above five replicate those same pairs. On GPT-2, requesting n=6 adds no distinct evidence yet moves mean_vector_norm 4.631703 to 5.204990 (+12.38%) because the first pair is overweighted; balanced repeats n=10/20/40 return 4.631705/4.631704/4.631703.",
+    "CONTROL/SIGNAL: seed-0 random-init and trained GPT-2 both select max_norm_layer=11, with mean_vector_norm 4.165217 versus 4.631703 and pair_direction_cos_mean -0.027703 versus -0.00228960; no random-weight baseline or held-out direction-validity output accompanies the headline.",
+    "NAMING: the code computes Zou et al.'s activation-space mean-difference reading direction, while Ilharco et al.'s task vector is the weight-space quantity theta_finetuned - theta_pretrained; the two objects have dimensions d_model versus n_parameters and are not interchangeable."
+  ],
+  "fix": ""
+}

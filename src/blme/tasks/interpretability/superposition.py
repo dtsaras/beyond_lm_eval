@@ -44,6 +44,13 @@ def _multimodality_score(activations):
     # correction term in the denominator (the old code dropped it — using the
     # asymptotic n->inf form — which deviated ~10% at n=50). g1 = sample
     # skewness, g2 = sample EXCESS kurtosis (both bias-corrected).
+    # float64 before scipy. On a float32 input, scipy's bias-corrected skew /
+    # kurtosis path calls np.place with a float64 replacement value and raises
+    # `TypeError: Cannot cast array data from dtype('float64') to
+    # dtype('float32') according to the rule 'safe'`. Hidden states arrive as
+    # float32, so this fired on every real model (pre-existing failure of
+    # test_interpretability_superposition, found during the 2026-09-03 campaign).
+    activations = np.asarray(activations, dtype=np.float64)
     g1 = skew(activations, bias=False)
     g2 = scipy_kurtosis(activations, fisher=True, bias=False)
     denom = g2 + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))

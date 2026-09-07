@@ -1,0 +1,26 @@
+{
+  "task": "geometry_categories",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "The code faithfully computes the BLME-defined category diagnostic: for each mapped token it measures the fraction of its k nearest mapped tokens carrying the same first-assigned category, and its separation calculation matches an independent centroid-distance implementation. Perfect m=3 clusters at k=20 produced the analytic purity ceiling (m-1)/k=0.1 exactly; no value-changing implementation counterexample was found.",
+  "defect_location": "NONE",
+  "comparable": "RED",
+  "comparable_reason": "Raw purity has a category-size ceiling min(k,m-1)/k and a vocabulary-dependent null, so tokenizer mapping directly changes the reported number. Across 12 current model results, purity versus log(vocab_size) had Pearson r=-0.942 for pronouns, -0.921 for prepositions, -0.894 for determiners, and -0.842 for singular_plural (all p<=5.9e-4); the outputs are not valid cross-model features as reported.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "No introducing paper, author repository, or released reference implementation exists. The catalogue and task metadata identify this as a BLME-specific proxy over the bundled categories.json asset.",
+  "paper_number": "NONE",
+  "paper_reason": "No source paper publishes a value for this BLME-specific category diagnostic, so there is no paper figure or table entry to reproduce.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Vocabulary size and tokenizer granularity dominate several emitted purities: the four strongest current correlations with log(vocab_size) range from -0.842 to -0.942 over 12 models. An IID-label simulation also showed the expected null shrink with candidate count (measured/theory: V=64 0.1525/0.1429; V=256 0.0465/0.0353; V=1024 0.0105/0.0088; V=4096 0.0045/0.0022), independently of representation quality.",
+  "defects": [
+    "Fixed k=20 imposes category-size-dependent purity ceilings; a three-token category cannot exceed 0.1 even under perfect separation.",
+    "Single-token filtering, leading-space variants, and first-category assignment change both the scored population and available outputs across tokenizers.",
+    "The separation baseline uses random non-category vocabulary tokens rather than the other declared categories, making it depend on vocabulary composition and random-tail embeddings.",
+    "The implementation resets NumPy's process-global legacy RNG, so later stochastic tasks can depend on task execution order.",
+    "The emitted cross_model_comparable=false metadata is not enforced by the feature-selection pipeline."
+  ],
+  "fix": ""
+}

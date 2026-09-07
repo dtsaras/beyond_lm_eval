@@ -94,7 +94,12 @@ class TestSuperpositionStrength:
         # Centered auxiliary: recovers the iid-Gaussian 1/m floor.
         assert out["mean_squared_overlap_centered"] * m == pytest.approx(1.0, rel=0.15)
         assert out["superposition_ratio"] > out["superposition_ratio_centered"]
-        assert out["vocab_size"] == V and out["hidden_dim"] == m
+        # `_meta_` since 2026-09-05: `hidden_dim` IS d_model and
+        # `welch_bound` is a closed form in (V, m), so both were reaching
+        # the feature matrix as architecture proxies under names the
+        # exclusion blocklist did not carry.
+        assert out["_meta_vocab_size"] == V and out["_meta_hidden_dim"] == m
+        assert "vocab_size" not in out and "hidden_dim" not in out
 
 
 # ===========================================================================

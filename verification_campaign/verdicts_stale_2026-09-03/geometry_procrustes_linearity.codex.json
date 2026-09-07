@@ -1,0 +1,26 @@
+{
+  "task": "geometry_procrustes_linearity",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Razzhigaev et al. define 1-min_A||Xtilde A-Ytilde||_F^2, which is bounded in [0,1], but reciprocating numerical-null singular values does not produce the minimizer on rank-deficient clouds. On a valid centered rank-3 cloud, BLME and upstream both returned -5.167924 while a Moore-Penrose solution returned 0.106791; the paper-defined domain does not exclude low-rank embedding sets.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "For a fixed independent nonlinear residual, expected 1-sim is multiplied by 1-d_model/(N-1). At the shipped N=12,895, that factor falls from 0.9603 at d=512 to 0.5832 at d=5,376, mechanically suppressing measured nonlinearity by 39.3%; changing tokenizer-produced N on the same construction also moved sim from 0.9961 at N=800 to 0.9059 at N=12,895.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "AIRI-Institute/LLM-Microscope",
+  "github_reason": "Fetched pip llm-microscope 0.0.7 and ran functions.py::procrustes_similarity against current BLME. They were bit-identical in float64 on an ordinary full-rank pair (0.165945919265046 both), the rank-3 failure (-5.167924085876 both), and all 11 cached GPT-2 adjacent pairs (max relative error 0); thus the defect is shared by released code, not a BLME transcription error.",
+  "paper_number": "YES",
+  "paper_reason": "The paper states a near-perfect score of 0.99. Current BLME on GPT-2 reports mean 0.992828 over the retained genuine block-to-block pairs, relative error +0.286%; this published headline is reproduced despite the rank-deficient-domain defect.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Controlled nulls with identical true nonlinearity match the analytic d_model/N factor to five decimals and show a 39.3% width-induced deflation across the zoo's d_model range. In ten real models, mean score had r=+0.523 with d_model and +0.443 with n_layers (underpowered p=0.12/0.20), while N varied from 12,895 to 14,506 solely from tokenization.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/procrustes_linearity.py:168-182: the SVD path rejects only S[-1]<=0, then reciprocates positive roundoff singular values near 1e-17. This can return a negative score even though A=0 proves the paper's minimum residual is at most one.",
+    "CODE/DOCUMENTATION procrustes_linearity.py:142-148 redefines the output range as (-inf,1] and declares the released numerical artifact part of the reference; this contradicts the source paper's explicit [0,1] bound rather than implementing its minimization robustly.",
+    "COVERAGE procrustes_linearity.py:233-260: trimming the post-final-norm state correctly removes LayerNorm contamination, but cache collection already omits the embedding and cannot recover the last block's pre-norm output. GPT-2 therefore reports 10 pairs for 12 blocks, missing embedding-to-block-0 and block-10-to-block-11.",
+    "COMPARABILITY: the least-squares projection absorbs an expected d_model/(N-1) fraction of independent residual energy, and no dimension-corrected companion is emitted.",
+    "COMPARABILITY: N is tokenizer-dependent rather than pinned across models, producing a second controlled variation in the same score."
+  ],
+  "fix": "Compute the paper's minimizer with torch.linalg.lstsq or torch.linalg.pinv using a documented rank tolerance (and retain an explicitly named upstream_exact variant only if historical parity is required); assert the [0,1] invariant. Recover the final block pre-normalization and embedding output for full transition coverage. For cross-model analysis, use a common N much larger than the widest d_model or emit a separately named, validated d_model/N-corrected nonlinearity measure."
+}

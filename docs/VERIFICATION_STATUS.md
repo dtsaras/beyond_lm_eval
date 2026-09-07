@@ -16,11 +16,11 @@ small-model signatures — NOT full paper-table reproduction.
 | geometry_vendi_score | bit-exact vs official score_K; ≤9e-15 vs score_X; audit re-verified fresh clouds |
 | geometry_isoscore | ≤4e-8 vs official IsoScore 2.x incl. N<d branch; audit: ≤3.3e-8 on 7 fresh clouds |
 | geometry_phd_dimension | seed-matched bit-exact vs GPTID @8c8759e; audit re-verified fresh clouds (R2/R4/R7) |
-| geometry_magnitude | ≤3.6e-15 vs magnipy (5 paths) incl. duplicate clouds (see caveat E3) |
-| geometry_lid | bit-exact vs official mle_batch (≤1.2e-5 fp32 gap); duplicate handling now matches official (audit fix) |
+| geometry_magnitude | ≤3.6e-15 vs magnipy (5 paths) incl. duplicate clouds (see caveat E3). **The 2026-09-07 'corrected' note here was itself wrong and has been withdrawn:** a round-9 RED claimed magnipy de-duplicates, and I recorded the original claim as false by ~1e12. Live magnipy `compute_magnitude_until_convergence` returns |{0,1}|=1.4621171572600098 and |{0,0,1}|=1.4541545040460961 — different values; it PERTURBS the singular ζ rather than quotienting the point set, and 1.4541545040460961 is exactly what BLME returns. The original claim stands. |
+| geometry_lid | matches official mle_batch to ~3e-5; error vs an exact float64 reference is 7e-14 (see kernel note below) |
 | geometry_intrinsic_dim | bit-identical to skdim _TwoNN on Pareto samples; fresh generic clouds 0.1–0.2% |
 | geometry_correlation_dimension | == live nolds.corr_dim (self-match artifact removed); see caveat E4 |
-| geometry_hubness | scikit-hubness kernel line-for-line; independent full-argsort e2e pin |
+| geometry_hubness | scikit-hubness kernel line-for-line; independent e2e pin. **Updated 2026-09-07:** neighbour ranking moved from normalized dot products to direct chord distances — the dot product left only 41 distinct off-diagonal similarities (of 32888) on a fixture with a 1e3 common offset and put 212/257 occupancy bins wrong. Now exact against a float64 reference at offsets 0…1e8 on CUDA and CPU. gpt2 numbers move at ≤3.6e-05 relative (k10_skew 34.0717888947 → 34.0705616505); archived hubness fields are stale at that level. |
 | geometry_mahalanobis | kernel == official deep_Mahalanobis_detector (0.0); adaptation disclosed; held-out AUROC non-degenerate (audit) |
 | geometry_spectral (alpha_official) | live WeightWatcher 0.7.7: ALL 49 gpt2 modules, mean dα 3e-4 / max 2.1e-3 (post KS-convention fix) |
 | geometry_spectral (Hill alpha) | disclosed proxy; exact identity α_σ=2α_λ−1 vs WW at matched cutoff |
@@ -47,7 +47,7 @@ small-model signatures — NOT full paper-table reproduction.
 | geometry_hsic | Gretton Def. 2 explicit-H; == Kornblith cka() 3.3e-15 | HSIC is a formula |
 | geometry_perplexity | independent f64 reconstruction ≤1e-4 (overall/rare/freq/BPC); BOS + truncation regressions pinned | standard CE; no official repo exists |
 | dynamics_gradient_flow | independent leaf-replacement autograd recompute: EXACT (audit); entropy==scipy; slope==linregress | official Pascanu code is RNN training code |
-| dynamics_fractal | estimators match paper definitions (auditor re-derived from ar5iv); R/S vs live nolds ±0.1; fGn known-H recovery; PAPER-NUMBER check: gpt2 H=0.63 vs language 0.70±0.09 | paper releases no estimator code; see caveat E5 |
+| dynamics_fractal | OFFICIAL CODE EXISTS and was cloned and executed: google-research/fractals_language `fractal_patterns_in_language.ipynb`. BLME's pooled kernels reproduce the released estimators to 0.26–0.71% (H) and 0.38–0.45% (J) on the reference's own scale grid. Two bugs found IN the reference (Joseph accumulator never reset across scales + reads a global X; off-by-one scoring). CAVEAT: `self_similarity_exponent` is not identified (cross-model spearman 0.143 between eps=5e-3 and 5e-2); `hurst_exponent` correlates +0.878 with mean NLL. `joseph_exponent` is clean, 1.6% from the paper's Wikipedia 0.52. | verified |
 
 ## C. Paper-grounded with DISCLOSED protocol deviations (refined adaptations; kernel verified per A/B)
 
@@ -77,6 +77,38 @@ overlap) · dynamics_interpolation (slerp official-exact; convexity summary BLME
 dynamics_perturbation_growth (linear-gain anchors exact at fp32 floor; QLE protocol NOT reproduced) ·
 repe_steering_effectiveness (hook == RepE linear_comb; KL summary BLME; alpha=0 → KL≈0 pinned) ·
 repe_concept_separability (== sklearn cross_val_score 0.0; probe family adaptation of Zou Sec 5.1).
+
+## Kernel change: geometry_lid (2026-08-19)
+
+The LID neighbour search was rewritten from a per-query float32 Python loop
+(`np.linalg.norm(X - X[qi], axis=1)` then a full `np.sort`) to a float64
+Gram-identity GEMM with `argpartition` selection. Motivation was cost: it was
+79% of the whole suite's runtime — 2846s on gpt2-774m alone, and an estimated
+5.6h on a 64-layer 32B checkpoint, past any workable per-task timeout. The new
+kernel is 70–190x faster (measured), which is what makes LID collectable
+across the zoo at all.
+
+The rewrite is more accurate, not less, because the old loop accumulated in
+float32. Against an exact float64 reference on a (4000, 768) cloud, maximum
+relative error on the returned LID estimates:
+
+| implementation | error vs exact |
+|---|---|
+| old float32 loop | 1.8e-05 |
+| current float64 GEMM | 7.0e-14 |
+
+The honest consequence for provenance: agreement with the *official*
+`mle_batch` — itself a float32 implementation — loosens from ~1.2e-05 to
+~3e-05, because the official code and the old BLME loop shared the same
+float32 error and now only one of them does. So this task is no longer
+"bit-exact against official code"; it is "within 3e-05 of official code and
+within 7e-14 of the true value". Both numbers are stated in section A.
+
+Query selection (seeded `rng.choice`), the self-distance drop, the `-k` MLE
+variant and the `lid > 0` filter are all unchanged, so the estimator's
+definition is identical. `tests/tasks/test_reference_parity_formulas.py::
+test_lid_mle_is_minus_k_variant_not_levina_bickel_parity` and the 11
+`tests/tasks/test_geometry.py -k lid` tests pass unchanged.
 
 ## E. STILL UNSURE — residual caveats (the honest list)
 

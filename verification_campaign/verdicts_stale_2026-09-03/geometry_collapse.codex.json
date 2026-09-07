@@ -1,0 +1,26 @@
+{
+  "task": "geometry_collapse",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Roy and Vetterli define p_k = sigma_k/sum(sigma) and erank = exp(-sum p_k log p_k); collapse.py:120 applies exactly that raw-singular-value formula. The paper's rho=0.5 four-value anchor gives 3.079201435678004 in both derivation and BLME (absolute error 0), and equal-rank spectra k=1,2,3,5,10,50 agree within 3e-14 with no value-changing counterexample.",
+  "defect_location": "NONE",
+  "comparable": "RED",
+  "comparable_reason": "Raw erank is a dimension count: on N=2048 iid Gaussian clouds it rose 31.9315 -> 494.5880 as d_model rose 32 -> 512 (Spearman rho=+1). The direct max/min fractions do not solve the finite-aspect-ratio effect: erank/d fell 0.997861 -> 0.965992 on that same sweep (rho=-1), while the unnormalized per-layer profile and its summaries remain exported.",
+  "normalized_variant": "max_erank_frac, min_erank_frac, max_drop_frac, collapse_ratio",
+  "normalized_ok": "RED",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "I fetched the Roy-Vetterli paper and searched its author/conference links and code indexes; no original implementation was released. Later RankMe and third-party effective-rank implementations are not code released with the 2007 paper, so they were not counted as GitHub provenance.",
+  "paper_number": "YES",
+  "paper_reason": "For the paper's displayed rho=0.5 spectrum (2.25, 0.75, 0.75, 0.25), the closed form is erank=3.079201435678004 and BLME returns 3.079201435678004, relative error 0. Equal singular values also reproduce the paper property erank(A)=rank(A) to at most 5.7e-16 relative.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Holding N and the iid Gaussian law fixed while varying only ambient width gave rho=+1 between raw erank and d_model. Width division reversed rather than removed the association (rho=-1) because the attainable spectrum depends on N/d_model; this is an architectural/sample-aspect proxy even though the Roy-Vetterli implementation itself is correct.",
+  "defects": [
+    "COMPARABILITY: collapse.py:160-171 exports raw erank_per_layer/max/min and sigma2 profiles as dimension counts; the BLME paper says individual eranks are divided by d_model, but there is no erank_per_layer_frac twin.",
+    "NORMALIZATION: dividing erank by d_model leaves a deterministic N/d_model aspect-ratio effect; a matched-null residual or fixed row budget is needed for cross-model use.",
+    "DOCUMENTATION: collapse.py:87-100 still says the covariance spectrum is primary and raw sigma is legacy, but lines 120 and 160-171 do the opposite. The later comment is correct; the earlier block is stale and materially misleading.",
+    "SCOPE: the primary profile is faithful Roy-Vetterli erank, not Queipo-de-Llano's uncentered sigma-squared, exp-free compression-valley entropy. The metadata now calls this a refined proxy, which is the honest framing.",
+    "ROBUSTNESS: an empty hidden-state mapping still reaches layers[0] at collapse.py:157 and raises IndexError rather than returning a task error."
+  ],
+  "fix": ""
+}

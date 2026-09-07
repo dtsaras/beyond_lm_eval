@@ -1,0 +1,26 @@
+{
+  "task": "dynamics_fractal",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "The implementation forms correctly shifted token NLL increments, normalizes and integrates each document, and fits the Hurst, Joseph, and Holder power laws defined by Daelemans et al. Independent IID anchors gave H = 0.544426 +/- 0.006883, J = 0.446791 +/- 0.013059, and S = 0.448789 +/- 0.018197, with no value-changing formula counterexample.",
+  "defect_location": "CONFIG",
+  "comparable": "YELLOW",
+  "comparable_reason": "Across GPT-2, DistilGPT-2, Pythia-70M, and Pythia-160M, H was 0.6002/0.6121/0.6139/0.6158 with no clear width or depth ordering. J instead split by tokenizer family (0.5118/0.5062 versus 0.5475/0.5556), a 0.041-0.049 family shift compared with 0.006-0.008 within-family changes, and S was too epsilon-sensitive to certify as architecture-free.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "https://github.com/google-research/google-research/tree/master/fractals_language",
+  "github_reason": "Fetched google-research at 42775283862022b2c6a89f9f0701d75bf4318de5 and executed the released notebook functions on identical synthetic streams. Notebook versus BLME H differed by 0.86% on IID and 2.31% on AR(0.9); BLME J differed by 4.95% and 5.76% from a repaired notebook J, and S differed by 11.81% and 2.45%. The verbatim J was unusable as an oracle because its accumulator is not reset and it reads global X.",
+  "paper_number": "PARTIAL",
+  "paper_reason": "For the closest accessible but unmatched comparison, the paper's T5-110M/Wikipedia H = 0.62, S = 0.59, and J = 0.45 versus local GPT-2/WikiText H = 0.6002, S = 0.5626, and J = 0.5118: relative errors 3.19%, 4.64%, and 13.73%. This is only partial because neither model nor exact corpus is matched.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "The four permitted models do not show a monotone size trend for H, but J has a larger tokenizer-family discontinuity than either within-family model-size change. That supports an architecture/tokenization confound but is not enough models for a stable partial-correlation claim.",
+  "defects": [
+    "CONFIG src/blme/tasks/configs/defaults.yaml:383-397 ships use_tokens = 1024, burn-in effectively 128, and holder_eps = 0.05, whereas the paper experiment uses 2048 tokens, discards 100 increments, and states epsilon = 0.005; the shipped task therefore does not reproduce the paper protocol even though its formulas are faithful.",
+    "CODE src/blme/tasks/dynamics/fractal.py:210-225 concatenates corpus rows until a token threshold without verifying shared document identity; unless the dataset rows are contiguous pieces of one source document, this constructs a pseudo-document with artificial joins rather than the paper's actual >4K-token document.",
+    "CODE src/blme/tasks/dynamics/fractal.py:226-250 can accept an incomplete short buffer when no complete >=4K-token document is assembled, violating its own document-length guard.",
+    "CODE the legacy per-document _rs_hurst summary uses a different scale family from the pooled headline estimator, so the task exports two H estimators under insufficiently distinct names.",
+    "PROVENANCE the released Joseph notebook has a global-X and cumulative-accumulator bug; direct equality to that cell would be evidence of reproducing a bug, not paper fidelity."
+  ],
+  "fix": ""
+}

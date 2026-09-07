@@ -1,0 +1,26 @@
+{
+  "task": "geometry_spectral",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "Stable rank is exact and the legacy singular-value Hill statistic is honestly labeled as a proxy, but src/blme/tasks/geometry/spectral.py:16-66 is not WeightWatcher's released PL fit over the full paper-defined domain. On eigenvalues log-spaced from 1e-10 to 1e-4, WeightWatcher 0.7.7 returns alpha=2.433172 with tail size 10 while BLME returns 1.144765 with tail size 100 (absolute delta 1.288407), because BLME uses a different eigenvalue cutoff and tail-candidate policy.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The task mixes relatively scale-robust alpha_official with architecture-dominated stable-rank and norm-amplitude-dependent alpha_hat outputs. Across 65 checkpoints, avg_stable_rank versus d_model had Pearson r=0.808 and Spearman rho=0.793; dividing by d_model merely reversed the association (r=-0.576, rho=-0.581). By contrast avg_alpha_official was weak versus d_model (r=0.092, rho=0.120), so that field is usable with a version/protocol caveat rather than the task as a whole.",
+  "normalized_variant": "avg_stable_rank_scalenorm",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "nsfzyzz/Generalization_metrics_for_NLP; CalculatedContent/WeightWatcher",
+  "github_reason": "Fetched both the paper repository and WeightWatcher. The paper environment pins WeightWatcher 0.5.6, whose legacy Python 3.8/PyTorch 1.5 stack was not run; I cross-ran the available official 0.7.7 instead. A seeded 100-point Pareto spectrum matched exactly (both alpha=1.8479214245033262), but adversarial spectra diverged sharply: 2.433172 versus 1.144765 on the cutoff case and 4.586598 versus 2.554731 on a seeded 100-point lognormal spectrum.",
+  "paper_number": "NONE",
+  "paper_reason": "The cited HT-SR papers publish definitions, distribution examples, and model-family correlation/ranking figures, but no pinned GPT-2 weight snapshot, WeightWatcher version, module census, and per-module alpha table yielding a like-for-like scalar for this task. I therefore found no reproducible published number rather than treating a qualitative plot range as a numerical match.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Stable rank is strongly width-linked (r=0.808, rho=0.793 with d_model across 65 checkpoints), and its shipped /d_model normalization remains strongly linked with the sign reversed (r=-0.576, rho=-0.581). alpha_hat also incorporates log10(lambda_max), so weight scale enters directly; alpha_official itself showed only weak width correlation.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/spectral.py:32-43: BLME drops eigenvalues only below 1e-12 and its min_tail=8 index bound actually leaves at least nine tail points, while WeightWatcher 0.7.7 uses EVALS_THRESH=1e-5 and a different candidate policy; valid spectra therefore select different x_min and alpha.",
+    "CODE src/blme/tasks/geometry/spectral.py:148-160: fields named alpha_official and alpha_hat overstate parity; rescaling the same test spectrum by 1e-5 changed BLME alpha from 1.144765 to 1.292484 (+12.90%) solely by crossing its absolute cutoff.",
+    "CODE src/blme/normalization.py:44-49: avg_stable_rank/d_model does not remove the architectural dependence; it changes rho from +0.793 to -0.581.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml: tail_fraction=0.2 affects only the disclosed legacy proxy, not the alleged official path; downstream consumers must not mistake avg_alpha for WeightWatcher alpha.",
+    "PROVENANCE: the paper repository pins WeightWatcher 0.5.6, while task metadata claims parity to 0.7.7; no executed published-version parity result exists."
+  ],
+  "fix": "Pin and run the paper repository's WeightWatcher 0.5.6 for reproduction, or explicitly name 0.7.7 and port that version's eigenvalue filtering, x_min candidates, KS convention, and small-tail correction exactly; emit the chosen cutoff, tail size, and fitter version. Keep avg_alpha under an explicit legacy_proxy name, retain raw stable rank, and replace the failed /d_model twin only after validating a separately named normalization on held-out model families."
+}

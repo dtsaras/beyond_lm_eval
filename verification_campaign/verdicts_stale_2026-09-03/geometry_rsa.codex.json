@@ -1,0 +1,26 @@
+{
+  "task": "geometry_rsa",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "On ordinary arrays both RDM/Spearman kernels match rsatoolbox exactly, but multiplying every activation by a positive constant must leave correlation-distance RSA unchanged and current BLME violates that definition. Scaling four nonconstant random layer clouds by 1e-13 changed adjacent correlation-distance RSA from 0.044845 to 0.99999957 and early-late from 0.001335 to 0.99999949 because identical seeded noise replaces the geometry.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Several summaries depend mechanically on depth: inserting nine identity blocks before an unchanged final representation moves adjacent_mean from rho=0.05407 to (9+rho)/10=0.90541 without changing the represented input-output map, while adjacent_min is an order statistic over L-1 draws. In the archived 46-model matrix, Euclidean adjacent_mean had rho=+0.596 with n_layers and early_late rho=-0.507; the recent sampling/LayerNorm fixes require a fleet rerun but do not remove this analytic dependence.",
+  "normalized_variant": "rsa_adjacent_mean_corrdist",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "rsagroup/rsatoolbox",
+  "github_reason": "Fetched and ran the Kriegeskorte-group official successor toolbox, rsatoolbox 0.3.2, on identical 40x16 condition arrays. BLME versus rsatoolbox Spearman was 0.05406740288224315 versus 0.05406740288224315 for Euclidean RDMs and 0.022202281979171817 versus 0.022202281979171817 for correlation-distance RDMs (absolute error 0 in both); this is a later official toolbox, not a contemporaneous 2008 release.",
+  "paper_number": "NONE",
+  "paper_reason": "Kriegeskorte et al. publish brain/model RDM deviations, bootstrap errors, and p-values for 96 experimental conditions, but no transformer adjacent-layer or early-late scalar on BLME's token population. There is no like-for-like published number to reproduce.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Identity-layer insertion proves exact n_layers dependence for adjacent summaries, independent of model quality or data. The archived fleet additionally shows rho=+0.596 (adjacent_mean) and -0.507 (early_late) with n_layers, while same-width/depth GPT-2 and Pythia-160M previously gave correlation-distance adjacent means 0.9004 and 0.6458, exposing a large architecture/tokenizer component.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/rsa.py:126-133: if any row standard deviation is at most 1e-12, the task adds absolute 1e-9 Gaussian noise to every row and resets the same RNG for every layer. Valid small-amplitude geometry is overwhelmed by identical noise, manufacturing RSA approximately 1.",
+    "CODE rsa.py:139-151: undefined Spearman values are silently converted to evidence of zero similarity; conversely, identical jitter makes all-zero layers report correlation-distance RSA near one. Undefined geometry must not be assigned either substantive endpoint.",
+    "COVERAGE rsa.py:64-71: the recent trim correctly removes post-final-LayerNorm contamination, but collection already omits embeddings and does not recover the last block's pre-norm output, so the reported early/late chain still excludes two genuine transitions on GPT-2.",
+    "COMPARABILITY: adjacent_mean, adjacent_std, and adjacent_min change under function-preserving identity-layer insertion; normalized depth indexing alone cannot make these summaries comparable across depths.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml:62-64: only 200 token conditions are retained. Evenly spaced sampling now spans the corpus and fixes the former leading-slice bug, but no resampling uncertainty accompanies min or endpoint statistics."
+  ],
+  "fix": "For correlation RDMs, create a common cross-layer mask that removes only truly constant/nonfinite conditions, or return an explicit undefined result with counts; never inject shared absolute noise, and never coerce nonfinite Spearman to zero. Hook the final block pre-normalization for complete block coverage. For cross-model reporting, compare fixed normalized-depth endpoints or the full depth-resampled RDM-similarity curve, avoid min as an uncorrected order statistic, and quantify token-resampling uncertainty."
+}

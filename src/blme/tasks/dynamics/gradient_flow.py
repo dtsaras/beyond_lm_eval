@@ -5,9 +5,18 @@ each layer's hidden state influences the prediction loss.
 For each layer l, computes ||d L_CE / d h_l||_F where L_CE is the shifted
 next-token cross-entropy loss averaged over positions (the same objective
 the model was trained on). This is the "signal strength" reaching the
-output from each layer. Smooth, monotonically decreasing flow indicates
-healthy gradient propagation; sharp drops indicate vanishing gradients;
-spikes indicate exploding gradients.
+output from each layer. Smooth flow indicates healthy propagation; sharp
+drops indicate vanishing gradients; spikes indicate exploding gradients.
+
+SIGN CONVENTION (corrected 2026-09-04). The layer index runs FORWARD, but
+backpropagation runs backward, so for a chain with per-layer Jacobian scale
+``a`` the activation gradient at layer i is proportional to ``a^(L-i)`` and
+``d log||g_i|| / d i = -log a``. A CONTRACTIVE chain -- the Pascanu et al.
+Eq. 7 vanishing regime -- therefore produces a POSITIVE slope, and an
+expansive/exploding chain a NEGATIVE one. Measured on matched six-layer
+chains: a = 0.5 gives slope +3.465736 and a = 2 gives -3.465736
+(adversarial review, 2026-09-04). The previous docstring asserted the
+opposite mapping.
 
 Reported metrics:
   - **gradient_norm_per_layer**: per-layer Frobenius norm of dL/dh_l.
@@ -15,11 +24,20 @@ Reported metrics:
     norms. High = signal distributed across layers; low = concentrated.
   - **gradient_flow_slope**: linear regression slope of log(norm) vs.
     NORMALIZED depth (layer index / (n_layers - 1)), so the slope is
-    comparable across models with different layer counts. Negative =
-    gradients decay with depth (vanishing); positive = gradients grow
-    (exploding).
+    depth-corrected across models with different layer counts -- but NOT
+    architecture-free: r(slope, log d_model) = +0.860 on real models.
+    POSITIVE = gradients shrink toward the input (vanishing); NEGATIVE =
+    they grow toward the input (exploding). See the sign convention above.
   - **gradient_vanishing_ratio**: fraction of layers where the norm is
-    < 10% of the maximum norm.
+    < 10% of the maximum norm. This is a DISPERSION statistic and is
+    DIRECTION-FREE by construction: the matched a = 0.5 and a = 2 chains
+    both return 0.333333 despite opposite slopes, so it cannot on its own
+    distinguish vanishing from exploding flow. Read it together with
+    ``gradient_flow_log_ratio_in_out``.
+  - **gradient_flow_log_ratio_in_out**: log(||g_first|| / ||g_last||).
+    Direction-aware and unit-free -- NEGATIVE means the input-side gradient
+    is the smaller one, i.e. vanishing; POSITIVE means exploding. On the
+    matched chains it is -3.465736 for a = 0.5 and +3.465736 for a = 2.
 
 Implementation: registers forward pre-hooks on each transformer block to
 capture the residual-stream input, calls `.retain_grad()`, then
@@ -38,6 +56,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
+from ..geometry.utils import safe_norm as _safe_norm
 
 logger = logging.getLogger("blme")
 
@@ -119,7 +138,13 @@ class GradientFlowTask(DiagnosticTask):
                 for li in range(n_layers):
                     if li in captured and captured[li].grad is not None:
                         g = captured[li].grad.detach().float()
-                        norms[li] = float(g.norm().item())
+                        # Scale-exact norm: `.norm()` squares first, so it
+                        # underflows to 0.0 long before the data does. A
+                        # 4-layer model whose stored gradients each had 8
+                        # nonzero coordinates at 1.250000039e-23 reported all
+                        # four norms as 0.0 against a true 3.535534017e-23
+                        # (adversarial review round 3, 2026-09-04).
+                        norms[li] = _safe_norm(g)
                 all_norms.append(norms)
 
                 # Zero grads for next sample
@@ -136,21 +161,62 @@ class GradientFlowTask(DiagnosticTask):
 
         mean_norms = np.mean(np.stack(all_norms), axis=0)  # (n_layers,)
 
-        # Entropy of normalised norms
+        # Entropy of the normalised norm profile, reported BOTH raw and
+        # divided by log(n_layers).
+        #
+        # The raw entropy is bounded above by log(n_layers), so it encodes
+        # depth rather than gradient flow: on five synthetic models with a
+        # BYTE-IDENTICAL normalized-depth profile (exact 1000x decay from first
+        # to last layer) it ranged 0.750 -> 3.430 as depth went 6 -> 80, and on
+        # real models it correlates r = 0.974 with log(n_layers) (adversarial
+        # review, 2026-09-02). The slope below was already depth-normalized for
+        # exactly this reason; the entropy was missed.
         total = mean_norms.sum()
         if total > 0:
             p = mean_norms / total
             p_pos = p[p > 0]
             flow_entropy = float(-np.sum(p_pos * np.log(p_pos)))
+            # exp(H)/L -- the participation ratio: what FRACTION of the
+            # layers effectively carries the gradient mass.
+            #
+            # This is an EMPIRICAL depth correction, not a theorem, and on
+            # REAL models it is the WORSE of the two.
+            #
+            # An earlier version of this comment claimed real models sit in the
+            # "fixed TOTAL decay" family, where exp(H)/L is the invariant one.
+            # That assignment was wrong. The profile is dominated by a LAYER-0
+            # ARTIFACT: layer 0 alone holds 0.545 / 0.654 / 0.735 of the total
+            # gradient mass, because ||h_0|| ~ 23 against ~3265 deeper in, and
+            # corr(log||dL/dh||, -log||h||) is +0.87 / +0.95. Measured spread
+            # across depth on real models is 1.88x for the RAW entropy against
+            # 4.15x for exp(H)/L (adversarial review, 2026-09-03).
+            #
+            # Both are emitted. Prefer the RAW entropy for cross-model work
+            # until the layer-0 artifact is addressed; the synthetic families
+            # below describe where each normalization would help, not where
+            # real models actually sit.
+            #     fixed TOTAL decay      raw H 2.7-10.9x  exp(H)/L 1.06-1.12x
+            #     fixed PER-LAYER decay  raw H 1.06-1.83x exp(H)/L 3.1 -12.3x
+            #     top-k layers carry it  raw H 1.00-1.16x exp(H)/L 10.0-13.3x
+            flow_entropy_norm = (float(np.exp(flow_entropy) / n_layers)
+                                 if n_layers > 0 else float("nan"))
         else:
             flow_entropy = float("nan")
+            flow_entropy_norm = float("nan")
 
         # Slope of log(norm) vs normalised depth (gradient decay/growth
         # rate per unit of depth, cross-model comparable). Regressing on
         # raw layer index yields a slope that scales as 1/n_layers — a
         # 32-layer model and a 64-layer model with identical gradient
         # profiles would get different slopes. Using ``xs / (n_layers-1)``
-        # gives per-depth-unit slope comparable across architectures.
+        # gives a per-depth-unit slope. NOTE: "comparable across architectures"
+        # is an OVER-CLAIM, the same one the entropy normalization carried until
+        # it was corrected. Measured on the textbook vanishing-gradient profile
+        # (fixed per-layer decay), the slope runs -1.78 -> -28.18 over
+        # L = 6..80, and on real models r(slope, log d_model) = +0.860
+        # (adversarial review, 2026-09-03). Normalizing by depth removes the
+        # n_layers scaling but not the width dependence; treat the slope as
+        # depth-corrected, not architecture-free.
         # Drop exactly-zero layers before taking the log rather than
         # clipping to 1e-30 — a clip injects spurious -inf-like values
         # that corrupt the linear fit.
@@ -163,6 +229,15 @@ class GradientFlowTask(DiagnosticTask):
         else:
             slope = float("nan")
 
+        # Direction-aware companion to gradient_vanishing_ratio, which is a
+        # dispersion statistic and cannot tell vanishing from exploding (both
+        # matched chains score 0.333333). NEGATIVE = input-side gradient is
+        # smaller = vanishing.
+        if mean_norms[0] > 0 and mean_norms[-1] > 0:
+            log_ratio_in_out = float(np.log(mean_norms[0]) - np.log(mean_norms[-1]))
+        else:
+            log_ratio_in_out = float("nan")
+
         # Vanishing ratio: fraction of layers < 10% of max
         max_norm = mean_norms.max()
         if max_norm > 0:
@@ -172,9 +247,26 @@ class GradientFlowTask(DiagnosticTask):
 
         return {
             "gradient_norm_per_layer": mean_norms.tolist(),
+            # Raw entropy is depth-bounded; prefer the normalized twin as a
+            # cross-model feature. Both are emitted (see note above).
             "gradient_flow_entropy": flow_entropy,
+            # DEMOTED to _meta_ (2026-09-04). exp(H)/L survives UNIFORM
+            # identity duplication (0.614327268485 to 1.1e-16) but not the
+            # NONUNIFORM case: inserting identity blocks at uneven depths
+            # leaves the logits exact and still moves it 0.614327 -> 0.430603,
+            # -29.9%. A twin whose whole claim is "removes the depth artefact"
+            # must survive any function-preserving re-decomposition, not just
+            # the symmetric one. Same bar that removed all eleven registered
+            # normalizers (adversarial review round 2, 2026-09-04).
+            "_meta_gradient_flow_entropy_norm": flow_entropy_norm,
             "gradient_flow_slope": slope,
+            # gradient_vanishing_ratio is a FRACTION of layers, so it is not
+            # width-confounded, but it correlates r = 0.978 with log(n_layers)
+            # on real models because deeper stacks put more layers below a
+            # fixed 10%-of-max cut. It is retained but should be treated as
+            # depth-linked, not as an independent structural signal.
             "gradient_vanishing_ratio": vanishing_ratio,
+            "gradient_flow_log_ratio_in_out": log_ratio_in_out,
             "gradient_norm_mean": float(mean_norms.mean()),
             "gradient_norm_max": float(mean_norms.max()),
             "gradient_norm_min": float(mean_norms.min()),

@@ -34,7 +34,10 @@ def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokeni
 
     def spy(model, tokenizer, samples, max_length):
         captured["max_length"] = max_length
-        return {}
+        # (per_layer, post_norm_last) since 2026-09-05: the fresh collector
+        # returns BOTH tensors, because the profile is hooked and the headline
+        # follows the released reference's post-norm state.
+        return {}, []
 
     monkeypatch.setattr(me, "_collect_per_sample_layer_tokens_fresh", spy)
     me.MatrixEntropyTask(config={"num_samples": 2}).evaluate(
@@ -123,25 +126,46 @@ def test_perplexity_bpc_correct_with_bos_tokenizer():
     r = task.evaluate(model, tok, dataset)
     bpc = r["bits_per_char"]
 
-    # Independent textbook BPC: total NLL in bits over the same scored tokens,
-    # divided by total characters (BOS-inclusive scoring, T-1 labels per doc).
+    # Independent textbook BPC under the protocol actually used: ONE
+    # "\n\n"-joined stream scored in a single pass, total NLL in bits over
+    # every predicted token, divided by the characters of that same span (the
+    # joined text minus the first token, which is never predicted).
+    #
+    # This test originally summed per-document NLL and per-document chars,
+    # matching the old per-document scoring. That protocol is gone: documents
+    # are no longer scored from a cold start, no longer truncated at 512, and
+    # BPC no longer re-tokenizes anything -- so the BOS misalignment this test
+    # guards is now structurally impossible rather than merely fixed. The
+    # assertion below still catches any drift between the scored token window
+    # and the character denominator, which is what the bug actually was.
     import torch
     import torch.nn.functional as F
-    nll_bits, total_chars = 0.0, 0
+    corpus = "\n\n".join(docs)
     with torch.no_grad():
-        for d in docs:
-            ids = tok(d, return_tensors="pt")["input_ids"]
-            logits = model(ids).logits[:, :-1, :]
-            labels = ids[:, 1:]
-            nll = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
-                                  labels.reshape(-1), reduction="sum").item()
-            nll_bits += nll / np.log(2)
-            total_chars += len(d)
-    expected = nll_bits / total_chars
+        ids = tok(corpus, return_tensors="pt")["input_ids"]
+        logits = model(ids).logits[:, :-1, :]
+        labels = ids[:, 1:]
+        nll = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                              labels.reshape(-1), reduction="sum").item()
+    # SOURCE-OFFSET span, not `len(decode(first_id))`.
+    #
+    # This reference used to subtract the DECODED length of the first token,
+    # which on a BOS tokenizer is `'<|endoftext|>'` -- 13 characters that are
+    # not in the corpus at all. It therefore encoded the very defect the task
+    # was fixed for (adversarial review round 2, 2026-09-04). The correct
+    # denominator is the source span the SCORED targets actually cover, which
+    # is what `strided_perplexity` now derives from the offset mapping.
+    _off = tok(corpus, return_offsets_mapping=True)["offset_mapping"]
+    _scored_chars = sum(b - a for (a, b) in _off[1:] if b > a)
+    expected = (nll / np.log(2)) / _scored_chars
     assert abs(bpc - expected) < 1e-3, (
-        f"BPC {bpc:.5f} != textbook {expected:.5f} — recount/scoring token "
-        f"counts misaligned on a BOS tokenizer"
+        f"BPC {bpc:.5f} != textbook {expected:.5f} — scored token window and "
+        f"character denominator misaligned on a BOS tokenizer"
     )
+
+    # The whole corpus fits in one window here, so the strided pass must have
+    # scored exactly (n_tokens - 1) tokens: no double-count, no skip.
+    assert r["_meta_n_tokens_strided"] == ids.shape[1] - 1
 
 
 def test_perplexity_survives_empty_text_sample():
@@ -169,7 +193,10 @@ def test_weight_norms_handles_3d_fused_params():
 
     torch.manual_seed(0)
     W = torch.randn(4, 8, 8)  # 4 experts, 8x8 each
-    frobs, specs, sranks = _weight_matrix_stats(W)
+    # _weight_matrix_stats also returns the two dimensionless companions
+    # (stable_rank/min(m,n) and ||W||_F/sqrt(mn)), which divide the matrix-shape
+    # term out of quantities that otherwise track d_model at rho +0.683.
+    frobs, specs, sranks, sranks_norm, rms = _weight_matrix_stats(W)
     assert len(specs) == 4, "each fused expert must yield its own spectral norm"
     for i in range(4):
         true_sigma = float(torch.linalg.svdvals(W[i])[0])
@@ -179,7 +206,19 @@ def test_weight_norms_handles_3d_fused_params():
 
     # 2-D input is unchanged (single matrix)
     W2 = torch.randn(6, 10)
-    f2, s2, r2 = _weight_matrix_stats(W2)
+    
+    # The companions must be per-matrix and correctly bounded.
+    import numpy as _np
+    assert len(sranks_norm) == len(sranks) and len(rms) == len(frobs)
+    for _sr, _srn, _fr, _rms, _M in zip(sranks, sranks_norm, frobs, rms,
+                                        (W.reshape(-1, W.shape[-2], W.shape[-1])
+                                         if W.ndim > 2 else W.unsqueeze(0))):
+        _m, _n = int(_M.shape[-2]), int(_M.shape[-1])
+        assert 0.0 <= _srn <= 1.0 + 1e-9, f"normalized stable rank out of [0,1]: {_srn}"
+        assert _srn == pytest.approx(_sr / min(_m, _n), rel=1e-9)
+        assert _rms == pytest.approx(_fr / _np.sqrt(_m * _n), rel=1e-9)
+
+    f2, s2, r2, rn2, rms2 = _weight_matrix_stats(W2)
     assert len(s2) == 1 and abs(s2[0] - float(torch.linalg.svdvals(W2)[0])) < 1e-4
 
 
@@ -250,10 +289,10 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     task = SVDIsotropyTask(config={"num_samples": 5})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
-    assert "svd_auc" in results
+    assert "_meta_svd_auc" in results
     assert "cond_number" in results
-    assert results["svd_auc"] > 0
-    assert results["svd_auc"] <= 1.0
+    assert results["_meta_svd_auc"] > 0
+    assert results["_meta_svd_auc"] <= 1.0
     assert results["cond_number"] >= 1.0
 
 
@@ -584,9 +623,14 @@ def test_lipschitz(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     assert "error" not in results
-    assert "lipschitz_max" in results
-    assert "lipschitz_mean" in results
-    assert results["lipschitz_max"] >= 0
+    # `lipschitz_*` are now `_meta_`-prefixed aliases: they were
+    # bit-identical duplicates of `relative_change_*` (eight keys, four
+    # values), and the name was wrong -- this is the relative-change
+    # ratio, not an operator Lipschitz constant.
+    assert "relative_change_max" in results
+    assert "_meta_lipschitz_max" in results
+    assert "_meta_lipschitz_mean" in results
+    assert results["_meta_lipschitz_max"] >= 0
 
 
 def test_cka(mock_model, mock_tokenizer):
@@ -682,8 +726,17 @@ def test_correlation_dimension_reframes_hidden_state_gp_method():
 
     assert "error" not in result, result
     assert "correlation_dimension" in result
-    assert result["hidden_state_correlation_dimension"] == result["correlation_dimension"]
-    assert result["correlation_dimension_method"] == "hidden_state_grassberger_procaccia"
+    # NaN-aware: the two are ALIASES, and with only 25 stub points the
+    # scaling-region fit is legitimately censored to NaN -- and `nan == nan` is
+    # False, so a bare equality check fails on a correct result.
+    _a = result["_meta_hidden_state_correlation_dimension"]
+    _b = result["correlation_dimension"]
+    assert (_a == _b) or (np.isnan(_a) and np.isnan(_b)), (_a, _b)
+    # The primary key is now the SCALING-REGION fit -- the old 5th-95th
+    # percentile window sat in the saturation region and missed GP 1983's
+    # published D2 = 2.05 by -27.7% on a Lorenz attractor.
+    assert result["correlation_dimension_method"] == (
+        "hidden_state_grassberger_procaccia_scaling_region")
     assert result["correlation_dimension_point_space"] == "mean_pooled_hidden_states"
 
 
@@ -781,9 +834,15 @@ def test_positional_decay_uniform_causal_attention_is_null():
 
         def forward(self, input_ids=None, output_attentions=False, **kwargs):
             seq_len = input_ids.shape[1]
+            # WELL-FORMED causal attention: every row sums to 1 over keys
+            # 0..i INCLUSIVE. The previous fixture wrote `attn[i, :i] = 1/i`,
+            # which left the DIAGONAL at 0 and row 0 entirely empty, so no row
+            # summed to 1 -- it was not an attention pattern at all, and the
+            # number this test reported for the pooled estimand was measured on
+            # that malformed input (independent Opus review, 2026-09-04).
             attn = torch.zeros(1, 2, seq_len, seq_len)
-            for i in range(1, seq_len):
-                attn[:, :, i, :i] = 1.0 / i
+            for i in range(seq_len):
+                attn[:, :, i, :i + 1] = 1.0 / (i + 1)
 
             class Out:
                 attentions = (attn,)
@@ -807,7 +866,16 @@ def test_positional_decay_uniform_causal_attention_is_null():
     )
 
     assert "error" not in result, result
+    # The HEADLINE (rowwise) must be exactly 0 on this null.
     assert result["mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
+    # And the MANUSCRIPT'S pooled estimand must NOT be, which is why the
+    # headline is the rowwise one. Pinned so the evidence for overriding the
+    # paper survives: the pooled null bias converges to about -0.467 as the
+    # context grows (-0.4344766895 at L=8, -0.4666215371 at L=256).
+    _pooled = result["mean_positional_decay_correlation_pooled"]
+    assert _pooled < -0.3, (
+        f"pooled estimand no longer shows its null bias ({_pooled}); if this "
+        f"changed, revisit which estimand should be the headline")
     assert result["layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
 
 
@@ -957,17 +1025,48 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     assert "error" not in res
 
     # Normalised entropy must be in [0, 1].
-    assert 0 <= res["matrix_entropy_normalized"] <= 1.01, (
-        f"H_normalized out of [0, 1]: {res['matrix_entropy_normalized']}"
+    # `_meta_` prefixed: the H / log(d) twin was demoted on 2026-09-04 because
+    # zero-padding d=512 -> 4096 (an exact isometry) moves it 0.721317 ->
+    # 0.540988 and it makes the archive width association WORSE than the raw
+    # value. Still emitted, still bounded, just not feature-eligible.
+    # `matrix_entropy` IS the normalised H (Wei et al. Def. 4.3); the
+    # `_meta_..._normalized` aliases were removed on 2026-09-05 because they
+    # carried the IDENTICAL float under a second name -- the "demotion" they
+    # documented never took effect (independent Opus review).
+    assert 0 <= res["matrix_entropy"] <= 1.01, (
+        f"H_normalized out of [0, 1]: {res['matrix_entropy']}"
     )
-    assert 0 <= res["mean_matrix_entropy_normalized"] <= 1.01
+    assert 0 <= res["mean_matrix_entropy"] <= 1.01
+    assert "_meta_matrix_entropy_normalized" not in res
+    assert res["matrix_entropy_raw"] >= 0.0
 
-    # Headline == last-layer entropy.
+    # Headline == last-layer entropy, in the NORMALISED convention.
+    #
+    # `matrix_entropy` now holds H / log d, which is Wei et al.'s Definition
+    # 4.3 and the quantity their tables report: on their protocol pythia-70m's
+    # published 0.7003 matches the normalised 0.6659 (-4.9%), against a raw
+    # H of 4.1542 (+493%). The raw value is retained under a _meta_ key.
     last_key = max(
         res["layer_matrix_entropies"].keys(),
         key=lambda k: int(k.split("_")[1]),
     )
-    assert res["matrix_entropy"] == res["layer_matrix_entropies"][last_key]
+    # THE HEADLINE IS NO LONGER THE PROFILE'S LAST ENTRY, deliberately.
+    #
+    # Wei et al.'s released recipe is `AutoModel(...)[0]` == `hidden_states[-1]`
+    # == `ln_f(b_{L-1})`, so the headline is a single-layer estimand the
+    # REFERENCE defines as the post-norm state, while the per-layer PROFILE is
+    # hooked so it is homogeneous. They are different tensors on purpose
+    # (2026-09-05). Asserting they are equal is asserting the defect that made
+    # this task RED: hooking the headline moved gpt2 +93.3% off the reference
+    # and turned a published 70m-vs-160m gap from +6.3% into +105.5%.
+    assert res["_meta_headline_is_post_final_norm"] is True
+    # The profile's deepest entry is the HOOKED one, so it must differ from the
+    # headline on any model with a real final norm -- if these ever coincide,
+    # the substitution silently stopped happening.
+    assert res["matrix_entropy"] != res["layer_matrix_entropies_normalized"][last_key]
+    assert res["matrix_entropy_raw"] != res["layer_matrix_entropies"][last_key]
+    # The headline must be the normalised one, not the raw one.
+    assert 0 <= res["matrix_entropy"] <= 1.01
 
 
 def test_matrix_entropy_uses_per_sample_cache():
@@ -1183,7 +1282,12 @@ def test_mp_bulk_iid_null():
     assert "error" not in m
     assert m["outlier_frac"] <= 0.01, f"iid null produced outliers: {m}"
     assert m["ks_distance"] < 0.05, f"KS too large for iid null: {m}"
-    assert np.isclose(m["gamma"], 0.1)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 200 / 1999)
 
 
 def test_mp_bulk_planted_spike_detected():
@@ -1221,7 +1325,12 @@ def test_mp_bulk_constant_dimension_dropped():
     for key in ("outlier_frac", "spike_energy", "ks_distance", "gamma",
                 "outlier_frac_g25", "spike_energy_g25", "ks_distance_g25"):
         assert np.isfinite(m[key]), f"{key} is NaN after dropping dim: {m}"
-    assert np.isclose(m["gamma"], 99 / 1000)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 99 / 999)
 
 
 def test_mp_bulk_edge_and_cdf_sanity():
@@ -1248,8 +1357,15 @@ def test_mp_bulk_edge_and_cdf_sanity():
     rng = np.random.default_rng(3)
     m = _mp_layer_metrics(rng.standard_normal((800, 200)),
                           edge_tol=0.05, fixed_gamma=None)
-    assert np.isclose(m["gamma"], 0.25)
-    assert np.isclose(_mp_bulk_edge(m["gamma"]), 2.25, atol=1e-9)
+    # gamma = D/(N-1), not D/N: centering removes one degree of freedom, so
+    # the centered matrix has rank <= N-1 and D/(N-1) is the ratio that
+    # actually governs the spectrum. Using D/N misplaces the bulk edge, and
+    # just below gamma = 2 the off-by-one gave a ~2x error in the fitted
+    # sigma^2 (0.49 for a truth of 1.0).
+    assert np.isclose(m["gamma"], 200 / 799)
+    # (1 + sqrt(gamma))^2 at the corrected gamma.
+    assert np.isclose(_mp_bulk_edge(m["gamma"]),
+                      (1 + (200 / 799) ** 0.5) ** 2, atol=1e-9)
 
 
 def test_mp_bulk_integration(mock_model, mock_tokenizer):
@@ -1407,7 +1523,7 @@ def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
     })
     out = task.evaluate(_HeadModel(), _Tok(), dataset=None)
 
-    assert out["unembedding_n_category_tokens"] == 8
+    assert out["_meta_unembedding_n_category_tokens"] == 8
     assert out["unembedding_purity_mean"] == 1.0
 
 
@@ -1498,8 +1614,8 @@ def test_categories_relation_hubness_and_analogy_kernels():
     out = task._compute_relation_consistency(E, {"rel": pairs}, tokenizer=None)
 
     assert out["rel_consistency"] == pytest.approx(1.0, abs=1e-9)
-    assert out["rel_analogy_acc_top1"] == pytest.approx(1.0, abs=1e-12)
-    assert out["rel_analogy_acc_top5"] == pytest.approx(1.0, abs=1e-12)
+    assert out["_meta_rel_analogy_acc_top1"] == pytest.approx(1.0, abs=1e-12)
+    assert out["_meta_rel_analogy_acc_top5"] == pytest.approx(1.0, abs=1e-12)
 
     # Hubness kernel vs an independent recomputation on a category.
     tids = list(range(10, 20))
@@ -1576,3 +1692,38 @@ def test_representation_sensitivity_bias_head_matches_autograd():
     assert blme_val == pytest.approx(ref, rel=1e-4), (
         f"bias-branch closed form diverged from autograd: {blme_val} vs {ref}"
     )
+
+
+def test_every_geometry_task_actually_runs():
+    """Smoke test: each registered geometry task must EXECUTE.
+
+    `geometry_vendi_score` once shipped a `NameError` on every call -- a
+    reference to an out-of-scope loop variable -- while its parity suite stayed
+    9/9 green, because no test invoked `evaluate()`. A task that cannot run is
+    the most severe failure there is, and nothing caught it.
+    """
+    import blme.tasks.geometry  # noqa: F401
+    from blme.registry import list_tasks, get_task
+
+    from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
+    import torch
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    model = GPT2LMHeadModel(GPT2Config(
+        n_layer=3, n_head=2, n_embd=32, vocab_size=tok.vocab_size,
+        n_positions=64, n_ctx=64)).eval()
+    dataset = [{"text": "The quick brown fox jumps over the lazy dog."},
+               {"text": "A second sentence with entirely different tokens here."},
+               {"text": "Numbers one two three four five six seven eight nine."}]
+
+    failures = []
+    for name in sorted(t for t in list_tasks() if t.startswith("geometry_")):
+        cls = get_task(name)
+        if cls is None:
+            continue
+        try:
+            cls(config={"num_samples": 3, "use_cache": False}).evaluate(
+                model, tok, dataset, cache=None)
+        except Exception as exc:  # noqa: BLE001 - we want the type and message
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+    assert not failures, "geometry tasks that raise on a minimal input:\n" + "\n".join(failures)

@@ -1,0 +1,25 @@
+{
+  "task": "geometry_intrinsic_dim",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "From Facco's F(mu)=1-mu^(-d), the required estimate is the origin-constrained slope of -log(1-F_emp) on log(mu) under the paper's one-based empirical-CDF algorithm, which the code implements exactly. Its periodic 14-cube and Swiss-roll replications were 13.9340 and 1.97336 versus 13.91 and 2.01 (0.173% and 1.823% relative error), with no value-changing counterexample on the paper's continuous-data domain.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The raw dimension count is strongly associated with architecture in the current 46-model table: rho=0.629 with d_model (p=2.89e-6) and rho=0.391 with n_layers (p=0.00715). Zero-padding a fixed 5-D cloud from ambient width 5 to 512 changed the estimate by only 1.08e-8 relative, so this is not an algebraically forced ambient-width effect, but it remains a strong trained-model scale proxy as reported.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_repo": "https://github.com/efacco/TWO-NN",
+  "github_reason": "The authors' efacco/TWO-NN release was found, but its legacy C++ program could not be fetched and built through this host's shell network. Installed scikit-dimension 0.3.4 was run head-to-head instead: on three 500-point Gaussian clouds BLME was 0.656-0.658% higher because BLME uses Facco's paper-specified one-based empirical CDF while scikit-dimension uses zero-based ranks.",
+  "paper_number": "YES",
+  "paper_reason": "Facco et al. Fig. 1 reports trimmed slopes 13.91 for a periodic 14-D cube and 2.01 for a Swiss roll. Ten independent local N=2500 replications using BLME's slope averaged 13.934002 and 1.973362, relative errors 0.173% and 1.823%; the paper does not publish its random seed.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Across 46 archived model rows, intrinsic_dimension has rho=0.629 with d_model (p=2.89e-6), rho=0.391 with n_layers (p=0.00715), and rho=0.242 with vocab_size (p=0.104). The zero-padding control proves the estimator is invariant to unused ambient coordinates, but the emitted model statistic still tracks learned width/depth strongly enough to require explicit scale control.",
+  "defects": [
+    "src/blme/tasks/geometry/intrinsic_dim.py:83 reads the output-style key _meta_sample_size rather than a user configuration key, so the shipped num_samples value never limits static embeddings; this is a code-wiring defect, not an estimator defect.",
+    "src/blme/task_metadata.py:55 claims bit-identical scikit-dimension parity. Direct execution shows a systematic 0.656-0.658% difference at N=500 because scikit-dimension uses zero-based ranks; BLME follows the paper here, so the provenance claim, not the formula, is wrong.",
+    "src/blme/tasks/geometry/intrinsic_dim.py:114-125 filters duplicate-induced r1=0 and equal-distance mu=1 rows only after neighbor search. A fully duplicated cloud returns NaN; the paper assumes a continuous distribution and does not define this case, so the behavior needs an explicit invalid-population diagnostic rather than silent row loss.",
+    "The task emits one full-vocabulary estimate and no Facco-style subsampling curve, plateau, or uncertainty, leaving the relevant scale unresolved on noisy manifolds."
+  ],
+  "fix": ""
+}

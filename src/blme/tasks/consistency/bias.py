@@ -131,6 +131,9 @@ def _embed_word(model, tokenizer, word: str, device, final_norm=None,
     # double-normalises the embedding and corrupts every WEAT d-value.
     # Keep the helper signature for API compatibility but do not
     # re-apply the norm.
+    # post-final-norm: DELIBERATELY post-norm -- this compares a model's
+    # OUTPUT representations of two prompts, which is the post-`ln_f`
+    # vector by definition.
     h = out.hidden_states[-1][0, pos]  # (D,) — already post-norm
     return h.float().detach().cpu().numpy()
 

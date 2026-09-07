@@ -5,6 +5,7 @@ without seeds, so rerunning the study produced different feature values
 across invocations. Paper-grade numbers should be deterministic.
 """
 import inspect
+import pytest
 import sys
 from pathlib import Path
 
@@ -136,13 +137,41 @@ def test_collect_hidden_states_token_subsampling_is_seeded():
     assert "torch.Generator" in src
 
 
-def test_svd_isotropy_pair_sampling_is_seeded():
-    """SVD isotropy's average cosine sample must be deterministic across
-    reruns of the same hidden-state matrix."""
+def test_svd_isotropy_average_cosine_is_exact_not_sampled():
+    """SVD isotropy's average cosine must be EXACT, not a seeded sample.
+
+    This test previously required a `default_rng` in the source -- i.e. it
+    pinned that the pair sample was at least seeded. The sampler has since been
+    replaced by the closed form
+
+        E_{i != j}[u_i . u_j] = (N ||mean(u)||^2 - 1) / (N - 1),
+
+    which is stronger than determinism: there is no sampling error at all,
+    where the 1000-pair sample carried errors up to 0.047 on a quantity whose
+    cross-model range is 0.36-0.99. Pin the exactness instead of the seed.
+    """
+    import numpy as np
     from blme.tasks.geometry import isotropy
+
     src = inspect.getsource(isotropy._svd_metrics_for_layer)
     assert "np.random.choice" not in src
-    assert "default_rng" in src
+    assert "default_rng" not in src, (
+        "the average cosine is computed in closed form; a RNG here means the "
+        "sampler was reintroduced"
+    )
+
+    # Exactness: agree with brute force over all ordered distinct pairs.
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((300, 24)) + 0.7
+    got = isotropy._svd_metrics_for_layer(X)["avg_cosine_similarity"]
+    u = X / np.linalg.norm(X, axis=1, keepdims=True)
+    g = u @ u.T
+    n = len(u)
+    expected = float((g.sum() - np.trace(g)) / (n * (n - 1)))
+    assert got == pytest.approx(expected, rel=1e-9, abs=1e-9)
+
+    # Determinism: identical input, identical output, bit for bit.
+    assert isotropy._svd_metrics_for_layer(X)["avg_cosine_similarity"] == got
 
 
 def test_correlation_dimension_subsampling_is_seeded():

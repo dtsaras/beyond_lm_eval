@@ -1,6 +1,6 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_prediction_stats
+from .utils import collect_prediction_stats, strided_perplexity
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -26,6 +26,17 @@ class RarePPLTask(DiagnosticTask):
 
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
+
+        # MATERIALISE ONCE. `evaluate` traverses the dataset twice -- once for
+        # the per-document statistics and again for the strided pass -- so a
+        # one-shot iterator was consumed by the first traversal and the second
+        # silently fell back to the per-document protocol under the same key.
+        # The same 4 texts gave strided PPL 25.964948 / BPB 1.146522 as a list
+        # but per-document PPL 69.553105 (2.679x) as an iterator, with nothing
+        # in the output to distinguish them (adversarial review round 2,
+        # 2026-09-04).
+        if not isinstance(dataset, (list, tuple)):
+            dataset = list(dataset)
 
         if cache is not None and cache.is_populated and use_cache:
             stats, _ = cache.get_prediction_stats(num_samples=num_samples)
@@ -78,60 +89,125 @@ class RarePPLTask(DiagnosticTask):
                     nll_freq += l_val
                     cnt_freq += 1
 
-        # Bits-per-character: re-tokenise the first num_samples documents
-        # so we can count UTF-8 characters in each one. NLL is per token
-        # in nats; convert to bits and divide by char count.
+        # ---- Corpus perplexity by the STANDARD strided-window protocol ----
+        #
+        # ppl_overall and the bits-per-X family are the numbers a reader will
+        # compare against published perplexities, so they must be computed the
+        # way published perplexities are: one concatenated stream, a sliding
+        # window with masked overlap. See strided_perplexity() for the full
+        # rationale and the measured gpt2 discrepancy (37.91 -> 21.80).
+        #
+        # The frequency-stratified buckets above stay on the per-document
+        # stats path: they need per-token identity, they are a RATIO between
+        # two buckets scored under the same conditions, and the protocol
+        # difference largely cancels in that ratio.
         bpc = float("nan")
-        if cnt_total > 0:
-            try:
-                total_chars = 0
-                total_tokens_for_chars = 0
-                for i, sample in enumerate(dataset):
-                    if i >= num_samples:
-                        break
-                    text = sample["text"] if isinstance(sample, dict) else str(sample)
-                    # Tokenise IDENTICALLY to collect_prediction_stats (default
-                    # add_special_tokens — the old add_special_tokens=False
-                    # dropped the BOS on Llama/Gemma-style tokenizers, so the
-                    # recount undercounted tokens by one per doc and BPC was
-                    # ~13% low) and skip <2-token docs the SAME way, so
-                    # total_tokens_for_chars == cnt_total exactly and BPC reduces
-                    # to nll_total_bits / total_chars.
-                    # Truncation MUST match the scoring path (cache and
-                    # collect_prediction_stats both truncate at 512; audit
-                    # 2026-07-16: an untruncated recount over-counted tokens
-                    # on long docs — 727 vs 519 on a 720-token doc — biasing
-                    # BPC low, growing with doc length).
-                    enc = tokenizer(text, truncation=True, max_length=512)
-                    n_tok = len(enc["input_ids"])
-                    if n_tok < 2:
-                        continue
-                    total_tokens_for_chars += (n_tok - 1)
-                    # Chars must correspond to the SCORED (truncated) text.
-                    if len(enc["input_ids"]) >= 512:
-                        text = tokenizer.decode(enc["input_ids"],
-                                                skip_special_tokens=True)
-                    total_chars += len(text)
+        bpb = float("nan")
+        ppl_strided = float("nan")
+        _strided_error = None
+        _byte_attr = "none"
+        _extra_bounds = {}
+        nll_strided = float("nan")
+        n_strided = 0
+        try:
+            (ppl_strided, nll_strided, n_strided,
+             n_bytes, n_chars, _ppl_window, _ppl_stride,
+             _byte_attr) = strided_perplexity(
+                model, tokenizer, dataset, num_samples=num_samples,
+                max_length=self.config.get("ppl_max_length"),
+                stride=self.config.get("ppl_stride"),
+            )
+            if n_strided > 0 and np.isfinite(nll_strided):
+                bits_total = nll_strided * n_strided / float(np.log(2))
+                # bits_per_byte is the tokenizer-independent standard (the
+                # Pile / lm-evaluation-harness convention). bits_per_char is
+                # kept for continuity but is Unicode-code-point based, so it
+                # is NOT comparable across corpora with different scripts.
+                # The PUBLIC keys carry EXACT values only.
+                #
+                # The offset-less branch can only bound the denominator from
+                # above, and the bound is not always tight: when token 0 owns
+                # 16 of a 22-byte corpus the bound is off by 3.7x, so exporting
+                # it under `bits_per_byte` would contradict what that key
+                # means (adversarial review round 3, 2026-09-04). It is emitted
+                # under an explicitly-named `_meta_` key instead.
+                if n_bytes > 0:
+                    _bpb_val = float(bits_total / n_bytes)
+                    if _byte_attr == "offsets":
+                        bpb = _bpb_val
+                    else:
+                        _extra_bounds["_meta_bits_per_byte_lower_bound"] = _bpb_val
+                if n_chars > 0:
+                    _bpc_val = float(bits_total / n_chars)
+                    if _byte_attr == "offsets":
+                        bpc = _bpc_val
+                    else:
+                        _extra_bounds["_meta_bits_per_char_lower_bound"] = _bpc_val
+        except Exception as e:
+            # RECORDED, not swallowed. `ppl_overall` is documented as the
+            # STRIDED number; when the strided pass fails it silently became
+            # the per-document one under the same key, with no flag. The same
+            # three-document input gave ppl_overall 59.735543 as a list and a
+            # different value as a one-shot iterator, because the iterator was
+            # consumed by the first pass -- indistinguishable in the output
+            # (adversarial review, 2026-09-04).
+            _strided_error = f"{type(e).__name__}: {e}"
+            logger.info(f"  Strided PPL/BPC computation failed: {_strided_error}")
 
-                if total_chars > 0 and total_tokens_for_chars > 0:
-                    # Average NLL per token (over the same shifted labels)
-                    mean_nll_nats = nll_total / cnt_total
-                    # bits per token
-                    bits_per_token = mean_nll_nats / float(np.log(2))
-                    # tokens per char (using the freshly tokenised counts)
-                    tokens_per_char = total_tokens_for_chars / total_chars
-                    bpc = float(bits_per_token * tokens_per_char)
-            except Exception as e:
-                logger.info(f"  BPC computation failed: {type(e).__name__}: {e}")
+        # Per-document figures, retained under explicit names so the
+        # protocol behind every number is visible at the call site.
+        ppl_perdoc = (float(np.exp(nll_total / cnt_total))
+                      if cnt_total > 0 else float("inf"))
+        nll_perdoc = (nll_total / cnt_total) if cnt_total > 0 else float("nan")
 
-        ppl_overall = float(np.exp(nll_total / cnt_total)) if cnt_total > 0 else float("inf")
-        mean_nll_nats = (nll_total / cnt_total) if cnt_total > 0 else float("nan")
+        # ppl_overall / mean_nll_nats now carry the STRIDED value, falling
+        # back to the per-document one only if the strided pass failed.
+        # `ppl_overall` MEANS the strided value. When the strided pass fails
+        # it is NaN, not silently re-pointed at the per-document number: a
+        # synthetic joined-stream failure returned ppl_overall = 2.000000004,
+        # identical to `ppl_overall_perdoc`, with only a `_meta_` field to
+        # betray that the definition had changed (adversarial review round 3,
+        # 2026-09-04). The per-document value keeps its own name.
+        _strided_ok = bool(np.isfinite(ppl_strided))
+        ppl_overall = ppl_strided if _strided_ok else float("nan")
+        mean_nll_nats = nll_strided if np.isfinite(nll_strided) else float("nan")
+
+        _extra = {
+            # Which protocol `ppl_overall` is actually on, always emitted.
+            "_meta_ppl_protocol": "strided" if _strided_ok else "per_document",
+            "_meta_ppl_byte_attribution": _byte_attr,
+            **_extra_bounds,
+        }
+        if _strided_error is not None:
+            _extra["_meta_ppl_strided_error"] = _strided_error
+        try:
+            _extra["_meta_ppl_window"] = int(_ppl_window)
+            _extra["_meta_ppl_stride"] = int(_ppl_stride)
+        except NameError:
+            pass
 
         return {
+            # Frequency-stratified buckets. These come from the PER-DOCUMENT
+            # pass -- they need per-token identity -- while ppl_overall is
+            # strided, so forming ppl_rare/ppl_overall mixes protocols: on gpt2
+            # that cross-protocol ratio is 5.31 against a within-protocol 3.05,
+            # a 74% inflation of the apparent rare-token penalty. The
+            # within-protocol ratio is emitted directly so nobody has to build
+            # it, and the protocol is recorded in _meta_ppl_bucket_protocol.
             "ppl_rare": float(np.exp(nll_rare / cnt_rare)) if cnt_rare > 0 else float("inf"),
             "ppl_freq": float(np.exp(nll_freq / cnt_freq)) if cnt_freq > 0 else float("inf"),
+            "ppl_rare_over_freq": (float(np.exp(nll_rare / cnt_rare - nll_freq / cnt_freq))
+                                   if cnt_rare > 0 and cnt_freq > 0 else float("nan")),
+            "_meta_ppl_bucket_protocol": "per_document",
             "ppl_overall": ppl_overall,
             "mean_nll_nats": mean_nll_nats,
             "bits_per_char": bpc,
-            "n_tokens_scored": cnt_total,
+            "bits_per_byte": bpb,
+            "_meta_n_tokens_scored": int(n_strided) if n_strided > 0 else cnt_total,
+            # Protocol-explicit duplicates for auditability.
+            "_meta_ppl_overall_strided": ppl_strided,
+            "ppl_overall_perdoc": ppl_perdoc,
+            "_meta_n_tokens_strided": int(n_strided),
+            "_meta_n_tokens_perdoc": int(cnt_total),
+            **_extra,
         }

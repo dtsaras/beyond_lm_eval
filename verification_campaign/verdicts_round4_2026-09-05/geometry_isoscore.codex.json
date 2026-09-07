@@ -1,0 +1,27 @@
+{
+  "task": "geometry_isoscore",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The current kernel reduces Rudman et al. Eq. 4.1 to (PR-1)/(d-1), matched independent covariance-eigenvalue calculations within 8.33e-16 absolute, and reproduced all nine Table 2 anchors within 2.22e-16. It is not faithful on every finite cloud: an exact +1,000,000 translation changed 0.995797623796 to 0.024504805160 (-97.54%), while released IsoScore 2.0.1 remained 0.995797634125.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Raw IsoScore is structurally ambient-width dependent: zero-padding one exact rank-5 cloud from d=5 to d=2048 changed 1.000000000000 to 0.001954079140, a 511.75x drop. The separately emitted isoscore_effective_dims passed the strict mechanism test, staying 5.000000000000 within 2.22e-14 under d=5..2048 zero-padding; NORMALIZERS contains 0 registrations, so this is an in-task variant rather than a global registered twin.",
+  "normalized_variant": "isoscore_effective_dims",
+  "normalized_ok": "GREEN",
+  "github": "YES",
+  "github_repo": "bcbi-edu/p_eickhoff_isoscore",
+  "github_reason": "I fetched and inspected the current main IsoScore/IsoScore.py and executed its operations locally on six ordinary, translated, rotated, scaled, rank-1, and near-isotropic arrays; BLME's maximum absolute difference was 2.11e-14, and against installed released IsoScore 2.0.1 it was 2.83e-08 on ordinary/wide cases. The residual is real rather than a paper/reference disagreement: on the exact translated adversary released 2.0.1 returned 0.995797634125 while BLME returned 0.024504805160 (absolute difference 0.971292829965).",
+  "paper_number": "YES",
+  "paper_reason": "Rudman et al. Table 2 publishes iota(I_9^(k))=(k-1)/8, namely 0.000 through 1.000 in steps of 0.125. Exact paired-axis covariance clouds driven through the current public task reproduced all nine values with maximum absolute error 2.22e-16; k=5 returned 0.4999999999999999 versus 0.500 published.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Across all 66 local blme_verified_a records, raw IsoScore had Spearman rho=-0.432836 with d_model (p=2.84e-4), -0.309590 with n_layers (p=0.0114), and -0.462942 with log(parameters) (p=9.08e-5). isoscore_effective_dims reduced those associations without moving them to vocabulary: rho with d_model/n_layers/vocab_size/log(parameters) was -0.089072/-0.038992/-0.031041/-0.142155, all p>=0.255, although these records use the older common 200-document protocol.",
+  "defects": [
+    "CODE/FIDELITY at src/blme/tasks/geometry/isotropy.py:214: np.asarray(X - X.mean(...), dtype=float64) promotes only AFTER the mean and subtraction. On a 4096x8 exactly balanced integer cloud, adding exactly 1,000,000 preserved every coordinate (X-offset == V) but moved BLME 0.995797623796 -> 0.024504805160 (-97.54%); the released package stayed 0.995797634125 and the float32 mean was wrong by 31.125.",
+    "TESTED-CONTRACT DEFEAT at tests/test_scale_invariance.py:28,66-74: on an exact mean-20, nine-level stored cloud, the file's own seven scales produced BLME [0.981982455, 0.000746064, 0.000182220, 0.000321703, 0.013080541, 0.545010791, 0.000142099], while a promoted same-storage reference stayed 0.985943129-0.986654257; calling the test's _const at the documented 1e-6 storage tolerance fails, with worst relative error 0.999856.",
+    "CODE/INTEGRATION at src/blme/tasks/geometry/isotropy.py:270-288 and src/blme/cache.py:129-134: _cache_ok checks only document count, not hidden-state availability. A real locally populated 40-document logits-only ModelOutputCache had hidden=None and 40 logits; IsoScore raised AttributeError on None.float() and made 0 self-collection calls instead of falling back.",
+    "CODE/AUXILIARY at src/blme/tasks/geometry/isotropy.py:174-179: _isoscore_null_floor still claims to preserve N/d but caps only N. Requested (N,d)=(83641,768) executes (52083,768), changing N/d 108.907552 -> 67.816406; an 8-seed d=64 analogue moved the isotropic-null mean 0.990663293 -> 0.985159385 (delta -0.005503907).",
+    "CODE/PROTOCOL at src/blme/tasks/geometry/isotropy.py:293-294: the public task rejects every finite cloud with fewer than 10 rows although Algorithm 1 and released 2.0.1 define non-singletons. A 6x3 exact isotropic cloud gives kernel/reference 1.000000000000 but evaluate returns 'Too few finite hidden states'; this sample-size restriction is recorded here and is not used to score implementation fidelity.",
+    "CONFIG/DOC at src/blme/tasks/configs/defaults.yaml:14-25: resolved defaults are num_samples=1000 and min_points_per_dim=50, but the comments still say the ratio is enforced and NaN-gated. A current 20x100 task run at N/d=0.2 emitted isoscore=0.152547250416 with _meta_sampling_regime_ok=false, directly contradicting the shipped documentation."
+  ],
+  "fix": "Promote X before computing its mean, then center and scale the centered matrix by its finite maximum magnitude before SVD; add the exact mean-20 seven-scale adversary to test_scale_invariance.py and require the public path to match the promoted reference within 1e-6. Require both sufficient documents and non-None hidden states before using a cache, otherwise self-collect; preserve the null draw's N/d by jointly reducing N and d (the 83641x768 case fits as about 66002x606) and report the executed shape; remove or explicitly label the <10 protocol restriction; and correct defaults.yaml to say the 50x condition is metadata-only."
+}

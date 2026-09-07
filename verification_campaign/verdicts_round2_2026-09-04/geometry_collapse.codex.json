@@ -1,0 +1,26 @@
+{
+  "task": "geometry_collapse",
+  "reviewer": "codex",
+  "verdict": "YELLOW",
+  "verdict_reason": "The primary computation is faithful to Roy-Vetterli: the published rho=0.5 spectrum gives 3.079201435678004 versus 3.0792014356780038 (relative error 1.44e-16), 200 adversarial spectra have maximum relative error 6.80e-16, and current gpt2/distilgpt2/pythia-70m/pythia-160m profiles agree cache-to-fresh at 0.000e+00 and with independent SciPy SVD at most 9.64e-7 relative. One implementation caveat remains: if the discovered final block fires on one forward and is skipped on the next same-shaped forward, the fresh collector reuses the stale tensor and reports erank 2.249104620 instead of 2.729245638 (absolute error 0.480141018) while claiming block provenance.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The bundle contains raw dimension counts: at fixed N=513 under an iid no-collapse null, erank rises 7.982495 -> 411.818325 from d=8 -> 512 with Spearman rho=+1.000, while erank/d reverses to rho=-1.000. Collapse ratio alone survives the direct width intervention: zero-padding the identical three-layer cloud from d=8 to 512 leaves it 0.506258856821 and leaves all four raw summaries unchanged to 0.000e+00, but the four emitted /d_model fields move by exactly 64.0x.",
+  "normalized_variant": "erank_per_layer_frac, max_erank_frac, min_erank_frac, max_drop_frac (in-task outputs; NORMALIZERS has 0 registrations)",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "facebookresearch/directclr",
+  "github_reason": "I re-fetched and inspected the official 147-line DirectCLR spectrum.py; it contains 0 Roy-effective-rank or collapse-ratio routines and returns the covariance singular spectrum after row-L2 normalization, so there are 0 same-input scalar comparisons available. A fresh local clone attempt exited 128 because this sandbox cannot reach GitHub, and Roy-Vetterli itself released 0 code artifacts; the formula was therefore verified analytically rather than by author-code execution.",
+  "paper_number": "YES",
+  "paper_reason": "Roy-Vetterli Section 2.3's rho=0.5 example has spectrum [2.25, 0.75, 0.75, 0.25] and independent erank 3.0792014356780038; BLME returns 3.079201435678004 (absolute error 4.44e-16, relative error 1.44e-16). Property 1 also returns k for k=1,2,3,5,10,50 with maximum relative error 5.68e-16; the BLME collapse_ratio and max_drop extensions have 0 published numeric counterparts.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Width is causally confirmed by the fixed-N=513 iid null: raw erank has rho(d_model)=+1.000 across d=8..512, whereas the /d_model twin has rho=-1.000 and falls 0.997812 -> 0.804333. Observation count is another confirmed bound: on the same current gpt2 cache, 75/150/314 tokens move max_erank 53.528361 -> 100.577521 -> 195.403798 and max_drop -27.693886 -> -50.843813 -> -91.676569, even though collapse_ratio stays in the narrower 0.121253-0.131054 range.",
+  "defects": [
+    "CODE, utils.py:218-265: the fresh path neither clears nor pops _last_block_out['h'] per forward and sets one run-level flag after any successful swap. In a two-forward conditional-block test with one actual hook invocation, the second same-shaped sample reused stale states (max tensor error 5.0), erank changed 2.729245638 -> 2.249104620, and _meta_last_entry_is_block_output was still true.",
+    "NORMALIZATION/CODE, collapse.py:215-240: although normalization.py has exactly 0 registered twins, the task still emits four first-class /d_model variants. Isometric zero-padding from d=8 to 512 leaves max_erank/min_erank/max_drop/collapse_ratio at 7.810457319/3.954113194/-1.942833987/0.506258857 exactly, while every fraction changes by exactly 64.0x; on the iid width null the association merely flips from rho=+1.000 raw to -1.000 divided.",
+    "PROTOCOL/COMPARABILITY, defaults.yaml:31-32 and collapse.py:46: the effective default is 100 documents, not a fixed point count. A current gpt2 prefix sweep produced 75, 150, and 314 token rows and max_erank 53.528361, 100.577521, and 195.403798, so raw dimension counts cannot be pooled without matching the realized point population.",
+    "ROBUSTNESS/CODE, collapse.py:73-219: an empty activation mapping still reaches layers[0] and raises IndexError('list index out of range'); the measured structured-result count is 0.",
+    "DOCUMENTATION, collapse.py:231-233: the comment calls erank_sigma2_per_layer a raw-singular-value spectrum, but the emitted value is effective_rank(S**2): 7.391674861 versus an independent 7.391674849, while the actual raw-sigma primary is 7.810457319."
+  ],
+  "fix": "In collect_hidden_states, pop or clear the hook sink before each forward, accept a replacement only from that same forward, and set last_is_block true only if every retained sample was successfully replaced; add the measured one-of-two-hook regression requiring erank 2.729245638, not 2.249104620. Return a structured failure before indexing an empty layer list; remove or _meta_-demote the four failed /d_model fields; fix the sigma2 comment. Keep cache._last_block_substituted and max_drop unchanged: their current mismatch delta is 0.000e+00 and the increasing-profile formula error is 0.000e+00."
+}

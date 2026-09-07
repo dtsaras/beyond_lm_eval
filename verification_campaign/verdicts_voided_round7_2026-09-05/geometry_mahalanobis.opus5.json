@@ -1,0 +1,28 @@
+{
+  "task": "geometry_mahalanobis",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "The interleaved fit/score split is real and I reproduced BOTH sides of the ledger's claim by re-running the collector and estimator directly on the same 50 WikiText passages: contiguous split (pre-fix) gives mahalanobis_sq_per_dim_id 1.4552, gap_per_dim 1.7728, auroc 0.9296 -- the ledger's 'before' row EXACTLY -- and the stride split gives 0.5444, 1.3416, 0.9776, which is bit-identical to what the shipped evaluate() emits (0.5444168448448181 / 1.341486632823944 / 0.9776). The pairing property survives: X_ood is restricted to the SAME _score_idx as X_id_score, so each scored text is compared against its own token permutation, and the covariance is still fitted on the disjoint complement (n_id_fit 25, n_id_score 25, n_ood_score 25). The estimator itself is the single-centroid Ledoit-Wolf adaptation of Lee et al. 2018, and the module docstring declares that adaptation explicitly rather than claiming to implement Eq. 2.",
+  "defect_location": "CONFIG",
+  "comparable": "RED",
+  "comparable_reason": "auroc is a near-pure size proxy on the 66-model archive: spearman +0.744 with d_model (p=7.8e-13) and +0.762 with log-params (p=1.1e-13); ood_separation_ratio +0.608/+0.665. mean_mahalanobis_id grows as sqrt(d) by construction. The per-dim family removes the leading d-scaling (the source's own iid sweep d=64..1024 moves the raw distance 4.11x and dist^2/d only 1.1018 -> 1.1575) but does NOT make models commensurable: at identical d=1024 gpt2-medium reads 0.0237 against pythia-410m's 2.1219. Ledoit-Wolf shrinkage also differs by an order of magnitude across models (0.1243 gpt2 measured here vs 0.606 pythia-70m recorded), so models are literally scored by different functions.",
+  "normalized_variant": "mahalanobis_sq_per_dim_id / mahalanobis_sq_per_dim_ood / ood_separation_gap_per_dim",
+  "normalized_ok": "YELLOW",
+  "normalized_ok_detail": "Removes the sqrt(d) scaling but not the shrinkage heterogeneity or the 90x same-d gap the source itself records.",
+  "github": "NONE",
+  "github_repo": "pokaxpoka/deep_Mahalanobis_detector (Lee et al. 2018)",
+  "github_reason": "Lee et al.'s released code is a CIFAR/ImageNet CNN detector with per-class means, a pooled within-class covariance and a max over classes; BLME implements a deliberately different single-centroid Ledoit-Wolf variant on LM hidden states and says so in the docstring, so a head-to-head run would compare two different estimators. I verified the arithmetic against scipy.spatial.distance.mahalanobis directly instead (the code calls it).",
+  "paper_number": "NONE",
+  "paper_reason": "Lee et al. publish AUROC for CNN OOD benchmarks (CIFAR-10 vs SVHN etc.); there is no published LM-hidden-state Mahalanobis number this task should reproduce, and the estimator is an adaptation, so a published figure would not be the right target.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "auroc rho +0.744 with d_model and +0.762 with log-params over 66 archived models; ood_separation_ratio +0.608 / +0.665; mean_mahalanobis_id +0.303 / +0.254. The headline separability tracks model size more strongly than almost any other column I measured on this campaign.",
+  "defects": [
+    "The interleaved split does NOT neutralise corpus ordering, it swings it the other way. Five seeded RANDOM 25/25 splits of the same 50 prefix passages give mahalanobis_sq_per_dim_id 0.5721 / 0.6093 / 0.6511 / 0.6606 / 0.6764 (mean 0.634); the shipped stride split gives 0.5444, BELOW all five, because stride-2 on consecutive WikiText pairs every scored passage with its immediate same-article neighbours in the fit set. Pre-fix contiguous was 1.4552 (+130% vs random). Correct fix is a seeded random permutation, not a fixed stride, which is ordering-independent by construction.",
+    "The headline is largely a property of the one-article corpus. On load_default_corpus(diverse=True) the same code gives stride id 0.7911 / gap 0.3890 / auroc 0.8320 against prefix 0.5444 / 1.3416 / 0.9776 -- the reported auroc drops from 0.98 to 0.83 purely by making the corpus topically diverse. CONFIG: the study config does not set diverse=True.",
+    "Two of the four 'after' numbers in the fix's own justification table do not reproduce. Measured, driving the real evaluate() and confirmed by a direct re-implementation: ood_separation_gap_per_dim = 1.341486632823944 where the table says 1.4090 (-4.8%), and auroc = 0.9776 where the table says 0.9792. mahalanobis_sq_per_dim_id (0.5444) and mean_mahalanobis_id (19.887) reproduce exactly, and every 'before' number reproduces exactly, so this is a recording error in the ledger, not a code change.",
+    "n = 25 fit points in d = 768 (_meta_d_over_n_fit = 30.72) means the empirical covariance has rank 24 and Ledoit-Wolf shrinkage is doing essentially all the work; the split-to-split spread I measured (auroc 0.9248-1.0000, gap_per_dim 0.83-1.78 over five random splits of the SAME 50 texts) exceeds most between-model differences. CONFIG: num_samples 50."
+  ],
+  "fix": "Replace `_fit_idx = np.arange(0, n_id, 2)` with a seeded permutation (np.random.RandomState(seed).permutation(n_id)[:fit_n]) so the split is independent of corpus ordering in both directions; raise num_samples well above 50 and set diverse=True in the study config; correct the two mis-recorded 'after' values in RERUN_LEDGER.md.",
+  "source_hash": "0786cba3d0f37ffb",
+  "shared_hash": "d0478e3704ad9da6"
+}

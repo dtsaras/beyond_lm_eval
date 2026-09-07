@@ -147,7 +147,15 @@ def test_task_scores_mean_pooled_sample_representations():
 
     assert "error" not in result, result
     assert result["n_id_fit"] + result["n_id_score"] == 10
-    assert result["n_ood_score"] == 10
+    # PAIRED design: each held-out ID text is scored against a shuffle of
+    # THAT SAME text, so the OOD scored set is the same held-out index range
+    # as the ID scored set -- not the whole shuffled corpus. (The unpaired
+    # split mixed the shuffle effect with content differences and inflated
+    # pythia-70m AUROC 0.598 -> 0.824.)
+    assert result["n_ood_score"] == result["n_id_score"]
+    # The point of this test: one vector PER TEXT, not one per token. Each
+    # stub text is 4 tokens, so a token-flattened collector would report 20.
+    assert result["n_ood_score"] == 5
 
 
 def test_fit_split_preserves_id_scoring_holdout_for_small_n():

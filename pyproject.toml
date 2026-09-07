@@ -24,6 +24,14 @@ dependencies = [
     "scipy",
     "pyyaml",
     "datasets",
+    # Pinned. dionysus 2.1.1 bundles fast_zigzag (Dey-Hou) under BSD-3-Clause,
+    # which topology_zigzag_persistence needs for the paper's true multi-layer
+    # barcode. It was declared under an OPTIONAL extra, so a production install
+    # silently fell back to the GF(2) pairwise approximation and dropped the
+    # paper's own metric without any error (adversarial review, 2026-09-03).
+    # On glibc 2.34-2.38 an UNPINNED install falls through to an sdist that
+    # fails to build against Boost 1.74.
+    "dionysus==2.1.1",
 ]
 
 [project.optional-dependencies]

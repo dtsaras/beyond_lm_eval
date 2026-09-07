@@ -86,6 +86,9 @@ class ParaphraseInvarianceTask(DiagnosticTask):
                 out2 = model(**inputs2, output_hidden_states=True)
                 out3 = model(**inputs3, output_hidden_states=True)
 
+                # post-final-norm: DELIBERATELY post-norm. These are SENTENCE
+                # EMBEDDINGS compared to each other -- the model's output
+                # representation is the object, not an intermediate block's.
                 rep1 = out1.hidden_states[-1][0, -1].float()
                 rep2 = out2.hidden_states[-1][0, -1].float()
                 rep3 = out3.hidden_states[-1][0, -1].float()

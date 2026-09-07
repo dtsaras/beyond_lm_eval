@@ -105,6 +105,8 @@ import numpy as np
 import torch
 
 from ...registry import register_task
+# collected_layer_count is no longer needed: the deepest entry is the hooked
+# raw block output, so there is nothing to trim.
 from ...tasks.base import DiagnosticTask
 
 logger = logging.getLogger("blme")
@@ -115,11 +117,18 @@ logger = logging.getLogger("blme")
 _ZERO_NORM_EPS = 1e-12
 
 
-def _procrustes_similarity(X, Y) -> float:
+def _procrustes_similarity(X, Y, rank_aware: bool = False) -> float:
     """Linearity score of Razzhigaev et al. 2024 (arXiv:2405.12250).
 
     Bit-exact port of ``llm_microscope.procrustes_similarity`` (repo commit
-    b6db939 / pip v0.0.7). The reference is torch-native and its value in
+    b6db939 / pip v0.0.7) IN FLOAT64. The qualifier matters: the released
+    function preserves its input dtype, and because ``1 / S`` is unguarded the
+    float32 evaluation of the SAME formula is not numerically stable -- on
+    ill-conditioned clouds native-float32 and float64 evaluations of the
+    reference differ by up to 0.626398 (adversarial review, 2026-09-04). BLME
+    promotes to float64 deliberately, for determinism; parity against the
+    reference EVALUATED IN FLOAT64 is exactly 0.0. The reference is torch-native
+    and its value in
     the near-rank-deficient regime is determined by how ``torch.linalg.svd``
     resolves the tiny singular values that the unguarded ``1 / S`` then
     amplifies — so BLME runs the SAME torch SVD (promoted to float64 for
@@ -159,7 +168,12 @@ def _procrustes_similarity(X, Y) -> float:
         # 2. Frobenius-normalize each cloud (default torch.norm == Frobenius).
         nx = Xc.norm()
         ny = Yc.norm()
-        if float(nx) <= _ZERO_NORM_EPS or float(ny) <= _ZERO_NORM_EPS:
+        # EXACT zero. The score is invariant to positive rescaling of either
+        # cloud, so an absolute 1e-12 floor is not: a valid pair reads 0.995197
+        # at scales 1, 1e-8, 1e-12 and 1e-13 but returned NaN at 1e-14 while
+        # the released code still gave 0.995197 (adversarial review round 2,
+        # 2026-09-04). Only a genuinely zero cloud has no shape.
+        if float(nx) <= 0.0 or float(ny) <= 0.0:
             return float("nan")
         Xc = Xc / nx
         Yc = Yc / ny
@@ -168,17 +182,44 @@ def _procrustes_similarity(X, Y) -> float:
         #    Reproduces get_est_svd verbatim (unguarded 1 / S — matching the
         #    reference; a genuinely singular S is caught below).
         U, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
-        if S.numel() == 0 or float(S[-1]) <= 0.0:
+        if S.numel() == 0:
+            return float("nan")
+        if rank_aware:
+            # RUN FIRST, before the exact-singularity bail-out. An exactly
+            # zero-padded rank-5 cloud has smallest singular value 0.0 and a
+            # stable truth of 1.000000, yet BOTH the headline and the
+            # advertised rank-aware companion returned NaN -- the companion
+            # exists precisely for that case (adversarial review round 2,
+            # 2026-09-04).
+            tol = float(S[0]) * max(Xc.shape) * torch.finfo(Xc.dtype).eps
+            Sinv = torch.where(S > tol, 1.0 / S, torch.zeros_like(S))
+            A_r = Vh.T * Sinv[None, ...] @ U.T @ Yc
+            return float(1.0 - (Xc @ A_r - Yc).square().sum())
+        if float(S[-1]) <= 0.0:
             # Exactly-singular X: 1/S would be inf. The reference would
             # divide by zero here; BLME reports NaN instead of NaN/inf
-            # propagating silently. (Does not occur for real token clouds.)
+            # propagating silently.
             return float("nan")
         A = Vh.T * (1.0 / S)[None, ...] @ U.T @ Yc     # (D, D)
         Y_est = Xc @ A
 
         # 4. Normalized residual as similarity (||Y||_F = 1 => already norm.).
         y_error = (Y_est - Yc).square().sum()
-        return float(1.0 - y_error)
+        sim = float(1.0 - y_error)
+        if False:  # rank_aware is handled above, before the singularity guard
+            # SEPARATE ESTIMAND, never the headline. The reference inverts
+            # every positive float, so on a genuinely rank-deficient pair its
+            # answer is decided by how the SVD resolved the null space: eight
+            # EXACT rank-5 pairs whose true linearity is 1.000000 scored
+            # 0.591902-0.814047 under the reference rule (adversarial review,
+            # 2026-09-04). A Moore-Penrose cutoff at numpy's pinv tolerance
+            # recovers 1.000000 there, but it is NOT what the paper's numbers
+            # were computed with, so it is emitted under its own name.
+            tol = float(S[0]) * max(Xc.shape) * torch.finfo(Xc.dtype).eps
+            Sinv = torch.where(S > tol, 1.0 / S, torch.zeros_like(S))
+            A_r = Vh.T * Sinv[None, ...] @ U.T @ Yc
+            return float(1.0 - (Xc @ A_r - Yc).square().sum())
+        return sim
 
 
 @register_task("geometry_procrustes_linearity")
@@ -212,6 +253,7 @@ class ProcrustesLinearityTask(DiagnosticTask):
         if cache is not None and cache.is_populated and use_cache:
             layer_states = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=False,
+                replace_final_norm=True, include_embedding=True,
             )
         else:
             from ...cache import ModelOutputCache, load_default_corpus
@@ -224,18 +266,37 @@ class ProcrustesLinearityTask(DiagnosticTask):
             local_cache.populate(need_hidden=True)
             layer_states = local_cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=False,
+                replace_final_norm=True, include_embedding=True,
             )
 
         if not layer_states:
             return {"error": "No hidden states available for procrustes linearity"}
 
+        # The layer set now starts at the EMBEDDING output, so the first pair
+        # is embedding->block0 -- a real layer transformation that was being
+        # skipped. It is the LEAST linear transition on gpt2 (0.911103, below
+        # the previously reported min of 0.931330), so `procrustes_linearity_min`
+        # was not the minimum. With the deepest block recovered by the hook as
+        # well, the profile now covers all L transitions; the official notebook
+        # is the mirror image, measuring embed->block0 but skipping the deepest
+        # block (adversarial review, 2026-09-04).
         layers = sorted(layer_states.keys())
+        # RESOLVED: the deepest entry is now the block's RAW pre-norm output,
+        # recovered by a forward hook in the cache (verified: ln_f(hooked)
+        # reproduces the cached post-norm entry to 0.0e+00 on gpt2 and
+        # pythia-70m). Previously `_min` and `_last` were both 0.88282 -- the
+        # final NORM's own transition -- against 0.98354 for the truly
+        # least-linear block, so the reported "least linear layer" was a
+        # LayerNorm; and the trim that removed it DELETED the deepest block
+        # instead, leaving only 10 of gpt2's 12 blocks covered. The hook keeps
+        # every block and contains no LayerNorm transition.
         n_layers = len(layers)
         if n_layers < 2:
             return {"error": "Need at least 2 layers for procrustes linearity"}
 
         n_tokens = 0
         sims = []
+        sims_rank = []
         for a, b in zip(layers[:-1], layers[1:]):
             X = layer_states[a]
             Y = layer_states[b]
@@ -250,8 +311,10 @@ class ProcrustesLinearityTask(DiagnosticTask):
                 continue
             n_tokens = max(n_tokens, X.shape[0])
             sims.append(_procrustes_similarity(X, Y))
+            sims_rank.append(_procrustes_similarity(X, Y, rank_aware=True))
 
         sim = np.asarray(sims, dtype=np.float64)
+        _sr = np.asarray(sims_rank, dtype=np.float64)
         finite = np.isfinite(sim)
         if not np.any(finite):
             return {"error": "No adjacent layer pair yielded a valid linearity score"}
@@ -266,6 +329,9 @@ class ProcrustesLinearityTask(DiagnosticTask):
             slope = float("nan")
 
         finite_sim = sim[finite]
+        _d_model = int(layer_states[layers[0]].shape[-1]) if n_tokens else 0
+        _d_over_n = (float(_d_model) / float(n_tokens)) if n_tokens else float("nan")
+
         first = sim[0] if np.isfinite(sim[0]) else float("nan")
         last = sim[-1] if np.isfinite(sim[-1]) else float("nan")
         return {
@@ -284,4 +350,39 @@ class ProcrustesLinearityTask(DiagnosticTask):
             "_meta_n_layers": int(n_layers),
             "_meta_n_pairs": int(n_pairs),
             "_meta_n_tokens": int(n_tokens),
+            # DIMENSION CORRECTION -- DEMOTED to _meta_ (2026-09-04).
+            #
+            # The mechanism is AMBIENT D/N, but the chance-explained fraction
+            # is governed by the FITTED RANK, not by the ambient width. That
+            # difference is not academic: zero-padding a representation from
+            # D=16 to D=128 is an exact isometry that leaves the raw residual
+            # at 0.059777, yet it moved this corrected value 1.002904 ->
+            # 1.880446 (+87.5%) (adversarial review, 2026-09-04). A twin that
+            # a function-preserving embedding can move by 87% does not meet
+            # this campaign's mechanism bar, so it is excluded from the
+            # feature matrix rather than shipped as a comparable quantity.
+            "_meta_procrustes_nonlinearity_corrected_mean": (
+                float((1.0 - np.mean(finite_sim)) / (1.0 - _d_over_n))
+                if 0.0 < _d_over_n < 1.0 else float("nan")),
+            "_meta_procrustes_nonlinearity_corrected_max": (
+                float((1.0 - np.min(finite_sim)) / (1.0 - _d_over_n))
+                if 0.0 < _d_over_n < 1.0 else float("nan")),
+            # The score also moves with N on the SAME model and layers
+            # (0.9961 -> 0.9059 over an 800 -> 12895 token sweep), and N is
+            # whatever the tokenizer yields from the corpus, so record the
+            # regime the number was measured in.
+            "_meta_d_model": int(_d_model),
+            "_meta_d_over_n_tokens": float(_d_over_n),
+            # Rank-aware companion (Moore-Penrose cutoff at numpy's pinv
+            # tolerance). Not the paper's rule -- the released code inverts
+            # every positive float -- but it is the value that is correct when
+            # the transition is genuinely rank-deficient, where the reference
+            # rule scored EXACT rank-5 pairs at 0.364014-0.809678 against a
+            # truth of 1.000000. Emitted alongside so the gap is visible.
+            "procrustes_linearity_rank_aware_mean": (
+                float(np.mean(_sr[np.isfinite(_sr)]))
+                if np.any(np.isfinite(_sr)) else float("nan")),
+            "_meta_procrustes_rank_aware_gap_max": (
+                float(np.nanmax(np.abs(_sr - sim)))
+                if np.any(np.isfinite(_sr) & finite) else float("nan")),
         }

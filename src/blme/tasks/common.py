@@ -75,11 +75,27 @@ _LAYER_ATTRS = [
     ("bert.encoder", "layer"),    # BertLMHeadModel
     ("encoder", "layer"),         # BERT-encoder style
     ("model", "embed_tokens"),    # Skip — not layers, but check next
+    # BARE BASE MODELS (AutoModel rather than AutoModelForCausalLM), where the
+    # block list hangs off the root. `get_layers(GPT2Model)` returned None
+    # before these entries, which silently disabled the `replace_final_norm`
+    # hook -- the fresh path then kept HF's post-ln_f state while asserting it
+    # was a raw block output (adversarial review, 2026-09-04). Kept LAST so a
+    # wrapper's own chain always wins.
+    ("", "h"),                    # GPT2Model, GPTNeoModel, BloomModel
+    ("", "layers"),               # LlamaModel, GPTNeoXModel, Qwen2Model, ...
+    ("", "blocks"),               # MptModel
+    ("decoder", "layers"),        # OPTModel
 ]
 
 
 def _resolve_attr(obj, dotted_path):
-    """Resolve a dotted attribute path like 'model.decoder'."""
+    """Resolve a dotted attribute path like 'model.decoder'.
+
+    An empty path resolves to the object itself, so a bare base model whose
+    block list hangs off the root is reachable.
+    """
+    if not dotted_path:
+        return obj
     for part in dotted_path.split("."):
         if not hasattr(obj, part):
             return None

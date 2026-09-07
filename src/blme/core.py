@@ -230,6 +230,22 @@ def evaluate(
             # them error out instead of falling back to self-collection.
             "geometry_cknna",
             "geometry_procrustes_linearity",
+            # `geometry_isoscore` is DELIBERATELY NOT HERE.
+            #
+            # It consumes hidden states, so registering it looks right -- and I
+            # did register it, briefly, in response to the round-3 finding that
+            # its sample count depended on co-runners. That was wrong: the
+            # shared cache is sized to `max(num_samples)` over the cached
+            # tasks, and isoscore asks for 1000 DOCUMENTS because Rudman et al.
+            # require points to outnumber dimensions by orders of magnitude.
+            # On a 24-layer, 2048-wide model that is roughly 100 GB of cached
+            # hidden states for every task in the run.
+            #
+            # The real defect was that the task SILENTLY ACCEPTED a smaller
+            # cache. It now checks whether the cache can supply its configured
+            # document count and self-collects when it cannot, which fixes the
+            # co-runner dependence without resizing the cache for everyone
+            # (adversarial review round 3 + follow-up, 2026-09-04).
         }
         cache_logits_tasks = {
             "geometry_perplexity",
@@ -271,6 +287,50 @@ def evaluate(
             t in force_eager_tasks for t in diagnostic_tasks
         )
         if force_eager:
+            # float16 + eager attention OVERFLOWS. SDPA/FlashAttention keep the
+            # softmax numerically stable internally; the eager path computes
+            # q @ k^T in the model dtype, and for fp16 checkpoints those scores
+            # exceed 65504 and become inf -> NaN, which then propagates into
+            # every hidden state we cache.
+            #
+            # This was silent and destructive (2026-08-19). Including a single
+            # double-backward task (dynamics_sharpness) forces eager for the
+            # WHOLE run, so on Pythia — whose checkpoints are fp16 — half the
+            # hidden-state cache became NaN. Tasks that mask non-finite rows
+            # (LID, intrinsic_dim) then returned numbers computed on whatever
+            # survived instead of failing, and generate() sampling from NaN
+            # probabilities tripped a CUDA device-side assert that killed every
+            # remaining GPU task in the process.
+            #
+            # bfloat16 has fp32's exponent range at fp16's memory cost, so it
+            # removes the overflow without changing the sharding maths. Verified
+            # on pythia-70m: eager+fp16 = 36,779,008 non-finite hidden values,
+            # eager+bf16 and eager+fp32 = 0.
+            try:
+                param_dtype = next(model.parameters()).dtype
+            except (StopIteration, AttributeError):
+                param_dtype = None
+            effective_dtype = None
+            if param_dtype == torch.float16:
+                logger.info(
+                    "Forcing eager attention on a float16 model overflows; "
+                    "casting parameters to bfloat16 for numerical safety."
+                )
+                # Cast PARAMETERS ONLY. model.bfloat16() also casts every
+                # buffer, and some are float32 on purpose: GPT-NeoX/Pythia keep
+                # RoPE inv_freq / original_inv_freq in float32 and cannot
+                # recover precision lost by a bf16 round-trip. Casting them
+                # changed top-1 logits at 32% of positions on pythia-70m
+                # (CE 2.2955 vs 2.3332 for a direct bf16 load); restoring just
+                # those two buffers made the outputs bit-identical, which
+                # identified them as the sole cause (adversarial review,
+                # 2026-09-02). Buffers keep whatever dtype the checkpoint set.
+                for _p in model.parameters():
+                    _p.data = _p.data.to(torch.bfloat16)
+                effective_dtype = "bfloat16 (cast from float16 for eager)"
+            else:
+                effective_dtype = str(param_dtype).replace("torch.", "")
+
             try:
                 if hasattr(model, "config"):
                     model.config._attn_implementation = "eager"
@@ -311,6 +371,27 @@ def evaluate(
                     need_logits=need_logits,
                 )
 
+                # Never let a contaminated cache pass silently. Tasks that mask
+                # non-finite rows (LID, intrinsic_dim, ...) would otherwise
+                # return a number computed on whatever survived, which looks
+                # like a valid measurement and is not. Downstream analysis has
+                # no way to tell the difference, so say it loudly here and
+                # record it in the envelope.
+                if need_hidden and cache._hidden_states:
+                    n_bad = sum(
+                        int((~torch.isfinite(v)).sum())
+                        for v in cache._hidden_states.values()
+                    )
+                    if n_bad:
+                        n_tot = sum(v.numel() for v in cache._hidden_states.values())
+                        logger.error(
+                            f"NON-FINITE HIDDEN STATES: {n_bad}/{n_tot} "
+                            f"({100 * n_bad / max(n_tot, 1):.1f}%) of the cached "
+                            "hidden states are NaN/inf. Every forward-pass "
+                            "metric from this run is suspect."
+                        )
+                        cache_settings["nonfinite_hidden_fraction"] = n_bad / max(n_tot, 1)
+
         # SIGALRM-based per-task timeouts only work on the main thread of a Unix
         # process. Detect this once so the per-task loop never tries (and fails)
         # to install a handler off the main thread (Audit-V2 infra:7).
@@ -348,10 +429,16 @@ def evaluate(
             except TaskTimeout:
                 logger.error(f"Task '{task_name}' timed out after {timeout_sec}s")
                 task_errors[task_name] = f"Timeout after {timeout_sec}s"
-            except torch.cuda.OutOfMemoryError:
-                logger.error(f"Task '{task_name}' ran out of GPU memory")
+            except torch.cuda.OutOfMemoryError as e:
+                # Keep torch's own message: it names the failing allocation,
+                # the device, and how much was free, which is the only way to
+                # tell "model does not fit" from "one op wants a huge buffer".
+                # Flattening it to a bare string cost a diagnosis cycle on
+                # dynamics_sharpness (2026-08-20).
+                detail = " ".join(str(e).split())[:400]
+                logger.error(f"Task '{task_name}' ran out of GPU memory: {detail}")
                 torch.cuda.empty_cache()
-                task_errors[task_name] = "CUDA out of memory"
+                task_errors[task_name] = f"CUDA out of memory — {detail}"
             except Exception as e:
                 logger.error(f"Task '{task_name}' failed: {e}")
                 task_errors[task_name] = str(e)
@@ -399,6 +486,21 @@ def evaluate(
     all_failures = {**task_errors, **errored_results}
     if fail_on_task_error and all_failures:
         raise RuntimeError(f"BLME task errors under strict mode: {all_failures}")
+
+    # 5b. Scale-normalized twins.
+    #
+    # Structural quantities that grow mechanically with architecture (stable
+    # rank is bounded by d_model, a "layer of maximum norm" by depth) are
+    # published RAW and additionally as <metric>_scalenorm, divided by the
+    # architectural quantity that bounds them. Raw values are never modified,
+    # so nothing already reported changes; the twin exists so a feature matrix
+    # can use a size-free version instead of rediscovering scale.
+    from .normalization import add_normalized, arch_info
+    try:
+        normalization_added = add_normalized(task_results, arch_info(model))
+    except Exception as e:  # never let a derived quantity break a real run
+        logger.info(f"normalization skipped: {e}")
+        normalization_added = {}
 
     # 6. Build results envelope
     envelope = build_results_envelope(

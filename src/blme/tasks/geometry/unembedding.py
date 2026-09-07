@@ -1,6 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings, get_final_norm, get_lm_head
+from .utils import safe_unit_rows
 import torch
 import numpy as np
 import json
@@ -83,18 +84,67 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             W_dev = W_out.detach().float()
             if torch.cuda.is_available() and not W_dev.is_cuda:
                 W_dev = W_dev.cuda()
-            W_centered_t = W_dev - W_dev.mean(dim=0, keepdim=True)
-            S_t = torch.linalg.svdvals(W_centered_t)
+            # Roy & Vetterli's effective rank is defined on the matrix ITSELF,
+            # not on a centered copy. Centering `W_out` here is BLME's own
+            # addition and it is not a harmless one: against the paper's closed
+            # form (Sec. 2.3, the 4x4 circulant example) the centered value is
+            # **-11.4% at rho = 0.5 and +48.8% at rho = 0.9** -- the error
+            # changes SIGN with the matrix -- and on real unembedding matrices
+            # it ranges 0.5% to 57.9% (pythia-70m 296.11 -> 467.53) and
+            # REORDERS models (adversarial review, 2026-09-03).
+            #
+            # The shared `effective_rank` helper is exact (<= 3e-16 against the
+            # closed form); the defect was here.
+            # `safe_svdvals`: numpy/torch compute the SVD internally and then CAST
+            # the singular values back to the input dtype, and that cast overflows
+            # to inf near 3.4e38 -- so a scale-FREE consumer downstream (effective
+            # rank, RankMe, IsoScore, alpha) returns NaN on data it should handle
+            # exactly. The helper factors out the max first, which only shifts
+            # exponents (2026-09-07).
+            from .utils import safe_svdvals
+            S_t = safe_svdvals(W_dev)
             S = S_t.detach().cpu().numpy()
             from .utils import effective_rank as _effective_rank
             eff_rank = _effective_rank(S)
-            del W_dev, W_centered_t, S_t
+            # Centered variant retained under a name that says what it is.
+            # CENTRE IN DOUBLE. The raw effective rank is already exact, but
+            # the optional centred variant erased it: an exact raw
+            # 2.600490005990 became NaN, and the centred auxiliary returned NaN
+            # instead of 2.729838563104 at 2.406159650500376e38 (gpt-5.6-sol
+            # round 9, 2026-09-07). `W_dev - mean` in the model's dtype
+            # overflows near the top of the range -- centred entries of a
+            # 2.4e38 matrix exceed 3.4e38 -- so `safe_svdvals` (correctly)
+            # refuses a non-finite matrix. Exactly the defect found in
+            # `collapse` today, where wiring `safe_svdvals` did not help because
+            # the overflow was in the line ABOVE the SVD.
+            _Wc = W_dev.double()
+            _Wc = _Wc - _Wc.mean(dim=0, keepdim=True)
+            eff_rank_centered = _effective_rank(
+                # `safe_svdvals`: numpy/torch compute the SVD internally and then CAST
+                # the singular values back to the input dtype, and that cast overflows
+                # to inf near 3.4e38 -- so a scale-FREE consumer downstream (effective
+                # rank, RankMe, IsoScore, alpha) returns NaN on data it should handle
+                # exactly. The helper factors out the max first, which only shifts
+                # exponents (2026-09-07).
+                safe_svdvals(_Wc).detach().cpu().numpy())
+            del W_dev, _Wc, S_t
         except Exception as _e:
             # Historic bug: returning 0.0 silently masked SVD failures
             # (GPU OOM on qwen-9b/27b) so the column looked like
             # "collapsed to rank-0" rather than "couldn't be computed".
             logger.info(f"  unembedding SVD failed: {type(_e).__name__}: {_e}")
             eff_rank = float("nan")
+            # The 2026-09-03 fix added `unembedding_eff_rank_centered` to the
+            # return dict but bound the variable ONLY inside the `try`, so
+            # this handler -- written specifically for the OOM the comment
+            # above names -- raised `UnboundLocalError` on the way out and
+            # `core.py` recorded the WHOLE task as failed. Tying, purity,
+            # category count and embedding alignment were all lost along with
+            # the one number that actually could not be computed. Reproduced
+            # by forcing `svdvals` to raise `torch.cuda.OutOfMemoryError`
+            # (red-team review, 2026-09-05); pinned by
+            # `tests/tasks/test_unembedding_svd_failure.py`.
+            eff_rank_centered = float("nan")
             
         # Category Purity. For each labelled token, measure the fraction
         # of its top-k nearest unembedding rows that belong to the same
@@ -125,9 +175,17 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                 n_category_tokens = len(cat_labels)
 
                 if cat_labels:
-                    W_norm = W_out_np / (
-                        np.linalg.norm(W_out_np, axis=1, keepdims=True) + 1e-10
-                    )
+                    # `safe_unit_rows`, not `norm + 1e-10`.
+                    #
+                    # Adding to the norm is not normalisation: it shrinks small
+                    # rows toward the origin and changes the neighbour geometry
+                    # -- the exact anti-pattern `hubness.py` documents and that
+                    # `safe_unit_rows` exists to remove. It also underflows,
+                    # because the norm SQUARES each coordinate long before the
+                    # data itself is denormal. This site was missed when the
+                    # rest of the campaign moved to the helper (found by an AST
+                    # sweep for the class, 2026-09-07).
+                    W_norm = safe_unit_rows(W_out_np)
 
                     # Optionally subsample labelled tokens to keep very
                     # large label sets tractable. Deterministic seed so
@@ -144,9 +202,27 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                         if idx >= W_norm.shape[0]:
                             continue
                         my_cat = cat_labels[idx]
-                        sims = W_norm @ W_norm[idx]
-                        sims[idx] = -np.inf
-                        top_k_idx = np.argpartition(sims, -k)[-k:]
+                        # DIRECT chord distances, and a STABLE tie rule.
+                        #
+                        # Two defects in the previous `argpartition` on
+                        # `W_norm @ W_norm[idx]`:
+                        #  1. cancellation -- with unit rows every dot product
+                        #     sits near 1 and the separating quantity 1 - u.v
+                        #     is the difference of two ~1.0 sums, which float32
+                        #     cannot resolve on an anisotropic vocabulary. This
+                        #     is the same defect confirmed in `hubness.py` on
+                        #     2026-09-07; found here by sweeping the class.
+                        #  2. `argpartition` leaves ties in arbitrary order, so
+                        #     a tied k-th neighbour made the score depend on
+                        #     array order -- the same flaw `hubness.py` removed
+                        #     when it dropped `topk` for a stable argsort.
+                        # Ranking by squared chord distance is equivalent for
+                        # unit rows (||u-v||^2 = 2 - 2u.v) but differences the
+                        # coordinates before squaring, which is exact.
+                        _d2 = ((W_norm - W_norm[idx]) ** 2).sum(axis=1)
+                        _d2[idx] = np.inf
+                        top_k_idx = np.lexsort(
+                            (np.arange(len(_d2)), _d2))[:k]
                         match_count = sum(
                             1 for t in top_k_idx if cat_labels.get(int(t)) == my_cat
                         )
@@ -183,12 +259,17 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                 else:
                     E_ref = E_ref.cpu().numpy()
 
-                e_norms = np.linalg.norm(E_ref, axis=1, keepdims=True)
-                w_norms = np.linalg.norm(W_out_np, axis=1, keepdims=True)
-                safe_e = np.where(e_norms > 0, e_norms, 1.0)
-                safe_w = np.where(w_norms > 0, w_norms, 1.0)
+                # `safe_unit_rows`, not `np.where(norm > 0, norm, 1.0)`.
+                #
+                # `np.linalg.norm` SQUARES before summing, so at 1e-25 it
+                # underflows to exactly 0, the guard divides the row by ONE, and
+                # the "unit" vectors are the raw tiny rows. A TIED matrix whose
+                # cosine is exactly 1.0 by construction returned **0.0 at 1e-25
+                # and 1e25** (gpt-5.6-sol round 9, 2026-09-07). The guard reads
+                # as a zero-row guard but fires on rows that are merely small --
+                # the identical defect fixed in `contextualization` today.
                 cos_sims = np.sum(
-                    (E_ref / safe_e) * (W_out_np / safe_w), axis=1
+                    safe_unit_rows(E_ref) * safe_unit_rows(W_out_np), axis=1
                 )
                 emb_alignment_mean = float(np.mean(cos_sims))
                 emb_alignment_std = float(np.std(cos_sims))
@@ -199,10 +280,25 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
         return {
             "unembedding_is_tied": is_tied,
             "unembedding_eff_rank": float(eff_rank),
+            # Was computed and then DISCARDED, so the promised key did not
+            # exist and a second full (V, d) SVD was thrown away every run.
+            "unembedding_eff_rank_centered": float(eff_rank_centered),
             "unembedding_purity_mean": float(purity_mean),
-            "unembedding_n_category_tokens": int(n_category_tokens),
-            "cross_model_comparable": False if n_category_tokens > 0 else True,
-            "comparability_note": (
+            # `_meta_`: a VOCABULARY PROXY. It counts how many of the 21
+            # category words the tokenizer happens to render as single tokens
+            # (815 on gpt2), so it varies with the tokenizer and not with the
+            # model's representations -- and it was reaching the feature
+            # matrix unprefixed (red-team review, 2026-09-05).
+            "_meta_unembedding_n_category_tokens": int(n_category_tokens),
+            # `_meta_` and RENAMED. As `cross_model_comparable` this read as a
+            # statement about the whole result dict; it is not. It describes
+            # the PURITY field only -- `unembedding_eff_rank` (rho +0.921 with
+            # d_model) is precisely the field it does NOT cover. It is also
+            # constant `False` on every model that has any category token, so
+            # unprefixed it contributed a zero-variance column.
+            "_meta_purity_cross_model_comparable": (
+                False if n_category_tokens > 0 else True),
+            "_meta_comparability_note": (
                 "tokenizer_dependent_category_token_mapping"
                 if n_category_tokens > 0
                 else "intrinsic_unembedding_geometry"

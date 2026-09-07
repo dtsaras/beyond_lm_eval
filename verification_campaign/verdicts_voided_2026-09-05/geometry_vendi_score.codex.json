@@ -1,0 +1,27 @@
+{
+  "task": "geometry_vendi_score",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "Re-deriving Friedman and Dieng Definition 3.1 gives VS = exp(-sum_i lambda_i log lambda_i) for the eigenvalues of K/n, exactly the algebra at vendi.py:174-183. Against an independent singular-value/eigenspectrum implementation, the current cosine and RBF cores had worst relative errors 5.66e-14 and 1.36e-15 over 175 ordinary, rank-deficient, duplicated, and rescaled cases with 0 bound violations; direct official score_X comparisons at (6,4), (40,16), (200,64), and (512,768) were 6.85e-16, 9.56e-16, 0, and 0 relative, and the definition-consistent mixed-zero anchors were exact to 1.87e-14.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "A current-code function-preserving depth refinement that inserted only identity layers left first/last VS fixed at 1.000000/4.000000 but changed vendi_overall_mean from 2.333333 at L=3 to 1.062500 at L=64 (-54.46%, rho=-1.000), vendi_slope from 3.000000 to 0.360577 (-87.98%, rho=-0.943), and q50 from 2.000000 to 1.000000. Independently, at the shipped 512-point population, isotropic Gaussian controls rose from 310.714215 at d=512 to 481.026940 at d=4096 (+54.81%, rho=+1.000), although isometric zero-padding of one fixed cloud from d=32 to 4096 changed VS by exactly 0; several emitted profile summaries therefore cannot be compared across depth/width without architecture controls.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "vertaix/Vendi-Score (vendi_score 0.0.3)",
+  "github_reason": "Fetched and read the released vendi.py and locally ran installed vendi_score 0.0.3. BLME versus the official independent score_X kernel path differed by relative 6.85e-16, 9.56e-16, 0, and 0 at (6,4), (40,16), (200,64), and (512,768), duplicated rows differed by 0, and RBF versus official score_K differed by 0; for 35 orthogonal rows plus 5 zero rows the official score_X gives 25.223334 because trace(K)=35, whereas BLME gives the paper-consistent 32.710617 because its valid unit-diagonal kernel has spectrum {1/40 repeated 35, 5/40}.",
+  "paper_number": "YES",
+  "paper_reason": "Theorem 3.1 states that N completely dissimilar elements have VS=N and completely similar elements have VS=1: BLME returned 2.000000, 4.000000, and 7.999999999999998 for N=2,4,8 (worst relative error 2.22e-16) and 1.000000000000052 for 40 identical rows (relative error 5.20e-14). The paper's explicit 90/10 identical-group example also gives exp(H(0.9,0.1))=1.384145488461686, versus BLME 1.384145488461795 (relative error 7.89e-14).",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Depth is causally confounded in the task-level summaries: inserting function-preserving identity layers from L=3 to 64 drove vendi_overall_mean 2.333333 to 1.062500 with rho=-1.000 and vendi_slope 3.000000 to 0.360577 with rho=-0.943 while both endpoint clouds were bit-identical. Width also sets the finite-sample null: three-seed isotropic means increased monotonically 310.714215 -> 366.822568 -> 398.996303 -> 451.927757 -> 481.026940 for d=512,768,1024,2048,4096 (rho=+1.000), whereas a fixed rank-32 geometry survived isometric padding through d=4096 at exactly 14.781454771133, so the association is architecture/population-specific rather than an error in the Vendi formula.",
+  "defects": [
+    "COMPARABILITY/CODE: vendi.py:323-352 averages and regresses uniformly over layer indices, so adding identity layers changes the reported profile despite an unchanged function: L=3 -> 64 moved overall mean 2.333333 -> 1.062500, slope 3.000000 -> 0.360577, and q50 2.000000 -> 1.000000.",
+    "CONFOUND/NO NORMALIZED TWIN: current evaluation emitted 15 fields, but 0 registered normalized Vendi outputs; _meta_vendi_normalized_mean at vendi.py:344-346 is excluded from analysis and merely divides by the point count. In the 66-model pre-fix archive it was exactly raw/512 (max absolute residual 0, Spearman rho=1.000 with raw), and on current isotropic controls raw/512 still rose 0.606864 -> 0.939506 from d=512 -> 4096.",
+    "CONFIG/PROTOCOL: merged defaults.yaml:333-338 fixes max_points=512 and num_samples=100, so the code-level fallbacks are irrelevant. A 1,000-row orthonormal cloud has paper VS=1000.000000, but _layer_vendi returned 512.000000 at the shipped cap (-48.80%); this is a deterministic size-capped subsample estimand, not the full-cloud score.",
+    "DOC/PROVENANCE: vendi.py:25-33, 139-141, and 218-220 plus task_metadata.py:129, test_vendi_parity.py:22-28, and vendi.json:8-10 still call default cosine nonlinear and distinct from linear-spectrum methods, although _cosine_kernel is exactly X_normalized X_normalized^T. The class docstring at vendi.py:230-233 also advertises withdrawn vendi_null_ratio_mean as cross-model comparable, while the measured result dict contains 0 such keys, and line 312 points to nonexistent _isotropic_null_vendi.",
+    "TEST COVERAGE: python3 -m pytest ran the focused official-parity file with 9 passed in 0.13 s, but that file contains 0 zero-row cases; add the m-orthogonal-plus-zeros anchors where current BLME gives 40.000000/32.710617/8.944272 and official score_X gives 36.476108/25.223334/6.324555.",
+    "CODE HYGIENE: collected_layer_count is imported at vendi.py:57 but has 0 executable uses; remove it so readers do not infer that the profile is being trimmed."
+  ],
+  "fix": ""
+}

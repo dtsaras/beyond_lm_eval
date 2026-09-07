@@ -1,0 +1,27 @@
+{
+  "task": "geometry_schatten",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The scalar Schatten helper and Li et al. MNN kernel are correct, but the Yusupov outputs are not the paper-defined quantity: src/blme/tasks/geometry/schatten.py:142-168 centers and row-normalizes post-block residual states before reporting only the last layer, whereas the source uses unnormalized post-activation, pre-residual MLP states and averages layers. On X=I_2, the source Schatten-1 value is 2.000000 but BLME returns 0.707107, a 64.64% change.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The stated d_model normalization is not padding-invariant when token count limits rank. Zero-padding one identical rank-1 geometry from d=2 to 64 made row_normalized_schatten_1 fall 0.707107 to 0.022097 (Spearman rho=-1.000) and row_normalized_schatten_4 fall 1.189207 to 0.500000 (rho=-1.000). Across 65 archived checkpoints, S1 versus d_model had Pearson r=-0.759 and Spearman rho=-0.952; MNN/T was globally weaker (r=-0.080, rho=-0.145) but remained width-linked within eight Pythia models (rho=-0.970).",
+  "normalized_variant": "row_normalized_schatten_1, row_normalized_schatten_4, row_normalized_schatten_inf, row_normalized_matrix_nuclear_norm",
+  "normalized_ok": "RED",
+  "github": "PARTIAL",
+  "github_repo": "MLGroupJLU/MatrixNuclearNorm",
+  "github_reason": "Fetched the official MNN implementation and ran both raw kernels on the same torch-seed-0 11x17 tensor after the released normalization: official=9.868363380432129 and BLME=9.868363380432129 (absolute error 0; BLME's reported /T value is 0.8971239436756481). No author-released Yusupov implementation was found, and no official RankMe repository implementation was available to cross-run.",
+  "paper_number": "NONE",
+  "paper_reason": "Li et al. report model/dataset MNN values, but the released material does not pin the sampled rows and layer aggregation needed to reconstruct a like-for-like BLME scalar; Yusupov et al. report downstream correlations rather than the transformed BLME quantity. There is therefore no reproducible published number for this task's combined output.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The controlled zero-padding experiment proves direct width dependence for the purported normalized S1/S4 outputs, and the 65-checkpoint audit gives rho=-0.952 for S1 versus d_model. RankMe also retained rho=0.404 with d_model (p=8.52e-4); only the global MNN/T correlation was weak.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/schatten.py:142-168: the Yusupov path changes the representation, preprocessing, normalization, and layer aggregation, so it does not emit the cited plain Schatten metric.",
+    "CODE src/blme/tasks/geometry/schatten.py:152-168: division by d_model^(1/p) is not invariant to adding zero coordinates and produces a deterministic width trend when T<d_model.",
+    "CODE src/blme/tasks/geometry/schatten.py:90-110: RankMe uses sigma/(sum(sigma)+1e-12), not the paper's sigma/sum(sigma)+epsilon convention; for singular values [3e-14,1e-14], BLME gives 1.158284 versus the scale-invariant 1.754765 (-33.99%).",
+    "METRIC CAVEAT src/blme/tasks/geometry/schatten.py:72-87: the faithfully implemented MNN surrogate is coordinate-basis-dependent rather than a true nuclear norm; a right-orthogonal rotation preserved the true nuclear norm at 2.000 but changed MNN/T from 0.500 to 0.250.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml: num_samples=10 and max_length=128 leave rank token-limited for the evaluated widths; these settings amplify, but do not cause, the code-level normalization defect.",
+    "CODE src/blme/tasks/geometry/schatten.py:226-227: the public docstring says MNN is divided by d although the implementation correctly divides by T."
+  ],
+  "fix": "Split the provenance families. Add a source-faithful Yusupov output from raw pre-residual MLP activations with the paper's layer aggregation; retain the current transformed outputs under explicit BLME-adaptation names. Replace d_model^(1/p) with an explicitly named, zero-padding-invariant shape statistic while preserving the raw norms, implement RankMe's stated probability/epsilon formula with an exact zero guard, and correct the MNN documentation."
+}

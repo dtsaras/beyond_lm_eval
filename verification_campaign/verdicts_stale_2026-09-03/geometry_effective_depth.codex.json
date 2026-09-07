@@ -1,0 +1,25 @@
+{
+  "task": "geometry_effective_depth",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "The current code implements ShortGPT BI as 1-E_t[cos(h_l,t,h_l+1,t)] and Csordas's mean of per-token relative update norms with the released 1e-6 clamp. Identity/orthogonal/sign-flip BI anchors are exactly 0/1/2, a random reference comparison differed by 1.08e-7, and the tested Csordas contribution was 0.1149071455001831 in both implementations; the 90% depth quantile is explicitly labeled as a BLME extension.",
+  "defect_location": "NONE",
+  "comparable": "YELLOW",
+  "comparable_reason": "BI and relative contribution are dimensionless and contain no explicit d_model or vocabulary term. The normalized depth quantile has unavoidable layer-count discretization: identical uniform contribution profiles give effective_depth_90=1.0000, 0.9167, 0.9167, 0.90625 and 0.9000 at L=6,12,24,32,80, so shallow/deep models are comparable only with that up-to-1/L caveat.",
+  "normalized_variant": "effective_depth_90",
+  "normalized_ok": "YELLOW",
+  "github": "YES",
+  "github_repo": "icip-cas/ShortGPT; RobertCsordas/llm_effective_depth",
+  "github_reason": "I fetched ShortGPT's released shortgpt/metrics.py and Csordas's official analysis/analyze_norms.py. BLME matched ShortGPT on ordinary nonzero tensors to 1.08e-7 and matched the released per-token ratio-then-mean computation exactly on the tested tensor, including clamp_min(1e-6).",
+  "paper_number": "NONE",
+  "paper_reason": "Neither paper publishes an exact scalar for BLME's combined output on any allowed small model. ShortGPT reports rankings/pruning outcomes and Csordas reports profiles for different large-model families; effective_depth_90 itself is a disclosed BLME statistic, so there is no paper number it should reproduce.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "No current zoo column exists for a direct d_model/n_layers/vocab correlation. Algebraically BI and contribution ratios are width-free, but effective_depth_90 carries the measured ceil(0.9L)/L layer-count artifact even under identical profiles; that is a small, confirmed depth dependence rather than evidence of width or vocabulary domination.",
+  "defects": [
+    "COMPARABILITY: effective_depth_90 is quantized in steps of 1/L; report the integer k90 alongside k90/L or compare uncertainty intervals when layer counts differ.",
+    "SCOPE: effective_depth_90 is not Csordas et al.'s importance-weighted depth score, and frac_low_influence=BI<0.05 is not a ShortGPT threshold. The module discloses both facts correctly, but downstream prose must preserve them.",
+    "CONFIG/COVERAGE: the shipped 20 samples provide no convergence or uncertainty estimate for either profile.",
+    "EDGE CONVENTION: ShortGPT's released code maps undefined zero/zero cosine to similarity 0.5, while torch cosine in BLME yields similarity 0 and BI 1. This does not affect the paper-defined nonzero residual-state domain but should be pinned if degenerate states are accepted."
+  ],
+  "fix": ""
+}

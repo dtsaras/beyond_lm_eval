@@ -1,0 +1,26 @@
+{
+  "task": "geometry_positional_decay",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The BLME paper defines one Spearman correlation per head after pooling token pairs, whereas src/blme/tasks/geometry/positional_decay.py averages a separate Spearman for every causal query row. On a valid causal head, the code returns +0.574286 while the pooled off-diagonal definition returns -0.266470 (including each diagonal gives -0.218950), so the aggregation can reverse the sign.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "The headline averages a depth-dependent layer profile and mixes decay with architecture-specific sink strength. Fresh/current measurements found r=+0.638 with d_model and +0.750 with n_layers over 10 models; excluding key position 0 changed GPT-2, DistilGPT2, and Pythia-70M magnitudes by 46%, 49%, and 25%, respectively, because their sink-mass fractions were 47.3%, 41.3%, and 14.5%.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "Fetched the authors' ZhuiyiTechnology/roformer repository and inspected the released RoPE attention implementation. It implements the position-dependent Q/K rotations and attention product, but neither that repository nor the ALiBi release implements this distance-versus-attention Spearman diagnostic, so there is no original code to cross-run.",
+  "paper_number": "NONE",
+  "paper_reason": "RoFormer and ALiBi publish no per-head distance-attention Spearman, and the BLME paper supplies only its formula and qualitative sign hypothesis. There is no published scalar for this task to reproduce.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Across 10 measured models, the reported value correlated +0.750 with n_layers and +0.638 with d_model; within GPT-2-family depth it moved from -0.2454 (6 layers) through -0.2923 (12) to -0.1909 (24) and -0.1742 (36). Position-0 sink mass also varied 3.3-fold across the checked architectures and changed the cross-model score non-uniformly.",
+  "defects": [
+    "CODE src/blme/tasks/geometry/positional_decay.py:89-113 versus paper sections/metrics_geometry.tex:246-252: mean-of-row-Spearmans is not the paper's Spearman of pooled (distance, attention) pairs per head; the constructed head flips +0.574286 to -0.266470.",
+    "CODE src/blme/tasks/geometry/positional_decay.py:37-38: np.allclose uses an absolute 1e-8 tolerance to declare a row constant; [1e-9,2e-9,3e-9,4e-9] has exact rho=-1 but is returned as 0. This fired on 0 of 74,448 real GPT-2 rows, so it is latent rather than an explanation of existing results.",
+    "COMPARABILITY: position 0 is both the maximum-distance key and an attention sink. The shipped GPT-2 score is -0.2923 versus -0.4273 when that key is excluded, and the size of the shift differs materially by architecture.",
+    "CODE src/blme/tasks/geometry/positional_decay.py:81-103: a tuple containing only None attention entries passes the first guard and is misreported later as a short-sequence/NaN failure. The main harness forces eager attention, but standalone SDPA calls hit this path.",
+    "CONFIG src/blme/tasks/configs/defaults.yaml:85-86 and positional_decay.py:75-79: the effective protocol is five documents truncated at 256 tokens and accepts four-token sequences, contradicting the paper's sufficiently-long-context applicability requirement."
+  ],
+  "fix": "Implement the paper literally: within each head concatenate all valid causal (distance, attention) pairs, compute one Spearman, then average head scores; state explicitly whether diagonal/self-attention pairs are included. Replace np.allclose with an exact rank-constancy test, emit a separately named sink-excluded variant, compare fixed normalized depths, require a configured long-context minimum, and detect all-None attention tuples with an actionable eager-attention error."
+}

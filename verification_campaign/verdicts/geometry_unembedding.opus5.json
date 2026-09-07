@@ -1,0 +1,27 @@
+{
+  "task": "geometry_unembedding",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "The UnboundLocalError fix is real and the pin is genuine: I copied unembedding.py to a scratch dir, deleted the single line `eff_rank_centered = float(\"nan\")` from the except block, and ran the same test body against the pre-fix copy -- all 22 parametrised cases raise UnboundLocalError, while the current file passes all 22 (tests/tasks/test_unembedding_svd_failure.py, 22 passed in 3.45s). The surviving estimand is correct: `effective_rank` is Roy & Vetterli 2007's exp(-sum p_i log p_i) on RAW singular values, verified against closed forms -- rank-one gives exactly 1.0, identity spectra give 4.0 / 15.999999999999998 / 768.0000000000008 for n = 4/16/768, and an AR(1) Toeplitz gives 3.248642448331537 against the hand-computed 3.248642448331537 (rel 0.0e+00). The centered variant that was removed from the headline is confirmed wrong-signed: on the same AR(1) matrix it reads -14.5% at rho=0.5 and +55.6% at rho=0.9.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "unembedding_eff_rank is bounded by min(V, d_model) and tracks width directly; the task is verified_d and absent from all 66 archived envelopes so I could not correlate it over the zoo, but on gpt2 it reads 685.97 out of d=768 (89.3% of the ceiling), i.e. it is close to saturating its own architectural bound. unembedding_purity_mean is tokenizer-dependent (815 of 21 category word-lists resolve to single tokens on gpt2) and the task now says so itself via _meta_purity_cross_model_comparable=False. unembedding_is_tied and embedding_alignment_* are architecture facts, comparable but not structural. No normalized eff-rank variant (eff_rank / d_model) is emitted.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "PARTIAL",
+  "github_reason": "Roy & Vetterli's effective rank has no single canonical released implementation; I verified the formula against its closed form instead (identity, rank-one, AR(1) Toeplitz, all exact to <= 1e-15). The purity and embedding-alignment quantities are BLME's own constructions with no upstream code to fetch.",
+  "github_repo": "",
+  "paper_number": "PARTIAL",
+  "paper_reason": "Roy & Vetterli 2007 Property 1 (erank >= 1 for any nonzero matrix, with equality for rank one) and Property 2 (erank = n for the identity) both reproduce exactly: 1.0 and 768.0000000000008. The paper's own worked correlation-matrix example reproduces to rel 0.0e+00 against the entropy formula. No published unembedding effective-rank number exists for a specific LM to reproduce.",
+  "confounds": "SUSPECTED",
+  "confounds_reason": "Not measurable over the zoo (0 of 66 archived envelopes carry this task). By construction unembedding_eff_rank <= min(V, d_model) and gpt2 sits at 89.3% of that ceiling, so a width proxy is the null hypothesis and there is no evidence here against it. _meta_unembedding_n_category_tokens is an explicit vocabulary proxy and is now correctly prefixed.",
+  "defects": [
+    "Purity's row normalisation uses `W_out_np / (norm + 1e-10)` -- an ABSOLUTE epsilon on a scale-free normalisation, the exact pattern the campaign replaced with safe_unit_rows elsewhere (perturbation_growth, stability, superposition). It is inconsistent with the rest of the repo and breaks scale invariance of the cosine ranking for a globally small W.",
+    "Purity cost is O(n_query * V * d) in numpy on the CPU: 815 queries x 50257 x 768 took 6.8 s on gpt2, but `num_samples: 2000` with a 256k-vocab 4608-dim head is ~2.4e12 flops -- the same class of large-model blow-up the SVD OOM handler exists for, and it has no handler of its own.",
+    "No normalized effective-rank variant is emitted (eff_rank / min(V, d_model)), so the only spectral column the task exports is one whose ceiling is d_model.",
+    "The SVD try/except catches bare `Exception`; `torch.cuda.OutOfMemoryError` subclasses RuntimeError so the named case is covered, but a KeyboardInterrupt-adjacent BaseException in svdvals would still escape (minor)."
+  ],
+  "fix": "Replace `norm + 1e-10` with the repo's safe_unit_rows; emit `unembedding_eff_rank_norm = eff_rank / min(V, d_model)`; chunk or GPU the purity similarity loop and wrap it in the same graceful-degradation handler the SVD has.",
+  "source_hash": "9a70f2e962bf1fe0",
+  "shared_hash": "2269442e56b00687"
+}

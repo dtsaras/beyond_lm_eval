@@ -37,7 +37,10 @@ def test_task_vector_geometry(mock_model, mock_tokenizer):
     # May error if get_layers returns None for this architecture
     if "error" not in results:
         assert "layer_task_vector_norms" in results
-        assert "max_norm_layer" in results
+        assert "_meta_max_norm_layer" in results
+        # comparable twin added 2026-09-05: the bare index is pearson
+        # +0.9942 with n_layers.
+        assert "max_norm_layer_fraction" in results
         assert isinstance(results["layer_task_vector_norms"], list)
 
 
@@ -63,9 +66,9 @@ def test_steering_effectiveness(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "best_steering_layer" in results
-        assert "steering_success_rate" in results
-        assert "layer_steering_kl_divergence" in results
+        assert "_meta_best_steering_layer" in results
+        assert "_meta_steering_success_rate" in results
+        assert "_meta_steering_kl_divergence" in results
 
 
 def test_concept_separability(mock_model, mock_tokenizer):
@@ -209,9 +212,54 @@ def test_steering_effectiveness_runs_on_default_text_corpus(mock_model, mock_tok
     assert corpus == snapshot, "task mutated the caller's shared corpus"
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "best_steering_layer" in results
-        assert "steering_success_rate" in results
-        assert "layer_steering_kl_divergence" in results
+        assert "_meta_best_steering_layer" in results
+        assert "_meta_steering_success_rate" in results
+        assert "_meta_steering_kl_divergence" in results
+
+
+def test_concept_separability_runs_on_default_text_corpus(mock_model, mock_tokenizer):
+    """Regression (2026-09-04): the sibling steering task has had this exact
+    test since campaign-4 B2; concept_separability did not, and that gap let a
+    real regression ship.
+
+    A "fix" for generator datasets reassigned `dataset` AFTER the fallback had
+    already built its labelled fact-pair set, clobbering it — so an UNLABELLED
+    corpus, which is precisely what core.py substitutes on every study run,
+    raised `KeyError: 'label'`. Every one of the 99 repe tests passed on the
+    broken code because none of them handed this task an unlabelled dataset.
+
+    All four dispatch shapes must work, and none may mutate the caller's data.
+    """
+    import copy
+    from blme.tasks.representation_engineering import ConceptSeparabilityTask
+
+    corpus = [{"text": f"Wikipedia sentence number {i}."} for i in range(8)]
+    snapshot = copy.deepcopy(corpus)
+
+    task = ConceptSeparabilityTask(config={"num_samples": 4})
+    res_text = task.evaluate(mock_model, mock_tokenizer, dataset=corpus)
+    assert corpus == snapshot, "task mutated the caller's shared corpus"
+    assert isinstance(res_text, dict)
+    assert "error" not in res_text, res_text
+    assert "mean_auc" in res_text
+
+    # Bare strings — the other unlabelled shape a caller can pass.
+    res_str = task.evaluate(mock_model, mock_tokenizer,
+                            dataset=[f"plain string {i}" for i in range(8)])
+    assert "error" not in res_str, res_str
+
+    # dataset=None must agree with the unlabelled paths: all three fall back to
+    # the same bundled fact pairs, so all three must produce the same number.
+    res_none = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    assert "error" not in res_none, res_none
+    assert res_text["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
+    assert res_str["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
+
+    # And a LABELLED GENERATOR must still work — the case the broken fix was
+    # written for, which must not regress while fixing the common path.
+    gen = ({"text": f"Fact {i} is stated.", "label": i % 2} for i in range(8))
+    res_gen = task.evaluate(mock_model, mock_tokenizer, dataset=gen)
+    assert "error" not in res_gen, res_gen
 
 
 def test_steering_effectiveness_rejects_mixed_dataset(mock_model, mock_tokenizer):

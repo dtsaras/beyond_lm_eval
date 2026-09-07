@@ -97,6 +97,20 @@ class AblationRobustnessTask(DiagnosticTask):
                 for ids in encodings:
                     # We compute the mean activation first over the sequence
                     clean_out = model(ids, output_hidden_states=True)
+                    # post-final-norm: THE `ln_f` ENTRY IS NEVER REACHED, by
+                    # construction. `target_layers` is
+                    # `range(num_layers // 4, 3 * num_layers // 4)`, so its
+                    # largest member is `3L//4 - 1`, and the consumer below reads
+                    # `clean_states[l_idx + 1]`, i.e. at most `clean_states[3L//4]`
+                    # -- strictly inside the block outputs for every L >= 2.
+                    #
+                    # That matters because these values are written BACK into
+                    # the residual stream by a hook on `layers[l_idx]`, which
+                    # replaces that block's OUTPUT. A post-`ln_f` vector is in a
+                    # different space and would be the wrong replacement. The
+                    # one exception is the degenerate L = 1 fallback
+                    # (`target_layers = [0]`, giving `clean_states[1]` = `ln_f`),
+                    # where the task has no interior layer to ablate at all.
                     clean_states = [h.detach() for h in clean_out.hidden_states]
                     
                     hooks = []

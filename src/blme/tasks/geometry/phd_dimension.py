@@ -176,7 +176,18 @@ def _phd_dimension(
     m = float(np.mean(ms))
     if not np.isfinite(m) or m >= 1.0:
         return float("nan")
-    d = 1.0 / (1.0 - m)
+    # CORRECT INVERSION FOR ANY alpha.
+    #
+    # E_alpha(n) ~ n^((d - alpha)/d) gives slope m = 1 - alpha/d, hence
+    # d = alpha / (1 - m). The official GPTID code returns 1/(1-m) regardless
+    # of alpha, which is right ONLY at alpha = 1 -- and alpha is
+    # config-reachable here (defaults.yaml sets alpha: 1.0, so this is latent
+    # at the shipped protocol, but wrong the moment it is changed). Measured on
+    # a uniform R^2 cloud: alpha=0.5 returned 3.946938 where alpha/(1-m) is
+    # 1.973469, and alpha=1.5 returned 1.277344 where the correct value is
+    # 1.916016. At alpha = 1.0 this is bit-identical to the official form, so
+    # parity with GPTID is preserved at the reference setting.
+    d = alpha / (1.0 - m)
     return float(d) if np.isfinite(d) else float("nan")
 
 
@@ -191,14 +202,18 @@ def _gather_point_cloud(
     or ``last``.
     """
     # Cache path — flat (N, D) token cloud at the chosen layer.
+    # post-final-norm=False, DELIBERATELY: one configured layer (default -1,
+    # the model's output representation), not a profile.
     if cache is not None and getattr(cache, "is_populated", False) and use_cache:
-        tensor = cache.get_hidden_states(layer_idx=layer_idx, num_samples=num_samples)
+        tensor = cache.get_hidden_states(layer_idx=layer_idx, num_samples=num_samples,
+                                         replace_final_norm=False)
         if tensor is not None and pooling == "all_tokens":
             return tensor.float().cpu().numpy().astype(np.float64)
         # For mean/last we need per-sample chunks.
         if tensor is not None and pooling in ("mean", "last"):
             chunks = cache.get_hidden_states(
                 layer_idx=layer_idx, num_samples=num_samples, per_sample=True,
+                replace_final_norm=False,
             )
             if chunks:
                 vecs = []
@@ -228,6 +243,13 @@ def _gather_point_cloud(
             inputs = tokenizer(
                 text, return_tensors="pt", truncation=True, max_length=max_length,
             ).to(device)
+            # post-final-norm=False, DELIBERATELY, and stated HERE because a
+            # declaration on the cache route does not cover this one. An
+            # independent review found these two private-forward routes
+            # undeclared while the cache route above was declared -- the exact
+            # shape of defect the sweep exists to prevent (2026-09-05).
+            # PHD reports ONE configured layer (default -1, the model's output
+            # representation), never a cross-layer profile.
             out = model(**inputs, output_hidden_states=True)
             hs = out.hidden_states  # tuple length n_layers+1 (embedding + blocks)
             # Match the CACHE convention: layer 0 = first block output (the
@@ -248,6 +270,57 @@ def _gather_point_cloud(
     if not collected:
         return None
     return np.asarray(collected, dtype=np.float64)
+
+
+def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
+                              max_length: int, layer_idx: int, pooling: str):
+    """Yield one ``(T_i, D)`` token cloud PER DOCUMENT.
+
+    The pooled path concatenates documents, which mixes manifolds and inflates
+    the dimension estimate. Tulchinskii et al. estimate one PHD per text and
+    report the mean, so this walks documents individually. Runs its own forward
+    pass: the shared cache stores a flat concatenated cloud with no document
+    boundaries, so per-document slices are not recoverable from it.
+    """
+    import torch as _torch
+    device = next(model.parameters()).device
+    samples = list(dataset)[:num_samples] if dataset is not None else []
+    with _torch.no_grad():
+        for smp in samples:
+            text = smp["text"] if isinstance(smp, dict) and "text" in smp else str(smp)
+            if not str(text).strip():
+                continue
+            enc = tokenizer(text, return_tensors="pt", truncation=True,
+                            max_length=max_length)
+            enc = {k: v.to(device) for k, v in enc.items()}
+            if enc["input_ids"].shape[1] < 1:
+                continue
+            # post-final-norm=False, DELIBERATELY -- same single-layer estimand
+            # as the sibling collector, and it must match it or the pooled and
+            # per-document numbers would come from different representations.
+            out = model(**enc, output_hidden_states=True)
+            hs = getattr(out, "hidden_states", None)
+            if not hs:
+                continue
+            # SAME CONVENTION AS `_collect_layer_cloud`: layer 0 = FIRST BLOCK
+            # OUTPUT, i.e. tuple index 1, because that is what the shared cache
+            # means by layer 0. This path used the raw tuple index, so for any
+            # explicit non-negative `layer_idx` the per-document estimate came
+            # from a DIFFERENT layer than the pooled estimate it is compared
+            # against -- `layer_idx: 0` gave the EMBEDDING cloud here and the
+            # first block's output there. The same off-by-one was fixed in
+            # `_collect_layer_cloud` in the 2026-07-16 audit and this sibling
+            # was missed (red-team review, 2026-09-05). At the shipped
+            # `layer_idx: -1` both resolve to the last entry, so the archive is
+            # unaffected; the knob was simply broken.
+            idx = (layer_idx + 1) if layer_idx >= 0 else len(hs) + layer_idx
+            idx = max(1, min(idx, len(hs) - 1))
+            h = hs[idx][0].detach().float().cpu().numpy()
+            if pooling == "mean":
+                h = h.mean(axis=0, keepdims=True)
+            elif pooling == "last":
+                h = h[-1:, :]
+            yield np.asarray(h, dtype=np.float64)
 
 
 @register_task("geometry_phd_dimension")
@@ -328,8 +401,106 @@ class PHDimensionTask(DiagnosticTask):
             seed=seed,
         )
 
-        return {
-            "phd_dimension": float(d),
+        out = {
+            "_meta_phd_dimension_pooled": float(d),
             "_meta_num_points": int(n_cloud),
             "_meta_layer_idx": int(layer_idx),
         }
+
+        # PER-TEXT protocol, which is what Tulchinskii et al. actually measure.
+        #
+        # The pooled cloud is a MIXTURE of per-document manifolds, and mixing
+        # raises the estimate: distilgpt2 reads 8.9757 pooled against
+        # 6.4749 +/- 1.1090 per text (+38.6%) and gpt2 6.3188 against
+        # 5.0383 +/- 0.9537 (+25.4%) on the same 81 documents. The inflation
+        # factor is NOT constant across models (1.386x vs 1.254x on the same
+        # corpus), so renaming the pooled quantity would preserve a
+        # model-dependent bias rather than remove it -- the per-text protocol
+        # has to be computed. It also yields the sd the pooled estimate
+        # discards, and reproduces the paper's published 9.491 to 2.7%
+        # (adversarial review, 2026-09-04).
+        per_text = []
+        try:
+            # ACCOUNTING, because the drops were silent. Documents shorter than
+            # `min_points` (50 tokens) cannot be estimated at all and were
+            # skipped without a trace, and the SURVIVORS do not all get the
+            # same estimator: the candidate-size grid is
+            # `range(min_points, min(max_points, len(doc)), point_jump)`, so a
+            # 200-token document is fit on 4 points and a 512-token one on 12.
+            # A power-law slope from 3 points and one from 12 entered
+            # `phd_dimension`'s mean with equal weight (red-team review,
+            # 2026-09-05).
+            _n_seen = _n_short = _n_ungriddable = _n_nonfinite = 0
+            _fit_pts = []
+            for _doc in _iter_per_document_clouds(
+                    model, tokenizer, dataset, num_samples, max_length,
+                    layer_idx, pooling):
+                if _doc is None:
+                    continue
+                _n_seen += 1
+                if _doc.shape[0] < min_points:
+                    _n_short += 1
+                    continue
+                # THE SECOND DROP, which the first round of accounting missed.
+                # A document longer than `min_points` can still be too short to
+                # FIT: the candidate-size grid is
+                # `range(min_points, min(max_points, len(doc)), point_jump)`, so
+                # a 50-89-token document yields a ONE-POINT grid, `_phd_dimension`
+                # returns NaN for want of a slope, and the document vanished
+                # from the mean with nothing recorded. Measured: 100 documents
+                # seen, 17 reported too-short, and **17 more silently dropped**
+                # this way (independent Opus review, 2026-09-05). Both are now
+                # counted, and a grid too short to support a fit is rejected
+                # here rather than deep inside the estimator.
+                _mx = min(max_points, _doc.shape[0])
+                _npts = len(range(min_points, _mx, point_jump))
+                if _npts < 2:
+                    _n_ungriddable += 1
+                    continue
+                _fit_pts.append(_npts)
+                _dd = _phd_dimension(
+                    _doc, alpha=alpha, metric="euclidean", n_reruns=n_reruns,
+                    n_points=n_points, n_points_min=n_points_min,
+                    min_points=min_points,
+                    max_points=_mx,
+                    point_jump=point_jump, seed=seed,
+                )
+                if np.isfinite(_dd):
+                    per_text.append(float(_dd))
+                else:
+                    _n_nonfinite += 1
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info(f"phd: per-text pass failed ({e})")
+
+        if per_text:
+            out["phd_dimension"] = float(np.mean(per_text))
+            out["phd_dimension_std"] = float(np.std(per_text))
+            out["_meta_phd_n_texts"] = int(len(per_text))
+            out["_meta_phd_n_texts_seen"] = int(_n_seen)
+            out["_meta_phd_n_texts_too_short"] = int(_n_short)
+            # Every document is now in exactly one bucket, and the four sum to
+            # `_meta_phd_n_texts_seen`. That property is the point: an
+            # accounting that does not add up is how the second drop hid.
+            out["_meta_phd_n_texts_ungriddable"] = int(_n_ungriddable)
+            out["_meta_phd_n_texts_nonfinite"] = int(_n_nonfinite)
+            out["_meta_phd_fit_points_min"] = (
+                int(min(_fit_pts)) if _fit_pts else 0)
+            out["_meta_phd_fit_points_median"] = (
+                float(np.median(_fit_pts)) if _fit_pts else float("nan"))
+            _dropped = _n_short + _n_ungriddable + _n_nonfinite
+            if _n_seen and _dropped / _n_seen > 0.1:
+                logger.warning(
+                    f"  phd: {_dropped}/{_n_seen} documents "
+                    f"({_dropped / _n_seen:.0%}) contributed nothing to "
+                    f"`phd_dimension` -- {_n_short} shorter than "
+                    f"min_points={min_points}, {_n_ungriddable} with fewer than "
+                    f"2 candidate sizes, {_n_nonfinite} with a non-finite fit. "
+                    f"The reported mean is over the long tail of the corpus, "
+                    f"not over the corpus.")
+        else:
+            # No document was large enough; fall back to the pooled estimate
+            # and flag that this is NOT the per-text quantity.
+            out["phd_dimension"] = float(d)
+            out["phd_dimension_std"] = float("nan")
+            out["_meta_phd_pooled_fallback"] = True
+        return out

@@ -27,7 +27,10 @@ Definition (Hosseini & Fedorenko 2023, Methods):
 
 Implementation notes:
     * Tier 2 — consumes the shared cache via
-      ``cache.get_hidden_states(layer_idx="all", per_sample=True)``.
+      ``cache.get_hidden_states(layer_idx="all", per_sample=True,
+      replace_final_norm=True)`` -- the last flag matters: without it the
+      deepest point is ``ln_f(b_{L-1})``, a LayerNorm output, not a block
+      output (see the note at the call site).
       Trajectory order matters, so the per-sample ``(T_i, D)`` chunks
       are required; the flattened token cloud would silently mix
       documents. Without a cache the task runs its own forward pass
@@ -91,7 +94,28 @@ def _trajectory_angles(X) -> np.ndarray:
 
     dots = np.einsum("ij,ij->i", V[:-1], V[1:])  # (T-2,)
     denom = norms[:-1] * norms[1:]
-    valid = (norms[:-1] > _ZERO_NORM_EPS) & (norms[1:] > _ZERO_NORM_EPS)
+    # RELATIVE validity test, not an absolute epsilon.
+    #
+    # The angle between two difference vectors is homogeneous of degree ZERO --
+    # scaling the whole trajectory cannot change it. `norms > _ZERO_NORM_EPS`
+    # made it scale-dependent: at 1e-30, 1e-25 and 1e-13 every norm falls below
+    # the fixed threshold, `valid` is all-False, and the function returns an
+    # EMPTY array, so a genuine 1.0471975512-rad turn was reported as no angle
+    # at all while 1, 1e13, 1e25 and 2.406159650500376e38 returned it correctly
+    # (gpt-5.6-sol round 9, 2026-09-07).
+    #
+    # `X` is already float64 here, so the norms themselves are fine at 1e-30
+    # (1e-60 is comfortably representable) -- the threshold was the whole
+    # defect. Scaling it by the trajectory's own largest step makes the test
+    # mean "this step is negligible COMPARED TO THIS TRAJECTORY", which is the
+    # only scale-free reading of "non-negligible norm".
+    #
+    # Fourth absolute-epsilon-in-a-scale-free-operation found on 2026-09-07,
+    # after `stability`'s clamp_min(1e-10), `coe`'s z_mag <= 1e-12, and
+    # `trajectories`' two norm + 1e-10 rescales.
+    _ref = float(norms.max()) if norms.size else 0.0
+    _floor = _ZERO_NORM_EPS * _ref if _ref > 0 else _ZERO_NORM_EPS
+    valid = (norms[:-1] > _floor) & (norms[1:] > _floor)
     if not np.any(valid):
         return np.empty(0, dtype=np.float64)
 
@@ -168,10 +192,33 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         skip_first = int(self.config.get("skip_first_tokens", 1))
         use_cache = self.config.get("use_cache", True)
 
+        # THE 12TH INSTANCE of the post-final-norm defect, and the only task
+        # in `core.py`'s `cache_hidden_tasks` that never opted in.
+        #
+        # HF's last `hidden_states` entry is `ln_f(b_{L-1})`, not a block
+        # output; `cache.py` grew `replace_final_norm=True` for exactly this,
+        # and rsa/collapse/lipschitz/procrustes_linearity/schatten/mutual_info
+        # all took it. This file did not, and it is ALWAYS on the cache path in
+        # production. A trajectory metric is especially exposed: the deepest
+        # point is an endpoint of every segment the curvature integrates.
+        # Measured over 100 wikitext passages at the shipped config
+        # (red-team review, 2026-09-05):
+        #
+        #   pythia-70m   straightening_ratio 0.031299 -> 0.052133  (+66.6%)
+        #                curvature_slope    -0.047855 -> -0.078497 (-64.0%)
+        #   pythia-160m  straightening_ratio 0.045122 -> 0.067378  (+49.3%)
+        #   gpt2         straightening_ratio 0.043095 -> 0.039696  (-7.9%)
+        #
+        # The SIGN of the bias is architecture-family determined, so it does
+        # not cancel in a cross-model comparison: over five models
+        # Spearman(shipped, corrected) is only +0.20 for `straightening_ratio`.
         if cache is not None and cache.is_populated and use_cache:
             per_layer_chunks = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=True,
+                replace_final_norm=True,
             )
+            _last_is_block = bool(
+                getattr(cache, "_last_block_substituted", False))
         else:
             # Fallback: run our own forward pass through a private cache
             # so the per-sample (T_i, D) split logic stays in one place.
@@ -184,8 +231,10 @@ class TrajectoryCurvatureTask(DiagnosticTask):
             )
             local_cache.populate(need_hidden=True)
             per_layer_chunks = local_cache.get_hidden_states(
-                layer_idx="all", per_sample=True,
+                layer_idx="all", per_sample=True, replace_final_norm=True,
             )
+            _last_is_block = bool(
+                getattr(local_cache, "_last_block_substituted", False))
 
         if not per_layer_chunks:
             return {"error": "No hidden states available for trajectory curvature"}
@@ -229,6 +278,11 @@ class TrajectoryCurvatureTask(DiagnosticTask):
 
         finite_curv = curv[finite]
         return {
+            # Provenance, derived: True only if the deepest entry really is the
+            # hooked raw block output. Every sibling that opted into
+            # `replace_final_norm` emits this; this task did not, so nothing in
+            # its output revealed that it was reading a LayerNorm.
+            "_meta_last_entry_is_block_output": bool(_last_is_block),
             "curvature_mean_first_layer": float(c_first),
             "curvature_mean_mid_layer": float(c_mid),
             "curvature_mean_last_layer": float(c_last),

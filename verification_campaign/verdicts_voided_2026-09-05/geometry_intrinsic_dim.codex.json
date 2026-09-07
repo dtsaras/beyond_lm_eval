@@ -1,0 +1,26 @@
+{
+  "task": "geometry_intrinsic_dim",
+  "reviewer": "codex",
+  "verdict": "GREEN",
+  "verdict_reason": "BLME computes Facco's one-based empirical-CDF, origin-constrained TwoNN slope and matches the released Ansuini estimator on ordinary, tied-distance, and duplicate-coordinate fixtures to a maximum absolute difference of 8.88e-16. Four analytic slopes 0.5, 2, 7, and 20 were recovered with maximum absolute error 7.11e-15; no value-changing counterexample survived the released reference's degeneracy semantics.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "Across 66 archived layerwise runs, mean ID spans 6.26675-9.05311 and has Spearman rho=+0.70642 with d_model, +0.52314 with layer count, +0.66150 with log(params), and +0.05645 with vocabulary size. Within-family rank residualization across 50 scaling models in 13 families leaves rho=+0.72198 with d_model. The named task also changes population and output shape by configuration: the shipped default produces one full-vocabulary static-embedding ID, whereas the study configuration produces one ID per layer; in a 503-row static mock, both shipped num_samples=100 and explicit sample_size=100 still used all 503 rows.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "ansuini/IntrinsicDimDeep; sissa-data-science/DADApy; efacco/TWO-NN",
+  "github_reason": "I fetched the official Ansuini IDNN/intrinsic_dimension.py and current DADApy TwoNN kernel and executed their released formulas on the same inputs. Ansuini and BLME matched on ordinary, 80-tie, and 20-duplicate fixtures with retained populations 200/120/141 and maximum absolute difference 8.88e-16; DADApy's one-based core matched five Pareto fixtures within 5.31e-11. The efacco/TWO-NN C++ repository was located but not built; the two executable Python references independently cross-verify the implementation.",
+  "paper_number": "YES",
+  "paper_reason": "Facco et al. Fig. 1 reports 13.91 for a periodic 14-cube, 2.01 for a Swiss roll, and 22.16 for a radial Cauchy cloud in dimension 20, each at N=2500 with the upper 10% excluded. Ten independent BLME slope-kernel replications gave 13.934002 +/- 0.383016 (+0.1726%), 1.973362 +/- 0.037211 (-1.8228%), and 22.553172 +/- 0.397756 (+1.7742%), respectively; the quoted uncertainties are across-replication sample standard deviations.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "In the same 66-model archive, mean layer ID has rho=+0.70642 with d_model (p=3.43e-11), +0.52314 with layer count (p=6.59e-6), +0.66150 with log(params) (p=1.48e-9), and only +0.05645 with vocabulary size (p=0.653); the within-family width association remains +0.72198 over 50 models. A fixed cloud zero-padded isometrically from ambient D=8 to D=4096 changed ID only from 7.645859125 to 7.645859085, a 4.04e-8 span, so the emitted statistic is a confirmed architecture proxy even though unused ambient coordinates are not the causal mechanism.",
+  "defects": [
+    "CODE, src/blme/tasks/geometry/intrinsic_dim.py:83: static evaluation reads the output-style _meta_sample_size key instead of a public sampling key. In a 503-row mock, defaults {layerwise:false,num_samples:100} and an explicit sample_size=100 both passed sample_size=None and used 503 rows; only _meta_sample_size=100 passed 100.",
+    "CONFIG/PROTOCOL: defaults.yaml selects one full input-embedding-table estimate, while the study recipe selects a per-token layer profile under the same task name. On six cached embedding tables, changing the internal sample from 500 to 1000 changed ID by factors 0.17202-12375.84753; pythia-70m moved 4.442505 to 54979.768584 and gpt2-medium moved 56.258144 to 9.677525, so silently ignoring the public cap is consequential.",
+    "OBSERVABILITY: _compute_id reports the pre-filter N, and layerwise evaluate discards even that metadata; neither path reports the population retained after r1=0/r1=r2 exclusions. In a 3002-token pythia-70m run, 36 duplicated rows left 2966 unique coordinates, and a pre-deduplicated alternative shifted layer estimates by 1.24%-2.06%, yet the emitted output exposed none of those counts or sensitivity.",
+    "NUMERICS: the GPU neighbor path uses direct float64 distances but the CPU fallback uses sklearn on float32. On the same 1000 sampled pythia-70m embedding rows, CPU returned 54979.768584 versus 55022.806183 from direct float64, a -0.0782% host-path difference; the output does not record which backend ran.",
+    "PROVENANCE, src/blme/task_metadata.py:55: 'bit-identical to skdim' is too strong and unversioned. Against the current scikit-dimension master formula, only 1 of 5 analytic Pareto fixtures was bit-identical and the other 4 differed by up to 4.44e-15; BLME is semantically aligned, but the defensible claim is paper/DADApy/Ansuini parity with measured tolerance. The same metadata also calls tie filtering a deviation even though the released Ansuini code removes r1=r2 rows; an 80-tie fixture matched to 4.44e-16."
+  ],
+  "fix": ""
+}

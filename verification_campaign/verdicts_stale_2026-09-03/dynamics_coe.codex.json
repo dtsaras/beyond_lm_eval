@@ -1,0 +1,25 @@
+{
+  "task": "dynamics_coe",
+  "reviewer": "codex",
+  "verdict": "RED",
+  "verdict_reason": "The CoE kernel matches Wang et al.'s released score.py (maximum relative errors 4.33e-16 for M, 4.81e-16 for A, 5.53e-12 for R, and 5.45e-16 for C), but dynamics/coe.py:174-190 does not supply the paper-defined chain. On a fixed GPT-2 continuation, the current slice applied to generated-token means gave CoE-R/C = -0.074734/0.120983 versus -0.016222/0.194411 from the full chain used by the released inference.py; the task instead scores the prompt's terminal token.",
+  "defect_location": "CODE",
+  "comparable": "YELLOW",
+  "comparable_reason": "In the 61-result pre-fix matrix, headline CoE-R/CoE-C had weak Spearman correlations with d_model, n_layers, vocab_size, and parameter count (maximum absolute rho 0.245), but that matrix is stale for the current layer slice and the four-model rerun is too small to certify invariance. The same result bundle emits chain_length_per_sample = n_layers exactly (rho = 1), and mean_normalized_angle retained rho = -0.434 with n_layers (p = 0.0005).",
+  "normalized_variant": "normalized_coe_c",
+  "normalized_ok": "RED",
+  "github": "YES",
+  "github_repo": "Alsace08/Chain-of-Embedding",
+  "github_reason": "Fetched and executed the authors' score.py and inspected inference.py. The four released score functions matched BLME on 200 identical random chains to at worst 5.53e-12 relative error, while inference.py demonstrated the missing end-to-end operation: it averages each layer over generated decoding steps before scoring.",
+  "paper_number": "NONE",
+  "paper_reason": "The paper reports downstream AUROCs rather than raw CoE-R/CoE-C values on released hidden-state fixtures. Without the authors' generated states and correctness labels, there is no published raw scalar for this task to reproduce.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "The headline scores were not strongly size-correlated in the old 61-result matrix, but the exported chain_length_per_sample is an exact depth proxy and mean_normalized_angle was significantly depth-linked. The current headline implementation still needs a broad matched rerun after repairing the chain, so absence of a headline size effect is not established.",
+  "defects": [
+    "CODE src/blme/tasks/dynamics/coe.py:174-190 scores the prompt's final token instead of the paper's mean over generated-output-token states.",
+    "CODE src/blme/tasks/dynamics/coe.py:188 removes the final hidden-state entry that the released inference.py includes and does not replace it with a hooked pre-final-norm block output; the current two-block regression test expects two transitions and obtains one, and same-continuation CoE-R/C moved from -0.074734/0.120983 to -0.016222/0.194411 under the official full-chain input.",
+    "CODE normalized_coe_c is an exact alias of coe_c (maximum absolute difference 0 across 61 stored results), so it is not a normalized cross-model variant.",
+    "PROVENANCE the paper's printed CoE-C expression and released implementation disagree about angle normalization; BLME follows the executable release, and this ambiguity must be disclosed rather than silently attributed to the equation alone."
+  ],
+  "fix": "For source parity, generate the continuation, average each layer over generated tokens as inference.py does, and pass its full h_0...h_L tuple to the scorer. If a block-only alternative is desired, hook the missing final pre-norm block output and publish it under a separate name; also remove or explicitly rename the normalized_coe_c alias."
+}
