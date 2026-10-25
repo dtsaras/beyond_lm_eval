@@ -259,6 +259,40 @@ def safe_unit_rows_torch(X):
     return U
 
 
+def as_numpy(t):
+    """Tensor -> numpy without changing any value.
+
+    numpy has no bfloat16, so ``.numpy()`` raises on a bf16 tensor; bf16 widens
+    EXACTLY to float32. Every other dtype is kept as is (in particular float64
+    is never narrowed).
+    """
+    t = t.detach().cpu()
+    if t.dtype == torch.bfloat16:
+        t = t.float()
+    return t.numpy()
+
+
+def _offload_bytes(t):
+    """Raw bytes of ``t`` plus a dtype tag the memmap reader understands.
+
+    bfloat16 has no numpy dtype, so it is stored as its 16-bit pattern and
+    viewed back as bfloat16 on read: the round trip is bit-exact and keeps the
+    dtype the in-memory route returns.
+    """
+    t = t.detach().cpu().contiguous()
+    if t.dtype == torch.bfloat16:
+        return t.view(torch.int16).numpy().tobytes(), "bfloat16"
+    a = t.numpy()
+    return a.tobytes(), a.dtype.str
+
+
+def _offload_view(path, tag, shape):
+    if tag == "bfloat16":
+        return torch.from_numpy(np.memmap(path, dtype=np.int16, mode="r",
+                                          shape=shape)).view(torch.bfloat16)
+    return torch.from_numpy(np.memmap(path, dtype=np.dtype(tag), mode="r", shape=shape))
+
+
 def safe_svdvals(M):
     """Singular values that do not overflow at the top of the float32 range.
 
@@ -450,10 +484,11 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                                     # NaN (regression introduced 2026-09-09 by
                                     # the dtype-preserving collection fix, caught
                                     # by codex round 15 the same day).
-                                    "np_dtype": np.dtype(
-                                        torch.empty(0, dtype=h_flat.dtype).numpy().dtype)}
+                                    "dtype_tag": None}
                             f = all_hidden[_k]["handle"]
-                            f.write(h_flat.numpy().tobytes())
+                            _bytes, _tag = _offload_bytes(h_flat)
+                            all_hidden[_k]["dtype_tag"] = _tag
+                            f.write(_bytes)
                             all_hidden[_k]["count"] += h_flat.shape[0]
                         else:
                             if _k not in all_hidden:
@@ -514,10 +549,11 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                                     # NaN (regression introduced 2026-09-09 by
                                     # the dtype-preserving collection fix, caught
                                     # by codex round 15 the same day).
-                                    "np_dtype": np.dtype(
-                                        torch.empty(0, dtype=h_flat.dtype).numpy().dtype)}
+                                    "dtype_tag": None}
                         f = all_hidden[layer_idx]["handle"]
-                        f.write(h_flat.numpy().tobytes())
+                        _bytes, _tag = _offload_bytes(h_flat)
+                        all_hidden[layer_idx]["dtype_tag"] = _tag
+                        f.write(_bytes)
                         all_hidden[layer_idx]["count"] += h_flat.shape[0]
                     else:
                         if layer_idx not in all_hidden:
@@ -542,11 +578,8 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
         for idx, meta in all_hidden.items():
             meta["handle"].close()
             if meta["count"] > 0:
-                mmap_array = np.memmap(meta["path"],
-                                       dtype=meta.get("np_dtype", np.float32),
-                                       mode='r',
-                                       shape=(meta["count"], meta["D"]))
-                results[idx] = torch.from_numpy(mmap_array)
+                results[idx] = _offload_view(meta["path"], meta["dtype_tag"],
+                                             (meta["count"], meta["D"]))
             else:
                 results[idx] = torch.empty(0)
     else:

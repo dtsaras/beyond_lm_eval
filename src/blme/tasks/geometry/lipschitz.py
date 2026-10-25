@@ -25,7 +25,7 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_hidden_states, collected_layer_count
+from .utils import as_numpy, collect_hidden_states, collected_layer_count
 import numpy as np
 import torch
 import logging
@@ -156,8 +156,8 @@ class LipschitzContinuityTask(DiagnosticTask):
         contraction_rates = []  # ratio < 1 = contractive, > 1 = expansive
         
         for i in range(n_layers - 1):
-            h_l = all_layers[layer_indices[i]].numpy()
-            h_next = all_layers[layer_indices[i + 1]].numpy()
+            h_l = as_numpy(all_layers[layer_indices[i]])
+            h_next = as_numpy(all_layers[layer_indices[i + 1]])
             
             # Align shapes (use minimum token count)
             n_tokens = min(len(h_l), len(h_next))
@@ -204,8 +204,8 @@ class LipschitzContinuityTask(DiagnosticTask):
         _paper_eps = 1e-8
         _pe = []
         for i in range(n_layers - 1):
-            _a = all_layers[layer_indices[i]].numpy()
-            _b = all_layers[layer_indices[i + 1]].numpy()
+            _a = as_numpy(all_layers[layer_indices[i]])
+            _b = as_numpy(all_layers[layer_indices[i + 1]])
             _n = min(len(_a), len(_b))
             if _n == 0:
                 continue

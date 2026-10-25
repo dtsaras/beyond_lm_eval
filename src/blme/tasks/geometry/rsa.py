@@ -22,7 +22,7 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_hidden_states, collected_layer_count
+from .utils import as_numpy, collect_hidden_states, collected_layer_count
 import numpy as np
 import torch
 from scipy.stats import spearmanr
@@ -163,7 +163,7 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         def _rdms(metric):
             out = {}
             for li in layer_indices:
-                X = np.asarray(all_layers[li].numpy()[sel], dtype=np.float64)
+                X = np.asarray(as_numpy(all_layers[li])[sel], dtype=np.float64)
                 # (see _n_degenerate below)
                 if metric == "correlation":
                     # Guard the degenerate rows correlation distance cannot

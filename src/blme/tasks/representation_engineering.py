@@ -1664,6 +1664,9 @@ class RefusalDirectionTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Refusal Direction Analysis (Arditi 2024)...")
 
+        if not HAS_SKLEARN:
+            return {"error": "scikit-learn is required for refusal direction. Install via: pip install scikit-learn"}
+
         # Only accept the caller's dataset if it carries an explicit
         # "harmful"/"harmless" label — not any {0,1,True,False} label.
         # Historic bug: ConceptSeparabilityTask silently mutated the

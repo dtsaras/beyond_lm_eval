@@ -105,7 +105,13 @@ class GlobalHubnessTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Global Hubness Analysis...")
-        k_values = self.config.get("k_values", [10, 50, 100])
+        # De-duplicate in order. The occurrence counters are keyed by k while
+        # the scatter loop runs once per LIST ENTRY, so a repeated k added its
+        # neighbours twice into one counter and doubled every count.
+        _k_raw = [int(k) for k in self.config.get("k_values", [10, 50, 100])]
+        k_values = list(dict.fromkeys(_k_raw))
+        if not k_values or min(k_values) < 1:
+            return {"error": f"hubness: k_values must be positive integers, got {_k_raw}"}
         batch_size = self.config.get("batch_size", 2000)
 
         E = get_embeddings(model)
@@ -274,6 +280,7 @@ class GlobalHubnessTask(DiagnosticTask):
         results = {
             "_meta_n_zero_rows": _n_zero,
             "_meta_n_nonfinite_rows": _n_nonfinite,
+            "_meta_k_values_duplicates_dropped": len(_k_raw) - len(k_values),
         }
         for k in k_values:
             n_occ_cpu = n_occ[k].cpu().numpy().astype(np.int64)
