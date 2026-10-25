@@ -14,7 +14,7 @@ decisions are recorded in the plan and in memory (`hardening-plan-2026-10`).
 - `main` is untouched, and nothing has been pushed. Ask before any push.
 - Golden snapshots are in `~/hara-artifacts/blme/golden/`:
   - `d106ef9_shipped_cache_run{A,B}` is the pre-CBWR pair (20 nondeterministic leaves);
-  - `b6980a9_shipped_cache_run{C,D}` is the post-merge CBWR pair, which is the **Phase 2 baseline**. Check it with `compare C D`; whether it was bit-identical is recorded below once known.
+  - `b6980a9_shipped_cache_run{C,D}` is the post-merge CBWR pair, which is the **Phase 2 baseline**. **C vs D: 0 differences over 258 entries / 6,187 leaves (bit-identical)** with `MKL_CBWR=COMPATIBLE`; the pre-CBWR pair differed in 20 leaves. That is one clean pair, so re-check with a third run before relying on a zero-tolerance gate. Coverage gaps as noted below (sharpness and intrinsic_dim time out on gpt2).
 - **Env:** venv `~/hara-venvs/beyond-lm-eval`. Never put "blme" in a venv path. pod1 has no git identity, so commits pass `GIT_AUTHOR_*`/`GIT_COMMITTER_*` for Dimitrios Tsaras.
 
 ## Done this session
@@ -34,8 +34,14 @@ decisions are recorded in the plan and in memory (`hardening-plan-2026-10`).
 
 **Correction:** Llama-3.1-8B is NOT cached on pod1 (no config, no weights). The cached modern models are Qwen3-4B and Qwen3-8B, and neither adds a BOS. Download a BOS model (Llama/Gemma) before measuring the BOS case.
 
+## Test results this session (sharded runner, CUDA hidden, 16 workers)
+- **`d106ef9` (pod1 baseline):** 2629 passed, 164 skipped, 0 failed over 2793 tests in 83 of 84 files. `test_offload_parity_guard.py` (2 tests) was stopped after 90 min on CPU, so 2793 + 2 = the handoff's 2795.
+- **Fix branch (`d106ef9` + crash fixes):** 2635 passed, 164 skipped, 1 failed over 2800 tests. The failure was `test_defect_class_guards` before its float64-spelling update; it passes after it. The offload guard was stopped as above.
+- **Merged state (`b6980a9`), 13 targeted files:** 0 failures (geometry 293, repe 100, forward_hook_leaks 857/156 skipped, the parity files for the touched tasks, the strict reference guard).
+- **Not yet run on the merged state:** the two 51-task population guards in full (more than 60 min each on CPU). The cache-population guard passed on the Phase 0 test changes.
+
 ## Findings this session that change the plan
-- **Golden runs are not bit-deterministic as first built.** Two runs of `d106ef9` with fresh processes, 2 pinned threads, CPU and a fixed corpus differed in 20 of 6,184 values (3 of 258 entries, relative 3e-8..2e-6): `topology_persistence_entropy` and `consistency_logical` on gpt2, and `geometry_svd` on tiny-random-gpt2. The likely cause is MKL's alignment-dependent kernels. The golden tool now sets `MKL_CBWR=COMPATIBLE`, `MKL_DYNAMIC=FALSE` and `OMP_DYNAMIC=FALSE`, and `compare --tolerate-from BASE0 BASE1` tolerates only leaves that differ between two baseline runs. That was checked: a 1-ulp change on a deterministic leaf is flagged. **The CBWR setting has not been validated with a fresh pair yet.**
+- **Golden runs are not bit-deterministic as first built.** Two runs of `d106ef9` with fresh processes, 2 pinned threads, CPU and a fixed corpus differed in 20 of 6,184 values (3 of 258 entries, relative 3e-8..2e-6): `topology_persistence_entropy` and `consistency_logical` on gpt2, and `geometry_svd` on tiny-random-gpt2. The likely cause is MKL's alignment-dependent kernels. The golden tool now sets `MKL_CBWR=COMPATIBLE`, `MKL_DYNAMIC=FALSE` and `OMP_DYNAMIC=FALSE`, and `compare --tolerate-from BASE0 BASE1` tolerates only leaves that differ between two baseline runs. That was checked: a 1-ulp change on a deterministic leaf is flagged. Validated on one fresh pair at `b6980a9`: bit-identical.
 - **Golden coverage gaps.** On gpt2, `dynamics_sharpness` and `geometry_intrinsic_dim` hit the 30-min timeout at 2 threads in both dtypes, so they are locked on the tiny model only. Errors are only the expected `sae_lens`-missing and `consistency_knowledge_capacity` dataset cases.
 - **Sink census (decision #6):** on Qwen3-4B and Qwen3-8B, position 0 carries 91–99% of the centred sum of squares and delimiters do not. See the decision packet.
 - **Hidden CUDA changes code paths.** The sharded runner hides CUDA, so 5 tasks take their CPU paths and the 51-task guards run more than 45 min each. The handoff's ~1 h serial baseline evidently ran with GPU0 visible. Compare like with like.
