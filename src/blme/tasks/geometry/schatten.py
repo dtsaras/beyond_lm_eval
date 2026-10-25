@@ -181,12 +181,51 @@ def _normalise_matrix(X: torch.Tensor) -> torch.Tensor:
     # 6.66e17, so rows of +/-7.0e17 * ones(768) slipped past it (adversarial
     # review round 3, 2026-09-04). Both fixed by rescaling the RAW matrix, by
     # its global maximum, before anything else touches it.
-    _fi0 = torch.finfo(X.dtype)
+    # PROMOTE, then CENTRE, then rescale — the order established in
+    # `centre_and_rescale` and already applied to collapse, matrix_entropy,
+    # contextualization and unembedding.
+    #
+    # This rescaled the UNCENTERED matrix in the INPUT dtype, so a payload far
+    # below the global max was annihilated before the mean was subtracted. On
+    # the fully finite float32 matrix
+    # [[1e37, 1e-13, 3.7e-14], [1e37, -1e-13, -3.7e-14]] the informative
+    # coordinates underflowed and BLME returned MNN/T = 0.0 against the
+    # EXECUTED official MNN.py's 0.9085408449172974 and the analytic
+    # 0.9085407984878452 — a 100% error on data the naive released reference
+    # handles correctly in the same dtype (Opus round 11, 2026-09-08).
+    #
+    # Reachability, recorded so the severity is not overstated: the guard fires
+    # only above |X|max = (finfo.max/D)**0.5/4, which is 1.6641e17 at float32
+    # and D=768, while gpt2's largest observed hidden magnitude is 3054.12 — a
+    # factor of 5.4e13 below. No transformer activation reaches it. The guard is
+    # still not gratuitous: on a pure-scale ladder the released reference itself
+    # returns inf at 1e-30 and nan at 8.5e37 where BLME stays correct.
+    # CONDITIONAL promotion — float32-first, exactly as in `cknna` and
+    # `dynamics_coe`.
+    #
+    # Promoting unconditionally is a REGRESSION here and I made that mistake
+    # before catching it: this task's verdict rests on bit-exact agreement with
+    # the released `MNN.py`, and over 100 random float32 matrices the promotion
+    # moved max |BLME - official| from **exactly 0.0 to 1.192e-07**. That is the
+    # same trap that cost `repe_task_vectors` its 0.0 agreement earlier today.
+    #
+    # So the promote/centre/rescale path runs ONLY where the float32 path would
+    # actually lose data — i.e. where the magnitude guard fires — and that is
+    # precisely the regime the released reference cannot handle either (it
+    # returns inf at 1e-30 and nan at 8.5e37 there).
+    _fi0 = torch.finfo(torch.float32)
     _D = max(1, X.shape[1])
     _gmax = X.abs().max()
     _lo0 = float(_fi0.tiny) ** 0.5 * 4.0
     _hi0 = (float(_fi0.max) / _D) ** 0.5 / 4.0
     if float(_gmax) > 0 and (float(_gmax) < _lo0 or float(_gmax) > _hi0):
+        # Outside the safe band: promote, centre in double, THEN rescale, so a
+        # payload far below the global max is not annihilated first. Fixes the
+        # [[1e37, 1e-13, 3.7e-14], ...] case, which read 0.0 against the
+        # executed official 0.9085408449172974.
+        X = X.double()
+        X = X - X.mean(dim=0, keepdim=True)
+        _gmax = X.abs().max()
         # POWER OF TWO, matching `cknna`: dividing by 2**round(log2(max))
         # shifts exponents only, so it introduces no rounding of its own.
         # Measured cost against dividing by the actual max is nil here
@@ -194,7 +233,10 @@ def _normalise_matrix(X: torch.Tensor) -> torch.Tensor:
         # guards in this repo should not use different disciplines
         # (independent Opus review, 2026-09-05).
         X = _pow2_rescale(X, float(_gmax))
-    X = X - X.mean(dim=0, keepdim=True)
+    else:
+        # Inside the safe band: the ORIGINAL float32 centring, untouched, so
+        # ordinary data stays bit-identical to the released reference.
+        X = X - X.mean(dim=0, keepdim=True)
     # Scale each row by its own largest coordinate before norming -- but ONLY
     # when the naive path would actually lose precision.
     #

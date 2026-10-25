@@ -117,7 +117,21 @@ class CorrelationDimensionTask(DiagnosticTask):
                 last_hidden = out.hidden_states[-1][0].detach().cpu()  # (T, D)
                 if pooling == "mean":
                     # Each sample contributes one mean-pooled vector
-                    all_hidden_states.append(last_hidden.mean(dim=0))
+                    # KEEP THE DOUBLE MEAN. `.to(last_hidden.dtype)` narrows
+                    # straight back to float32 for every float32 checkpoint, so
+                    # the promotion bought nothing: on native Pythia-70m hidden
+                    # states the cast gave 7.486064047571674 against an
+                    # independently reconstructed Grassberger-Procaccia
+                    # 15.295160200027059 (-51.06%), and a LOSSLESS translation
+                    # collapsed the estimate from 2.3540184486398976 to 0.0.
+                    # Removing only this cast gives 15.295160200026809
+                    # (codex round 15, 2026-09-09).
+                    #
+                    # This site was MISSED by the AST sweep of the same class,
+                    # which searched for a trailing `.float()`; this variant
+                    # spells the narrowing `.to(<dtype>)`. Ask what the query
+                    # cannot express.
+                    all_hidden_states.append(last_hidden.double().mean(dim=0))
                 elif pooling == "all_tokens":
                     # Each token is a separate data point (many more points)
                     all_hidden_states.extend(list(last_hidden))
@@ -311,13 +325,29 @@ class CorrelationDimensionTask(DiagnosticTask):
                 distances, num_radii=_plateau_radii)
             if _sr[0] is not None and np.isfinite(_sr[0]):
                 slope, r_squared = float(_sr[0]), float("nan")
-            elif _atom_frac > 0.0 and _sr[2] == "unidentified":
+            elif _atom_frac > 0.0 and _sr[2] in ("unidentified", "insufficient",
+                                                 "degenerate"):
                 # ATOMIC MEASURE. A positive mass of exactly-coincident points
                 # puts a constant floor under the correlation integral:
                 # C(r) -> c0 > 0 as r -> 0, so log C(r) is flat and the
                 # Grassberger-Procaccia D2 is EXACTLY 0. Rejecting a zero slope
                 # as impossible reported 1.8244 for a 10%-atom + 3-cube mixture
                 # whose true D2 is 0 (adversarial review, 2026-09-04).
+                # The status gate used to be `== "unidentified"` alone, so a
+                # PURE atomic measure -- where the plateau kernel reports
+                # `insufficient` (one atom, no positive distances) or
+                # `degenerate` (two atoms, a single distance) -- fell through to
+                # an error instead of the exact answer. Measured: one atom and
+                # two atoms both returned an error where D2 is exactly 0
+                # (gpt-6-astra round 10, 2026-09-07; the same leg Opus
+                # confirmed in round 9, which I left unfixed after refuting the
+                # OTHER leg of that verdict).
+                #
+                # Why the reason for the plateau failure does not matter: a
+                # positive mass of coincident points puts a constant floor under
+                # C(r), so log C(r) is flat as r -> 0 and D2 = 0 by definition.
+                # `_atom_frac > 0` is the load-bearing condition; the status only
+                # says which way the fit gave up.
                 slope, r_squared = 0.0, float("nan")
                 _fallback_reason = "atomic"
             else:
@@ -351,8 +381,34 @@ class CorrelationDimensionTask(DiagnosticTask):
         # (+57%), every run reporting status "ok" and R^2 > 0.99 (red-team
         # review, 2026-09-05). The default stays 60, so shipped values are
         # unchanged unless a caller sets it.
+        # C(r) COUNTS COINCIDENT PAIRS -- the radii do not.
+        #
+        # Radii must come from the positive distances (log 0 is undefined), but
+        # the correlation integral is a property of the WHOLE pair population.
+        # Dropping the zeros from both the numerator and the denominator
+        # silently replaces Grassberger-Procaccia's C(r) by the conditional
+        # integral (C(r) - c0)/(1 - c0) -- it measures the continuous part and
+        # ships it as the headline.
+        #
+        # An atom is not a nuisance here, it IS the answer: a population with
+        # positive mass at a point has D2 = 0, because C(r) -> c0 > 0 and
+        # log C(r) goes flat. On the independently specified population
+        # mu = 0.5*delta(-2) + 0.5*Uniform[0,1] -- where C(r) = 0.25 + 0.25(2r - r^2)
+        # for 0 < r < 1, so the exact D2 is 0 -- the filtered call returns
+        # 0.998264543712 and evaluate() shipped 0.987358435325, against nolds'
+        # 5.35160579501927e-17 on its constant small-radius integral. Passing
+        # the full pair population returns 0.002955769916 (codex round 12,
+        # 2026-09-08).
+        #
+        # The kernel ALREADY divides by `distances.size` and draws its radii
+        # from its own `distances > 0`: filtering here defeated logic that was
+        # already correct.
+        # Bound ONCE and passed by name, so the provenance key below cannot
+        # disagree with what the kernel was actually handed.
+        _cr_input = distances
         sr_slope, sr_r2, sr_status, sr_w = _gp_correlation_dimension_plateau(
-            distances[distances > 0], num_radii=_plateau_radii)
+            _cr_input, num_radii=_plateau_radii)
+        _cr_n_pairs = int(np.asarray(_cr_input).size)
 
         # THE PRIMARY KEY IS THE SCALING-REGION FIT, not the 5th-95th
         # percentile fit.
@@ -370,8 +426,39 @@ class CorrelationDimensionTask(DiagnosticTask):
         _primary = (float(sr_slope)
                     if (sr_slope is not None and sr_status == "ok")
                     else float("nan"))
+
+        # ATOMIC MEASURE -> D2 IS EXACTLY 0, APPLIED HERE.
+        #
+        # A positive mass of coincident points puts a constant floor under the
+        # correlation integral: C(r) -> c0 > 0 as r -> 0, so log C(r) is flat
+        # and the Grassberger-Procaccia dimension is exactly 0.
+        #
+        # I implemented this on 2026-09-07 in the branch above, and it was DEAD
+        # CODE. `_pct_slope` is snapshotted at line 280 (a deliberate round-6
+        # fix) and the headline is `sr_slope` from the plateau kernel, so every
+        # later assignment to `slope` -- lines 289, 313, 337 -- is stored and
+        # never read. AST confirms it: `slope` STORE at 190/213/237/261 (local
+        # numbering), LOAD only at 204. A pure atomic measure still returned
+        # NaN (Opus round 11, 2026-09-08).
+        #
+        # I verified that fix by calling `_gp_correlation_dimension_plateau`
+        # directly and re-implementing the branch condition in the test script,
+        # instead of driving `evaluate()`. That is exactly the failure the
+        # repo's own note warns about -- "never verify a fix by re-reading the
+        # diff; run it" -- and simulating the surrounding logic is the same
+        # error wearing a measurement's clothes.
+        if (_atom_frac > 0.0
+                and (sr_slope is None or sr_status != "ok"
+                     or not np.isfinite(_primary))):
+            _primary = 0.0
         return {
             "correlation_dimension": _primary,
+            # DERIVED pair population of the headline correlation integral.
+            # C(r) must be computed over ALL pairs including coincident ones;
+            # if the kernel is ever handed a positive-filtered array again this
+            # drops below N(N-1)/2 and the guard test fails.
+            "_meta_correlation_integral_n_pairs": _cr_n_pairs,
+            "_meta_coincident_pair_fraction": float(_atom_frac),
             # DEMOTED: bit-identical aliases of the primary. Three unprefixed
             # keys carried one value (5.054201187848884) and the R^2 fix added
             # a fourth and fifth pair, so five is_feature() columns carried two

@@ -125,6 +125,24 @@ class GradientFlowTask(DiagnosticTask):
                     # models make the resulting norms incommensurable.
                     shift_logits = out.logits[..., :-1, :].contiguous()
                     shift_labels = enc["input_ids"][..., 1:].contiguous()
+                    # PROMOTE half precision before the loss, as the released
+                    # model's own `forward(labels=...)` does.
+                    #
+                    # `F.cross_entropy` on bf16/fp16 logits computes the softmax
+                    # in half precision, and the SEED DERIVATIVE of this whole
+                    # measurement is (softmax(z) - one_hot(y))/(T-1) -- so the
+                    # error enters at the very first backward step and is then
+                    # propagated through every layer norm this task reports. On
+                    # a bf16 Pythia-70m, layer 1 read 162.675113677979 against
+                    # the native/analytic 53.704253345424 (+202.9%), and a
+                    # 256-class CONSTANT-loss anchor, whose true layer norms are
+                    # exactly [0, 0, 0, 0], emitted four positive values
+                    # (codex round 15, 2026-09-09).
+                    #
+                    # float64 is preserved rather than forced to float32: this
+                    # only lifts half precision to the width the reference uses.
+                    if shift_logits.dtype in (torch.float16, torch.bfloat16):
+                        shift_logits = shift_logits.float()
                     loss = F.cross_entropy(
                         shift_logits.view(-1, shift_logits.size(-1)),
                         shift_labels.view(-1),

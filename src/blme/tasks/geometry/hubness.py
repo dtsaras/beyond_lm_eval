@@ -147,8 +147,20 @@ class GlobalHubnessTask(DiagnosticTask):
         # alpha = 1e-23 all 24 stored coordinates were still nonzero while the
         # norm underflowed to 0.0, changing 77 of 257 k50 occurrence counts and
         # moving skew 0.393048896 -> 7.301942076 (adversarial review round 2,
-        # 2026-09-04). Scaling by the row max is exact in binary floating point
-        # and yields the identical unit vector.
+        # 2026-09-04).
+        #
+        # This used to claim "scaling by the row max is exact in binary
+        # floating point and yields the identical unit vector". It is NOT
+        # exact -- only a POWER-OF-TWO divisor leaves the mantissas alone, and
+        # an arbitrary row max re-rounds every coordinate. Measured on a
+        # 2000x256 standard normal: 0 of 2000 unit rows are bit-identical to
+        # the power-of-two-scaled result, with max coordinate deviation
+        # 5.960e-08. It is kept anyway because what this task CONSUMES is the
+        # k-NN ranking, and that is unchanged: 2000 of 2000 rows have identical
+        # k=10 neighbour lists under both scalings. The same false "only shifts
+        # exponents" claim WAS load-bearing in intrinsic_dim, where Two-NN
+        # compares radii for exact equality -- see the power-of-two rescale
+        # there (codex round 12, 2026-09-08).
         _rmax = E_norm.abs().amax(dim=1, keepdim=True)
         E_norm = E_norm / _rmax.clamp_min(torch.finfo(E_norm.dtype).tiny)
         _n = E_norm.norm(dim=1, keepdim=True)

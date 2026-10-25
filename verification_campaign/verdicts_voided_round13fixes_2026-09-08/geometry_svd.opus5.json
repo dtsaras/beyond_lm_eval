@@ -1,0 +1,20 @@
+{
+ "task": "geometry_svd",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified, including a NEW defect I introduced in the repair. The stored dtype was being read AFTER the float64 promotion, so the rank tolerance tau = sigma_1*max(N,D)*eps used float64 eps for every torch input, shrinking tau by 536870912x. On the exactly represented 100x5 fixture tile(stack(diag([1,.5,.25,2^-27,2^-28]),-diag),(10,1)) the tensor route gave rank 5 / cond 268435456 against the numpy route's rank 3 / cond 4. After capturing the dtype before promotion both routes give rank 3 and cond 4.0 exactly, and erank/PR are unchanged across all routes. THE FIRST VERSION OF MY REPAIR WAS ITSELF DEFECTIVE: using bf16's eps made max(m,n)*eps = 6.0 at width 768, so the tolerance exceeded sigma_1 and discarded EVERY singular value -- measured rank 0, cond inf. Guarded with the sqrt(max(m,n)) fallback this file already established for its bf16 variant, gated so float32 (every shipped route) keeps its tolerance bit-identical; bf16 now reads cond 3.045 against float32's 3.0448.",
+ "defect_location": "NONE",
+ "comparable": "YELLOW",
+ "comparable_reason": "The primary tolerance follows the CONTAINER dtype, and the shared cache .float()s everything on the way in, so a bf16 run is still reported at float32 resolution unless the caller passes source_dtype. That is disclosed by the separate _meta_*_source_precision variant rather than silently substituted.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "NO",
+ "github_repo": "",
+ "github_reason": "numpy's own matrix_rank envelope is the reference and was executed directly.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "The regression test I first wrote for this repair asserted rank <= 3 and PASSED while the bf16 path returned rank 0 -- it encoded the bug. Recorded because a test written from the same misunderstanding as the fix cannot catch the fix's error.",
+ "defects": [],
+ "fix": "No change required."
+}

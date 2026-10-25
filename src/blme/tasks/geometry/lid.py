@@ -118,7 +118,23 @@ def _compute_lid_for_matrix(X, k, max_queries=500, seed: int = 0):
     # search and moved lid_mean 77.372506032887 -> 76.176419631200 (-1.546%),
     # with -11.49% at +16000 (adversarial review, 2026-09-04). Centring costs
     # one pass and removes the leading term of any such shift.
-    X64 = X64 - X64.mean(axis=0, keepdims=True)
+    # NO CENTRING -- removed 2026-09-07, verified on both axes.
+    #
+    # It was added 2026-09-04 because a +10000 shift moved lid_mean -1.546%.
+    # That is no longer true: this function now VERIFIES each row's candidate
+    # set against a Gram lower bound and escalates when the check fails, so
+    # translation is handled by the escalation, not by the centring. Measured
+    # with and without, at +10000: **12.058202777345784 both ways, identical**.
+    #
+    # And the centring actively destroys wide-dynamic-range clouds, because the
+    # ULP of the centroid becomes the resolution floor. On the lattices
+    # {j*2^-80} U {1+j/32} it collapsed 21 distinct points onto one, producing
+    # 21 spurious ZERO estimates that halve the headline -- BLME 0.5081480494776388
+    # against the executed released `mle_batch` 1.0162960989552776, exactly 50%
+    # low (gpt-6-astra round 10, 2026-09-07). Without it: 0 zero estimates, the
+    # 21 rows escalate to exact search, and `_meta_lid_mean_positive_only` --
+    # which was already correct at 1.6185015223582724 both ways -- stops being
+    # the only trustworthy column.
     sq_norms = np.einsum("ij,ij->i", X64, X64)
 
     lid_estimates = []
@@ -302,13 +318,24 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
                 return result
 
         # --- Single-layer mode (last layer) ---
+        X = None
         if cache is not None and cache.is_populated and use_cache:
             # post-final-norm=False, DELIBERATELY: the single-layer mode
             # reports the LID of the model's OUTPUT representation. The
             # layerwise mode above opts IN, because that one is a profile.
             X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples,
                                         replace_final_norm=False)
-        else:
+            if X is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. A cache
+                # filled for an attention-only consumer returns None here and the
+                # dereference below raised, destroying the task rather than
+                # degrading it. Found by EXECUTING this check against a real
+                # attention-only cache across all 51 tasks -- the round-12 sweep
+                # of this same class was done by READING and put the population
+                # at 2 sites; running it puts it at 9 (codex round 13 +
+                # execution sweep, 2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if X is None:
             # EVERY token, matching the cache route (see the note in
             # collect_hidden_states). LID is a local-density estimator, so the
             # point count is part of the estimand, not an implementation

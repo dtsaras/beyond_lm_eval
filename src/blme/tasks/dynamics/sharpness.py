@@ -32,6 +32,7 @@ References:
     computation problems", J. Comput. Appl. Math. 74, 1996.
 """
 
+import math
 import logging
 from typing import List, Tuple
 
@@ -398,42 +399,64 @@ class LossSharpnessTask(DiagnosticTask):
 
         # The forward pass needs requires_grad=True; ensure model is in
         # eval mode but parameters can compute gradients.
+        # THE try MUST OPEN BEFORE THE FIRST MUTATION.
+        #
+        # `model.eval()`, the `requires_grad_` rewrite and the float32 promotion
+        # below all mutate the CALLER'S model, and the `finally` that restores
+        # them used to begin only after all three had run. An exception in that
+        # window — an OOM during the promotion is the realistic one — left the
+        # model in eval mode, with `requires_grad=False` on every parameter
+        # except the last block, and in float32; `core.py:439` then continued
+        # the run with that same object, so every later task in the sweep
+        # measured a mutated model (Opus round 11, 2026-09-08).
+        #
+        # This file already fixed exactly this class once, at
+        # `_sam_sharpness` (see its comment: an exception left a parameter at
+        # 1.1 instead of 1.0 and "silently poisoned every later task in the
+        # run"). The inner perturbation was wrapped; the outer setup was not.
+        #
+        # The restore variables are initialised to inert values first so the
+        # `finally` can never reference an unbound name when the failure
+        # happens early.
         was_training = model.training
-        model.eval()
-        # Save original requires_grad state so we can restore it — other
-        # tasks or user code may depend on the model's grad configuration.
-        orig_grad_state = {p: p.requires_grad for p in model.parameters()}
-        for p in model.parameters():
-            p.requires_grad_(False)
-        for p in params:
-            p.requires_grad_(True)
-
-        # Promote to float32 for EVERY measurement, not only the critical step.
-        #
-        # Curvature is a second-order quantity, so storage precision biases all
-        # four probes, not just the one that takes an explicit step. Measured on
-        # cached tiny-random-gpt2: bf16 power iteration gave 2.4375 against
-        # 3.109532833 in fp32, and evaluating the SAME bf16-rounded weights in
-        # fp32 arithmetic gave 3.111037254 -- isolating a ~21% error to the
-        # ARITHMETIC rather than to the weights (adversarial review,
-        # 2026-09-04). Without this, trace/eigenvalue/SAM split the zoo by
-        # checkpoint storage format rather than by model.
-        #
-        # Parameters ONLY. `model.float()` then `model.to(dtype)` is not a round
-        # trip -- it downcasts buffers that were deliberately float32 (on
-        # pythia-160m it turned `rotary_emb.inv_freq` float32 -> bfloat16, rel
-        # 3.65e-03, and PERSISTED into every later task in the run).
-        _model_dtype = next(model.parameters()).dtype
-        _promoted = _model_dtype in (torch.bfloat16, torch.float16)
+        orig_grad_state = {}
         _saved_param_dtypes = []
-        if _promoted:
-            logger.info(f"  sharpness: promoting model {_model_dtype} -> "
-                        f"float32 for all curvature probes")
-            _saved_param_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
-            with torch.no_grad():
-                for p_ in model.parameters():
-                    p_.data = p_.data.float()
+        _promoted = False
         try:
+            model.eval()
+            # Save original requires_grad state so we can restore it — other
+            # tasks or user code may depend on the model's grad configuration.
+            orig_grad_state = {p: p.requires_grad for p in model.parameters()}
+            for p in model.parameters():
+                p.requires_grad_(False)
+            for p in params:
+                p.requires_grad_(True)
+
+            # Promote to float32 for EVERY measurement, not only the critical step.
+            #
+            # Curvature is a second-order quantity, so storage precision biases all
+            # four probes, not just the one that takes an explicit step. Measured on
+            # cached tiny-random-gpt2: bf16 power iteration gave 2.4375 against
+            # 3.109532833 in fp32, and evaluating the SAME bf16-rounded weights in
+            # fp32 arithmetic gave 3.111037254 -- isolating a ~21% error to the
+            # ARITHMETIC rather than to the weights (adversarial review,
+            # 2026-09-04). Without this, trace/eigenvalue/SAM split the zoo by
+            # checkpoint storage format rather than by model.
+            #
+            # Parameters ONLY. `model.float()` then `model.to(dtype)` is not a round
+            # trip -- it downcasts buffers that were deliberately float32 (on
+            # pythia-160m it turned `rotary_emb.inv_freq` float32 -> bfloat16, rel
+            # 3.65e-03, and PERSISTED into every later task in the run).
+            _model_dtype = next(model.parameters()).dtype
+            _promoted = _model_dtype in (torch.bfloat16, torch.float16)
+            _saved_param_dtypes = []
+            if _promoted:
+                logger.info(f"  sharpness: promoting model {_model_dtype} -> "
+                            f"float32 for all curvature probes")
+                _saved_param_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
+                with torch.no_grad():
+                    for p_ in model.parameters():
+                        p_.data = p_.data.float()
             # Build a fresh computational graph and compute the per-batch loss.
             def compute_loss():
                 losses = []
@@ -490,6 +513,41 @@ class LossSharpnessTask(DiagnosticTask):
                 status=_pi_status,
             )
 
+            # SIGN STABILITY, MEASURED — because the reported sign can be an
+            # artefact of the iteration count.
+            #
+            # Power iteration cannot separate a near-degenerate +/-lambda pair:
+            # on pythia-70m the SAME model reports **-104737 at 10 iterations
+            # and +111530 at 64**, on 3/3 seeds, with |lambda| ~ 1.24e5 and a
+            # zero-crossing near iteration 37 (Opus round 11, 2026-09-08).
+            #
+            # `_meta_power_iter_converged` cannot warn about it: it was False on
+            # 5/5 real models, and True in 0/120 runs where the answer was exact
+            # to 4.3e-07 — a flag that is false when the answer is right and
+            # silent when it is wrong is worse than absent, because it invites
+            # the reader to trust it.
+            #
+            # So the flag is DERIVED from a second run at a different iteration
+            # count rather than asserted from an internal convergence test. If
+            # the two disagree in sign, the sign is not a property of the model
+            # and the caller is told so. Costs one extra power iteration.
+            _sign_stable = None
+            try:
+                _alt_status = {}
+                _alt = _power_iteration_top_eigenvalue(
+                    lambda vv: _hvp(compute_loss(), params, vv),
+                    _make_random_vec(params, rademacher=False, generator=gen),
+                    max(2, n_power_iter * 4), status=_alt_status,
+                )
+                if math.isfinite(_alt) and math.isfinite(top_eig):
+                    _sign_stable = bool(
+                        (_alt >= 0) == (top_eig >= 0)) if (
+                        _alt != 0.0 and top_eig != 0.0) else True
+                    _pi_status["alt_estimate"] = float(_alt)
+                    _pi_status["alt_n_iter"] = int(max(2, n_power_iter * 4))
+            except Exception:
+                _sign_stable = None
+
             # 3. SAM-style sharpness (module-level helper so parity tests
             # drive the exact code evaluate() runs, not a transcription).
             sam_sharpness, perturbed_loss, grad_norm = _sam_sharpness(
@@ -536,6 +594,11 @@ class LossSharpnessTask(DiagnosticTask):
             "_meta_hutchinson_trace_rel_se": _tr_rel_se,
             "_meta_power_iter_rel_change": float(_pi_status.get("rel_change", float("nan"))),
             "_meta_power_iter_converged": bool(_pi_status.get("converged", False)),
+            # DERIVED from a second run at 4x the iteration count -- see the
+            # note at the call site. None when the second run could not be made.
+            "_meta_top_eigenvalue_sign_stable": _sign_stable,
+            "_meta_top_eigenvalue_alt_estimate": _pi_status.get("alt_estimate"),
+            "_meta_top_eigenvalue_alt_n_iter": _pi_status.get("alt_n_iter"),
             "_meta_power_iter_n_used": int(_pi_status.get("n_iter", 0)),
             "hutchinson_trace_per_param": trace_per_param,
             "top_eigenvalue_estimate": top_eig,

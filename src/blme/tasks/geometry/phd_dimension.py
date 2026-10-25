@@ -223,7 +223,11 @@ def _gather_point_cloud(
                     ch = ch.float().cpu().numpy()
                     if ch.ndim != 2 or ch.shape[0] == 0:
                         continue
-                    vecs.append(ch.mean(0) if pooling == "mean" else ch[-1])
+                    # Narrowing straight back after a double-precision reduction discards
+                    # exactly what the promotion bought. Swept as a class: the first AST query
+                    # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
+                    # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
+                    vecs.append(ch.double().mean(0) if pooling == "mean" else ch[-1])
                 if vecs:
                     return np.asarray(vecs, dtype=np.float64)
 
@@ -262,7 +266,11 @@ def _gather_point_cloud(
             if h.ndim != 2 or h.shape[0] == 0:
                 continue
             if pooling == "mean":
-                collected.append(h.mean(0))
+                # Narrowing straight back after a double-precision reduction discards
+                # exactly what the promotion bought. Swept as a class: the first AST query
+                # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
+                # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
+                collected.append(h.double().mean(0))
             elif pooling == "last":
                 collected.append(h[-1])
             else:  # all_tokens

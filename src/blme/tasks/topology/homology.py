@@ -188,7 +188,14 @@ class PersistentHomologyTask(DiagnosticTask):
                         # .float() first: numpy doesn't accept bf16 tensors, and
                         # ripser requires a standard numpy dtype.
                         hidden = hs[l_idx + 1][0] # shape (seq_len, hidden_dim)
-                        sentence_rep = hidden.mean(dim=0).float().cpu().numpy()
+                        # The trailing .float() DISCARDED the precision the .double() was added to
+                        # gain: promote, average, then narrow back is self-defeating. Removing only
+                        # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                        # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                        # independently reconstructed Grassberger-Procaccia value, and restored a
+                        # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                        # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                        sentence_rep = hidden.double().mean(dim=0).cpu().numpy()
                         layer_representations[l_idx].append(sentence_rep)
                 
         finally:
@@ -280,6 +287,24 @@ class PersistentHomologyTask(DiagnosticTask):
             # restore below must undo, and lifetimes are translation invariant
             # so no offset needs restoring.
             _centred = np.asarray(data_matrix, dtype=np.float64)
+            # QUOTIENT DUPLICATE POINTS, exactly as topology_betti_curve does.
+            #
+            # A repeated point contributes an H0 bar of length ZERO (it dies at
+            # radius 0), which is a fabricated finite bar: it drags the mean
+            # persistence down without corresponding to any feature. On
+            # [(0,0), (0,1), (1,0), (0,1)] the finite H0 bars are [0, 1, 1] and
+            # the mean reads 0.6666666902601719 against the analytic and
+            # released-reference 1.0 (-33.33%), reproduced under all 24 row
+            # permutations; on fresh GPT-2 it reads 64.84628119915529 against
+            # 89.78715679196964 at all 12 sampled layers across 4 checkpoints
+            # (codex round 13, 2026-09-08).
+            #
+            # I applied this quotient to `betti_curve` in round 12 and did NOT
+            # sweep it to this file, which is the recurring failure this repo
+            # documents: fix one site of a class, leave the siblings.
+            # Deduplication commutes with the centring below, since identical
+            # rows stay identical under a common shift.
+            _centred = np.unique(_centred, axis=0)
             _centred = _centred - _centred.mean(axis=0, keepdims=True)
             _hg = float(np.max(np.abs(_centred))) if _centred.size else 0.0
             if np.isfinite(_hg) and _hg > 0:

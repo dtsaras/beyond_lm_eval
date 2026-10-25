@@ -224,7 +224,11 @@ def _collect_mean_pooled_hidden_states(
                 if mask.numel() == h.shape[0] and bool(mask.any()):
                     h = h[mask]
             if h.numel() > 0:
-                reps.append(h.mean(dim=0))
+                # Narrowing straight back after a double-precision reduction discards
+                # exactly what the promotion bought. Swept as a class: the first AST query
+                # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
+                # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
+                reps.append(h.double().mean(dim=0))
 
     return torch.stack(reps, dim=0) if reps else torch.empty(0)
 
@@ -332,12 +336,29 @@ class MahalanobisOODTask(DiagnosticTask):
         X_id = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_id, num_samples=len(dataset_id), max_length=max_length,
         )
-        X_id = X_id.float().numpy()
+        # float64 BEFORE the covariance fit. A Mahalanobis distance centres by
+        # the training mean, so it is translation invariant by construction —
+        # and in float32 it is not: at a +1e6 common offset the scores REORDER,
+        # spearman 0.998123827 against the float64 baseline, while float64
+        # holds at exactly 1.000000000 (measured; the reordering appears
+        # between +1e3, which is exact, and +1e6).
+        #
+        # A reordering is worse than a shift here because every reported number
+        # — AUROC above all — depends only on the ORDER of the scores, so this
+        # corrupts the headline while leaving the distances looking plausible.
+        #
+        # Safe to promote: this task is deliberately NOT bit-pinned to a
+        # released implementation (it uses Ledoit-Wolf where Lee et al. use the
+        # empirical covariance, because at the shipped n_fit=50 / d=768 the
+        # empirical estimator has rank 49/768), so there is no parity to lose —
+        # unlike `schatten` or `task_vectors`, where an unconditional promotion
+        # was a regression.
+        X_id = X_id.double().numpy()
 
         X_ood = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_ood, num_samples=len(dataset_ood), max_length=max_length,
         )
-        X_ood = X_ood.float().numpy()
+        X_ood = X_ood.double().numpy()   # see the note above
 
         if X_id.shape[0] < 5 or X_ood.shape[0] < 5:
             return {"error": "Need at least 5 ID and 5 OOD sample representations."}

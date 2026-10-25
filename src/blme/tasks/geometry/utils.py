@@ -419,13 +419,39 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                         # above, so entry -1 is already the raw block output
                         # when the caller asked for it.
                         h = hidden_states[li]
-                        h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
+                        h_flat = h.reshape(-1, h.shape[-1]).detach().cpu()
+                        # PRESERVE the incoming float dtype. `.float()` is a
+                        # no-op for the float32 every real checkpoint emits
+                        # and a NARROWING for float64, so it silently
+                        # discarded precision the estimators were repaired
+                        # to keep -- geometry_intrinsic_dim's collection
+                        # routes returned 3.552080162654 against the
+                        # released 4.606333343805 (-22.89%) for this reason
+                        # (flagged round 12, fixed round 14, 2026-09-09).
+                        # Promoting outright would double the memory of
+                        # every real run for no gain, so only NON-float
+                        # tensors are converted.
+                        if not h_flat.is_floating_point():
+                            h_flat = h_flat.float()
                         _k = _slot
                         if use_offload:
                             if _k not in all_hidden:
                                 path = _get_temp_dat_path()
                                 f = open(path, "wb")
-                                all_hidden[_k] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
+                                all_hidden[_k] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1],
+                                    # RECORD THE DTYPE. The bytes below are
+                                    # written raw and the memmap must read them
+                                    # back in the SAME format; hard-coding
+                                    # float32 there while the writer preserves
+                                    # the incoming dtype silently reinterprets
+                                    # 8-byte floats as 4-byte ones, which turned
+                                    # an exact [4, 2, 1] profile into
+                                    # [1.994847434735, 2, 1] and GPT-2 CKA into
+                                    # NaN (regression introduced 2026-09-09 by
+                                    # the dtype-preserving collection fix, caught
+                                    # by codex round 15 the same day).
+                                    "np_dtype": np.dtype(
+                                        torch.empty(0, dtype=h_flat.dtype).numpy().dtype)}
                             f = all_hidden[_k]["handle"]
                             f.write(h_flat.numpy().tobytes())
                             all_hidden[_k]["count"] += h_flat.shape[0]
@@ -458,12 +484,38 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                                                  device=h.device)[:_cap]
                         h = h[:, indices, :]
 
-                    h_flat = h.reshape(-1, h.shape[-1]).float().detach().cpu()
+                    h_flat = h.reshape(-1, h.shape[-1]).detach().cpu()
+                    # PRESERVE the incoming float dtype. `.float()` is a
+                    # no-op for the float32 every real checkpoint emits
+                    # and a NARROWING for float64, so it silently
+                    # discarded precision the estimators were repaired
+                    # to keep -- geometry_intrinsic_dim's collection
+                    # routes returned 3.552080162654 against the
+                    # released 4.606333343805 (-22.89%) for this reason
+                    # (flagged round 12, fixed round 14, 2026-09-09).
+                    # Promoting outright would double the memory of
+                    # every real run for no gain, so only NON-float
+                    # tensors are converted.
+                    if not h_flat.is_floating_point():
+                        h_flat = h_flat.float()
                     if use_offload:
                         if layer_idx not in all_hidden:
                             path = _get_temp_dat_path()
                             f = open(path, "wb")
-                            all_hidden[layer_idx] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1]}
+                            all_hidden[layer_idx] = {"path": path, "handle": f, "count": 0, "D": h_flat.shape[-1],
+                                    # RECORD THE DTYPE. The bytes below are
+                                    # written raw and the memmap must read them
+                                    # back in the SAME format; hard-coding
+                                    # float32 there while the writer preserves
+                                    # the incoming dtype silently reinterprets
+                                    # 8-byte floats as 4-byte ones, which turned
+                                    # an exact [4, 2, 1] profile into
+                                    # [1.994847434735, 2, 1] and GPT-2 CKA into
+                                    # NaN (regression introduced 2026-09-09 by
+                                    # the dtype-preserving collection fix, caught
+                                    # by codex round 15 the same day).
+                                    "np_dtype": np.dtype(
+                                        torch.empty(0, dtype=h_flat.dtype).numpy().dtype)}
                         f = all_hidden[layer_idx]["handle"]
                         f.write(h_flat.numpy().tobytes())
                         all_hidden[layer_idx]["count"] += h_flat.shape[0]
@@ -490,7 +542,10 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
         for idx, meta in all_hidden.items():
             meta["handle"].close()
             if meta["count"] > 0:
-                mmap_array = np.memmap(meta["path"], dtype=np.float32, mode='r', shape=(meta["count"], meta["D"]))
+                mmap_array = np.memmap(meta["path"],
+                                       dtype=meta.get("np_dtype", np.float32),
+                                       mode='r',
+                                       shape=(meta["count"], meta["D"]))
                 results[idx] = torch.from_numpy(mmap_array)
             else:
                 results[idx] = torch.empty(0)
@@ -536,6 +591,10 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
         p_logits, p_labels, p_hidden = _get_temp_dat_path(), _get_temp_dat_path(), _get_temp_dat_path()
         f_logits, f_labels, f_hidden = open(p_logits, "wb"), open(p_labels, "wb"), open(p_hidden, "wb")
         c_logits = c_labels = c_hidden = 0
+        # PER-DOCUMENT LENGTHS. The offloaded arrays are one flat stream, but
+        # the consumer treats each list element as ONE DOCUMENT, so the
+        # segmentation has to survive the round-trip (see the return below).
+        _doc_lens = []
         D_logits = D_hidden = 0
     else:
         stats["logits"] = []
@@ -593,6 +652,7 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
                     c_logits += l_flat.shape[0]
                     c_labels += y_flat.shape[0]
                     c_hidden += h_flat.shape[0]
+                    _doc_lens.append(int(y_flat.shape[0]))
                     D_logits, D_hidden = l_flat.shape[-1], h_flat.shape[-1]
                 else:
                     stats["logits"].append(torch.from_numpy(l_flat))
@@ -615,9 +675,37 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
             m_logits = np.memmap(p_logits, dtype=np.float32, mode='r', shape=(c_logits, D_logits))
             m_labels = np.memmap(p_labels, dtype=np.int64, mode='r', shape=(c_labels,))
             m_hidden = np.memmap(p_hidden, dtype=np.float32, mode='r', shape=(c_hidden, D_hidden))
-            stats["logits"] = [torch.from_numpy(m_logits)]
-            stats["labels"] = [torch.from_numpy(m_labels)]
-            stats["hidden"] = [torch.from_numpy(m_hidden)]
+            # SPLIT BACK INTO DOCUMENTS. Returning one tensor for the whole
+            # corpus silently redefined the statistic: `consistency.py` builds
+            # WITHIN-document controls and treats every list element as one
+            # document, so a single element made every control corpus-wide.
+            #
+            # With W = [[1,0],[-1,0]] and documents h = [[1,0],[1,0]],
+            # labels [0,0] and h = [[-1,0],[-1,0]], labels [1,1], every legal
+            # within-document control equals its target and the exact margin is
+            # 0.0: the in-memory and ModelOutputCache routes emit 0.0 while the
+            # offloaded route emitted 2.0, with the collision rate going
+            # 1.0 -> 0.0. A collision-free anchor's exact margin 1.0 became
+            # 1.4999999105930328. The concatenated tensors are bit-identical
+            # between routes -- ONLY the lengths [2,2] -> [4] differed. On real
+            # models the headline moved gpt2 0.010629930335388156 ->
+            # 0.011383407172830932 (+7.09%), pythia-70m +9.00% and distilgpt2
+            # +10.15% (codex round 12, 2026-09-08).
+            _t_logits = torch.from_numpy(m_logits)
+            _t_labels = torch.from_numpy(m_labels)
+            _t_hidden = torch.from_numpy(m_hidden)
+            if _doc_lens and sum(_doc_lens) == c_labels:
+                _off = 0
+                stats["logits"], stats["labels"], stats["hidden"] = [], [], []
+                for _n in _doc_lens:
+                    stats["logits"].append(_t_logits[_off:_off + _n])
+                    stats["labels"].append(_t_labels[_off:_off + _n])
+                    stats["hidden"].append(_t_hidden[_off:_off + _n])
+                    _off += _n
+            else:
+                stats["logits"] = [_t_logits]
+                stats["labels"] = [_t_labels]
+                stats["hidden"] = [_t_hidden]
         else:
             stats["logits"], stats["labels"], stats["hidden"] = [], [], []
 
@@ -625,6 +713,94 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
 
 
 _DEFAULT_PPL_WINDOW = 1024
+
+
+def _bytes_to_unicode_map():
+    """The GPT-2 byte-level BPE alphabet (Radford et al. 2019), inverted."""
+    bs = (list(range(ord("!"), ord("~") + 1))
+          + list(range(ord("\u00a1"), ord("\u00ac") + 1))
+          + list(range(ord("\u00ae"), ord("\u00ff") + 1)))
+    cs = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    return {chr(c): b for b, c in zip(bs, cs)}
+
+
+_U2B = _bytes_to_unicode_map()
+
+
+def _tokenizer_preserves_byte_count(tokenizer, ids, corpus) -> bool:
+    """True when re-decoding the ids reproduces the source's BYTE COUNT.
+
+    A normalising tokenizer (NFC composition, accent stripping, case folding
+    that changes width) scores a different byte sequence from the source, so
+    attributing SOURCE bytes to scored targets is wrong even when no offset
+    span is shared. This is the cheapest exact test of that condition.
+
+        SPECIAL TOKENS ARE SKIPPED, or this test fires for the wrong reason: a
+    BOS-adding tokenizer renders its BOS as the literal '<|endoftext|>' (13
+    characters that are nowhere in the corpus), so a plain decode never matches
+    the source length and BPC was withheld as NaN on every BOS tokenizer --
+    a false positive that broke `test_perplexity_bpc_correct_with_bos_tokenizer`
+    (BPC nan against the textbook 1.05579). Skipping special tokens isolates the
+    condition this guard is actually for, which is NORMALISATION of the source
+    text.
+    """
+    try:
+        # STRING EQUALITY, not byte-count equality.
+        #
+        # The first version compared only LENGTHS, which passes any
+        # BYTE-PRESERVING normalisation. Pythia-70m maps 'a' + U+0323
+        # (combining dot below) onto the composed 'a-with-dot': both encode to
+        # 3 bytes, so the length test saw nothing, while the attribution still
+        # charged 3 bytes and 2 characters to a single scored token that owns
+        # 1 byte and 1 character -- BPB 3.579988796568 against 10.739966389705
+        # (-66.6667%) and BPC 5.369983194853 against 10.739966389705 (-50%),
+        # with Pythia-160m independently at 1.737205126188 against
+        # 5.211615378563 (codex round 14, 2026-09-09).
+        return tokenizer.decode(list(ids), skip_special_tokens=True) == corpus
+    except Exception:
+        return False
+
+
+def _exact_token_bytes(tokenizer, ids, corpus):
+    """Raw UTF-8 bytes owned by each token, or ``None`` if not establishable.
+
+    BYTE OWNERSHIP IS A PROPERTY OF THE TOKEN PIECES, NOT OF CHARACTER OFFSETS.
+    A byte-level BPE splits a single character across several tokens, and the
+    character-offset map reports the SAME span for every one of them -- so no
+    arithmetic on offsets can recover which token owns which byte. Dividing the
+    shared span evenly invents an answer: real GPT-2 on the emoji '😀b'
+    has true piece ownership [3, 1, 1] and the even split assigns [2, 2].
+
+    Returns None unless the reconstructed pieces concatenate to exactly the
+    source UTF-8, so a normalizing tokenizer (lower-casing, accent stripping)
+    cannot silently pass a wrong partition off as exact.
+    """
+    try:
+        toks = tokenizer.convert_ids_to_tokens(list(ids))
+    except Exception:
+        return None
+    if not toks or any(t is None for t in toks):
+        return None
+    pieces = []
+    for t in toks:
+        if t and all(ch in _U2B for ch in t):
+            pieces.append(bytes(_U2B[ch] for ch in t))          # byte-level BPE
+        elif len(t) == 6 and t.startswith("<0x") and t.endswith(">"):
+            try:
+                pieces.append(bytes([int(t[3:5], 16)]))          # byte fallback
+            except ValueError:
+                return None
+        else:
+            pieces.append(t.replace("\u2581", " ").encode("utf-8"))
+    if b"".join(pieces) != corpus.encode("utf-8"):
+        return None
+    return [len(p) for p in pieces]
 
 
 def strided_perplexity(model, tokenizer, dataset, num_samples=100,
@@ -824,6 +1000,7 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
     # by the scored fraction and SAY SO via `_meta_ppl_byte_attribution`.
     corpus_bytes = corpus.encode("utf-8")
     _byte_exact = False
+    _byte_src = "offsets"
     if _offsets is not None and len(_offsets) == n_total:
         # PARTITION the corpus, do not sum offset widths.
         #
@@ -858,12 +1035,15 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
         _grp_start = 0
         _wb = [0.0] * len(_ends)
         _wc = [0.0] * len(_ends)
+        _shared = False       # did ANY span have to be divided?
         for _i in range(len(_ends)):
             if _i + 1 < len(_ends) and _ends[_i + 1] == _ends[_i]:
                 continue
             _lo = _ends[_grp_start - 1] if _grp_start > 0 else 0
             _hi = _ends[_i]
             _n_share = _i - _grp_start + 1
+            if _n_share > 1 and _hi > _lo:
+                _shared = True
             if _hi > _lo:
                 _bts = len(corpus[_lo:_hi].encode("utf-8")) / _n_share
                 _chs = (_hi - _lo) / _n_share
@@ -871,16 +1051,66 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
                     _wb[_j] = _bts
                     _wc[_j] = _chs
             _grp_start = _i + 1
-        _nb = 0.0
-        _nc = 0.0
-        for _i in sorted(_scored_pos):
-            if _i < len(_wb):
-                _nb += _wb[_i]
-                _nc += _wc[_i]
-        _nb, _nc = int(round(_nb)), int(round(_nc))
-        if _nb > 0:
-            n_bytes, n_chars, _byte_exact = max(1, _nb), max(1, _nc), True
-    _byte_mode = "offsets" if _byte_exact else "none"
+
+        # EXACT PIECE OWNERSHIP FIRST; the even split is not a partition.
+        #
+        # Dividing a shared span evenly and then rounding INVENTS byte
+        # ownership and used to label it exact. Real GPT-2 on
+        # '😀 This is an ordinary sentence about the weather.' counted 50
+        # scored bytes against the true 49 and emitted bits_per_byte
+        # 1.443730926792 instead of 1.473194823257 (-2.000%); on '😀b',
+        # whose true ownership is [3, 1, 1], it counted 3 scored bytes instead
+        # of 2 and emitted 8.143592235461 instead of 12.215388353192
+        # (-33.333%), and Pythia-70m 4.623930194629 instead of 6.165240259505.
+        # On GPT-2/WikiText-2 exactly one position differs (token ID 564, raw
+        # pieces [32,226,128]/[145] assigned [2,2] instead of [3,1]), for
+        # 1295024 counted against 1295023 true bytes (codex round 12,
+        # 2026-09-08).
+        _own = _exact_token_bytes(tokenizer, input_ids_all[0].tolist(), corpus)
+        if _own is not None and len(_own) == len(_ends):
+            # A character belongs to the token that owns its LAST byte.
+            _cum, _acc = [], 0
+            for _n in _own:
+                _acc += _n
+                _cum.append(_acc)
+            _wb = [float(_n) for _n in _own]
+            _wc = [0.0] * len(_own)
+            _ci, _bpos = 0, 0
+            for _ch in corpus:
+                _bpos += len(_ch.encode("utf-8"))
+                while _ci < len(_cum) - 1 and _cum[_ci] < _bpos:
+                    _ci += 1
+                _wc[_ci] += 1.0
+            _nb = sum(_wb[_i] for _i in _scored_pos if _i < len(_wb))
+            _nc = sum(_wc[_i] for _i in _scored_pos if _i < len(_wc))
+            _nb, _nc = int(_nb), int(_nc)
+            if _nb > 0:
+                n_bytes, n_chars, _byte_exact = max(1, _nb), max(1, _nc), True
+                _byte_src = "token_pieces"
+        elif not _shared and _tokenizer_preserves_byte_count(
+                tokenizer, input_ids_all[0].tolist(), corpus):
+            # No span was shared, so the offset partition IS the exact one --
+            # BUT ONLY IF THE TOKENIZER DID NOT NORMALISE THE TEXT.
+            #
+            # A normalising tokenizer scores a DIFFERENT byte sequence from the
+            # source, so counting source bytes gives a denominator the model
+            # never saw. Pythia-70m maps decomposed 'e' + combining acute + 'b'
+            # (4 source bytes) onto the SAME ids [860, 67] as the composed form
+            # (3 bytes); charging the extra byte to the scored targets gave
+            # bits_per_byte 3.292712874841 against 9.878138624522 (-66.6667%),
+            # and 50 instead of 48 scored bytes on the Pythia sentence
+            # (-4.000%) (codex round 13, 2026-09-08).
+            #
+            # The guard is a byte-count round-trip, which is exactly the
+            # condition that matters and costs one decode.
+            _nb = sum(_wb[_i] for _i in _scored_pos if _i < len(_wb))
+            _nc = sum(_wc[_i] for _i in _scored_pos if _i < len(_wc))
+            _nb, _nc = int(round(_nb)), int(round(_nc))
+            if _nb > 0:
+                n_bytes, n_chars, _byte_exact = max(1, _nb), max(1, _nc), True
+        # Otherwise ownership cannot be established and BPB is WITHHELD below
+        # rather than fabricated -- the same rule the no-offsets path follows.
+    _byte_mode = (_byte_src if _byte_exact else "none")
     if not _byte_exact:
         # NO FABRICATED DENOMINATOR. Scaling total bytes by a token-count
         # fraction has no exact byte interpretation: a slow-tokenizer anchor

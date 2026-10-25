@@ -250,12 +250,21 @@ class ProcrustesLinearityTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
 
+        layer_states = None
         if cache is not None and cache.is_populated and use_cache:
             layer_states = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=False,
                 replace_final_norm=True, include_embedding=True,
             )
-        else:
+            if layer_states is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
+                # orrectly with NO cache and returned an error with an attention-onl
+                # y one, i.e. it refused rather than self-collecting -- the defect a
+                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
+                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
+                # only sweep reported (2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if layer_states is None:
             from ...cache import ModelOutputCache, load_default_corpus
 
             if dataset is None:
@@ -301,9 +310,16 @@ class ProcrustesLinearityTask(DiagnosticTask):
             X = layer_states[a]
             Y = layer_states[b]
             if isinstance(X, torch.Tensor):
-                X = X.detach().float().cpu().numpy()
+                # PRESERVE the incoming float dtype. `.float()` is a no-op for the
+                # float32 every checkpoint emits and a NARROWING for float64. Probed on a
+                # 40x16 cloud with 1e-4 structure on a 1e5 offset -- the shape real hidden
+                # states have -- the narrowed path returns NaN where float64 returns a
+                # finite value (0.9999999999999806). Confirmed by counterexample rather than swept
+                # blindly: geometry_vendi_score has the same spelling and is UNAFFECTED
+                # (rel 2.7e-15), so it was left alone (2026-09-10).
+                X = X.detach().cpu().numpy()
             if isinstance(Y, torch.Tensor):
-                Y = Y.detach().float().cpu().numpy()
+                Y = Y.detach().cpu().numpy()
             X = np.asarray(X, dtype=np.float64)
             Y = np.asarray(Y, dtype=np.float64)
             if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:

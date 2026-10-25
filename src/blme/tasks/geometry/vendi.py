@@ -302,12 +302,33 @@ class VendiScoreTask(DiagnosticTask):
                 f"  Vendi: shared cache holds {_cached_docs} documents < "
                 f"configured {num_samples}; self-collecting so the score does "
                 f"not depend on which tasks co-ran.")
+        # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE.
+        #
+        # `_cache_ok` tested population and document count but not whether the
+        # cache actually holds HIDDEN STATES. A cache populated for an
+        # attention-only consumer returns None from `get_hidden_states`, and
+        # this then returned an error instead of self-collecting -- so simply
+        # co-running another task deleted every Vendi headline. Reproduced on
+        # pretrained gpt2 at the merged defaults: alone, all 9 headlines are
+        # emitted with mean 7.665371824565466 (released reference
+        # 7.665371824565450); paired with interpretability_attention_entropy in
+        # EITHER order, the task returned "No hidden states available for Vendi
+        # Score" and lost all 9. A 99-document attention-only cache happened to
+        # succeed only because it tripped the document-count guard above and
+        # self-collected; at 100 documents it failed (codex round 12,
+        # 2026-09-08).
+        layer_clouds = None
         if _cache_ok:
             layer_clouds = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=False,
                 replace_final_norm=True,
             )
-        else:
+            if not layer_clouds:
+                logger.info(
+                    "  Vendi: shared cache is populated but carries no hidden "
+                    "states (attention-only population); self-collecting.")
+
+        if not layer_clouds:
             from ...cache import ModelOutputCache, load_default_corpus
 
             if dataset is None:

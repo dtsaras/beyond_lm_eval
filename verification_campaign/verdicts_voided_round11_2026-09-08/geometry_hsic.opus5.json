@@ -1,0 +1,25 @@
+{
+  "task": "geometry_hsic",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "Re-derived Gretton et al. 2005's biased estimator HSIC_b = tr(K H L H)/(m-1)^2 and built an independent float64 reference with EXPLICIT centring matrices H = I - 11^T/m. Over all 78 gpt2 layer pairs the shipped _normalized_linear_hsic agrees with it to worst relative error 1.861e-15. The analytic anchor is exact at every scale: on [X, Y, 3X] the raw ratio reads 8.999999943 to 9.000000078 (want 9) and the normalized form reads 1.000000000000 (want 1) at all eight ladder rungs from 1e-30 to 5.325e18. On-grid translation by +1e6 and +1e8 changes the value by exactly 0.000e+00. HKH == (HX)(HX)^T is used in the numerically correct order and sqrt(a)*sqrt(b) avoids the float64 product overflow.",
+  "defect_location": "NONE",
+  "comparable": "RED",
+  "comparable_reason": "The normalized family inherits linear CKA's null floor and depth ramp exactly, because normalized linear HSIC IS linear CKA. Independent n=256 clouds score 0.043033 / 0.106492 / 0.341226 / 0.666117 at d = 8 / 32 / 128 / 512 (15.5x on pure noise), and with two FIXED endpoints avg_adjacent_hsic goes 0.068094 / 0.952219 / 0.997509 / 0.999396 at L = 2 / 8 / 32 / 64. The one genuinely comparable output is hsic_compression_ratio_raw, which I measured at exactly 0.066670 for all four values of L on the identical endpoints -- depth-invariant by construction, since it compares only layer 0 to layer L-1.",
+  "normalized_variant": "hsic_compression_ratio (the normalized-CKA form of the endpoint ratio, emitted beside hsic_compression_ratio_raw)",
+  "normalized_ok": "YELLOW",
+  "github": "PARTIAL",
+  "github_repo": "",
+  "github_reason": "Gretton et al. 2005 released MATLAB (hsicTestGamma) rather than a runnable Python artifact, so instead of a fetched reference I built the estimator from the paper's own Eq. (4) with explicit H matrices in float64 and compared on real data: 78/78 gpt2 layer pairs within 1.861e-15. The normalization is Kornblith's, and I separately confirmed the same kernel reproduces the released google-research CKA in the geometry_cka verdict.",
+  "paper_number": "NONE",
+  "paper_reason": "Gretton et al. publish HSIC as a test statistic with p-values on synthetic dependence tests, not as a tabulated value for a language model. The estimator's defining identities ARE reproduced exactly instead: normalized HSIC of a matrix with a positive multiple of itself is 1.000000000000 at every scale, and the raw endpoint ratio for [X, Y, cX] equals c^2 to 8.7e-9.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Width: normalized HSIC on independent noise rises 0.043033 -> 0.666117 over d = 8..512 with no signal present. Depth: avg_adjacent_hsic 0.068094 -> 0.999396 over L = 2..64 with the endpoints held exactly fixed. hsic_compression_ratio_raw is the exception -- 0.066670 at all four depths.",
+  "defects": [
+    "COMPARABILITY (not implementation): avg_adjacent_hsic and min_adjacent_hsic are depth proxies (0.068 -> 0.999 over L=2..64 at fixed content) and every normalized output carries a d/N null floor (0.043 -> 0.666 over d=8..512 on pure noise).",
+    "PAPER TEXT, NOT CODE: the manuscript's stated [0,1] bound on the compression ratio is false for the manuscript's OWN formula. tr(K_0 K_{L-1})/tr(K_0 K_0) is a projection coefficient; on [X, Y, 3X] the exact answer is 9, which I measured as 9.000000024640 at scale 1. The code names the key hsic_compression_ratio_raw and its comment already flags the discrepancy as a paper correction.",
+    "CONFIG (not implementation): defaults.yaml ships num_samples: 100 and max_hsic_tokens: 2000 with a seeded shared permutation; the Gram matrices, and hence every output, are computed on that 2000-token subsample rather than the full corpus.",
+    "LATENT NARROWING, no measurable effect: mutual_info.py:152 does .float() before _centered_linear_gram promotes to double at :23. Since collect_hidden_states already delivers float32 (utils.py:422, :461) this is a no-op on every reachable input, and the promotion inside the Gram is what makes the +1e6 and +1e8 translations come back at exactly 0.000e+00 relative."
+  ],
+  "fix": ""
+}

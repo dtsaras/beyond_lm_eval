@@ -1,0 +1,22 @@
+{
+ "task": "topology_betti_curve",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified against the RELEASED SOURCE, not against a reviewer's claim. I had reverted this same repair on 2026-09-07 conditioned on someone running the released topnn_framework loader -- correct caution, since the analogous magnipy de-duplication claim was refuted by execution. The condition is now met by reading the released code: transformers/betti_calc_parallel.py's read_csv does data = np.unique(np.transpose(np.array(data)), axis=0), i.e. it de-duplicates the POINTS before choosing k or building the neighbour graph. After applying np.unique(X, axis=0) a 42-point circle and the same circle plus 5 exact copies give IDENTICAL Betti numbers, and the disputed 13-row fixture gives beta_0 = 1, matching the released route (6 unique points -> 1 component) and GUDHI's single infinite H0 interval.",
+ "defect_location": "NONE",
+ "comparable": "YELLOW",
+ "comparable_reason": "Quotienting genuinely destroys multiplicity that the kNN construction was using as density -- the observation that motivated my revert was correct. It is applied anyway because the released reference defines this statistic and makes the other choice; the disagreement is documented at the call site rather than resolved silently in the mathematics' favour.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "topnn_framework (transformers/betti_calc_parallel.py)",
+ "github_reason": "Read the released read_csv directly; np.unique(..., axis=0) is line 47 of the reference saved under verdicts/_topology_betti_curve_codex_round12/reference/.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "CONFIRMED",
+ "confounds_reason": "TWO EXISTING TESTS WERE CHANGED, NOT FIXED: test_betti_zero_distance_edges_do_not_inflate_beta0 required beta_0 == 2 and the degenerate guard required _count_betti(zeros((2,5))) == (2,0). Both encoded BLME's multiplicity semantics rather than the reference's point-set semantics. Changing a test to match the code is how a real defect gets ratified, so this is flagged for the second reviewer to challenge explicitly.",
+ "defects": [
+  "PROCESS, not code: two tests were updated to the reference's answers (beta_0 1 and (1,0)). If the released loader's np.unique is judged not to define this statistic, the code change AND both test changes must be reverted together."
+ ],
+ "fix": "No change required."
+}

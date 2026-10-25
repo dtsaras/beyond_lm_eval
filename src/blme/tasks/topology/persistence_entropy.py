@@ -158,7 +158,14 @@ class PersistenceEntropyTask(DiagnosticTask):
                     for l_idx in target_layers:
                         hidden = _hs[l_idx + 1][0]
                         # .float() first: numpy doesn't accept bf16.
-                        rep = hidden.mean(dim=0).float().cpu().numpy()
+                        # The trailing .float() DISCARDED the precision the .double() was added to
+                        # gain: promote, average, then narrow back is self-defeating. Removing only
+                        # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                        # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                        # independently reconstructed Grassberger-Procaccia value, and restored a
+                        # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                        # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                        rep = hidden.double().mean(dim=0).cpu().numpy()
                         layer_reps[l_idx].append(rep)
         finally:
             _hook.remove()

@@ -69,6 +69,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from scipy.linalg import cho_factor, solve_triangular
 from scipy.spatial.distance import pdist, squareform
 
 logger = logging.getLogger("blme")
@@ -138,20 +139,49 @@ def _magnitude(D, t: float) -> float:
     Z = np.exp(-t * D)
 
     ones = np.ones(n, dtype=np.float64)
+
+    def _weights_cholesky(M: np.ndarray) -> np.ndarray:
+        """magnipy ``weights_cholesky``, verbatim: cho_factor + 2 triangular solves."""
+        c, _lower = cho_factor(M)
+        x = solve_triangular(c, ones, trans=1)
+        return solve_triangular(c, x.T, trans=0)
+
+    # DETECTION MUST BE CHOLESKY, NOT LU.
+    #
+    # This previously ran `np.linalg.solve`, whose comment claimed it was
+    # "bit-identical to the two-triangular-solve Cholesky form up to fp
+    # rounding". That is true of the SOLUTION on a positive-definite ζ and
+    # false of the FAILURE TEST, which is the only thing this branch is for.
+    # LU factorises any nonsingular matrix, so it raises only when ζ is
+    # EXACTLY singular; Cholesky raises whenever ζ is not positive definite.
+    # A ζ that is numerically indefinite but LU-invertible therefore returned
+    # from an invalid solve instead of reaching the perturbation below.
+    #
+    # Reached by a real 100x768 GPT-2 cloud with 95 distinct points (exact
+    # duplicate pairs (5,6), (5,61), (6,61), (11,65), (44,59), (85,90)): at
+    # t_med = 0.1713026078310342, rank(ζ) = 95 and cond(ζ) = 1.175309435246e17.
+    # `np.linalg.solve` raised nothing and returned magnitude
+    # -2034.8015584361294 with max|ζw - 1| = 129.0 -- a NEGATIVE magnitude,
+    # which is impossible for a finite metric space at t > 0. Released
+    # magnipy raises "7-th leading minor of the array is not positive
+    # definite", perturbs, and returns 71.00399079602064. The public headline
+    # was area 2.961573319962391 against the reference's 4.636803035166263
+    # (-36.13%) with a NaN median, because 267 of 513 integration points were
+    # discarded as invalid solves (codex round 12, 2026-09-08).
+    #
+    # magnipy catches a bare `Exception` here, so this does too: the point is
+    # to reproduce the reference's failure detection, not to improve on it.
     try:
-        # Positive-definite solve (matches magnipy's cholesky/scipy path:
-        # w = ζ⁻¹ 1, magnitude = Σ w). np.linalg.solve is bit-identical to
-        # the two-triangular-solve Cholesky form up to fp rounding.
-        w = np.linalg.solve(Z, ones)
-        return float(w.sum())
-    except np.linalg.LinAlgError:
+        return float(_weights_cholesky(Z).sum())
+    except Exception:
         pass
 
-    # Fallback 1: perturb the diagonal (Bunch et al. 2020) and retry.
+    # Fallback 1: perturb the diagonal (Bunch et al. 2020) and retry, which is
+    # magnipy's `perturb_singularities` branch -- ONE retry at 0.01·I, through
+    # the same Cholesky routine, exactly as the reference does it.
     try:
-        w = np.linalg.solve(Z + _SINGULAR_EPS * np.eye(n), ones)
-        return float(w.sum())
-    except np.linalg.LinAlgError:
+        return float(_weights_cholesky(Z + _SINGULAR_EPS * np.eye(n)).sum())
+    except Exception:
         pass
 
     # Fallback 2: Hermitian pseudo-inverse (magnipy weights_pinv).
@@ -172,7 +202,16 @@ def _pairwise_distance_matrix(X: np.ndarray) -> np.ndarray:
     # false zero pairs and corrupted the largest pair distance; the direct
     # form is translation-exact (adversarial review, 2026-09-04). Centering
     # first removes the leading term of the shift and costs nothing.
-    X = X - X.mean(axis=0, keepdims=True)
+    # NO CENTRING. It was added 2026-09-04 "to remove the leading term of the
+    # shift", and it is both redundant and destructive:
+    #   * redundant -- `pdist` differences coordinates before squaring, so the
+    #     shift cancels on its own. Measured on the 40x9 cloud that comment
+    #     cites, centred and uncentred agree to the digit at +1e3/1e6/1e10.
+    #   * destructive -- the ULP of the centroid becomes the resolution floor.
+    #     For X=[0, 1, 9.999999562023526e24] the mean's ULP is 5.369e8, so
+    #     d(0,1)=1 centred to 0 and magnitude read 1.9851238855228808 against
+    #     executed magnipy's 2.4621171572600096 (-19.37%).
+    # (gpt-6-astra round 10, 2026-09-07.)
     D = squareform(pdist(X, metric="euclidean"))
     np.fill_diagonal(D, 0.0)
     return D
@@ -448,13 +487,25 @@ class MagnitudeTask(DiagnosticTask):
                 f"  magnitude: shared cache holds {_cached_docs} documents != "
                 f"configured {num_samples}; self-collecting so the point count "
                 f"does not depend on which tasks co-ran.")
+        H = None
         if _cache_ok:
             # post-final-norm=False, DELIBERATELY: magnitude/diversity is
             # reported for ONE configured layer (default -1, the model's
             # output representation), never as a cross-layer profile.
             H = cache.get_hidden_states(layer_idx=layer_idx, per_sample=False,
                                         replace_final_norm=False)
-        else:
+            if H is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. A cache
+                # filled for an attention-only consumer returns None here, and
+                # this task then returned an error instead of self-collecting
+                # -- so co-running another task deleted every magnitude
+                # headline. Same defect as `geometry_vendi_score` (codex round
+                # 12, 2026-09-08); this is its second site.
+                logger.info(
+                    "  Magnitude: shared cache is populated but carries no "
+                    "hidden states; self-collecting.")
+        _cache_supplied = H is not None
+        if H is None:
             from .utils import collect_hidden_states
 
             if dataset is None:
@@ -470,13 +521,27 @@ class MagnitudeTask(DiagnosticTask):
                 # default made the two routes different protocols.
                 max_tokens_per_doc=None,
             )
-        _source = "shared_cache" if _cache_ok else "self_collected"
+        # DERIVED from what actually supplied the states, not from the plan.
+        _source = "shared_cache" if (_cache_ok and _cache_supplied) else "self_collected"
 
         if H is None:
             return {"error": "No hidden states available for magnitude"}
 
         if isinstance(H, torch.Tensor):
-            X = H.detach().float().cpu().numpy()
+            # float64, MATCHING the numpy branch below.
+            #
+            # The tensor branch narrowed to float32 while the array branch used
+            # float64, so the same cloud gave different answers depending on how
+            # it arrived -- and magnitude is a translation-invariant functional,
+            # so a lossless shift must not move it. On a 32-point cloud the task
+            # returned median 1.0002907220623911 and area 41244960994.27025, and
+            # translating by exactly +1 (every pairwise distance unchanged to 0)
+            # made evaluate() report "Degenerate cloud (no positive distances)":
+            # at that magnitude float32 cannot resolve the separations at all.
+            # `_pairwise_distance_matrix` already computes in double, so this
+            # only stops the input being damaged before it gets there
+            # (codex round 15, 2026-09-09).
+            X = H.detach().double().cpu().numpy()
         else:
             X = np.asarray(H, dtype=np.float64)
 

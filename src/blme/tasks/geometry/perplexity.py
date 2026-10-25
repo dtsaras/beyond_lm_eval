@@ -131,15 +131,24 @@ class RarePPLTask(DiagnosticTask):
                 # it under `bits_per_byte` would contradict what that key
                 # means (adversarial review round 3, 2026-09-04). It is emitted
                 # under an explicitly-named `_meta_` key instead.
+                #
+                # The EXACT modes are named in one place. `token_pieces` is the
+                # byte-level-BPE piece ownership added in round 12; `offsets`
+                # remains exact only when no offset span was shared between
+                # tokens, which the helper now checks before claiming it.
+                # Comparing against the single string "offsets" silently
+                # demoted every exact result to a lower bound the moment a
+                # second exact mode existed.
+                _EXACT_BYTE_MODES = ("offsets", "token_pieces")
                 if n_bytes > 0:
                     _bpb_val = float(bits_total / n_bytes)
-                    if _byte_attr == "offsets":
+                    if _byte_attr in _EXACT_BYTE_MODES:
                         bpb = _bpb_val
                     else:
                         _extra_bounds["_meta_bits_per_byte_lower_bound"] = _bpb_val
                 if n_chars > 0:
                     _bpc_val = float(bits_total / n_chars)
-                    if _byte_attr == "offsets":
+                    if _byte_attr in _EXACT_BYTE_MODES:
                         bpc = _bpc_val
                     else:
                         _extra_bounds["_meta_bits_per_char_lower_bound"] = _bpc_val

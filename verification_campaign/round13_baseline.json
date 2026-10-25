@@ -1,0 +1,517 @@
+{
+ "frozen_at": "2026-09-08 15:44:21",
+ "note": "Round 13 baseline. Two post-round-12 self-audit corrections are included: (1) isotropy bf16 rank-tolerance guard (sigma_1*max(m,n)*eps exceeded sigma_1 at bf16, returning rank 0 / cond inf); (2) spectral provenance flag propagated to the caller -- a per-layer key was dropped by the aggregation. (2) is provenance-only: avg_alpha_official is bit-identical at 3.904538608347353 on gpt2 before and after. Frozen with 0 verdicts written, so no review predates it.",
+ "suite": "2610 passed / 158 skipped / 0 failed, plus 87 + 348 targeted after the corrections",
+ "tasks": {
+  "dynamics_coe": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/coe.py": "3bf63ef6e6c77f72",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_fractal": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/fractal.py": "5f98d9c7806023b4",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_generation_diversity": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/generation_diversity.py": "a927a330432429c3",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_gradient_flow": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/gradient_flow.py": "8c16518fb9692a2e",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_interpolation": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/trajectories.py": "b697fd62ff303edc",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_perturbation_growth": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/perturbation_growth.py": "8ae59d58703bc78f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_sharpness": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/sharpness.py": "4155bb8831b2dd07",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "dynamics_stability": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/dynamics/stability.py": "07ac63af9f459922",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_categories": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/categories.py": "0e5a29a70f0ec617",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_cka": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/cka.py": "cbb5f8316ab9cca4",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_cknna": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/cknna.py": "569e3a22684ac0fa",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_collapse": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/collapse.py": "af667928a963009b",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_contextualization": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/contextualization.py": "9ca0cd574ef394e5",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_correlation_dimension": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/correlation_dimension.py": "0e1f5ef79fdf4ff9",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_effective_depth": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/effective_depth.py": "8d5cfacb41f5c438",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_hsic": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/mutual_info.py": "55319278eb3d19f0",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_hubness": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/hubness.py": "7244240155a6d559",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_intrinsic_dim": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/intrinsic_dim.py": "b1f4c8f630354e55",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_isoscore": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/isotropy.py": "6163934cd2f1d51d",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_lid": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/lid.py": "605ae68a78de9d05",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_lipschitz": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/lipschitz.py": "a7846210f74bd3ec",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_magnitude": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/magnitude.py": "12bbb59ebf246051",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_mahalanobis": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/mahalanobis.py": "eddb60ce62cdb1d2",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_matrix_entropy": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/matrix_entropy.py": "9902d9eac4392532",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_mp_bulk_deviation": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/rmt_bulk.py": "376c7c7d1401d492",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_neural_collapse": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/neural_collapse.py": "35a778c94da0fda9",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_perplexity": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/perplexity.py": "aeb4e7e31d39b351",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_phd_dimension": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/phd_dimension.py": "83fd686ae37e28d7",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_positional_decay": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/positional_decay.py": "f6c69492074d32a5",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_prediction_alignment": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/consistency.py": "f06fc6488979aca9",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_procrustes_linearity": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/procrustes_linearity.py": "ecb3df0245a604ec",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_representation_sensitivity": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/information_geometry.py": "8ea44e78035c679e",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_rsa": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/rsa.py": "9e7084e38926dff8",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_schatten": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/schatten.py": "e2102f451b87225a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_spectral": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/spectral.py": "611774baede4d5f5",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_superposition_strength": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/superposition_strength.py": "34e27946178d871d",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_svd": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/isotropy.py": "6163934cd2f1d51d",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_tokenizer_efficiency": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/tokenizer_efficiency.py": "6b18ffb87fae1098",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_trajectory_curvature": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/trajectory_curvature.py": "880a4fbbf4fbbb25",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_unembedding": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/unembedding.py": "a73d3a5a49adf1af",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_vendi_score": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/vendi.py": "1707d1d062fa8715",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "geometry_weight_norms": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/weight_norms.py": "d2f4aedf5763f5c5",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "repe_concept_separability": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/representation_engineering.py": "d53daa39bd85508f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "repe_refusal_direction": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/representation_engineering.py": "d53daa39bd85508f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "repe_steering_effectiveness": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/representation_engineering.py": "d53daa39bd85508f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "repe_task_vectors": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/representation_engineering.py": "d53daa39bd85508f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "topology_betti_curve": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/topology/betti_curve.py": "2b990a0ebe3cf34f",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "topology_homology": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/topology/homology.py": "0ba6d948c72f4d67",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "topology_persistence_entropy": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/topology/persistence_entropy.py": "c532c45d9ab93e07",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "topology_persistence_landscape": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/topology/persistence_landscape.py": "f1345e8db35bf94d",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  },
+  "topology_zigzag_persistence": {
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/topology/zigzag.py": "3111347e59f4434e",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/geometry/utils.py": "ef0ca2df38d723d6",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/common.py": "0c7c1a81b2c03c26",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/cache.py": "8eb6f13b3c3d450a",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/normalization.py": "51644a6730a3ba08",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/config_loader.py": "ffedc91dda126370",
+   "/home/dtsaras/projects/beyond_lm_eval/src/blme/tasks/configs/defaults.yaml": "307282d783004c2c",
+   "/home/dtsaras/projects/beyond_benchmarks/configs/tasks.yaml": "59b2d28a448ce4a0"
+  }
+ }
+}

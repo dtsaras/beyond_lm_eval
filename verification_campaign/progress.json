@@ -1,12 +1,12 @@
 {
  "total": 51,
- "reviewed": 51,
- "opus": 43,
- "codex": 11,
- "both": 11,
- "github": 35,
- "paper": 16,
- "signed_off": 7,
- "impl": 11,
+ "reviewed": 6,
+ "opus": 0,
+ "codex": 1,
+ "both": 0,
+ "github": 4,
+ "paper": 1,
+ "signed_off": 0,
+ "impl": 0,
  "comparable": 0
 }

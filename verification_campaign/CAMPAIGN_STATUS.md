@@ -115,3 +115,60 @@ for cross-model work.
    independent of the model's own task vectors; and neural_collapse's three NC2
    statistics cannot beat their own label-permutation null at the shipped
    5-class × 8-sentence bundle.
+
+---
+
+# Round 12 (gpt-6-astra, max effort) — complete 2026-09-08
+
+**51 of 51 reviewed: 21 GREEN / 20 YELLOW / 10 RED.** All 10 REDs were
+`defect_location: CODE` and all 10 are now fixed, each against the reviewer's
+own counterexample, each with a regression test validated against the
+pre-fix code (a guard that does not fail on the known-bad state proves nothing).
+
+| task | defect | fix | verified |
+|---|---|---|---|
+| `geometry_correlation_dimension` | C(r) dropped coincident pairs from BOTH numerator and denominator, so the headline was the CONDITIONAL integral (C−c₀)/(1−c₀) | pass the full pair population; radii still drawn from positive distances | μ = ½δ(−2)+½U[0,1], exact D2 = 0: **0.9873 → 0.00296** (nolds 5.35e-17). Cube controls bit-identical |
+| `geometry_magnitude` | `np.linalg.solve` (LU) raises only on EXACTLY singular ζ; magnipy's `cho_factor` raises on any non-PD one, then perturbs by 0.01·I | use magnipy's `weights_cholesky` for detection, catching bare `Exception` as it does | invalid solve returned **−497.03** (residual 513) where the fix gives 32.7586; matches live magnipy to 5e-16; pinned duplicate-parity values bit-preserved |
+| `geometry_intrinsic_dim` | rescale divided by an arbitrary max — the comment claimed it "only shifts exponents", true ONLY for a power of two — re-rounding Two-NN's exact-equality exclusions | divide by 2^ceil(log2(max)); stop narrowing to float32 | **constant 2.170755946319 across all 65 integer offsets** (was 2.1708 → 3.7654, +73.5%); scale ladder 1e-30…2.4e38 preserved |
+| `geometry_svd` | `.double()` promotion ran BEFORE the stored dtype was recorded, so the rank tolerance used float64 eps for every torch input — τ shrank by 2²⁹ | capture the incoming dtype (via `torch.finfo`, so bf16 reports its own eps) before promoting | exact 100×5 fixture: **rank 5 → 3, cond 268435456 → 4.0**, matching the numpy route; erank/PR unmoved |
+| `geometry_spectral` | exact positivity admitted SVD backward-error residue as eigenvalues: HDHᵀ's 9th singular value is 4.59e-15, not 0, so 64 numerical positives replaced the true 8 | resolve numerical zeros with the RELATIVE envelope eps·max(m,n)·S₀ before squaring | alpha now identical between D and HDHᵀ at ranks 2,3,8,19,20,32,48,63,64; rank 8 = **1.330045361632** (released WeightWatcher). 0 of 50 gpt2 matrices affected, min ratio 2.3215e7 |
+| `geometry_perplexity` | byte ownership split shared character-offset spans EVENLY and labelled it exact; a byte-level BPE reports the same span for every piece of one character | derive ownership from the token PIECES, verified to rebuild the source UTF-8 exactly; withhold BPB when it cannot be established | '😀b' ownership **[3,1,1]**, 2 scored bytes (was 3): BPB 8.1436 → **12.2154** (ref 12.215388); sentence 50 → **49** bytes |
+| `geometry_prediction_alignment` | the offloaded collector returned ONE tensor for the whole corpus while the consumer treats each element as a document — every within-document control became corpus-wide | retain per-document lengths and return per-document views of the memmaps | all **9 outputs now identical** across fresh/offload routes; concatenated tensors bit-identical, lengths equal |
+| `geometry_vendi_score` | a cache populated for an attention-only consumer is populated but UNUSABLE; the task errored instead of self-collecting, so co-running another task deleted all 9 headlines | require usable hidden states before accepting the cache, else self-collect | attention-only cache now yields **15 headline keys** instead of an error |
+| `repe_refusal_direction` | zero-direction layers were dropped with `continue`, and the headline is the last SURVIVING layer — so an earlier block's norm was published under the final layer's name | record a zero direction as 0.0 with undefined unit-direction quantities; depth denominator from the CANDIDATE set | zero-final fixture: **3.0 → 0.0**; pre-fix code published 0.0425 (gpt2) / 0.0471 (llama) |
+| `topology_betti_curve` | duplicate rows were not quotiented, so 5 exact copies changed a 42-point circle's Betti numbers | `np.unique(X, axis=0)` before choosing n/k | **duplicate-invariant**; 13-row fixture beta_0 = 1, matching the released route and GUDHI |
+
+## The betti_curve reversal, stated plainly
+
+I reverted this same fix on 2026-09-07 with the condition "not reinstated until
+someone runs the released `topnn_framework` loader and shows what it does" —
+caution that was right for `geometry_magnitude`, where live magnipy turned out
+to PERTURB rather than de-duplicate. That condition is now met by reading the
+released source directly, `transformers/betti_calc_parallel.py`, `read_csv`:
+
+    data = np.unique(np.transpose(np.array(data)), axis=0)
+
+Two existing tests encoded BLME's multiplicity semantics rather than the
+reference's and were updated, with the reversal recorded in both.
+
+## Sibling sweeps run after these fixes
+
+- LU-as-singularity-detector: population 2, both in `magnitude.py`, both fixed.
+- Unregistered hidden-state consumers: population **6**, not 1 — five already
+  handled a `None` cache read; `magnitude.py` did not and was the second live
+  site of the Vendi defect.
+- Divide-by-arbitrary-max: `hubness.py` carries the same false "exact" claim.
+  Measured: 0 of 2000 unit rows bit-identical, but **2000 of 2000 identical
+  k=10 neighbour lists** — no consumer-visible effect, so the comment was
+  corrected and the arithmetic left alone rather than risking pinned parity.
+- `_byte_mode` string consumers: 1, fixed — introducing a second exact mode
+  silently demoted every exact BPB to a lower bound until it was taught the
+  new name.
+
+## Sign-off state
+
+**0 of 51 dual sign-off.** All 51 tasks carry both reviewers' verdicts, and all
+51 are voided: today's fixes touched `utils.py`, `common.py` and other shared
+dependencies, so under the Pink–Ponk protocol every prior verdict on those
+tasks falls. This is the protocol working, not a regression — round 13 must
+re-review from the frozen post-fix state.

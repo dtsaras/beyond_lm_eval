@@ -51,6 +51,7 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         
         # Collect hidden states from ALL layers
+        all_layers = None
         if cache is not None and cache.is_populated and use_cache:
             # The branch production TAKES (geometry_rsa is in core.py's
             # cache_hidden_tasks). Requesting the hook here is necessary but
@@ -63,7 +64,15 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             # mere presence of a hooked tensor (a shape mismatch is
             # rejected inside get_hidden_states).
             _last_is_block = bool(getattr(cache, "_last_block_substituted", False))
-        else:
+            if all_layers is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
+                # orrectly with NO cache and returned an error with an attention-onl
+                # y one, i.e. it refused rather than self-collecting -- the defect a
+                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
+                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
+                # only sweep reported (2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if all_layers is None:
             _st = {}
             all_layers = collect_hidden_states(model, tokenizer, dataset,
                                            num_samples=num_samples,

@@ -618,3 +618,520 @@ write.
 2. Before implementing any claim about what a reference implementation does,
    **run the reference**. `magnitude` cost a revert, a withdrawn doc edit, and
    a broken pinned parity because two reviewers and I agreed without doing so.
+
+## 20. `geometry_magnitude` — DELETE the pre-distance centring (one line, fully diagnosed)
+
+`magnitude.py:175` `X = X - X.mean(axis=0, keepdims=True)`, added 2026-09-04
+with the comment *"Centering first removes the leading term of the shift and
+costs nothing."* **It costs a lot, and it buys nothing.**
+
+**What it costs.** For the distinct collinear points
+`X = [0, 1, 9.999999562023526e24]` the mean is 3.333e24, whose ULP is
+**5.369e8** — half a billion times larger than the gap being measured. So
+`d(0,1) = 1` centres to **exactly 0**, and two distinct points become
+coincident:
+
+    magnitude(t=1), current (centred) : 1.9851238855228808
+    magnitude(t=1), uncentred         : 2.4621171572600096
+    executed magnipy + closed form    : 2.4621171572600096   (-19.37% error)
+
+**What it buys: nothing.** The centring was added for translation safety, but
+the same comment already notes the direct `pdist` form is translation-exact.
+Measured on the `default_rng(343)` 40x9 cloud the comment itself cites, centred
+and uncentred agree to the digit at every offset:
+
+| offset | centred | uncentred |
+|---|---|---|
+| +1e3 | 21.469474515488 | 21.469474515488 |
+| +1e6 | 21.469474515497 | 21.469474515497 |
+| +1e10 | 21.469474426617 | 21.469474426617 |
+
+Identical, because `pdist` differences the coordinates directly and the shift
+cancels before anything is squared. The centring is a no-op on the case it was
+written for and a -19% error on wide-dynamic-range clouds.
+
+**Fix: delete line 175.** Verify against executed magnipy on both the collinear
+fixture and the 40x9 translated cloud before and after.
+
+**Why this is the third variant of one lesson today.** `matrix_entropy` had its
+rescale/centre ORDER fixed in the wrong direction; `persistence_landscape`'s
+prescale measured the offset instead of the geometry; and here a centring added
+to fix translation destroys precision on a case its author did not test.
+Centring is only free when the cloud's dynamic range is narrow compared to the
+centroid — a condition no site in this repo currently checks, and one
+`centre_and_rescale` should assert rather than assume.
+
+## 21. `geometry_matrix_entropy` — the global rescale discards small rows (NOT introduced today, NOT fixed today)
+
+For `X = [(a,0), (-a,0), (0,b), (0,-b)]` with `a = 1e-25`, `b = 1e25`, every row
+normalises to a unit axis vector, so Wei et al.'s centred row-normalised
+covariance is exactly `I_2 / 2` and `H / log(2) = 1`. Both executed released
+implementations return 1.0.
+
+BLME returns **9.965784170857316e-29** — astra's figure to the digit.
+
+Mechanism, verified: the global power-of-two rescale divides by `2^83` (the max
+entry is 1e25), taking the `1e-25` rows to `~1e-50`; the subsequent float32 cast
+flushes those to zero; the `row_norms > 0` filter then drops them, leaving
+**2 of 4 rows**. The surviving pair is collinear, so the entropy collapses.
+
+**Attribution, checked rather than assumed.** The pre-session file
+(`ae183a9`) already had `Z = Z.float()` before the row normalisation and the
+same rescale, so this defect predates today. My change re-ordered the promotion
+and centring — which fixed the TRANSLATION defect — and left this one intact. I
+did not introduce it and I did not fix it.
+
+**Why the rescale is the wrong tool here.** Row normalisation makes every row
+unit, so a GLOBAL scale factor is irrelevant to the statistic; the rescale
+exists only to keep the data in float32 range for the SVD. But a global factor
+cannot serve a matrix whose rows span 50 orders of magnitude — whatever it does
+for the large rows, it destroys the small ones. The fix is to normalise rows
+BEFORE any global rescale (row-wise max-factoring is already the established
+idiom here), or to keep double through the SVD, not to pick a better constant.
+
+Fixture-integrity note: `assert_payload_survives` would NOT have caught this,
+because the input is faithful — the destruction happens inside the task. The
+guard covers fixtures; nothing yet covers a task silently discarding rows.
+Emitting `_meta_n_rows_discarded` would make it visible, which is the same
+`_meta_` remedy applied to `hubness` and `intrinsic_dim` today.
+
+## 22. CENTRING-AS-A-TRANSLATION-FIX IS A DEFECT CLASS — 12 sites, 2 confirmed broken, 3 of them mine
+
+Round 10 found the same defect in two tasks independently, and a sweep shows a
+population of **12**. This supersedes the individual entries for `magnitude`
+and `lid`.
+
+**The class.** Centring is *required* where the estimand is defined on centred
+data (covariance, PCA, Procrustes) — those sites are correct and not at issue.
+The defective class is centring **added as a numerical fix for translation**,
+justified in-comment with some form of "centring removes the leading term of
+the shift and costs nothing."
+
+It does not cost nothing. Subtracting the mean is only safe when the cloud's
+dynamic range is NARROW relative to the centroid, because the ULP of the mean
+becomes the resolution floor of every coordinate. No site checks this.
+
+**Confirmed broken:**
+
+| task | evidence |
+|---|---|
+| `geometry_magnitude` | `X=[0, 1, 9.999999562023526e24]`: mean 3.33e24 has ULP **5.369e8**, so d(0,1)=1 centres to **0**. Returns 1.9851238855228808; executed magnipy and the closed form give 2.4621171572600096 (**-19.37%**) |
+| `geometry_lid` | lattices {j*2^-80} ∪ {1+j/32}: mean 0.65625 has ULP 1.11e-16, so **21 distinct points collapse to 1** and all 20 gaps vanish. lid_mean 0.5081480494776388 vs the executed released `mle_batch` 1.0162960989552776 — **exactly 50.0% low** |
+
+`geometry_lid` was **dual-GREEN in round 9**. Both reviewers passed a task that
+is 50% wrong on a constructible input, because neither built a cloud with a wide
+dynamic range. It is a paper task.
+
+**The full population (12), all justified by translation in-comment:**
+`fractal.py:382`, `isotropy.py:53`, `isotropy.py:278`, `lid.py:121`,
+`magnitude.py:175`, `matrix_entropy.py:102`, `mutual_info.py:25`,
+`schatten.py:197`, `utils.py:967`, `homology.py:283`,
+`persistence_entropy.py:198`, `persistence_landscape.py:489`.
+
+**THE LAST THREE ARE MINE, ADDED TODAY.** I centred the topology clouds to fix
+the ripser translation defect, and the fix carries exactly this exposure: a
+hidden-state cloud with a wide dynamic range would lose its fine structure the
+same way. It was the right fix for the reported defect and I did not test the
+regime that breaks it — the identical mistake the 2026-09-04 reviewer made.
+
+**The correct remedy is not a better centring.** For `magnitude` I measured it
+directly: centred and uncentred agree to the digit at every offset from 1e3 to
+1e10, because `pdist` differences coordinates before squaring and the shift
+cancels on its own. **Centring is redundant wherever a translation-exact
+algorithm is already used, and strictly worse than it.** So:
+
+1. Where the consumer already differences directly (`pdist`, `cdist`,
+   direct-difference kernels) — **delete the centring**. Covers `magnitude`,
+   `lid`, and the three topology sites.
+2. Where the estimand genuinely needs centred data, centre in double AND assert
+   the dynamic-range precondition, emitting a `_meta_` flag when the ULP of the
+   mean exceeds the smallest nonzero pairwise gap.
+3. Add that precondition to `centre_and_rescale`, which currently assumes what
+   it should check.
+
+### 22b. The centring class has TWO opposite failure directions
+
+`geometry_svd` (round 10) completes the picture. The same ordering question
+breaks in both directions, and a fix for one causes the other:
+
+**Direction A — centring too early destroys fine structure.** When the cloud's
+dynamic range is wide, the ULP of the mean becomes the resolution floor.
+`magnitude` (d(0,1)=1 -> 0, -19.37%) and `lid` (21 points -> 1, exactly 50% low).
+Remedy: DON'T centre; use a translation-exact algorithm.
+
+**Direction B — narrowing dtype before centring destroys structure the offset
+is hiding.** `geometry_svd`: for `1e6 + stack(±diag([4,1..1]/64))`, float32's
+ULP at 1e6 is exactly 0.0625, so the 1/64 = 0.015625 entries are NOT
+representable and 5 distinct values collapse to 3. Effective rank falls from
+7.411061418596 to **exactly 1.000000000000** — the task emits 1/1/1 and loses
+92.95% / 71.80% of the first two quantities. Verified. Remedy: PROMOTE, then
+centre.
+
+These are not two bugs, they are one rule applied at the wrong time:
+
+    PROMOTE (float64) -> CENTRE (only if the estimand needs it AND the
+    dynamic-range precondition holds) -> narrow dtype LAST, if at all.
+
+`centre_and_rescale` implements the ordering but ASSERTS NOTHING about the
+precondition. It should emit a `_meta_` flag when
+`ulp(mean) > smallest nonzero pairwise gap`, which is the exact condition that
+makes Direction A fire — and which would have caught `magnitude` and `lid`
+automatically.
+
+Sites needing Direction-B treatment (promote before centring):
+`isotropy.py:53`, `isotropy.py:278` (this verdict). Already done today:
+`collapse.py`, `matrix_entropy.py`, `contextualization.py`, `unembedding.py`.
+
+**`geometry_svd`'s third-clause fix from today is separately CONFIRMED by this
+same verdict** ("the previously incorrect final-layer endpoint is separately
+confirmed fixed") — so the 18% gpt2 change made by reading
+`modeling_gpt2.py:562-565` was right.
+
+### 22c. The precondition check — prototyped and validated, ready to apply
+
+`centre_and_rescale` should refuse (or flag) when centring would destroy
+resolution. The condition is exact and cheap to state: **the ULP of the centroid
+becomes the resolution floor of every coordinate**, so compare it against the
+smallest nonzero gap the data actually contains.
+
+    mu  = X.mean(axis=0)
+    ulp = max(np.spacing(abs(mu)))
+    gap = smallest positive difference between distinct values of X
+    safe = ulp < gap
+
+Validated against the confirmed-broken fixtures and against realistic data:
+
+| case | safe? | ulp(mean) | min gap |
+|---|---|---|---|
+| `magnitude` [0, 1, 1e25] | **False** | 5.369e+08 | 1.000e+00 |
+| `lid` lattices 2^-80 ∪ 1/32 | **False** | 1.110e-16 | 8.272e-25 |
+| healthy gaussian 40x8 | True | 5.551e-17 | 5.499e-05 |
+| gpt2-shaped hidden states | True | 2.776e-17 | 2.975e-10 |
+| gaussian translated +1e6 | True | 1.164e-10 | 6.079e-06 |
+
+It fires on exactly the two defects and on nothing else — including the
+translated cloud, which is the case centring was originally added to serve. So
+it does not merely detect the failures; it distinguishes them from the success
+the same code path was written for.
+
+**Cost caveat before wiring:** `np.unique` over every value is O(n log n) on the
+full matrix, which is real work at 50257x768. Use a sampled estimate of the
+minimum gap (or compute it per column on a row subsample) and say so in the
+`_meta_` flag, rather than paying full price on every call — and measure that
+the sampled version still fires on both fixtures before trusting it.
+
+## 23. Round-10 findings on tasks I "fixed" in round 9 — three confirmations, three gaps
+
+**`geometry_schatten` — import fix CONFIRMED.** "The import fix restores I_2 to
+S1=2.000000000, S4=1.189207115 and RankMe=1.999999877." The task computes again.
+Remaining: `Z=[[1e37,1e-13,3.7e-14],[1e37,-1e-13,-3.7e-14]]` returns MNN/T = 0 —
+rescaling before centring deletes valid centred directions. **Direction B of the
+centring class (item 22b), in a fifth file.**
+
+**`geometry_spectral` — small-N port CONFIRMED, but incomplete.** Two remaining
+port errors reach the public output: `W = diag(2, 1, 0 x62)` gives
+avg_alpha_official/avg_alpha_hat = **NaN/NaN** against the executed
+WeightWatcher analyzer's 1.721347520444 / 1.036354473231. My port dropped
+non-positive eigenvalues (`lam = lam[lam > 0]`) before the small-N branch;
+WWFit evidently does not, or handles the resulting N differently. **My
+validation used 120 random spectra, none of which had exact zeros** — full-rank
+Gaussians never produce them. The fixture space was wrong, not the sample size.
+
+**`geometry_trajectory_curvature` — my fix has a mixed-scale hole. Verified.**
+For `X = [(0,0), (1e-13,0), (1e-13,1), (1e-13,2)]` the step norms are
+`[1e-13, 1, 1]`, the paper-defined angles are `[pi/2, 0]` and the executed
+released implementation gives mean 0.7853981634. BLME emits `[0.0]`, mean 0.0.
+
+I replaced an ABSOLUTE floor (`norms > 1e-12`) with one RELATIVE to the largest
+step (`1e-12 * max(norms)`), which fixed uniform rescaling — the reported defect
+— and still discards a genuinely nonzero step that is merely small *relative to
+its neighbours*. The old code dropped it too, so I did not introduce the
+failure; I carried it across in a new form while believing I had made the
+quantity scale-free.
+
+**The correct floor is `norms > 0`.** The angle between two difference vectors
+is well-defined for any pair of nonzero steps, whatever their relative size;
+there is no magnitude below which it becomes meaningless, which is precisely why
+neither an absolute nor a relative epsilon belongs there. Both thresholds were
+answers to a question that should not have been asked.
+
+**`repe_concept_separability` — a second, unrelated defect.** Held-out logits
+124.491776559..139.430789746 saturate to probabilities of exactly 1.0, so
+ordering is lost and BLME emits AUC 0.833333333333 where live sklearn
+`cross_val_score` and direct pair-counting agree on a different value. Rank the
+LOGITS (or use a numerically stable sigmoid); AUC depends only on order, so the
+probability transform is unnecessary as well as lossy.
+
+### 23b. `geometry_spectral` — the exact fix, verified against live WWFit
+
+Diagnosed and confirmed, ready to apply as a one-line move.
+
+`W = diag(2, 1, 0 x62)` has 64 eigenvalues, **2 positive and 62 exact zeros**.
+BLME returns NaN. Running the reference both ways settles what it should be:
+
+    WWFit on the FULL spectrum (with zeros) : 2.4426950408889634
+    WWFit on the POSITIVES only (2 values)  : 1.7213475204444817
+
+The second matches the analyzer value astra quotes to twelve digits, so
+**BLME's zero-filtering (`lam = lam[lam > 0]`) is correct** — the analyzer
+filters too. The defect is the guard immediately after it:
+
+    if n < min_tail + 2:      # n < 4
+        return nan, nan, nan, 0
+
+which fires at n=2 and returns NaN before the small-N branch is ever reached.
+WWFit has no such bail-out: N=2 leaves one xmin candidate, `k_min=8` rejects it,
+and the fallback computes alpha from the whole spectrum.
+
+Verified by running my ported branch with the guard removed:
+
+| spectrum | ported branch | live WWFit | rel |
+|---|---|---|---|
+| 2 positives (the fixture) | 1.721347520444 | 1.721347520444 | **0.00e+00** |
+| 3 positives | 1.558110626551 | 1.558110626551 | **0.00e+00** |
+
+Fix: apply the `n < min_tail + 2` bail-out only on the N >= 20 path; let the
+small-N branch handle n < 20 down to n = 2, since its fallback already covers
+exactly that case.
+
+**Why my round-9 validation missed it, stated precisely:** I validated on 120
+random spectra from full-rank Gaussians, which never contain exact zeros. The
+fixture SPACE was wrong, not the sample size — 12,000 more draws of the same
+kind would not have found it. Rank-deficient and duplicate-eigenvalue spectra
+have to be constructed deliberately.
+
+## 24. POOLING IN THE MODEL'S DTYPE — 6 sites, one line each
+
+`topology_homology`'s round-10 RED is not in the barcode and not in the centring
+I added today: it is in the POOLING upstream of both. An exactly-represented
+side-0.25 square at +1e6 returns mean H0 **0.0625 instead of 0.25 (-75%)**, and
+a grid returns 8 H1 loops against the 12 both released backends measure on its
+unchanged sentence means. The reviewer's own control is decisive: *"changing only
+the pooling arithmetic in memory restores 0.25 and 12 without changing the
+barcode computation."*
+
+Sweeping the pattern gives **6 sites in 6 files**, in two equally broken forms:
+
+    hidden.mean(dim=0).float()     # accumulates in the MODEL's dtype
+      topology/homology.py:191
+      topology/persistence_entropy.py:161
+      topology/betti_curve.py:364
+
+    h.float().mean(dim=0)          # narrows BEFORE pooling
+      geometry/neural_collapse.py:343
+      topology/zigzag.py:832
+      topology/persistence_landscape.py:450
+
+The first overflows or quantises the accumulator (float32's ULP at 1e6 is
+0.0625, which is where the 0.25 -> 0.0625 collapse comes from). The second is
+Direction B of item 22b — it destroys structure the offset is hiding before the
+mean is ever taken. Both fix to `h.double().mean(dim=0)` and cast after.
+
+**This is the whole topology family plus `neural_collapse`,** which plausibly
+accounts for several of the round-10 topology REDs at once rather than each
+being its own defect.
+
+**I fixed exactly one instance of this today** — `representation_engineering.py`
+`rep = hidden.mean(dim=0).float()`, for `repe_concept_separability`, where the
+token mean went non-finite at 2.4e38 — and did not sweep for the line I had just
+changed. Six more were sitting in the tree, in the family the reviewers were
+about to test. **Fixing a line without grepping for that same line is the single
+most repeated process failure of this campaign**, and I committed it again today
+after writing the rule down twice.
+
+## 25. Round-10 tail: two pooling sites, and a LIMITATION of sweep_siblings.py
+
+**`repe_steering_effectiveness`** — RepE/ActAdd's contrast
+`v = mean(h_pos) - mean(h_neg)` must cancel a common residual offset. At +1e6
+BLME emits **KL = 0.0** against the executed released reader/controller's
+0.957300462359 (100% error), while the model's own logit drift is at most
+2.79e-9 — so the model is fine and the pooling is not.
+
+Uncovered site: `representation_engineering.py:1004-1005`,
+`mean_pos = torch.stack(pos_acts[l]).mean(dim=0)`. Fix as the others:
+`.double().mean(dim=0)` then cast back.
+
+**`topology_persistence_landscape`** — "sentence pooling changes the metric
+space before the repaired centring step": a +1e6 translation with exactly
+unchanged sentence means moves the H0 integral/L2/max by 16x/8x/4x. This should
+be closed by the `persistence_landscape.py:450` pooling fix already applied;
+**verify against this fixture rather than assuming**, since the verdict predates
+that change.
+
+### The sweeper matched one shape; the class spans several
+
+`sweep_siblings.py` seeded from `homology.py:191` found 6 sites sharing
+`mean(dim=0).float().cpu().numpy()`. It did NOT find lines 1004-1005, whose
+shape is `torch.stack(...).mean(dim=0)` — no `.float().cpu().numpy()` tail, a
+different skeleton and a different method multiset. **The tool is correct and
+the seed was too narrow.**
+
+So the rule needs a second half: after fixing a site, sweep from it AND sweep
+for the *semantic* operation independently (here: every `.mean(dim=` over a
+token or sample axis, regardless of what surrounds it). A shape-matcher answers
+"where else does this line appear", not "where else does this MISTAKE appear",
+and those differ whenever one defect has several idioms. Two of the six sites
+already needed the order-insensitive pass for exactly that reason; this is the
+same lesson one level up.
+
+## 26. `source_hash.py --write` must refuse to stamp stale verdicts
+
+Running `--write` after a green suite stamped all 102 verdicts with the current
+hash and flipped the accounting from 0/102 verified to 102/102 — all of it
+false. The Opus verdicts predate ~49 fixes; the codex round-10 verdicts predate
+17. Reverted by stripping the hashes.
+
+`--write` currently stamps unconditionally. It must instead:
+
+1. skip any verdict whose file is older than the newest semantic change to the
+   source it covers, and PRINT each skip with both timestamps;
+2. exit non-zero if it stamped nothing, so a caller cannot mistake "refused" for
+   "verified";
+3. gain a `--at-launch` mode that is the only supported path — stamping belongs
+   at the START of a round, against the tree the reviewer is about to read.
+
+Until then, do not run `--write`. The failure is silent, it inverts the
+campaign's headline number, and the tool reports success while doing it.
+
+## 27. `isotropy.py` — a fallback that CANNOT fire (round 11, verified)
+
+`isotropy.py` guards its SVD with `except np.linalg.LinAlgError:` in two places,
+but the call inside is now `safe_svdvals`, which raises **`torch._C._LinAlgError`**.
+Verified directly:
+
+    issubclass(torch._C._LinAlgError, numpy.linalg.LinAlgError)  ->  False
+    safe_svdvals(non-finite matrix)  ->  raises torch._C._LinAlgError
+
+So the scipy fallback is dead code and the exception propagates past a handler
+written to absorb it. This is the same class as `geometry_schatten`'s
+`except Exception: return {}`, which hid a NameError for an entire review round
+— except inverted: there the handler was too broad and swallowed everything,
+here it is too narrow and swallows nothing.
+
+**Both are the same underlying error: the handler was written against a call
+that has since been replaced.** Wiring `safe_svdvals` into 28+ sites changed
+what those sites can raise, and no one re-checked the except clauses. Sweep
+every `except *LinAlgError` in the tree against what its guarded call now
+raises.
+
+Fix: catch `(np.linalg.LinAlgError, torch._C._LinAlgError, RuntimeError)`, or
+better, have `safe_svdvals` normalise its failure to one documented exception
+type so call sites do not have to track torch internals.
+
+NOT applied yet: round-11 reviewers are mid-run against this tree and the
+freeze rule says fixes land between rounds, not during them.
+
+## 28. `apply_lm_head` skips Gemma-2's final logit softcap — SIGN INVERSION, 3 tasks
+
+**The most severe finding of round 11, and it is future-facing rather than
+retrospective.**
+
+`common.py:164 apply_lm_head` returns `head(hidden_states)` directly. Gemma-2's
+real forward pass then applies `logits = tanh(logits / cap) * cap` with
+`config.final_logit_softcapping = 30`. BLME skips it entirely.
+
+Measured by the reviewer on real gemma-2-2b: logits off by **32.27**, entropy
+**3.028 -> 0.860 nats**, and `convexity_gap` **INVERTS SIGN, +0.1347 ->
+-0.1424 (194.6%)**. That is 26x the 7.30% astra reported for the same defect.
+
+Mechanism confirmed here independently (cap=30): a raw logit of 45 caps to
+27.1544, 120 caps to 29.9799 (delta 90.02), and a distribution with entropy
+0.0000 nats becomes 0.2157 nats. The transform is strongly non-linear exactly
+where the model is confident, which is why an entropy-based convexity measure
+flips rather than merely shifts.
+
+**Population — three tasks share the helper:**
+ * `dynamics_interpolation` (`trajectories.py`) — unguarded, the measured sign inversion
+ * `interpretability_logit_lens` — unguarded
+ * `geometry_information_geometry` — ALREADY has its own softcap handling
+   (information_geometry.py:136-177, added 2026-09-03). One caller solved it
+   locally and the fix was never pushed down into the shared helper, so the
+   other two inherited the bug. That is the same shape as `safe_svdvals` being
+   wired at 28 sites but not `schatten`.
+
+`configs/models.yaml` in the study repo lists **5 gemma-2 checkpoints**
+(2b/9b/27b plus two aliases); the reviewer counted 7 softcapped entries, so
+confirm the exact set before quoting a number.
+
+**Nothing collected is wrong yet** — no archived results file contains
+`dynamics_interpolation` — but it fires the moment tier-2 runs on those models.
+
+**Fix in the SHARED helper, not the caller:** read
+`getattr(model.config, "final_logit_softcapping", None)` and apply
+`tanh(logits / cap) * cap` when set. Then delete the local guard in
+`information_geometry` so there is one implementation, and pin it with a test
+that a softcapped config changes `apply_lm_head`'s output and an uncapped one
+does not.
+
+## 29. `superposition_strength` below-Welch claim — NOT REPRODUCED, do not fix blind
+
+Round 11 reported that `superposition_ratio_centered` "can emit 0.76 — below
+the Welch bound, provably impossible". I could not reproduce it, and per the
+`geometry_magnitude` lesson (where I implemented a fix on an unreproduced claim
+about a reference and had to revert it) I am not changing the code.
+
+What I tried, all with the shipped `_mean_squared_overlap` and `_welch_bound`:
+
+| fixture | centered ratio |
+|---|---|
+| gpt2 real unembedding, V=50257 m=768 | **1.910674** |
+| random V=200 m=16 / 500 m=32 / 1000 m=64 | 1.0838 / 1.0762 / 1.0641 |
+| V close to m: 70/64, 34/32, 40/32 | 11.50 / 16.62 / 5.06 |
+| V/m sweep 1.06 … 3.12 | never below 1 |
+
+The ratio rises as V approaches m and falls toward ~1.06 as V/m grows; nothing
+in that family goes below the bound.
+
+**A hypothesis I tested and discarded:** centring removes one degree of
+freedom, so the centred rows span m−1 dimensions and arguably should be scored
+against `welch(V, m-1)`. That would make the ratio SMALLER (1.0838 -> 1.0106 at
+V=200, m=16), i.e. it moves toward the bound, not away — so if anything it makes
+a below-bound reading MORE likely, and it is not the explanation for a value of
+0.76.
+
+The file already records TWO previously-fixed routes to this impossible state
+(the +1e-9 epsilon, and float32 row normalisation overflowing to a negative
+overlap at >= 1e19). A third route is plausible. **To act on it I need the
+fixture** — model, config, and the V/m it was measured at. Until then this is an
+unreproduced claim, and the campaign's own most expensive mistake today was
+implementing one of those.
+
+## 30. `dynamics_coe` degenerate-chain divergence — a DESIGN divergence, needs a decision not a patch
+
+Both round-11 (Opus) and round-12 (astra) flag the same thing, and it is mine:
+my 2026-09-07 relative `_z_floor` returns NaN where the released `score.py`
+returns ~9999999827967.5 on `H = [(1,0), (1e13,1e13), (0,1)]`.
+
+I worked out whether any floor reproduces the release, and none does:
+
+    step magnitudes            : 1.4142135623730e13 (both steps)
+    z_mag (endpoint displacement): 1.414214
+    floor = 1e-12 * max|chain|   : 1.000000e+01   -> z_mag below it
+    floor = 1e-12 * mean step    : 1.414214e+01   -> z_mag below it
+    floor = float32 eps * scale  : 1.192093e+06   -> z_mag below it
+
+Every commensurate floor rejects this chain, because the endpoint displacement
+(1.414) is **six orders of magnitude below the representable resolution of the
+coordinates it was computed from** — float32's ULP at 1e13 is 1.049e6. The
+released value is `m / z_mag` with a denominator that is pure rounding noise;
+reproducing 1e13 requires having no floor at all, which is exactly the
+division-by-near-zero the floor was added to prevent.
+
+**So this is not a bug with a fix — it is a divergence with a choice:**
+
+  (a) keep the floor and diverge from the release on chains whose net
+      displacement is below their own coordinate resolution (current), or
+  (b) drop the floor, match the release bit-for-bit, and report ratios whose
+      denominator is noise.
+
+The campaign rule is "the released reference wins", which argues for (b). The
+reason I am NOT applying it unilaterally: this is the one case today where the
+reference's own answer is a numerical artefact rather than a definition, and
+(b) reintroduces a defect that a previous round fixed deliberately.
+
+**Reachability, so the stakes are clear:** the reviewers measured 11.98 orders
+of margin on 300 real chains, and the guard fires on none of them. Whichever way
+this goes, no shipped number moves.
+
+Needs a maintainer decision. Recording the analysis so whoever takes it does not
+have to redo it.

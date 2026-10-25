@@ -1,0 +1,24 @@
+{
+  "task": "geometry_magnitude",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "Bit-level agreement with the RELEASED magnipy. On real gpt2 the median-heuristic scale matches magnipy's median_heuristic_from_distances to 12 printed digits (0.157241917680 both) and |tX| matches compute_magnitude_from_distances at t_med/2, t_med and 2*t_med to relative 1.371e-16 / 2.374e-16 / 1.184e-16. Analytic anchors are exact: two points at distance 1 give 1.462117157260 against Leinster's closed form 2/(1+e^-1) = 1.462117157260, and 20 mutually distant points give 20.000000000. THE CENTRING DELETION IS VERIFIED ON BOTH AXES: on the collinear fixture [0, 1, 9.999999562023526e24], where centring_is_safe returns False, the distance matrix now carries d(0,1) = 1.0 exactly and |X| at t=1 is 2.4621171572600096 against live magnipy's 2.4621171572600096 -- relative error exactly 0.000e+00 -- and on-grid translation by +1e6 leaves the value bit-identical (rel 0.000e+00), so the centring was indeed redundant as well as destructive.",
+  "defect_location": "NONE",
+  "comparable": "RED",
+  "comparable_reason": "Magnitude counts points: |tX| -> n as t -> infinity, so every output is a token-population function. On isotropic d=32 Gaussians, magnitude_med_scale reads 25.1812 / 35.0847 / 56.9277 / 83.1216 and magnitude_auc 12.2599 / 14.0464 / 17.4520 / 19.6945 at N = 50 / 100 / 400 / 1000, and magnitude_dimension moves 1.7917 -> 2.9055 on the SAME distribution. Width is not a confound at all -- a fixed 8-dimensional cloud re-embedded in ambient d = 8 / 32 / 128 / 768 gives magnitude_med_scale 22.6182, magnitude_dimension 1.9535 and magnitude_auc 14.3725, bit-identical at all four.",
+  "normalized_variant": "_meta_magnitude_ratio (|tX|_high / n), _meta_magnitude_area_norm",
+  "normalized_ok": "YELLOW",
+  "github": "YES",
+  "github_repo": "aidos-lab/magnipy",
+  "github_reason": "Executed the installed magnipy against BLME on the same inputs: compute_magnitude_from_distances vs _magnitude at three scales on a real gpt2 cloud (rel <= 2.4e-16), median_heuristic_from_distances vs _median_heuristic_scale (identical to 12 digits), and the collinear wide-dynamic-range fixture end to end (rel exactly 0.000e+00). I also re-checked the de-duplication question the brief flags as settled and CONFIRM it: on n identical points magnipy prints 'not positive definite ... perturbing matrix' and returns 0.995024875622 / 0.998003992016 / 0.999500249875 at n = 2 / 5 / 20 -- exactly BLME's values -- so magnipy perturbs the singular zeta rather than de-duplicating, and BLME is right not to.",
+  "paper_number": "YES",
+  "paper_reason": "Leinster's canonical published example for a two-point space {0, d} is |X| = 2/(1 + e^-d). At d=1 the closed form is 1.4621171572600098 and BLME returns 1.462117157260 -- relative error below 1e-15. The n-point limit |tX| -> n as t -> infinity is also reproduced exactly: 20 mutually distant points give 20.000000000, and _meta_magnitude_ratio is 1.0000 on every cloud tested.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Token population, by construction: magnitude is bounded above by n and saturates there, so med_scale (3.3x), auc (1.6x) and magnitude_dimension (1.6x) all move monotonically over N = 50..1000 on an identical distribution. d_model REFUTED by measurement -- bit-identical outputs under ambient re-embedding from d=8 to d=768. Vocabulary does not enter.",
+  "defects": [
+    "COMPARABILITY: every headline is a token-count function (magnitude_med_scale 25.18 -> 83.12 over N=50..1000 on one distribution). Since num_samples counts documents, the realized N is also a tokenizer-efficiency proxy across models.",
+    "CONFIG (not implementation): the shipped scale window n_scales: 10, scale_span: 10.0 spans only t_med/10 .. t_med*10, and magnitude_dimension saturates inside it -- uniform d-cubes at N=400 read 1.5461 / 2.1072 / 2.4824 / 2.7962 for true d = 2 / 4 / 8 / 16, compressing a 8x range of intrinsic dimension into a 1.8x range of output. Widening scale_span, not changing the kernel, is what would restore discrimination.",
+    "NORMALIZED VARIANT: _meta_magnitude_ratio is 1.0000 on every cloud I measured, because the high-scale rung always saturates at n -- so as a predictor column it is a constant and carries no information."
+  ],
+  "fix": ""
+}

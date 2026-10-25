@@ -47,23 +47,50 @@ def test_count_betti_raises_clear_error_without_ripser(monkeypatch):
         bc._count_betti(np.random.default_rng(0).standard_normal((5, 2)))
 
 
-def test_betti_zero_distance_edges_do_not_inflate_beta0():
-    """Campaign-3 BUG: zero-weight kNN edges (between duplicate points) were
-    stored as explicit zeros, which scipy's csgraph treats as "no edge", so a
-    cluster of duplicates disconnected and inflated beta_0. Duplicate points
-    must stay one connected component."""
+def test_betti_duplicate_rows_are_quotiented_like_the_reference():
+    """The released loader treats the input as a POINT SET.
+
+    topnn_framework/transformers/betti_calc_parallel.py, in `read_csv`:
+
+        data = np.unique(np.transpose(np.array(data)), axis=0)
+
+    so duplicate rows are removed BEFORE k and the neighbour graph are chosen.
+
+    This assertion previously required beta_0 == 2, from the campaign-3 fix for
+    zero-weight kNN edges being stored as explicit zeros (which scipy's csgraph
+    reads as "no edge", disconnecting a duplicate cluster). That bug was real,
+    but the expectation encoded BLME's own multiplicity semantics rather than
+    the reference's: on these exact 13 rows the executed released loader
+    collapses them to 6 points whose graph has beta_0 = 1, and independent
+    GF(2) boundary reduction and GUDHI agree (codex round 12, 2026-09-08).
+    Quotienting also removes the zero-distance edges entirely, so the original
+    defect is now structurally impossible rather than merely guarded.
+    """
     pytest.importorskip("ripser")
     from blme.tasks.topology.betti_curve import _count_betti
 
-    dup = np.zeros((8, 2))  # 8 EXACT duplicates -> all kNN distances are 0
+    dup = np.zeros((8, 2))  # 8 EXACT duplicates -> ONE point after quotienting
     far = np.array([[100.0, 0.0], [100.1, 0.0], [100.0, 0.1],
                     [100.1, 0.1], [100.2, 0.0]])
     X = np.vstack([dup, far])
     beta_0, _ = _count_betti(X, maxdim=1, n_neighbors=4)
-    assert beta_0 == 2, (
-        f"beta_0={beta_0}: the duplicate cluster (1 component) + far blob (1) "
-        f"should give 2, not inflate when zero-distance edges are dropped"
+    assert beta_0 == 1, (
+        f"beta_0={beta_0}: 13 rows are 6 distinct points, and at k=4 the "
+        f"released construction connects them into one component"
     )
+
+
+def test_betti_is_invariant_to_exact_duplicate_rows():
+    """Adding exact copies must not change the answer at all."""
+    pytest.importorskip("ripser")
+    from blme.tasks.topology.betti_curve import _count_betti
+
+    th = np.linspace(0, 2 * np.pi, 42, endpoint=False)
+    circle = np.c_[np.cos(th), np.sin(th)]
+    with_copies = np.vstack([circle, circle[:5]])
+    assert _count_betti(circle, maxdim=1, n_neighbors=4) == \
+        _count_betti(with_copies, maxdim=1, n_neighbors=4), (
+            "5 exact copies changed the Betti numbers of a 42-point circle")
 
 
 def test_persistent_homology(mock_model, mock_tokenizer):
@@ -142,7 +169,10 @@ def test_betti_curve_geodesic_recovers_clusters_and_loops():
     assert b1n == 0
 
     # Degenerate guard: < 3 points returns without error.
-    assert _count_betti(np.zeros((2, 5)), maxdim=1) == (2, 0)
+    # Two IDENTICAL rows are ONE point under the released point-set
+    # semantics, so this collapses to a single component (was (2, 0) when
+    # duplicates carried multiplicity).
+    assert _count_betti(np.zeros((2, 5)), maxdim=1) == (1, 0)
 
 
 def test_persistence_entropy(mock_model, mock_tokenizer):

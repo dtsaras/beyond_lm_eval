@@ -75,9 +75,31 @@ class PredictionAlignmentTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
 
+        # A POPULATED CACHE IS NOT NECESSARILY A COMPLETE ONE.
+        #
+        # `is_populated` says the cache HAS been filled, not that it was filled
+        # with the observations THIS task needs. A cache populated for a
+        # consumer that does not request hidden states returns a stats dict
+        # without the "hidden" key, and the loop below then raised
+        # KeyError('hidden') -- destroying the task rather than degrading it,
+        # and losing the analytic 4/3 simplex result and the real gpt2 /
+        # pythia-70m / distilgpt2 headlines 0.00476083671008902 /
+        # 0.00797083420412881 / 0.003904443819608007 in all three incomplete
+        # cache feature combinations (codex round 13, 2026-09-08).
+        #
+        # This is the same class as geometry_vendi_score, geometry_magnitude,
+        # geometry_isoscore and geometry_svd: accept the cache on CONTENT, not
+        # on a populated flag. Checked by asking for the keys this task
+        # dereferences rather than by trusting the flag.
+        stats = None
         if cache is not None and cache.is_populated and use_cache:
             stats, _ = cache.get_prediction_stats(num_samples=num_samples)
-        else:
+            if not stats or any(stats.get(k) is None for k in ("hidden", "labels")):
+                logger.info(
+                    "  prediction_alignment: shared cache is populated but is "
+                    "missing hidden states or labels; self-collecting.")
+                stats = None
+        if stats is None:
             stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
 
         # Resolve the projection weight the model actually uses for

@@ -81,10 +81,26 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             # coordinate is inside [-1, 1] before anything is squared. A row
             # that is exactly zero gets scale 0 and therefore no noise, which
             # is what "1% of this row" means for a zero row.
-            _rmax = E1_float.abs().amax(dim=1, keepdim=True)
-            _tiny = torch.finfo(E1_float.dtype).tiny
+            # IN DOUBLE. Factoring the row max out fixed the underflow end, but
+            # the PRODUCT `_rmax * ||row/_rmax||` still overflows float32 at the
+            # top: at scale 2.406159650500376e38 the row max is representable
+            # while the true row norm (~3x it) is not, so `row_scale` became inf
+            # and `noise = raw * inf * 0` became NaN -- breaking the
+            # `noise_std = 0` self-identity axiom, which returned 0.867291334397
+            # instead of exactly 1.0 (gpt-6-astra round 10, 2026-09-07).
+            #
+            # My round-9 ladder stopped at 1e25 and the axiom holds at every rung
+            # through 1e38; only the very top exposes it. Testing "extreme
+            # scales" is not the same as testing the LAST representable one.
+            #
+            # Double has the range for the product, and the noise is cast back
+            # to the working dtype after the multiply, so nothing downstream
+            # changes dtype.
+            _E64 = E1_float.double()
+            _rmax = _E64.abs().amax(dim=1, keepdim=True)
+            _tiny = torch.finfo(_E64.dtype).tiny
             row_scale = _rmax * (
-                E1_float / _rmax.clamp_min(_tiny)).norm(dim=1, keepdim=True)
+                _E64 / _rmax.clamp_min(_tiny)).norm(dim=1, keepdim=True)
             # Normalize the noise DIRECTION before scaling, so the realized
             # perturbation is exactly `noise_std` relative to each row.
             #
@@ -107,7 +123,7 @@ class NeighborhoodStabilityTask(DiagnosticTask):
                 generator=generator,
             )
             raw = raw / raw.norm(dim=1, keepdim=True).clamp_min(1e-12)
-            noise = raw * row_scale * noise_std
+            noise = (raw.double() * row_scale * noise_std).to(E1_float.dtype)
             E2 = E1_float + noise
             
         # Compute Stability

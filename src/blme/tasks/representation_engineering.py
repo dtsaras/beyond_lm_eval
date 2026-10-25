@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 import numpy as np
 
 try:
@@ -199,17 +200,38 @@ class TaskVectorGeometryTask(DiagnosticTask):
             # is cast back below so every downstream consumer -- including the
             # cosine and the released-reader comparison -- sees exactly the
             # dtype it saw before. Only the NORM is taken in double.
-            _Ap = A_pos.double()
-            _An = A_neg.double()
-            mean_pos = _Ap.mean(dim=0).to(A_pos.dtype)
-            mean_neg = _An.mean(dim=0).to(A_neg.dtype)
+            # FLOAT32-FIRST for the VECTOR, double only for the NORM.
+            #
+            # I promoted this unconditionally and it was a REGRESSION. Against
+            # the official `repe.rep_readers.ClusterMeanRepReader
+            # .get_rep_directions`, executed on real gpt2 layer-6 activations,
+            # the pre-fix float32 mean gave max|v_BLME - v_official| = **exactly
+            # 0.000e+00** and the promoted mean gives **1.907e-06** (rel
+            # 4.41e-07) (Opus round 11, 2026-09-08).
+            #
+            # This task's value rests on that bit-exact agreement, so a strictly
+            # MORE ACCURATE computation is a regression here -- the same trap I
+            # identified in `cknna._remove_outliers` and then walked into anyway
+            # by promoting without asking what the task's verdict rests on.
+            #
+            # So: `v` is computed exactly as the reference computes it, and the
+            # double path is used ONLY for the reported NORM, which is a
+            # separate scale-equivariant quantity that read 0.0 at 1e-25 and inf
+            # at 1e25 in float32 and now reads 4.888880104e-25 / 5.210100052e+25.
+            mean_pos = A_pos.mean(dim=0)
+            mean_neg = A_neg.mean(dim=0)
             
-            # The Task Vector / Reading Vector v
+            # The Task Vector / Reading Vector v -- reference-identical.
             v = mean_pos - mean_neg
             
-            # 1. Magnitude of the task vector
-            v_norm = float(torch.linalg.vector_norm(
-                _Ap.mean(dim=0) - _An.mean(dim=0), ord=2).item())
+            # 1. Magnitude of the task vector. float32 first; double only where
+            # float32 has already failed (underflow to 0 or overflow to inf),
+            # which is the regime the reference cannot reach either.
+            v_norm = float(torch.linalg.vector_norm(v.float(), ord=2).item())
+            if not math.isfinite(v_norm) or (v_norm == 0.0 and bool(v.any())):
+                v_norm = float(torch.linalg.vector_norm(
+                    A_pos.double().mean(dim=0) - A_neg.double().mean(dim=0),
+                    ord=2).item())
             task_vector_norms.append(v_norm)
             
             # 2. cos(mean_pos, mean_neg). This was named
@@ -608,7 +630,14 @@ class ConceptSeparabilityTask(DiagnosticTask):
                     # this only ever removes error, and it also fixes the
                     # original reason for the `.float()` here (bf16 cannot go
                     # straight to numpy).
-                    rep = hidden.double().mean(dim=0).float().cpu().numpy()
+                    # The trailing .float() DISCARDED the precision the .double() was added to
+                    # gain: promote, average, then narrow back is self-defeating. Removing only
+                    # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                    # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                    # independently reconstructed Grassberger-Procaccia value, and restored a
+                    # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                    # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                    rep = hidden.double().mean(dim=0).cpu().numpy()
                     layer_reps[l_idx].append(rep)
         
         y = np.array(labels)
@@ -1001,9 +1030,30 @@ class SteeringEffectivenessTask(DiagnosticTask):
                         neg_acts[l].append(_hn[l + 1][0, -1].cpu().float())
 
                 for l in range(num_layers):
-                    mean_pos = torch.stack(pos_acts[l]).mean(dim=0)
-                    mean_neg = torch.stack(neg_acts[l]).mean(dim=0)
-                    task_vectors[l] = mean_pos - mean_neg
+                    # CAST AFTER THE CANCELLATION, not before.
+                    #
+                    # `v = mean(h_pos) - mean(h_neg)` must cancel a common
+                    # residual offset exactly. Promoting each mean to double and
+                    # then casting it BACK before subtracting only halves the
+                    # error (measured at +1e6: 1.381e-01 -> 6.343e-02), because
+                    # float32 cannot hold the MEAN at that magnitude even though
+                    # it can hold the contrast. The means are large and the
+                    # difference is small, so the narrowing has to happen after
+                    # the subtraction. At +1e6 BLME emitted KL=0.0 against the
+                    # released reader/controller's 0.957300462359, with the
+                    # model's own logit drift at most 2.79e-9 (gpt-6-astra round
+                    # 10, 2026-09-07).
+                    _mp64 = torch.stack(pos_acts[l]).double().mean(dim=0)
+                    _mn64 = torch.stack(neg_acts[l]).double().mean(dim=0)
+                    mean_pos = _mp64
+                    mean_neg = _mn64
+                    # Narrow the CONTRAST, which is small and representable --
+                    # never the means, which are not. The vector is injected
+                    # into the model below, so it must come back to the model's
+                    # dtype; doing that here rather than above is the whole
+                    # point of the change.
+                    task_vectors[l] = (mean_pos - mean_neg).to(
+                        pos_acts[l][0].dtype)
 
             finally:
                 if _hook_s is not None:
@@ -1735,9 +1785,15 @@ class RefusalDirectionTask(DiagnosticTask):
         if n_splits < 2:
             return {"error": "Need at least 2 prompts in each class for held-out separability"}
         seed = int(self.config.get("seed", 42))
+        # CANDIDATE layers: those that HAVE data. The depth denominator must
+        # come from this structural set, never from whichever layers happened
+        # to survive the data-dependent filters below -- otherwise dropping a
+        # deep layer promotes an earlier one to depth 100%.
+        _candidate_idx = []
         for li in range(n_layers):
             if harmful_states[li].size == 0 or harmless_states[li].size == 0:
                 continue
+            _candidate_idx.append(li)
             X = np.concatenate([harmful_states[li], harmless_states[li]], axis=0)
             y = np.concatenate([
                 np.ones(len(harmful_states[li]), dtype=int),
@@ -1753,8 +1809,22 @@ class RefusalDirectionTask(DiagnosticTask):
             mu_n = X[y == 0].mean(axis=0)
             full_direction = mu_h - mu_n
             d_norm = float(np.linalg.norm(full_direction))
-            if d_norm == 0:
-                continue
+            # A ZERO FULL-POPULATION DIRECTION IS NOT A ZERO TRAINING DIRECTION.
+            #
+            # The original code did `continue` here, which deleted the layer and
+            # let the headline fall through to an earlier block. My round-12
+            # repair recorded the layer with direction_norm 0.0 but forced
+            # separability_auc and mean_projection_gap to NaN -- which is the
+            # SAME conflation in a quieter form. The cross-validated AUC is fitted
+            # on TRAINING FOLDS, and a fold's mean difference can be perfectly
+            # nonzero while the full-population one cancels to exactly zero: on
+            # the round-12 regression fixture the fitted folds give
+            # AUC 43/96 = 0.447916666667 and gap -1/sqrt(2) = -0.707106781187,
+            # both of which were being discarded (codex round 13, 2026-09-08).
+            #
+            # So do not skip: report direction_norm as the 0.0 it is and let the
+            # cross-validation below decide the AUC on its own folds, which
+            # already skip any fold whose own direction is zero.
 
             cv = StratifiedKFold(
                 n_splits=n_splits, shuffle=True, random_state=seed,
@@ -1833,7 +1903,17 @@ class RefusalDirectionTask(DiagnosticTask):
             # which made `auc_at_depth_100` **NaN on every model** (it was
             # filled for 61/61 in the archive) and capped
             # `best_layer_fraction` at 0.9565 (adversarial review, 2026-09-03).
-            _max_idx = float(layer_idxs.max()) if len(layer_idxs) else 1.0
+            # The denominator is the deepest CANDIDATE index, not the deepest
+            # index with a finite AUC. Using the latter let an earlier block
+            # land at depth 100% whenever the deepest layers were dropped
+            # (undefined AUC): the 4-block fixture reported
+            # best_layer_fraction 1.0 and auc_at_depth_100 1.0 for its only
+            # nonzero direction at block 1, whose actual fraction is 1/3.
+            # It still is NOT `n_layers - 1`: the post-final-norm entry is
+            # structurally excluded, and dividing by L - 1 made
+            # `auc_at_depth_100` NaN on every model.
+            _max_idx = (float(max(_candidate_idx)) if _candidate_idx
+                        else (float(layer_idxs.max()) if len(layer_idxs) else 1.0))
             depths = layer_idxs / max(1.0, _max_idx)
             for q in (0.0, 0.25, 0.5, 0.75, 1.0):
                 # If the requested depth lies outside the surviving
@@ -1854,8 +1934,10 @@ class RefusalDirectionTask(DiagnosticTask):
         # a "depth-normalized" feature could never reach 1.0 and its range was
         # model-size dependent -- the exact failure the field exists to avoid.
         best_layer_fraction = (
-            float(best_layer) / max(1.0, float(_scored_idx[-1]) if _scored_idx
-                                    else float(n_layers - 1))
+            float(best_layer) / max(1.0, float(max(_candidate_idx))
+                                    if _candidate_idx
+                                    else (float(_scored_idx[-1]) if _scored_idx
+                                          else float(n_layers - 1)))
             if best_layer >= 0 else float("nan")
         )
 
@@ -1863,7 +1945,13 @@ class RefusalDirectionTask(DiagnosticTask):
             "direction_norm": final["direction_norm"],
             "separability_auc": final["separability_auc"],
             "mean_projection_gap": final["mean_projection_gap"],
-            "best_layer_separability_auc": float(best_auc),
+            # NaN, not the -1.0 SENTINEL. `best_auc` starts at -1.0 so any real
+            # AUC wins; when every layer's AUC is undefined it was emitted
+            # verbatim, so a bounded equal-mean fixture whose defined best AUC is
+            # 0.0 reported -1.0 -- outside the range of the quantity it names
+            # (codex round 13, 2026-09-08).
+            "best_layer_separability_auc": (float(best_auc) if best_layer >= 0
+                                            else float("nan")),
             # `_meta_`: an ABSOLUTE layer index (1..63 across the archive),
             # spearman +0.493 with n_layers -- a depth proxy shipped as a
             # structural predictor. The blocklist named `best_layer_idx`, not

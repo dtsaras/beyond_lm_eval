@@ -83,7 +83,14 @@ class IntrinsicDimensionTask(DiagnosticTask):
             id_trend = []
             
             for layer_idx in tqdm(sorted_layers, desc="Computing Layer IDs"):
-                X = layer_activations[layer_idx].float().numpy()
+                # PRESERVE the incoming precision. `_compute_id` was repaired to
+                # rescale by a power of two and keep float64, but this call site
+                # still narrowed to float32 first, so the public layerwise route
+                # discarded exactly the information the repaired estimator was
+                # careful to keep: a perturbed lattice read 3.552080162654 against
+                # the released Facco/Ansuini 4.606333343805 (-22.89%) identically
+                # on all three evaluation routes (codex round 13, 2026-09-08).
+                X = layer_activations[layer_idx].double().numpy()
                 # Subsample if too large
                 if len(X) > 20000:
                     rng = np.random.default_rng(
@@ -134,7 +141,14 @@ class IntrinsicDimensionTask(DiagnosticTask):
              if E is None:
                  return {"error": "Could not extract embeddings"}
              
-             E_np = E.float().cpu().numpy()
+             # PRESERVE the incoming precision on the STATIC route too. The
+             # layerwise call site was repaired first and this one was left, so
+             # the static and model-collection routes still returned
+             # 3.552080162654 against the released Facco/Ansuini 4.606333343805
+             # (-22.89%) on the perturbed lattice while the layerwise route was
+             # already correct -- the same class fixed at one site and not swept
+             # (codex round 14, 2026-09-09).
+             E_np = E.double().cpu().numpy()
              # `sample_size`, not `_meta_sample_size`: the `_meta_` prefix marks
              # OUTPUT provenance keys, so the old spelling could never be set
              # by a config and this subsample knob was permanently dead (both
@@ -165,19 +179,50 @@ class IntrinsicDimensionTask(DiagnosticTask):
         # supplied the fixture and the CPU detail, and it reproduces to nine
         # digits).
         #
-        # Dividing by the max only shifts exponents, so the ratios below are
-        # bit-for-bit what they would have been -- and the estimate is now
-        # identical on both paths at every scale.
+        # THE DIVISOR MUST BE A POWER OF TWO.
+        #
+        # The line above used to read "dividing by the max only shifts
+        # exponents, so the ratios below are bit-for-bit what they would have
+        # been". That is true ONLY when the divisor is a power of two. Dividing
+        # by an arbitrary max ROUNDS every coordinate, and Two-NN is not a
+        # smooth function of the coordinates: it excludes duplicate points and
+        # equal-radius (r1 == r2) queries by EXACT comparison, so re-rounding
+        # silently changes which queries are excluded.
+        #
+        # Counterexample (lossless integer lattice, so nothing is lost to the
+        # fixture itself): G = meshgrid(arange(-16,17), arange(-16,17)); take
+        # 500 distinct rows as float32 / 16, then translate by +2. Every
+        # pairwise distance is bit-identical and all 500 rows stay distinct,
+        # yet evaluate() returned 2.170755946319 untranslated and
+        # 3.765359458874 translated (+73.4584%) -- because the untranslated max
+        # is exactly 1 (division is a no-op) while the translated max is 3
+        # (division rounds), moving the valid-ratio count from 166 to 335.
+        # Released pdist + Facco/Ansuini returns 2.170755946319 on BOTH, and
+        # reproduces BLME's wrong value when fed BLME's divided coordinates --
+        # so the estimator was never at fault, the preprocessing was. Over all
+        # 65 integer offsets the released answer is constant while BLME
+        # exceeded 1% on 58, median +46.7954%, max +85.6091% at offset 9. The
+        # first failure is at coordinate max 3, i.e. 1014.7x BELOW the measured
+        # GPT-2 hidden max of 3044.142334 (codex round 12, 2026-09-08).
+        #
+        # Scaling to a power of two keeps the mantissas untouched, which is what
+        # the original comment promised, and still fixes the sklearn
+        # underflow/overflow the rescale was introduced for.
         _g = float(np.max(np.abs(np.asarray(
             X.detach().cpu() if isinstance(X, torch.Tensor) else X, dtype=np.float64))))
         if np.isfinite(_g) and _g > 0:
-            X = (X / _g) if isinstance(X, torch.Tensor) else (np.asarray(X) / _g)
+            _s = float(2.0 ** np.ceil(np.log2(_g)))   # exact: mantissa preserved
+            if np.isfinite(_s) and _s > 0:
+                X = (X / _s) if isinstance(X, torch.Tensor) else (np.asarray(X) / _s)
 
-        # Accept torch.Tensor or numpy.ndarray.
+        # PRESERVE float64. Narrowing here re-quantises the coordinates that the
+        # power-of-two rescale was just careful not to disturb, and the
+        # `.double()` calls further down then promote an already-damaged tensor
+        # -- a fix that is present in the source and has no effect.
         if isinstance(X, torch.Tensor):
-            X_tensor = X.detach().float()
+            X_tensor = X.detach().double()
         else:
-            X_tensor = torch.from_numpy(np.asarray(X, dtype=np.float32))
+            X_tensor = torch.from_numpy(np.asarray(X, dtype=np.float64))
 
         # DROP NON-FINITE ROWS, AND SAY SO.
         #
@@ -292,9 +337,35 @@ def _two_nearest_neighbor_distances(
         logger.info("sklearn not installed, skipping ID estimation")
         return None, None
 
-    X_np = X.detach().float().cpu().numpy()
+    # float64 + a TREE algorithm, matching the GPU branch's arithmetic.
+    #
+    # The GPU branch above uses double precision and
+    # `donot_use_mm_for_euclid_dist` precisely because the Gram identity
+    # (x^2 + y^2 - 2xy) cancels catastrophically when r1 << ||x||. This
+    # fallback did neither: `.float()` plus `algorithm="auto"`, which resolves
+    # to brute force and uses that same identity. The result was a host-
+    # dependent estimate -- the exact failure the GPU comment says it fixed --
+    # reading -5.12% low with exact duplicates at r1 = 3.576e-07 on d=768
+    # (Opus round 11, 2026-09-08).
+    #
+    # Measured against the GPU branch's own reference (torch double, direct
+    # differences) on a 400x768 cloud offset by 50, worst relative r1 error:
+    #     auto/brute  float32  1.708e-07
+    #     auto/brute  float64  1.692e-12   <- Gram residue survives promotion
+    #     ball_tree   float32  1.356e-07
+    #     ball_tree   float64  0.000e+00   <- exact
+    # so the algorithm matters as much as the dtype: promoting alone leaves a
+    # picometre of the identity behind, and only a tree computes the true
+    # distance. `n_jobs` is dropped because tree queries are already threaded
+    # and it is not accepted for construction.
+    #
+    # This is the SECOND time this fallback has been missed: the 2026-09-07
+    # unit-max rescale was applied to both paths, and the dtype/algorithm was
+    # left GPU-only. A branch that only runs on hosts without CUDA is invisible
+    # to every check run on a GPU box.
+    X_np = X.detach().cpu().double().numpy()
     nbrs = NearestNeighbors(
-        n_neighbors=3, algorithm="auto", metric="euclidean", n_jobs=-1,
+        n_neighbors=3, algorithm="ball_tree", metric="euclidean",
     ).fit(X_np)
     d, _ = nbrs.kneighbors(X_np)
     return d[:, 1], d[:, 2]

@@ -1,0 +1,22 @@
+{
+ "task": "topology_persistence_entropy",
+ "verdict": "GREEN",
+ "verdict_reason": "PE = -sum p_i log2 p_i with p_i = l_i/sum(l) reproduces scipy.stats.entropy(lifespans, base=2) -- the exact route giotto-tda uses -- to rel <= 1e-12 across 20 random barcodes of 2..40 bars. Analytic extremes hold: uniform lifespans give exactly log2(m) at m = 2, 8, 64, and a single dominant bar gives 0 to 1e-9. The normalisation is a ratio so the statistic is scale free, and it measures as such: unchanged to rel 1e-12 at scales 1e-14, 1e-6, 1e6, 1e14, which is the property an earlier absolute 1e-12 floor destroyed.",
+ "defect_location": "NONE",
+ "comparable": "YELLOW",
+ "comparable_reason": "layer_{i}_num_features_h0 is exactly N-1 at every sample size measured (N=15 -> 14, N=25 -> 24, N=40 -> 39) and identical across all 12 layers. That is forced by Rips H0: N points give N components at radius 0 and N-1 finite bars whatever the geometry. It is the sample count in disguise, constant across layers, and a zero-variance column once N is fixed. It does not affect the entropy itself, which is why this is on the comparability axis.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "giotto-ai/giotto-tda",
+ "github_reason": "giotto-tda's PersistenceEntropy is scipy.stats.entropy on the lifespans with base=2; executed that route directly as the reference. tests/tasks/parity/test_coverage_gap_parity.py.",
+ "paper_number": "NONE",
+ "paper_reason": "Atienza et al. 2016 define persistent entropy (Def 3.1, log base 2) but publish no single number that this task's corpus protocol reproduces.",
+ "confounds": "CONFIRMED",
+ "confounds_reason": "The H0 feature-count columns carry no model information (see comparable_reason) and will be perfectly collinear across layers in any feature table built from this task.",
+ "defects": [
+  "COMPARABILITY, topology/persistence_entropy.py: layer_{i}_num_features_h0 is structurally N-1 and identical across layers; measured 14/24/39 at N=15/25/40. Emitting it as a public feature adds 12 constant, mutually identical columns."
+ ],
+ "fix": "Either demote layer_{i}_num_features_h0 to _meta_ or drop it: it is determined by the sample size, not by the model. The entropy computation itself needs no change.",
+ "reviewer": "opus5"
+}

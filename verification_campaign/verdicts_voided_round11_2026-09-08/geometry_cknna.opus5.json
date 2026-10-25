@@ -1,0 +1,25 @@
+{
+  "task": "geometry_cknna",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "Fetched minyoungg/platonic-rep metrics.py and ran AlignmentMetrics.cknna + remove_outliers + F.normalize head-to-head against BLME's _remove_outliers/_l2_normalize/_cknna: the preprocessing is bitwise identical (torch.equal True for all 13 gpt2 layers) and all 156 ordered gpt2 layer pairs agree to relative error exactly 0.000e+00, with 0 pairs showing any difference. Analytic anchors also match the reference exactly: biased self-identity 1.000000000000, unbiased self 0.973192653556, independent clouds 0.094863769906, rotation invariance 1.1e-08.",
+  "defect_location": "NONE",
+  "comparable": "RED",
+  "comparable_reason": "The adjacent-layer family is a depth proxy: interpolating between two FIXED endpoints, avg_adjacent_cknna goes 0.028894 (L=2) -> 0.745684 (L=8) -> 0.943221 (L=32) -> 0.970849 (L=64) while early_late_cknna stays 0.028894 at every L. Unlike geometry_cka there is NO width null floor -- independent n=256 clouds give 0.034968 / 0.035240 / 0.038398 / 0.037240 / 0.030099 at d = 8 / 32 / 128 / 512 / 2048, flat to +-13% with no trend -- and isometric zero-padding of real gpt2 layers moves the score only 0.760156 -> 0.763947 from d=768 to d=4096, reproduced exactly by the released reference. So early_late_cknna and first_middle_cknna are comparable; the four adjacent_* and the off-diagonal summaries are not.",
+  "normalized_variant": "",
+  "normalized_ok": "ABSENT",
+  "github": "YES",
+  "github_repo": "minyoungg/platonic-rep",
+  "github_reason": "Downloaded metrics.py from the released repo and executed AlignmentMetrics.cknna and remove_outliers directly. Compared to BLME on (a) 156 ordered gpt2 layer pairs at topk=10, unbiased=True -- 0/156 differences, worst rel 0.000e+00; (b) an 8-rung scale ladder; (c) isometric zero-padding to d=1024/1792/4096 -- reference reproduces BLME's value to the printed digit at every rung. On the ladder BLME is strictly MORE stable than the reference (reference collapses to 0.000000000000 at 1e-30, 1e-25 and 1e25 where BLME holds 0.760155561280), which is the documented conditional hardening and does not disturb ordinary-data parity.",
+  "paper_number": "NONE",
+  "paper_reason": "Huh et al. 2024 publish CKNNA only as scatter/bar figures of alignment against downstream score; no tabulated CKNNA scalar for a public checkpoint on a stated corpus exists to reproduce. The reference's own behavioural anchors are reproduced exactly instead (biased self-identity 1.000000000000; unbiased self 0.973192653556, i.e. the ~0.9999-style deficit the +1e-6 regulariser creates; independent 0.094863769906).",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Depth CONFIRMED and width REFUTED, both measured. Depth: avg_adjacent_cknna 0.028894 -> 0.970849 over L = 2..64 with the represented content held exactly fixed (Spearman +1.0 on the 4 rungs). Width: 0.034968 -> 0.030099 over d = 8..2048 on independent clouds (no monotone trend), and real-gpt2 zero-padding d=768 -> 4096 moves the score by 0.50%. Vocabulary is not in the input path.",
+  "defects": [
+    "DOCUMENTATION, cknna.py:445-449 and the module docstring: the comment justifying the n_points == topk guard claims that is 'the paper's k -> n FULL-NEIGHBOURHOOD limit, where CKNNA reduces to CKA exactly'. Measured on a seed-3 40x16 pair, topk = 38 / 39 / 40 give CKNNA 0.024624 / 0.051006 / 0.051006 against linear CKA 0.307675 -- 83% away, not a reduction. The unbiased -inf diagonal means the row-wise top-k never fills the mask. The NUMBER is right (the released reference returns the same values); only the stated justification is wrong.",
+    "COMPARABILITY (not implementation): the four adjacent_* summaries are depth proxies -- 0.028894 -> 0.970849 over L=2..64 at fixed endpoints.",
+    "REFERENCE-INHERITED, not a BLME defect: _remove_outliers applies a per-row 95th-percentile clamp, so padding a d-wide cloud past ~20x width makes the bound exactly 0 and zeroes the features. The released remove_outliers does the identical thing (verified by execution), and gpt2 would need d > 15360 of padding to reach it.",
+    "CONFIG, unreachable as shipped: the n_points >= topk guard at cknna.py:452-462 runs BEFORE the max_cknna_tokens cap at :465-469, so a configured topk > 2000 would pass the guard and then fail inside torch.topk. defaults.yaml ships topk: 10, so it cannot fire."
+  ],
+  "fix": ""
+}

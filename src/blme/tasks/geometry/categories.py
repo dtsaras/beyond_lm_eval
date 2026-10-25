@@ -161,15 +161,35 @@ class CategoryGeometryTask(DiagnosticTask):
         # 2026-09-04). A token with two labels has no unambiguous label, so
         # purity for it is not defined at all; excluding it is the only answer
         # that does not depend on file order. The count is reported.
+        # RELATION PAIRS ARE CLAIMS TOO.
+        #
+        # This census skipped any entry that was not a bare string, so a
+        # relation category written as pairs -- plural = [[man, men],
+        # [woman, women], ...] -- contributed NOTHING to it, and its tokens
+        # were labelled first-wins instead of being dropped. The whole point of
+        # the census is that the answer must not depend on asset key order, and
+        # it did: on unchanged GPT-2 with people = [man, woman, child, person]
+        # and that plural list, reversing the two keys moved plural purity
+        # 0.083333333333 -> 0.357142857143 and people purity
+        # 0.25 -> 0.083333333333. The ambiguous ids are 805, 6259, 8580, 9410,
+        # so the correct counts are 4 ambiguous / 8 mapped; both orders emitted
+        # 0/12. Dropping every multiply-claimed id gives 0.083333333333 in both
+        # orders, which is the declared rule (codex round 15, 2026-09-09).
         _claims = {}
         for _c, _items in categories.items():
             for _w in ([] if not isinstance(_items, list) else _items):
-                if not isinstance(_w, str):
-                    continue
-                for _v in (_w, " " + _w):
-                    _ids = tokenizer.encode(_v, add_special_tokens=False)
-                    if len(_ids) == 1:
-                        _claims.setdefault(_ids[0], set()).add(_c)
+                # Flatten one level so pair/tuple entries are counted.
+                if isinstance(_w, str):
+                    _words = [_w]
+                elif isinstance(_w, (list, tuple)):
+                    _words = [_x for _x in _w if isinstance(_x, str)]
+                else:
+                    _words = []
+                for _ww in _words:
+                    for _v in (_ww, " " + _ww):
+                        _ids = tokenizer.encode(_v, add_special_tokens=False)
+                        if len(_ids) == 1:
+                            _claims.setdefault(_ids[0], set()).add(_c)
         _ambiguous = {t for t, cs in _claims.items() if len(cs) > 1}
         if _ambiguous:
             for _c in list(cat_tokens):

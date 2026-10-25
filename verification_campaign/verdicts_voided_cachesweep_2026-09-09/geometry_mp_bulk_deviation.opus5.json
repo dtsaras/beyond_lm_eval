@@ -1,0 +1,20 @@
+{
+ "task": "geometry_mp_bulk_deviation",
+ "verdict": "GREEN",
+ "verdict_reason": "_mp_bulk_edge(gamma) reproduces the analytic Marchenko-Pastur upper edge (1+sqrt(gamma))^2 to rel <= 1e-15 at gamma = 0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 10.0. Checked against SAMPLED matrices rather than only against a restatement of its own formula: the largest eigenvalue of white Wisharts at (N,D) = (4000,400), (4000,1000), (2000,1000) lies within [0.90, 1.06] x the predicted edge, which is the expected finite-N Tracy-Widom band.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "gamma = D/N differs across models, and the task already handles this by emitting gamma-matched comparisons per layer plus fixed-gamma *_g25 variants at gamma = 0.25, which is the right construction for cross-model use.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "NO",
+ "github_repo": "",
+ "github_reason": "The Marchenko-Pastur law is analytic; the closed form IS the reference and was executed directly, alongside sampled Wishart spectra. No third-party implementation was needed.",
+ "paper_number": "YES",
+ "paper_reason": "The MP bulk edge (1+sqrt(gamma))^2 is the published closed form (Marchenko-Pastur 1967); reproduced to 1e-15 across seven aspect ratios.",
+ "confounds": "NONE",
+ "confounds_reason": "None found on the measured axes.",
+ "defects": [],
+ "fix": "No change required. Coverage note: this task had NO executed parity test before round 13; tests/tasks/parity/test_coverage_gap_parity.py now supplies one.",
+ "reviewer": "opus5"
+}

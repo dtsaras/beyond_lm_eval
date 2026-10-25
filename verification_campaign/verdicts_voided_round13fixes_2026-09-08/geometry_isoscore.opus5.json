@@ -1,0 +1,20 @@
+{
+ "task": "geometry_isoscore",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "IsoScore reproduces Rudman et al.'s algorithm, reimplemented independently from the paper, to rel <= 1e-6 over 15 random (n, d) clouds with anisotropic per-axis scaling. MY FIRST REFERENCE WAS WRONG AND BLME WAS RIGHT: I took the raw diagonal of the covariance and disagreed by 2.5%; the diagonal must be taken in the PCA basis, i.e. it is the EIGENVALUE SPECTRUM of the covariance, which is exactly what BLME computes via SVD on the centred data. Endpoints behave: an isotropic 4000x8 Gaussian scores >0.85 and a cloud with one axis at 1e3 and seven at 1e-3 scores <0.10. This verdict rests on an INDEPENDENT REIMPLEMENTATION of the reference, not only on executed parity.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured. Order sensitivity here is a SINGLE-DRAW figure: one reversal of the document list at num_samples=20, which is not necessarily the shipped default. A single permutation is one sample, not a bound -- measured on dynamics_interpolation, reversal gave 0.62% while six random permutations of the same set spanned 12.85%.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "Rudman et al. 2022 (arXiv:2108.07344) Algorithm 1",
+ "github_reason": "Reference derived independently from Rudman et al. 2022 (arXiv:2108.07344) Algorithm 1 and executed against BLME; tests/tasks/parity/test_independent_reimplementation.py. This is a stronger basis than the executed-parity verdicts elsewhere in this pass, which run existing checks rather than re-deriving the reference.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "None established. Cross-task sweeps covering this task found derived (not literal) _meta_ provenance flags and no mis-prefixed metadata keys.",
+ "defects": [],
+ "fix": "No change required on the evidence gathered. SCOPE LIMIT: grounded in executed reference parity plus determinism measurement; extreme-scale behaviour and an independent reimplementation of the reference were not attempted for this task."
+}

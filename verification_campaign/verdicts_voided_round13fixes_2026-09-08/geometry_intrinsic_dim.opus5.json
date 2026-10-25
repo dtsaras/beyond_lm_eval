@@ -1,0 +1,20 @@
+{
+ "task": "geometry_intrinsic_dim",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified. Two-NN depends only on distance RATIOS, so a lossless translation cannot move it, and it did: the rescale divided by an arbitrary coordinate max under a comment claiming that 'only shifts exponents', which is true ONLY for a power-of-two divisor. Two-NN excludes duplicate and equal-radius queries by EXACT comparison, so re-rounding changed which queries were excluded -- on a 500-row integer lattice / 16 the estimate went 2.170755946319 -> 3.765359458874 (+73.46%) at offset 2 alone, and exceeded 1% on 58 of 65 integer offsets. After scaling by 2^ceil(log2(max)) and preserving float64, the estimate is CONSTANT at 2.170755946319 across all 65 offsets -- exactly the released pdist+Facco/Ansuini value -- and skdim's independent TwoNN is likewise constant. The underflow the rescale exists for is preserved: 24.233986524306 at every scale from 1e-30 to 2.406159650500376e38, max deviation 4.4e-16.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "scikit-dimension (skdim.id.TwoNN)",
+ "github_reason": "skdim's TwoNN executed as an independent check; it is constant across offsets after the repair, as is BLME. tests/tasks/test_intrinsic_dim_translation_invariance.py.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "The three wide_dynamic_range fixtures now return NaN, and skdim's TwoNN RAISES ValueError on the same three -- both refuse a degenerate input. The pre-repair value 3.058976841655 on the two-lattice fixture was float32 rounding noise manufacturing asymmetries in a perfectly regular lattice where 38 of 42 points have exactly tied neighbour distances.",
+ "defects": [],
+ "fix": "No change required."
+}

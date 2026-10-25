@@ -174,10 +174,28 @@ class PerturbationGrowthTask(DiagnosticTask):
                     # that squares before summing, are the two mechanisms behind
                     # this campaign's most repeated numeric defect.
                     from ..geometry.utils import safe_unit_rows_torch
-                    _rmax = E.abs().amax(dim=-1, keepdim=True)
-                    _tiny = torch.finfo(E.dtype).tiny
-                    scale = (_rmax * (E / _rmax.clamp_min(_tiny)).norm(
-                        dim=-1, keepdim=True)) * rel_eps
+                    # IN DOUBLE — the identical expression `stability.py` was
+                    # promoted for on 2026-09-07, left in float32 here.
+                    #
+                    # `_rmax * ||row / _rmax||` overflows float32 at the top of
+                    # the range: the row max is representable while the true row
+                    # norm, several times larger, is not, so `scale` becomes inf
+                    # and the perturbation NaN. In `stability` that broke the
+                    # `noise_std = 0` self-identity axiom (0.867 instead of
+                    # exactly 1.0 at 2.406e38); here the guard downstream then
+                    # returns no metric at all.
+                    #
+                    # Two siblings, same defect, same day — one fixed and one
+                    # missed, and my sweep for the fixed line did not match this
+                    # one because the surrounding expression differs. Found by
+                    # a reviewer (Opus round 11, 2026-09-08), which is the
+                    # fourth time this campaign a sweep has come up short of the
+                    # population it was run for.
+                    _E64 = E.double()
+                    _rmax = _E64.abs().amax(dim=-1, keepdim=True)
+                    _tiny = torch.finfo(_E64.dtype).tiny
+                    scale = ((_rmax * (_E64 / _rmax.clamp_min(_tiny)).norm(
+                        dim=-1, keepdim=True)) * rel_eps).to(E.dtype)
                     noise = safe_unit_rows_torch(noise)
                     E_pert = E + noise * scale
                     # The REALIZED displacement, measured rather than assumed --
@@ -219,13 +237,27 @@ class PerturbationGrowthTask(DiagnosticTask):
                         _hc[-1] = _sink_c["h"]
                         _hp[-1] = _sink_p["h"]
                         _used_hook[0] = True
-                        hs_c = [h[0].float().cpu() for h in _hc]
-                        hs_p = [h[0].float().cpu() for h in _hp]
+                        # PRESERVE the incoming float dtype at collection.
+                        #
+                        # `_growth_profile` promotes BOTH subtraction operands to
+                        # double, but that cannot recover what was already thrown
+                        # away here: narrowing happens BEFORE the difference is
+                        # taken, and the difference is the whole measurement. On
+                        # a native float64 ten-block affine contraction
+                        # h -> 1000 + (h - 1000)/2 the exact rate is
+                        # log(1/2) = -0.693147180560; collection drove the final
+                        # divergence 1.9531302035810137e-05 to 0.0 and the task
+                        # refused outright, and at 8 blocks it emitted
+                        # -0.676376923249. `narrowing_is_safe` returns False on
+                        # this fixture and `centring_is_safe` True, so the loss is
+                        # precisely the narrowing (codex round 15, 2026-09-09).
+                        hs_c = [h[0].cpu() for h in _hc]
+                        hs_p = [h[0].cpu() for h in _hp]
                     else:
                         _used_hook[0] = False
                         _keep = block_output_count(model)
-                        hs_c = [h[0].float().cpu() for h in _hc][:_keep]
-                        hs_p = [h[0].float().cpu() for h in _hp][:_keep]
+                        hs_c = [h[0].cpu() for h in _hc][:_keep]
+                        hs_p = [h[0].cpu() for h in _hp][:_keep]
                     if clean_acc is None:
                         clean_acc = [[] for _ in hs_c]
                         pert_acc = [[] for _ in hs_p]

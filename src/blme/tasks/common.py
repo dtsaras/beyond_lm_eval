@@ -174,6 +174,34 @@ def apply_lm_head(model, hidden_states):
     Returns:
         Logits tensor of shape (..., V)
     """
+    def _softcap(logits):
+        """Apply the model's FINAL LOGIT SOFTCAP if its config declares one.
+
+        Gemma-2 computes `logits = tanh(logits / cap) * cap` with
+        `final_logit_softcapping = 30`, and this helper skipped it — returning
+        the bare head output as though it were the model's logits.
+
+        Measured on real gemma-2-2b: logits off by 32.27, entropy
+        3.028 -> 0.860 nats, and `dynamics_interpolation`'s `convexity_gap`
+        **INVERTS SIGN, +0.1347 -> -0.1424 (194.6%)** (Opus round 11,
+        2026-09-08). The transform is strongly non-linear exactly where the
+        model is confident — a raw logit of 120 caps to 29.98 — which is why an
+        entropy-based measure flips rather than merely shifts.
+
+        Fixed HERE rather than in the caller on purpose. Three tasks share this
+        helper (`dynamics_interpolation`, `interpretability_logit_lens`,
+        `geometry_information_geometry`) and the third had already solved it
+        LOCALLY on 2026-09-03 without pushing the fix down, so the other two
+        inherited the bug — the same shape as `safe_svdvals` being wired at 28
+        sites but not at `schatten`.
+        """
+        cap = getattr(getattr(model, "config", None),
+                      "final_logit_softcapping", None)
+        if cap:
+            cap = float(cap)
+            return torch.tanh(logits / cap) * cap
+        return logits
+
     head = get_lm_head(model)
     if head is not None:
         params = next(head.parameters())
@@ -181,11 +209,12 @@ def apply_lm_head(model, hidden_states):
         # with device_map sharding) the lm_head can live on a different
         # GPU than the caller's hidden state. Move the input to the
         # head's device before projecting.
-        return head(hidden_states.to(params.device).to(params.dtype)).float()
+        return _softcap(head(hidden_states.to(params.device)
+                             .to(params.dtype)).float())
     # Fallback: h @ E^T (works for tied embeddings)
     E = get_embeddings(model)
     if E is not None:
-        return hidden_states.to(E.device).float() @ E.float().T
+        return _softcap(hidden_states.to(E.device).float() @ E.float().T)
     raise RuntimeError("Cannot project hidden states to vocab: no lm_head or embeddings found")
 
 

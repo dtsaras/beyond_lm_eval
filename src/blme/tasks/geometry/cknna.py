@@ -298,7 +298,11 @@ def _remove_outliers(X: torch.Tensor, q: float = 0.95) -> torch.Tensor:
     # the reference overflows there too.
     bound = torch.quantile(X.abs(), q, dim=1).mean()
     if not torch.isfinite(bound):
-        bound = torch.quantile(X.abs().double(), q, dim=1).mean().to(X.dtype)
+        # Narrowing straight back after a double-precision reduction discards
+        # exactly what the promotion bought. Swept as a class: the first AST query
+        # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
+        # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
+        bound = torch.quantile(X.abs().double(), q, dim=1).mean()
         if not torch.isfinite(bound):
             # Genuinely unrepresentable in the working dtype: clamp in double.
             _b64 = torch.quantile(X.abs().double(), q, dim=1).mean()
@@ -413,12 +417,21 @@ class CKNNATask(DiagnosticTask):
         # row-L2 normalisation and outlier clamp largely absorb the LayerNorm,
         # which is exactly why it went unnoticed.
         _cknna_status = {"last_is_block": False}
+        layer_activations = None
         if cache is not None and cache.is_populated and use_cache:
             layer_activations = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples,
                 replace_final_norm=False,
             )
-        else:
+            if layer_activations is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
+                # orrectly with NO cache and returned an error with an attention-onl
+                # y one, i.e. it refused rather than self-collecting -- the defect a
+                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
+                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
+                # only sweep reported (2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if layer_activations is None:
             layer_activations = collect_hidden_states(
                 model, tokenizer, dataset, num_samples=num_samples, layer_idx="all",
                 replace_final_norm=False,

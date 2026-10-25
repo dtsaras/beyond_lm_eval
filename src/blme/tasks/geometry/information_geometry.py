@@ -233,13 +233,47 @@ class RepresentationSensitivityTask(DiagnosticTask):
                             if _cap:
                                 _z = torch.tanh(_z / float(_cap)) * float(_cap)
                             return _z
+                        # PROBE AT SEVERAL MAGNITUDES AND TAKE THE WORST.
+                        #
+                        # A single probe at the observed |h| is not enough,
+                        # because a saturating head's violation GROWS with
+                        # magnitude while a linear head's stays at the rounding
+                        # floor. Measured on a cap-30 softcap in bfloat16
+                        # (linear control in the same dtype in brackets):
+                        #
+                        #     |h| 0.5   0.0000000  [0.0000000]
+                        #     |h| 1.0   0.0065359  [0.0000000]   <- under 3*eps
+                        #     |h| 2.0   0.0263158  [0.0000000]
+                        #     |h| 4.6   0.1124260  [0.0000000]
+                        #     |h| 16    0.4219512  [0.0000000]
+                        #
+                        # bfloat16's eps is 7.8e-3, so the 3*eps tolerance is
+                        # 0.0234 and a genuine softcap slips under it whenever
+                        # the probed activations are mild — the reported case
+                        # sat at lin_rel 0.02309 against a 0.02344 threshold and
+                        # the task then reported a score **+8.57% above
+                        # autograd** (Opus round 11, 2026-09-08). The margin
+                        # between the rounding floor and a real violation is
+                        # one part in a hundred at this dtype, which is not a
+                        # margin.
+                        #
+                        # Scaling the probe up costs three extra forward
+                        # evaluations and moves the softcap an order of
+                        # magnitude clear of the floor, while a linear head is
+                        # scale-free and reports the same rounding noise at
+                        # every rung — so the MAXIMUM over rungs separates them
+                        # without tightening the tolerance, which would have
+                        # made bf16 rounding fire the guard instead.
                         _a = _real(_h1 * 0.0)
-                        _b = _real(_h1)
-                        _c = _real(_h1 * 2.0)
-                        _lhs = (_c - _a)
-                        _rhs = 2.0 * (_b - _a)
-                        _den = _lhs.abs().max().clamp_min(1e-30)
-                        _lin_rel = float(((_lhs - _rhs).abs().max() / _den).item())
+                        _lin_rel = 0.0
+                        for _k in (1.0, 2.0, 4.0):
+                            _b = _real(_h1 * _k)
+                            _c = _real(_h1 * (2.0 * _k))
+                            _lhs = (_c - _a)
+                            _rhs = 2.0 * (_b - _a)
+                            _den = _lhs.abs().max().clamp_min(1e-30)
+                            _lin_rel = max(_lin_rel, float(
+                                ((_lhs - _rhs).abs().max() / _den).item()))
                     except Exception:
                         _lin_rel = 0.0
                     if _lin_rel > _tol:

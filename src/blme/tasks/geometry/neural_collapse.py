@@ -340,7 +340,14 @@ class NeuralCollapseTask(DiagnosticTask):
                 h = out.hidden_states[-1][0]  # (T, D) — already normed
                 # Mean-pool, ignoring padding (causal LMs typically don't
                 # have padding here since we tokenize one text at a time).
-                pooled = h.float().mean(dim=0).cpu().numpy()
+                # The trailing .float() DISCARDED the precision the .double() was added to
+                # gain: promote, average, then narrow back is self-defeating. Removing only
+                # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                # independently reconstructed Grassberger-Procaccia value, and restored a
+                # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                pooled = h.double().mean(dim=0).cpu().numpy()
                 feats.append(pooled)
                 labs.append(label)
 

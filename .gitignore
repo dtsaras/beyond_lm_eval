@@ -219,3 +219,15 @@ paper/main.pdf
 paper/*.synctex.gz
 # Local-only shim used to syntax-check main.tex without the real NeurIPS .cls
 paper/neurips_2025.cls
+
+# Reviewer scratch from the 2026-09 verification campaign: model weights, .npz
+# arrays and source snapshots (~1.8 GB, 11k files). Never commit. Every
+# subdirectory of verdicts/ is scratch; the verdict JSONs themselves sit at the
+# top level of verdicts/.
+verification_campaign/verdicts/*/
+verification_campaign/logs/
+
+# Local agent state
+.claude/
+.agents/
+.codex/

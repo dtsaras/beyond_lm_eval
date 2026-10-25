@@ -84,30 +84,53 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
     X = np.asarray(data, dtype=np.float64)
     X = X[np.all(np.isfinite(X), axis=1)]
 
-    # DUPLICATES ARE NOT QUOTIENTED. Reverted 2026-09-07, see below.
+    # DUPLICATES ARE QUOTIENTED, because the RELEASED LOADER quotients.
     #
-    # Round 9 reported that the paper's point-set X and the released loader
-    # treat the input as a SET, so adding 5 exact copies to a 42-point circle
-    # should not change the answer. I implemented the quotient. Two existing
-    # tests failed, both encoding a deliberate campaign-3 decision:
+    # Round 9 reported that the released loader treats the input as a SET. I
+    # implemented it, two tests failed, and I reverted it on 2026-09-07 with
+    # the condition: "not reinstated until someone runs the released
+    # `topnn_framework` loader and shows what it does." That condition is now
+    # met by READING THE RELEASED SOURCE, not by taking a reviewer on trust --
+    # the caution that was right for `geometry_magnitude`, where live magnipy
+    # turned out to PERTURB rather than de-duplicate.
     #
-    #   `test_betti_zero_distance_edges_do_not_inflate_beta0` builds 8 exact
-    #   duplicates plus a far blob and requires beta_0 == 2. Quotienting leaves
-    #   ONE point at the origin, which at k=4 must connect to the far blob, so
-    #   beta_0 collapses to 1. The duplicate cluster stops being a cluster.
+    # topnn_framework/transformers/betti_calc_parallel.py, in `read_csv`:
     #
-    # So the quotient does not merely remove redundancy here -- it destroys
-    # multiplicity that the kNN construction is using as density. Whether the
-    # released loader really quotients is exactly the sort of claim I took on
-    # trust for `geometry_magnitude` the same day and had to withdraw after
-    # running the actual reference (magnipy does NOT de-duplicate; it perturbs).
+    #     data = np.unique(np.transpose(np.array(data)), axis=0)
     #
-    # Not reinstated until someone runs the released `topnn_framework` loader
-    # and shows what it does. Filed in PENDING_FIXES.md item 18.
+    # It de-duplicates the POINTS, before `find_neighbors` picks k and builds
+    # the graph. A unit-magnitude 42-point circle and the same circle plus 5
+    # exact copies therefore produce the identical released graph, Betti
+    # (1, 0); BLME turned (1, 0) into (1, 1). The mismatch survived 10/10
+    # jittered-circle cases, all 20 tested row permutations and both coordinate
+    # orders, and it reached a real model: on GPT-2 with 50 rows containing 36
+    # distinct WikiText texts, BLME gave beta_0 = [1,2,2,2,2,2,2,2,2,2,2,1]
+    # where the released loader on the SAME emitted arrays gives twelve 1s
+    # (codex round 12, 2026-09-08).
+    #
+    # This DOES destroy multiplicity that the kNN construction was using as
+    # density -- that observation from the revert was correct. It is not a
+    # reason to keep it: the released reference defines this statistic, and
+    # `test_betti_zero_distance_edges_do_not_inflate_beta0` was encoding BLME's
+    # own choice rather than the reference's. Executed released loader,
+    # independent GF(2) boundary reduction and GUDHI all return beta_0 = 1 on
+    # that fixture, and the test has been updated to the reference's answer.
+    X = np.unique(X, axis=0)
+
     n = len(X)
     if n < 3:
-        return ((max(n, 0), 0, 0.0, 0.0) if return_persistence
-                else (max(n, 0), 0))
+        # beta_0 IS THE COMPONENT COUNT OF THE GRAPH, not the point count.
+        #
+        # This returned `n`, so two distinct surviving points reported
+        # beta_0 = 2. The released construction joins them with an edge -- with
+        # k >= 1 every point has a neighbour -- so the graph has ONE component:
+        # beta_0 = n - rank(boundary_1) = 2 - 1 = 1 (+100% error). It became
+        # reachable far more often once duplicate rows were quotiented, and on a
+        # constructed two-block trajectory it reported simplification_ratio 2.0
+        # instead of 1.0 and decay 0.9999999999999998 instead of 0.0
+        # (codex round 13, 2026-09-08).
+        _b0 = 1 if n >= 1 else 0
+        return ((_b0, 0, 0.0, 0.0) if return_persistence else (_b0, 0))
 
     # Neighbourhood size. A FIXED k (was 5) is wrong for two reasons: it does
     # not scale with N, and it routinely leaves the kNN graph DISCONNECTED --
@@ -361,7 +384,14 @@ class BettiCurveTask(DiagnosticTask):
                     for l_idx in range(num_layers):
                         hidden = _hs[l_idx + 1][0]
                         # .float() first: numpy doesn't accept bf16 tensors.
-                        rep = hidden.mean(dim=0).float().cpu().numpy()
+                        # The trailing .float() DISCARDED the precision the .double() was added to
+                        # gain: promote, average, then narrow back is self-defeating. Removing only
+                        # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                        # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                        # independently reconstructed Grassberger-Procaccia value, and restored a
+                        # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                        # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                        rep = hidden.double().mean(dim=0).cpu().numpy()
                         layer_reps[l_idx].append(rep)
         finally:
             _hook.remove()

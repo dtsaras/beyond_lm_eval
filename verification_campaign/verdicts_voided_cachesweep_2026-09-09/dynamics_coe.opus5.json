@@ -1,0 +1,20 @@
+{
+ "task": "dynamics_coe",
+ "verdict": "GREEN",
+ "verdict_reason": "_coe_from_chain reproduces CoE-R (Eq. 5) and CoE-C (Eq. 6/7) in the OFFICIAL normalized/normalized form to rel <= 1e-9 over 15 random chains of length 3..11 in 24 dimensions, against an independently written reference (Mag_i/Z_Mag, Ang_i/Z_Ang, CoE-C = |mean(Mag~ e^{i Ang~})|). Every CoE quantity is a ratio to Z_Mag or Z_Ang and so must be dimensionless; measured unchanged to rel 1e-9 at chain scales 1e-30, 1e-8, 1e8, 1e25 and 2.406159650500376e38. The task follows the released score.py rather than the paper's printed Eq. 6/7, which is the correct choice under the campaign rule and is documented at the call site -- the original work is three-way inconsistent (prose raw/raw, Algorithm 2 normalized-mag/raw-angle, official code normalized/normalized).",
+ "defect_location": "NONE",
+ "comparable": "RED",
+ "comparable_reason": "CoE-R and CoE-C average L layer transitions and divide by an END-TO-END normaliser, so both quantities depend on depth by construction. Two models of different depth are not on the same scale, independently of any implementation question. This is the reason the verdict axis and the comparability axis are separate: the implementation is faithful AND the metric is not cross-model comparable without a depth control.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "Alsace08/Chain-of-Embedding",
+ "github_reason": "Reimplemented score.py's compute_CoE_R / compute_CoE_C in the normalized/normalized form used by the released code and matched to 1e-9; tests/tasks/parity/test_coverage_gap_parity.py.",
+ "paper_number": "NONE",
+ "paper_reason": "Wang et al. (arXiv:2410.13640) publish downstream classification statistics, not CoE values reproducible from a corpus alone.",
+ "confounds": "CONFIRMED",
+ "confounds_reason": "Depth normalisation makes CoE-R/CoE-C depth-dependent by construction (see comparable_reason) -- that is structural and independent of sample size. Separately, this task SHIPS num_samples=5, which is a very small corpus for a per-sample mean; at that shipped size the headline coe_c is exactly reproducible and order-invariant to 2.08e-16, but no cross-model separation analysis was attempted here. A 3.70% shift in coe_c between num_samples 20 and 40 was measured, both ABOVE the shipped default, so it bounds sensitivity in that range and says nothing about N=5.",
+ "defects": [],
+ "fix": "No implementation change required on the ordinary domain. NOT ESTABLISHED BY THIS REVIEW: the degenerate-chain regime (z_mag at or near the relative floor) was not tested against the released code, because the released repository was not executed here -- only its documented formulas were reimplemented. That question stays open and should be settled by running the released score.py.",
+ "reviewer": "opus5"
+}

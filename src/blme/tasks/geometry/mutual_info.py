@@ -101,6 +101,7 @@ class HSICDependenceTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
 
         # Collect all layer activations
+        layer_activations = None
         if cache is not None and cache.is_populated and use_cache:
             layer_activations = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, replace_final_norm=True)
@@ -108,7 +109,17 @@ class HSICDependenceTask(DiagnosticTask):
             # mere presence of a hooked tensor (a shape mismatch is
             # rejected inside get_hidden_states).
             _last_is_block = bool(getattr(cache, "_last_block_substituted", False))
-        else:
+            if layer_activations is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. A cache
+                # filled for an attention-only consumer returns None here and the
+                # dereference below raised, destroying the task rather than
+                # degrading it. Found by EXECUTING this check against a real
+                # attention-only cache across all 51 tasks -- the round-12 sweep
+                # of this same class was done by READING and put the population
+                # at 2 sites; running it puts it at 9 (codex round 13 +
+                # execution sweep, 2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if layer_activations is None:
             _st = {}
             layer_activations = collect_hidden_states(
                 model, tokenizer, dataset, num_samples=num_samples,

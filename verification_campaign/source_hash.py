@@ -19,6 +19,7 @@ import inspect
 import json
 import os
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
@@ -89,6 +90,29 @@ def shared_hash():
     return h.hexdigest()[:16]
 
 
+def task_source_files(task):
+    """Every file whose change invalidates a verdict for `task`.
+
+    The task's own module plus the shared helpers, since a change to
+    `geometry/utils.py` can alter a task that never mentions it.
+    """
+    files = []
+    cls = _TASK_REGISTRY.get(task)
+    if cls is not None:
+        try:
+            files.append(inspect.getfile(cls))
+        except Exception:
+            pass
+    for rel in SHARED:
+        cand = os.path.join(ROOT, "src", "blme", rel)   # same base as shared_hash()
+        if os.path.exists(cand):
+            files.append(cand)
+    for path in SHARED_EXTERNAL:
+        if os.path.exists(path):
+            files.append(path)
+    return files
+
+
 def task_hashes():
     out = {}
     for name, cls in _TASK_REGISTRY.items():
@@ -104,6 +128,7 @@ def main():
     hashes = task_hashes()
     shared = shared_hash()
     stale, ok, unstamped = [], [], []
+    stamped, skipped = [], []
     for f in sorted(glob.glob(os.path.join(ROOT, "verification_campaign",
                                            "verdicts", "*.json"))):
         d = json.load(open(f))
@@ -113,9 +138,32 @@ def main():
             continue
         rec = d.get("source_hash")
         if write:
+            # REFUSE TO STAMP A VERDICT OLDER THAN THE CODE IT COVERS.
+            #
+            # `--write` used to stamp unconditionally. Run after a green suite
+            # on 2026-09-08 it turned the accounting from "0 of 102 verified"
+            # into "102 of 102 verified against current source" and reported
+            # success — while 51 Opus verdicts predated ~49 fixes and 51 codex
+            # verdicts predated 17 more. Neither reviewer had seen the tree it
+            # certified them against. That is worse than carrying no hash: it
+            # manufactures provenance, and it silently inverts the campaign's
+            # headline number.
+            #
+            # A verdict may only be stamped if the source it covers has not
+            # changed since the verdict was written. Stamping belongs at the
+            # START of a round, against the tree the reviewer is about to read.
+            _vm = os.path.getmtime(f)
+            _srcs = task_source_files(task)
+            _newest = max([os.path.getmtime(x) for x in _srcs] or [0.0])
+            if _newest > _vm:
+                skipped.append((os.path.basename(f),
+                                time.strftime("%m-%d %H:%M", time.localtime(_vm)),
+                                time.strftime("%m-%d %H:%M", time.localtime(_newest))))
+                continue
             d["source_hash"] = cur
             d["shared_hash"] = shared
             json.dump(d, open(f, "w"), indent=2)
+            stamped.append(os.path.basename(f))
             continue
         if d.get("shared_hash") not in (None, shared):
             stale.append((os.path.basename(f) + "  [shared helpers]",
@@ -129,10 +177,31 @@ def main():
             ok.append(os.path.basename(f))
 
     if write:
-        print(f"stamped {len(hashes)} task hashes into the verdict files")
+        print(f"stamped {len(stamped)} verdicts")
+        if skipped:
+            print(f"REFUSED to stamp {len(skipped)} verdicts whose source changed "
+                  f"after they were written:")
+            for n, vm, sm in skipped:
+                print(f"  {n:46s} verdict {vm}  source {sm}")
+        if not stamped:
+            print("nothing stamped — a verdict written before its own source "
+                  "cannot be certified against it")
+            sys.exit(1)
         return
-    print(f"{len(ok)} verdicts match their source")
-    print(f"{len(unstamped)} verdicts carry no hash (written before stamping)")
+    print(f"{len(ok)} verdicts VERIFIED against their source")
+    # UNSTAMPED IS NOT VERIFIED.
+    #
+    # These used to be reported on their own line and then quietly excluded
+    # from the stale list, so a consumer counting "stale" saw a smaller number
+    # than the number of unverified verdicts -- 32 of them, on 2026-09-07,
+    # sitting in neither bucket. An absent hash is not evidence that the source
+    # is unchanged; it is the absence of evidence, and the conservative reading
+    # is the only safe one when the whole point of the mechanism is to stop
+    # unverified claims being counted as verified.
+    print(f"{len(unstamped)} verdicts carry NO HASH -> counted as UNVERIFIED "
+          f"(written before stamping; absence of a hash is not a match)")
+    print(f"{len(ok)} of {len(ok) + len(unstamped) + len(stale)} verdicts are "
+          f"verified against current source")
     if stale:
         print(f"\n{len(stale)} verdicts are STALE -- the source changed "
               f"semantically since they were written:")

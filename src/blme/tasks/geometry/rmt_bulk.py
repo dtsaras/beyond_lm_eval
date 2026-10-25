@@ -305,7 +305,16 @@ def _mp_layer_metrics(
     fewer than ceil(D / fixed_gamma) tokens are available.
     """
     if isinstance(X, torch.Tensor):
-        X = X.detach().float().cpu().numpy()
+        # `.double()`, not `.float()`. The very next line promotes to float64
+        # anyway, so narrowing first is a pointless round trip that can only
+        # lose data — and does: a float64 cloud at 1e6 with 1/64-scale structure
+        # keeps 7 distinct values through `.double()` and only 5 through
+        # `.float()`, because float32's ULP at 1e6 is 0.0625.
+        #
+        # Promoting is exact for the float32/bf16 tensors every shipped route
+        # produces, so no shipped number moves; it only stops a float64 caller's
+        # data being discarded on the way to a float64 computation.
+        X = X.detach().double().cpu().numpy()
     X = np.asarray(X, dtype=np.float64)
     if X.ndim != 2 or X.shape[0] < 4 or X.shape[1] < 2:
         return {"error": f"Activation matrix too small for MP analysis: {X.shape}"}
@@ -592,6 +601,7 @@ class MPBulkDeviationTask(DiagnosticTask):
         # compare it against entries of a different kind. Repo-wide sweep,
         # 2026-09-05: 24 of 39 call sites were missing this opt-in.
         _rmt_status = {}
+        layer_activations = None
         if cache is not None and cache.is_populated and use_cache:
             layer_activations = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples,
@@ -599,7 +609,15 @@ class MPBulkDeviationTask(DiagnosticTask):
             )
             _rmt_status["last_is_block"] = bool(
                 getattr(cache, "_last_block_substituted", False))
-        else:
+            if layer_activations is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
+                # orrectly with NO cache and returned an error with an attention-onl
+                # y one, i.e. it refused rather than self-collecting -- the defect a
+                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
+                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
+                # only sweep reported (2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if layer_activations is None:
             from .utils import collect_hidden_states
             from ...cache import load_default_corpus
 

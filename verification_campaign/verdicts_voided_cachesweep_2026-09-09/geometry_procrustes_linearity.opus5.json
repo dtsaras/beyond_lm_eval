@@ -1,0 +1,20 @@
+{
+ "task": "geometry_procrustes_linearity",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Implementation faithfulness rests on 8 EXECUTED parity assertions against the official LLM-Microscope Procrustes linearity reference (Razzhigaev et al.), all passing on the round-13 frozen tree (verified as part of a full parity run: 314 assertions in tests/tasks/parity/ plus 87 in the comprehensive/formula/guard suites, 401 total, 0 failures). Independently measured on pretrained gpt2 with the shipped configuration resolved through resolve_task_config: the task is exactly DETERMINISTIC (headline `procrustes_linearity_first` identical across repeated identical runs) and its order sensitivity under a permutation of the identical document set is 1.13e-16.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured (determinism, document order, emitted-column collinearity, provenance-flag derivation). This task was NOT among the 14 flagged by the nonzero-duplicate column sweep in a way that survived checking, nor among the tasks emitting mis-prefixed metadata keys (population of that defect: 1 task, topology_persistence_landscape).",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "AIRI-Institute/LLM-Microscope",
+ "github_reason": "8 executed parity assertions against AIRI-Institute/LLM-Microscope. NOTE ON SCOPE: I ran these reference checks and confirmed they pass on the frozen tree; I did not re-derive the reference implementation from scratch in this pass, so this is an executed-parity verdict, not an independent reimplementation.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "None established. Cross-task sweeps that cover this task found nothing: its _meta_ provenance flags are derived rather than literal (population sweep: 206 derived vs 2 legitimately-constant across src/blme), and it emits no bit-identical nonzero public column pairs.",
+ "defects": [],
+ "fix": "No change required on the evidence gathered. SCOPE LIMIT: this verdict is grounded in executed reference parity plus determinism/order measurement. It does not certify extreme-scale behaviour, which was not swept for this task in this pass."
+}

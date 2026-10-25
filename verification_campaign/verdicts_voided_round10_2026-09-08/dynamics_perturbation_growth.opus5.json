@@ -1,0 +1,27 @@
+{
+  "task": "dynamics_perturbation_growth",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "THE HOOK LEAK IS FIXED AND I VERIFIED IT THE WAY I FOUND IT. The collection loop is now wrapped in try/finally with `_hook.remove()` in the finally block. Patching model.forward to raise on the third call and counting BLME-registered hooks on get_layers(model): gpt2 goes [0]*12 -> [0]*12 and layers[-1]._forward_hooks is {} after the raise; pythia-70m goes [0]*6 -> [0]*6. Previously this was 0 -> 1 and stayed. The metric itself is unchanged and self-consistent: `_meta_last_entry_is_block_output` = True on all 10 models I ran and `_meta_realized_rel_eps` = 0.01 exactly at the study's rel_eps=0.01.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "THE dtype SPREAD IS STILL LIVE AND STILL UNDISCLOSED. Same gpt2 weights, same 10 passages, same rel_eps=0.01: growth_log_ratio = 2.800723 (fp32) / 4.642212 (bf16) / 3.102867 (fp16) -- a 65.7% spread from storage format alone, reproducing the ledger's 2.7956 / 4.6152 / 3.0699 to within 1.1%. `_meta_realized_rel_eps` does NOT catch it: it reads 0.01 / 0.01012 / 0.0100025, all inside the 5% warning band, because the perturbation SIZE is fine and the divergence AMPLIFICATION is not. A study that mixes bf16 and fp32 checkpoints is ranking dtypes on this column.",
+  "normalized_variant": "growth_rate_per_block (= (log d_L - log d_0) / n_transitions)",
+  "normalized_ok": "RED",
+  "github": "NONE",
+  "github_repo": "",
+  "github_reason": "No code was released with Li et al. 2025 (arXiv:2503.13530) or with the Fernando & Guitchounts residual-stream line; the task is BLME's own clean-room formulation of a quasi-Lyapunov exponent and is documented as such. Nothing to fetch.",
+  "paper_number": "NONE",
+  "paper_reason": "Li et al. publish a quasi-Lyapunov analysis of reasoning traces, not a per-layer divergence-growth number for a base LM at a stated perturbation size, so there is no published value this can reproduce. The module's own analytic anchor does hold (a linear stack h_{l+1} = a h_l gives growth_log_ratio = (L-1) ln|a| exactly).",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Over 10 models at the study config: rho(growth_log_ratio, n_layers) = +0.673 -- it accumulates one term per block traversed, so a deeper model scores higher for being deeper. The depth-normalized twin OVER-corrects and flips the sign: rho(growth_rate_per_block, n_layers) = -0.648, and rho(., d_model) = -0.470. `initial_divergence` is a vocab/embedding-scale proxy at rho = -0.826 with vocab_size (range 0.00443-0.03303) and is emitted unprefixed.",
+  "defects": [
+    "dtype: growth_log_ratio 2.800723 / 4.642212 / 3.102867 on the same gpt2 weights in fp32 / bf16 / fp16 (65.7% spread), with the realized perturbation identical to within 1.2%. `_meta_realized_rel_eps` passes on all three, so the guard that exists does not detect the larger of the two dtype problems, and nothing in the output records the storage dtype.",
+    "growth_rate_per_block is a WORSE depth proxy than the column it normalizes, with the sign flipped: rho -0.648 vs +0.673 with n_layers over 10 models. Dividing by n_transitions assumes the log-divergence is proportional to depth; measured, the two are anti-correlated after division.",
+    "initial_divergence carries rho -0.826 with vocab_size over 10 models and is feature-eligible and unprefixed. It is rel_eps times the mean embedding row norm, i.e. an embedding-scale readout, not a dynamical property.",
+    "NO UNCERTAINTY IS EMITTED AT ALL at num_samples=10 -- no std, no SEM, no per-sample spread -- so the reader cannot tell whether a between-model difference exceeds sampling noise. The task emits n_samples_used and nothing else about dispersion.",
+    "The default fallback dataset ('Perturbation growth probe sentence {i}.') is a set of near-identical short sentences; a run that reaches it produces a number on a degenerate corpus with nothing in the output to say so.",
+    "SCOPING CHECK ON THE NEW TEST (asked, and it holds): `tests/tasks/test_forward_hook_leaks.py::_is_blme_hook` excludes only hooks whose __module__ or __code__.co_filename is outside blme. I confirmed the upstream leak it is scoped around is real and NOT Llama-specific -- on pythia-70m (GPTNeoX) a raised forward leaks `transformers.utils.output_capturing.install_output_capuring_hook.<locals>.output_capturing_hook` on all 6 blocks -- and that the scoping does NOT hide a BLME leak: the same helper correctly CAUGHT geometry_matrix_entropy's own lambda leaking on layers[-1] in the same run. The scoping is honest. What is not honest is the test's docstring claim that it 'covers every task that hooks a module': it is parametrized over 2 of the ~25 hook sites in src/blme."
+  ],
+  "fix": "Compute the clean and perturbed forwards in fp32 (promote-and-restore, as repe_steering_effectiveness already does), or emit a `_meta_param_dtype` flag and refuse cross-dtype comparison -- the same gpt2 weights currently read 2.800723 / 4.642212 / 3.102867. Prefix `initial_divergence` with _meta_ (rho -0.826 with vocab_size). Emit a per-sample std/SEM for growth_log_ratio. Either report the profile as a shape (log d_l against normalized depth) rather than as a level, or state that growth_rate_per_block is anti-correlated with depth (rho -0.648) so it is not a depth-neutral twin. Extend the parametrization of test_forward_hook_leaks.py to every task that registers a hook, or narrow its docstring."
+}

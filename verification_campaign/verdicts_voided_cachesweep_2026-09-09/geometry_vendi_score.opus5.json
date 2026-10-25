@@ -1,0 +1,20 @@
+{
+ "task": "geometry_vendi_score",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified. The task accepted the shared cache on population and document count WITHOUT checking that it holds hidden states, so a cache populated for an attention-only consumer returned None and the task emitted an error instead of self-collecting -- merely co-running another task deleted all 9 headlines. Verified directly: with a genuine attention-only ModelOutputCache (populated, correct document count, get_hidden_states None) the repaired task self-collects and emits 15 numeric keys instead of an error. 9 executed parity assertions against the official Vendi Score library pass.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "vertaix/Vendi-Score",
+ "github_reason": "tests/tasks/parity/test_vendi_parity.py (9 assertions) against the official library; cache behaviour pinned by tests/tasks/test_cache_without_hidden_states.py.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "Population swept: 6 tasks read hidden states from the shared cache without being registered as hidden-state consumers; 5 already handled a None return, and geometry_magnitude did not -- it was the second live site of this same defect and was repaired too.",
+ "defects": [],
+ "fix": "No change required."
+}

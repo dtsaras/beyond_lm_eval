@@ -447,7 +447,14 @@ class PersistenceLandscapeTask(DiagnosticTask):
                     for l_idx in target_layers:
                         h = _hs[l_idx + 1][0]  # (T, D)
                         layer_reps[l_idx].append(
-                            h.float().mean(dim=0).cpu().numpy())
+                            # The trailing .float() DISCARDED the precision the .double() was added to
+                            # gain: promote, average, then narrow back is self-defeating. Removing only
+                            # this cast moved geometry_correlation_dimension from 7.486064047571674 to
+                            # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
+                            # independently reconstructed Grassberger-Procaccia value, and restored a
+                            # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
+                            # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                            h.double().mean(dim=0).cpu().numpy())
         finally:
             _hook.remove()
         _last_is_block = bool(_n_fwd > 0 and _n_sub == _n_fwd)

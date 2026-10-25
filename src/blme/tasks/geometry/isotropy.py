@@ -14,7 +14,50 @@ class _BF16_EPS_PROXY:
 
 def _svd_metrics_for_layer(X, source_dtype=None):
     """Compute SVD-based isotropy metrics for a single (N, D) matrix."""
-    X = X.float().numpy() if isinstance(X, torch.Tensor) else X
+    # DO NOT NARROW HERE. The comment immediately below promises "FLOAT64 for
+    # every reduction", and this line threw the precision away before that
+    # promise could be kept — but only on the torch entry point, so the SAME
+    # data gave different answers depending on which type it arrived as:
+    #
+    #     1e6 + diag([4,1..1]/64), float64
+    #       numpy path : effective_rank 14.190710135717614, PR 3.5461254612546, cond 4.0
+    #       torch path : effective_rank 1.0,                PR 1.0,             cond 1.0
+    #
+    # (Opus round 11, 2026-09-08.) float32's ULP at 1e6 is 0.0625, so the 1/64
+    # entries are not representable and 5 distinct values collapse to 3.
+    #
+    # Promoting is exact for the float32/bf16 activations every shipped route
+    # actually produces, so no shipped number moves; it only stops the torch
+    # entry point from destroying float64 data that the numpy one preserves.
+    #
+    # CAPTURE THE STORED PRECISION BEFORE PROMOTING. The promotion below is
+    # what makes `np.asarray(X).dtype` float64 for EVERY torch input, and the
+    # rank tolerance further down reads that dtype. Recording it afterwards
+    # therefore replaced float32's eps (1.1920928955078125e-07) with float64's
+    # (2.220446049250313e-16), shrinking tau = sigma_1 * max(N, D) * eps by
+    # 536870912x and admitting pure noise into the numerical rank. On the
+    # exactly represented 100x5 fixture
+    # tile(stack(diag([1, .5, .25, 2^-27, 2^-28]), -diag(...)), (10, 1)) the
+    # numpy route gives rank 3 and cond 4 while the tensor route gave rank 5
+    # and cond 268435456; on real models cond_number read 2639769566.349200
+    # against 4211.900205875545 for GPT-2 (626740.8x), 1097747448.012681 vs
+    # 3480.566570343801 for distilgpt2, 3529012.982894 vs 29.894059411639 for
+    # pythia-70m, and the default self-collection route 4423152817.259969 vs
+    # 8210.930005182801 (codex round 12, 2026-09-08).
+    #
+    # `torch.finfo` is used directly so bfloat16 reports its own eps rather
+    # than being flattened into a numpy dtype that cannot represent it.
+    if isinstance(X, torch.Tensor):
+        _stored_eps = (float(torch.finfo(X.dtype).eps)
+                       if X.dtype.is_floating_point
+                       else float(np.finfo(np.float32).eps))
+        _stored_dtype = X.dtype
+        X = X.detach().cpu().double().numpy()
+    else:
+        _arr_dt = np.asarray(X).dtype
+        _stored_dtype = (_arr_dt if np.issubdtype(_arr_dt, np.floating)
+                         else np.dtype(np.float32))
+        _stored_eps = float(np.finfo(_stored_dtype).eps)
     # FLOAT64 for every reduction below.
     #
     # Removing the absolute epsilons made the formulas scale-invariant on
@@ -38,10 +81,6 @@ def _svd_metrics_for_layer(X, source_dtype=None):
     # direct callers with genuinely float32 data.
     # The PRIMARY tolerance always follows the CONTAINER dtype, so established
     # values never shift. `source_dtype` only feeds the disclosed variant below.
-    _arr_dt = np.asarray(X).dtype
-    _stored_dtype = (_arr_dt if np.issubdtype(_arr_dt, np.floating)
-                     else np.dtype(np.float32))
-    _stored_eps = float(np.finfo(_stored_dtype).eps)
     X = np.asarray(X, dtype=np.float64)
     finite_mask = np.all(np.isfinite(X), axis=1)
     X = X[finite_mask]
@@ -61,7 +100,21 @@ def _svd_metrics_for_layer(X, source_dtype=None):
         # exponents (2026-09-07).
         from .utils import safe_svdvals
         S = safe_svdvals(X)
-    except np.linalg.LinAlgError:
+    # BOTH exception types, because they share no ancestor.
+    #
+    # `np.linalg.LinAlgError` derives from ValueError; `torch._C._LinAlgError`
+    # derives from RuntimeError. Verified: `issubclass(torch._C._LinAlgError,
+    # np.linalg.LinAlgError)` is False. The guarded call is now `safe_svdvals`,
+    # which raises the torch one -- so this handler could never fire and the
+    # fallback below was dead code, with the exception propagating past a clause
+    # written to absorb it (found independently by both round-11 reviewers).
+    #
+    # Same root cause as `geometry_schatten`'s `except Exception: return {}`,
+    # which hid a NameError for a whole review round, but inverted: that handler
+    # was too broad and swallowed everything, this one too narrow and swallowed
+    # nothing. Wiring `safe_svdvals` into 28+ sites changed what those sites
+    # raise, and no one re-checked the except clauses.
+    except (np.linalg.LinAlgError, torch._C._LinAlgError):
         try:
             from scipy.linalg import svd as scipy_svd
             _, S, _ = scipy_svd(X, full_matrices=False)
@@ -159,7 +212,26 @@ def _svd_metrics_for_layer(X, source_dtype=None):
     # float32 quantization noise into signal. Using float64 eps after a float32
     # capture inflated the numerical rank on a fixed 100x5 float32 rank-3
     # construction (adversarial review round 2, 2026-09-04).
-    rel_tol = float(S[0]) * max(X.shape) * _stored_eps
+    # THE max(m, n) FACTOR IS ONLY USABLE WHERE eps IS SMALL.
+    #
+    # numpy's rank envelope sigma_1 * max(m, n) * eps is a worst-case bound
+    # calibrated for eps ~ 1e-16. Now that `_stored_eps` correctly follows the
+    # INCOMING dtype, a bfloat16 tensor puts eps at 0.0078125, and at width 768
+    # the factor is 768 * 0.0078125 = 6.0 -- the tolerance exceeds sigma_1
+    # itself, so EVERY singular value is discarded: measured rank 0 and
+    # cond_number inf on a 200x768 standard normal. That is worse than the
+    # float64-eps bug this replaced.
+    #
+    # This file already established the remedy for exactly this case, for the
+    # disclosed source-precision variant below: use the Frobenius-style
+    # sqrt(max(m, n)) factor, which at bf16/768 gives 0.216 and is usable.
+    # Applied here only when the primary factor is degenerate, so the float32
+    # path -- every shipped route, since the cache `.float()`s on the way in --
+    # keeps its established tolerance and no published number moves.
+    _fac = max(X.shape) * _stored_eps
+    if _fac >= 1.0:
+        _fac = float(np.sqrt(max(X.shape))) * _stored_eps
+    rel_tol = float(S[0]) * _fac
     # MODEL-PRECISION VARIANT, disclosed rather than substituted.
     #
     # The hidden states are `.float()`-cast into the cache, so the primary
@@ -285,7 +357,9 @@ def _isoscore(X: np.ndarray) -> float:
         # exponents (2026-09-07).
         from .utils import safe_svdvals
         S = safe_svdvals(Xc)
-    except np.linalg.LinAlgError:
+    # See the note above: the two LinAlgError types share no ancestor,
+    # and `safe_svdvals` raises the torch one.
+    except (np.linalg.LinAlgError, torch._C._LinAlgError):
         return float("nan")
     _s0 = float(S[0]) if S.size else 0.0
     if _s0 > 0 and np.isfinite(_s0):
@@ -349,7 +423,26 @@ class IsoScoreTask(DiagnosticTask):
             # layerwise mode above opts IN for exactly that reason.
             X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples,
                                         replace_final_norm=False)
-        else:
+            if X is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. A cache
+                # filled for an attention-only consumer returns None here, and
+                # the `X.float()` further down then raised
+                # "AttributeError: 'NoneType' object has no attribute 'float'"
+                # -- co-running an attention task DESTROYED this task rather
+                # than degrading it. On local gpt2 the dispatcher went from
+                # IsoScore 0.001001730065864821 to that AttributeError, and
+                # self-collection restores exactly 0.001001730065864821
+                # (codex round 13, 2026-09-08).
+                #
+                # This is the THIRD and FOURTH site of the class, after
+                # geometry_vendi_score and geometry_magnitude in round 12. The
+                # round-12 sweep listed both of these and I cleared them by
+                # READING the surrounding code instead of running it.
+                logger.info(
+                    "  shared cache is populated but carries no hidden "
+                    "states; self-collecting.")
+                _cache_ok = False
+        if not _cache_ok:
             if cache is not None and cache.is_populated and use_cache:
                 logger.info(
                     f"  IsoScore: shared cache holds {_cached_docs} documents "
@@ -585,7 +678,26 @@ class SVDIsotropyTask(DiagnosticTask):
             # embeddings, no cross-layer profile to keep homogeneous.
             X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples,
                                         replace_final_norm=False)
-        else:
+            if X is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. A cache
+                # filled for an attention-only consumer returns None here, and
+                # the `X.float()` further down then raised
+                # "AttributeError: 'NoneType' object has no attribute 'float'"
+                # -- co-running an attention task DESTROYED this task rather
+                # than degrading it. On local gpt2 the dispatcher went from
+                # IsoScore 0.001001730065864821 to that AttributeError, and
+                # self-collection restores exactly 0.001001730065864821
+                # (codex round 13, 2026-09-08).
+                #
+                # This is the THIRD and FOURTH site of the class, after
+                # geometry_vendi_score and geometry_magnitude in round 12. The
+                # round-12 sweep listed both of these and I cleared them by
+                # READING the surrounding code instead of running it.
+                logger.info(
+                    "  shared cache is populated but carries no hidden "
+                    "states; self-collecting.")
+                _cache_ok = False
+        if not _cache_ok:
             if cache is not None and cache.is_populated and use_cache:
                 logger.info(
                     f"  IsoScore: shared cache holds {_cached_docs} documents "

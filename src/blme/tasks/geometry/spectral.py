@@ -37,7 +37,15 @@ def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 2) -> tuple:
     # population (adversarial review, 2026-09-04).
     lam = lam[lam > 0]
     n = lam.size
-    if n < min_tail + 2:
+    # The bail-out applies to the N >= 20 path ONLY. WWFit has no such guard:
+    # at N=2 it leaves one xmin candidate, `k_min=8` rejects it, and the
+    # fallback fits the whole spectrum. `W = diag(2, 1, 0 x62)` has 2 positive
+    # eigenvalues and returned NaN here against the executed analyzer's
+    # 1.721347520444 (gpt-6-astra round 10, 2026-09-07). Verified: the ported
+    # branch below reproduces WWFit at rel 0.00e+00 for n=2 and n=3.
+    if n >= 20 and n < min_tail + 2:
+        return float("nan"), float("nan"), float("nan"), 0
+    if n < 2:
         return float("nan"), float("nan"), float("nan"), 0
 
     # SMALL-N BRANCH, ported from the released WWFit.
@@ -227,6 +235,8 @@ class WeightSpectralTask(DiagnosticTask):
 
         alphas = []
         stable_ranks = []
+        _svd_zeros_total = 0
+        _svd_modules_affected = 0
 
         # Martin, Peng & Mahoney explicitly EXCLUDE the final classifier /
         # unembedding from the HT-SR layer scan -- it is not a transformer
@@ -334,18 +344,65 @@ class WeightSpectralTask(DiagnosticTask):
                     stable_rank = float("nan")
                     _sr_norm = float("nan")
 
+                # RESOLVE NUMERICAL ZEROS ONCE, FOR BOTH ALPHAS.
+                #
+                # Round 12 applied this envelope only to `alpha_official`, and
+                # the Hill estimate below kept reading the UNFILTERED spectrum --
+                # so the same SVD residue that was fixed for one headline still
+                # drove the other. The derived counter proved it: on the
+                # rotated fixture the task reported 56 resolved zeros and 1
+                # affected module while this estimator ignored both. Under an
+                # EXACT orthogonal rotation (H = hadamard(64)/8, H^T H = I,
+                # H^T (H D H^T) H = D bit-exact) the model mean fell from the
+                # analytic 11.310516525413693 to 6.176705546335985 (-45.39%),
+                # with ranks 2, 3, 8 and 11 failing by -44.91%..-45.44% and
+                # ranks 12+ agreeing (codex round 13, 2026-09-08).
+                _S64 = np.asarray(S_np, dtype=np.float64)
+                _rank_tol = (float(np.finfo(np.float64).eps) * max(W.shape)
+                             * float(_S64[0]) if _S64.size else 0.0)
+                _S_res = _S64[_S64 > _rank_tol]
+                _n_svd_zeros = int(_S64.size - _S_res.size)
+                _svd_zeros_total += _n_svd_zeros
+                _svd_modules_affected += int(_n_svd_zeros > 0)
+
                 # 2. Power Law Alpha (Martin & Mahoney 2021)
                 # Hill estimator on top tail_fraction of singular values.
+                #
+                # `k` is still drawn from the FULL width, because the disclosed
+                # tail fraction describes the operator, not the surviving
+                # spectrum. When the k-th value does not exist among the
+                # RESOLVED singular values the Pareto tail is not identified and
+                # alpha is undefined -- which is what the diagonal matrix
+                # already reported, and is now what its rotation reports too.
                 k = max(2, int(tail_fraction * len(S_np)))
-                top_k = S_np[:k]
+                top_k = _S_res[:k] if _S_res.size >= k else np.array([])
 
                 # Hill Estimator: alpha = 1 + k / sum(ln(x_i / x_min))
                 # `> 0`, not `> 1e-6`: the Hill estimator sees only the
                 # ratios x_i/x_min, so it is exactly scale-invariant and an
                 # absolute floor is not (same measurement as above).
-                if k > 0 and top_k[-1] > 0:
+                if k > 0 and top_k.size >= k and top_k[-1] > 0:
                     x_min = top_k[-1]
                     log_sum = np.sum(np.log(top_k / x_min))
+                    # THE MLE IS UNDEFINED WHEN THE TAIL IS NUMERICALLY FLAT.
+                    #
+                    # `log_sum > 0` accepts a sum built entirely from rounding.
+                    # For D = diag(1 x 12, 0 x 52) the top 12 values are exactly
+                    # equal, the exact log-denominator is 0 and there is no
+                    # finite MLE -- which BLME reported correctly. Its exact
+                    # orthogonal rotation H D H^T has the SAME spectrum, but the
+                    # SVD splits the equal values at the 1e-15 level, giving
+                    # log_sum 4.884981308350688e-15 and
+                    # alpha = 1228254443828323.5 -- a false finite result that
+                    # survived 32/32 signed permutations with every input weight
+                    # bounded by 1 (codex round 14, 2026-09-09).
+                    #
+                    # A relative spread at or below the rank envelope means the
+                    # tail is one repeated value as far as the arithmetic can
+                    # tell, so the estimate is withheld rather than invented.
+                    _spread = float((top_k[0] - x_min) / max(float(top_k[0]), 1e-300))
+                    if _spread <= float(np.finfo(np.float64).eps) * max(W.shape):
+                        log_sum = 0.0
                     if log_sum > 0:
                         # NOT clipped to [0, 20]. A Hill estimate above 20 is a
                         # real (if extreme) measurement, and clipping made it
@@ -370,8 +427,33 @@ class WeightSpectralTask(DiagnosticTask):
                 else:
                     alpha = float("nan")
 
+                # RESOLVE numerical zeros before squaring, with a RELATIVE rule.
+                #
+                # `_pl_mle_alpha_ks` filters `lam > 0` exactly, on purpose: an
+                # absolute floor is not scale-invariant and the PL-MLE alpha
+                # depends only on ratios. But exact positivity cannot tell a
+                # true small eigenvalue from SVD backward-error residue, and
+                # the residue is not zero. For H = hadamard(64)/8 and
+                # D = diag(8, ..., 1, 0 x 56), H D H^T is exactly representable
+                # with exact inverse H^T W H = D, yet its computed 9th singular
+                # value is 4.5890373406e-15 rather than the analytic 0 -- so 64
+                # numerical positives replaced the true 8, which also flips the
+                # released estimator to a different small-N branch. BLME
+                # emitted alpha 2.328817742812 and weighted alpha 4.206263970125
+                # against the full released WeightWatcher analyzer's
+                # 1.330045361632 and 2.402301296670 (+75.0931%), reproduced
+                # across all 32 signed coordinate permutations. Failing ranks
+                # were 2, 3, 8 and 19; ranks 20, 32, 48, 63 and 64 agreed.
+                #
+                # The tolerance is numpy's own matrix-rank envelope,
+                # eps * max(m, n) * S[0]. It is RELATIVE to S[0], so it keeps
+                # the scale invariance that the absolute floor destroyed. It
+                # moves no pretrained number: across 148 unmodified matrices
+                # every singular value is at least 2.3215e7 times this envelope
+                # (codex round 12, 2026-09-08).
+
                 # Official-style PL-MLE alpha on eigenvalues (B8).
-                evals = S_np.astype(np.float64) ** 2
+                evals = _S_res ** 2
                 alpha_off, _xmin, _ks, _ntail = _pl_mle_alpha_ks(evals)
                 lambda_max = float(evals.max()) if evals.size else float("nan")
                 alpha_hat = (alpha_off * np.log10(lambda_max)
@@ -385,6 +467,9 @@ class WeightSpectralTask(DiagnosticTask):
                     "alpha_official_xmin": float(_xmin),
                     "alpha_official_ks": float(_ks),
                     "alpha_official_n_tail": int(_ntail),
+                    # DERIVED: how many singular values the backward-error rule
+                    # resolved to zero. 0 on every pretrained matrix tested.
+                    "_meta_alpha_official_n_svd_zeros": _n_svd_zeros,
                     "alpha_hat": float(alpha_hat),
                     "spectral_norm": float(S_np[0]) if len(S_np) > 0 else 0,
                     "stable_rank_normalized": float(_sr_norm),
@@ -424,6 +509,15 @@ class WeightSpectralTask(DiagnosticTask):
                 logger.info(f"Error analyzing {name}: {e}")
                 continue
 
+        # DERIVED provenance for the relative rank envelope. A per-layer key
+        # is dropped by this aggregation, so the counts are accumulated: the
+        # flag has to reach the CALLER to be worth anything. 0 on every
+        # pretrained matrix tested (min singular value is 2.3215e7x the
+        # envelope on gpt2), so a nonzero value here means a genuinely
+        # rank-deficient operator was scanned.
+        results["_meta_alpha_official_n_svd_zeros"] = int(_svd_zeros_total)
+        results["_meta_alpha_official_modules_with_svd_zeros"] = int(
+            _svd_modules_affected)
         results["avg_alpha"] = float(np.mean(alphas)) if alphas else float("nan")
         results["avg_stable_rank"] = float(np.mean(stable_ranks)) if stable_ranks else float("nan")
         results["min_alpha"] = float(np.min(alphas)) if alphas else float("nan")

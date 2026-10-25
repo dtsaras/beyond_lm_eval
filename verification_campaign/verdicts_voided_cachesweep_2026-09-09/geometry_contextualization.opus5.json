@@ -1,0 +1,20 @@
+{
+ "task": "geometry_contextualization",
+ "verdict": "GREEN",
+ "verdict_reason": "_intra_sentence_mean_cosine reproduces Ethayarajh 2019's IntraSim -- mean cosine of each token vector to the SENTENCE-MEAN vector, not the pairwise token-token mean -- to rel <= 1e-10 against an independently written reference, over 20 random (2..30) x 16 clouds. Definitions 1-2 are exactly invariant under a positive common rescale and the implementation now is: unchanged to rel 1e-9 at 1e-30, 1e-8, 1e8, 1e25 and 2.406159650500376e38, the regime where a plain np.linalg.norm underflows because it squares before summing.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established. An earlier draft of this verdict cited a 4.37% order sensitivity in mean_anisotropy_baseline; that was measured at num_samples=20 while this task SHIPS num_samples=1000, fifty times larger. A sampling-noise figure taken 50x below the shipped configuration is not evidence about the shipped configuration, and re-measuring at N=1000 was not completed here, so the claim is WITHDRAWN rather than restated with a caveat.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "kawine/contextual",
+ "github_reason": "The released analyze.py averages token-to-sentence-mean similarities for IntraSim; that definition was reimplemented independently and matches to 1e-10.",
+ "paper_number": "NONE",
+ "paper_reason": "Ethayarajh 2019 reports SelfSim/IntraSim for BERT/ELMo/GPT-2 on its own corpus; not reproducible under this task's corpus protocol without adopting that corpus.",
+ "confounds": "NONE",
+ "confounds_reason": "None established. The anisotropy baseline is estimated from the same corpus, which is worth attention in principle, but no measurement at or near the shipped num_samples=1000 was made in this pass.",
+ "defects": [],
+ "fix": "No implementation change required on the evidence gathered. OPEN: order sensitivity of the anisotropy baseline at the shipped num_samples=1000 was not measured; the only figure obtained (4.37%) is at N=20 and is not attributable to the shipped protocol.",
+ "reviewer": "opus5"
+}

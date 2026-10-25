@@ -113,9 +113,21 @@ def _trajectory_angles(X) -> np.ndarray:
     # Fourth absolute-epsilon-in-a-scale-free-operation found on 2026-09-07,
     # after `stability`'s clamp_min(1e-10), `coe`'s z_mag <= 1e-12, and
     # `trajectories`' two norm + 1e-10 rescales.
-    _ref = float(norms.max()) if norms.size else 0.0
-    _floor = _ZERO_NORM_EPS * _ref if _ref > 0 else _ZERO_NORM_EPS
-    valid = (norms[:-1] > _floor) & (norms[1:] > _floor)
+    # STRICTLY > 0, and nothing else.
+    #
+    # I replaced an absolute floor with one relative to the largest step, which
+    # fixed uniform rescaling and still discarded a step that is merely small
+    # RELATIVE TO ITS NEIGHBOURS: for X=[(0,0),(1e-13,0),(1e-13,1),(1e-13,2)]
+    # the norms are [1e-13, 1, 1], the defined angles are [pi/2, 0] and the
+    # executed released implementation gives mean 0.7853981634, while BLME
+    # emitted [0.0] (gpt-6-astra round 10, 2026-09-07).
+    #
+    # The angle between two difference vectors is well defined for ANY pair of
+    # nonzero steps, whatever their relative size. There is no magnitude below
+    # which it stops meaning something, so neither an absolute nor a relative
+    # epsilon belongs here -- both were answers to a question that should not
+    # have been asked. Only an exactly zero step has no direction.
+    valid = (norms[:-1] > 0.0) & (norms[1:] > 0.0)
     if not np.any(valid):
         return np.empty(0, dtype=np.float64)
 
@@ -157,7 +169,14 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
         if chunk is None:
             continue
         if isinstance(chunk, torch.Tensor):
-            chunk = chunk.detach().float().cpu().numpy()
+            # PRESERVE the incoming float dtype. `.float()` is a no-op for the
+            # float32 every checkpoint emits and a NARROWING for float64. Probed on a
+            # 40x16 cloud with 1e-4 structure on a 1e5 offset -- the shape real hidden
+            # states have -- the narrowed path returns NaN where float64 returns a
+            # finite value (2.0871608250868765). Confirmed by counterexample rather than swept
+            # blindly: geometry_vendi_score has the same spelling and is UNAFFECTED
+            # (rel 2.7e-15), so it was left alone (2026-09-10).
+            chunk = chunk.detach().cpu().numpy()
         chunk = np.asarray(chunk, dtype=np.float64)
         if chunk.ndim != 2 or chunk.shape[0] < skip_first + 3:
             continue
@@ -212,6 +231,7 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         # The SIGN of the bias is architecture-family determined, so it does
         # not cancel in a cross-model comparison: over five models
         # Spearman(shipped, corrected) is only +0.20 for `straightening_ratio`.
+        per_layer_chunks = None
         if cache is not None and cache.is_populated and use_cache:
             per_layer_chunks = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=True,
@@ -219,7 +239,15 @@ class TrajectoryCurvatureTask(DiagnosticTask):
             )
             _last_is_block = bool(
                 getattr(cache, "_last_block_substituted", False))
-        else:
+            if per_layer_chunks is None:
+                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
+                # orrectly with NO cache and returned an error with an attention-onl
+                # y one, i.e. it refused rather than self-collecting -- the defect a
+                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
+                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
+                # only sweep reported (2026-09-09).
+                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
+        if per_layer_chunks is None:
             # Fallback: run our own forward pass through a private cache
             # so the per-sample (T_i, D) split logic stays in one place.
             from ...cache import ModelOutputCache, load_default_corpus

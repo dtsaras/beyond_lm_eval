@@ -1,0 +1,20 @@
+{
+ "task": "geometry_prediction_alignment",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified. The disk-offloaded collector returned ONE tensor for the whole corpus while consistency.py treats each list element as one document, so every within-document control silently became a corpus-wide derangement -- a storage-induced change to the declared statistic. After retaining per-document lengths and returning per-document views of the memmaps, the two storage routes agree exactly: on a 4-document gpt2 run all 9 numeric outputs are identical between BLME_DISK_OFFLOAD=0 and =1, the concatenated logits/labels/hidden tensors are bit-identical, and the document lengths match ([9,7,10] on a 3-document control). The bytes were never in question; only the segmentation was.",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "NO",
+ "github_repo": "",
+ "github_reason": "No released reference for this composite statistic; verified by ROUTE EQUIVALENCE, which is the property the defect broke. tests/tasks/test_prediction_alignment_storage.py.",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "Route equivalence is now pinned by a regression test that asserts identical per-document lengths and bit-identical concatenated tensors, so a future storage change cannot silently redefine the statistic again.",
+ "defects": [],
+ "fix": "No change required."
+}

@@ -1,0 +1,20 @@
+{
+ "task": "geometry_spectral",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified. Exact positivity (lam > 0) admitted SVD backward-error residue as genuine eigenvalues: for H = hadamard(64)/8 and D = diag(8..1, 0x56), H D H^T has the same spectrum as D by construction but its computed 9th singular value is 4.59e-15, so 64 numerical positives replaced the true 8 and flipped the released small-N branch. After resolving numerical zeros with the RELATIVE envelope eps*max(m,n)*S[0], alpha is identical between D and H D H^T at ranks 2,3,8,19,20,32,48,63,64; at rank 8 it is 1.330045361632, exactly the released WeightWatcher value, and all 32 signed coordinate permutations return that same number. The four previously-failing ranks reproduce the reported deltas exactly (-40.66%, -35.68%, +75.09%, +9.16%). The envelope is relative so scale invariance holds (unchanged 1e-23..1e23).",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "CalculatedContent/WeightWatcher",
+ "github_reason": "Released WeightWatcher analyzer value 1.330045361632 reproduced on both matrices; 6 parity assertions plus tests/tasks/test_spectral_rank_rotation.py (12 assertions).",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "NONE",
+ "confounds_reason": "No pretrained matrix is affected: across all 50 gpt2 2-D parameters the rule discards nothing, and the smallest positive singular value is 2.3215e7 times the envelope. The derived counter _meta_alpha_official_n_svd_zeros reads 0 on gpt2 and avg_alpha_official is bit-identical at 3.904538608347353.",
+ "defects": [],
+ "fix": "No change required."
+}

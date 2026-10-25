@@ -1,0 +1,25 @@
+{
+  "task": "geometry_weight_norms",
+  "reviewer": "opus5",
+  "verdict": "GREEN",
+  "verdict_reason": "Head-to-head against the installed WeightWatcher on all 49 two-dimensional gpt2 weight matrices, matched by longname: worst relative disagreement is 1.211e-14 on Frobenius, 7.115e-16 on the spectral norm and 2.372e-14 on stable rank (WW's log_norm/log_spectral_norm are log10 of the SQUARED quantities; I converted). The Rudelson-Vershynin Prop. 3.9 construction (64 rows of repeated e_i in R^16) returns (8.000000000000, 2.000000000000, 16.000000000000) against the exact (8, 2, 16). The round-9 denormal defect is closed and I checked past the rung that exposed it: on diag(10..1)/10 the Frobenius norm is exact to 0.00e+00 relative at 1e-40, 1e-38 and 3.4028234663852886e38, and the stable rank stays within 6.6e-06 of the exact 3.85 at every rung. All six degenerate_spectra fixtures (exact zeros, all-identical, duplicated pairs, one-dominant-plus-tiny-tail) reproduce the exact values.",
+  "defect_location": "CODE",
+  "comparable": "RED",
+  "comparable_reason": "mean_frobenius_norm and mean_spectral_norm are raw magnitudes in parameter units and track width: 171.68 / 165.00 / 38.32 / 43.15 / 181.20 for distilgpt2 / gpt2 / pythia-70m / pythia-160m / gpt2-medium (Spearman rho with d_model +0.894). norm_uniformity is rho +0.894 with d_model and separates the architecture families (0.894 / 0.892 / 0.587 / 0.745 / 0.917) rather than the models. The raw _meta_mean_stable_rank is bounded by min(m,n) and is rho +0.894 with d_model, +0.700 with parameter count.",
+  "normalized_variant": "mean_stable_rank_normalized",
+  "normalized_ok": "YELLOW",
+  "github": "YES",
+  "github_repo": "CalculatedContent/WeightWatcher",
+  "github_reason": "Ran weightwatcher.WeightWatcher(model=gpt2).analyze(mp_fit=False, randomize=False, plot=False, vectors=False) locally and matched all 49 reported rows to BLME's _weight_matrix_stats by longname. Worst relative differences: Frobenius 1.211e-14, spectral 7.115e-16, stable rank 2.372e-14, 49/49 matched, 0 unmatched. This is an executed reference comparison, not a code read.",
+  "paper_number": "YES",
+  "paper_reason": "Rudelson & Vershynin's stable-rank construction (Prop. 3.9): an m-by-n matrix formed of m/n repeats of the identity has ||W||_F = sqrt(m), sigma_max = sqrt(m/n) and stable rank exactly n. At m=64, n=16 BLME returns 8.000000000000 / 2.000000000000 / 16.000000000000 against the exact 8 / 2 / 16 (relative error 0 on all three). This is a theoretical anchor; the paper publishes no transformer measurement to reproduce.",
+  "confounds": "CONFIRMED",
+  "confounds_reason": "Measured over 5 models: mean_frobenius_norm rho +0.894 with d_model and +0.600 with parameter count; _meta_mean_stable_rank rho +0.894 / +0.700; norm_uniformity rho +0.894 / +0.600. These are architectural quantities by definition. mean_stable_rank_normalized does not remove the dependence, it changes its sign and strengthens it against parameter count: rho -0.671 with d_model and -0.800 with parameter count (0.0559 / 0.0595 / 0.0722 / 0.0500 / 0.0529). Independently, zero-padding diag(8,...,1) from 8x8 to 256x256 leaves Frobenius, spectral and RAW stable rank unchanged while dividing the normalized companion by exactly 32. n=5 with three distinct widths supports a direction, not a coefficient.",
+  "defects": [
+    "OBSERVABILITY, weight_norms.py:109-121,165-170: failures are recorded as NaN and then removed by np.nanmean with no counter and no warning, so a layer whose SVD failed is indistinguishable from one that was never present. Adding one all-NaN 4x4 matrix beside I4 leaves all six scalar headlines bit-identical with zero diagnostics.",
+    "COMPARABILITY, weight_norms.py:148-170: the per-layer average is over EXPOSED matrices, so a fused QKV projection contributes one matrix where a split Q/K/V contributes three. Architecturally equivalent layouts therefore give different means; this is a layout confound, not an arithmetic error.",
+    "COMPARABILITY, weight_norms.py:105,199-206: mean_stable_rank_normalized divides by min(m,n), which is the right bound, but the resulting number still depends on matrix SHAPE choices (zero-padding an 8x8 to 256x256 divides it by 32 with the raw stable rank unchanged), so it should not be presented as architecture-invariant.",
+    "SCOPE: only per-LAYER parameters are measured (get_layers), so the embedding and unembedding matrices -- which WeightWatcher does report and which dominate parameter count on small models -- are outside the profile. That is a defensible scope, but it is not stated in the output."
+  ],
+  "fix": ""
+}

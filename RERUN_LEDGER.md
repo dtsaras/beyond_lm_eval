@@ -7887,3 +7887,919 @@ the second time today a question was settled by running or reading the actual
 released code rather than reasoning about it (`weightwatcher` for
 `geometry_spectral`, `magnipy` for `geometry_magnitude` — where doing so
 reversed my conclusion).
+
+---
+
+## ROUND 10 (gpt-6-astra, max effort) — first verdicts (2026-09-07 18:2x)
+
+Model switched to `gpt-6-astra` at `model_reasoning_effort = "max"`. The config
+was already set at 17:29, 43 minutes before the round-10 launch at 18:12, so the
+whole round runs on it — verified by probe (`ASTRA_OK`) and by the config mtime,
+not assumed.
+
+### `geometry_collapse` — my fix CONFIRMED, and the new RED is REFUTED
+
+The reviewer confirms the overflow repair outright: at 2.406159650500376e38 the
+evaluator now returns eranks 15.276807901381 / 12.719444961668 /
+7.806865804328 and collapse_ratio 0.511027294100, "agreeing with an independent
+SVD within **4.45e-16** relative".
+
+The new claim is that a "+1e6 exactly preserved common translation" moves the
+centred-erank profile 4 / 2 / 1.649384888466 -> 4 / 2 / 1 and collapse_ratio
+0.412346222117 -> 0.25 (-39.37%).
+
+**It does not, when the translation is genuinely lossless.** float32's ULP at
+1e6 is 0.0625, so a cloud on that grid translates exactly. Tested that way,
+BLME's centred erank is bit-identical:
+
+| fixture | erank +0 | erank +1e6 | rel |
+|---|---|---|---|
+| 40x8 general | 7.789194981471 | 7.789194981471 | **0.000e+00** |
+| near-rank-1 (erank 1.4476) | 1.447641904626 | 1.447641904626 | 1.5e-16 |
+| near-rank-2 | 1.981278335555 | 1.981278335555 | 0.000e+00 |
+| near-rank-3 | 2.991863394218 | 2.991863394218 | 0.000e+00 |
+
+The near-rank-1 row is the sensitive regime their own 1.649 sits in, and it is
+invariant. Off the grid, a +1e6 float32 translation quantises the cloud onto a
+0.0625 lattice and the erank moves — but that is the FIXTURE losing the payload
+before the task sees it, and BLME correctly reports the cloud it was handed.
+With float64 input the centring holds to 9.5e-09 at +1e6.
+
+**This is the same fixture error I made five times today** (`intrinsic_dim`,
+`collapse`, `perturbation_growth`, `homology`, `categories`), now made by a
+reviewer. It is the single most common way to manufacture a defect in this
+campaign: `(P + big).astype(float32)` destroys the geometry, and every
+downstream number is then correctly wrong.
+
+`tests/tasks/test_centre_and_rescale.py::assert_payload_survives` exists to
+catch exactly this and should be pointed at the reviewers, not just at me.
+
+### `dynamics_interpolation` — my slerp fix was necessary but NOT sufficient
+
+The reviewer reports positive homogeneity still broken END TO END: for
+h1=c(1,0), h2=c(0,1), W=2I/c the exact entropy gap is 0.327813325473, while
+`evaluate()` returns 0 at c=1e-30/1e-25 and NaN at c=1e25/2.406e38 — with
+endpoint logits agreeing to 1.192092896e-7, so the model path is fine.
+
+`_slerp` itself is now homogeneous to ~5e-8 across the ladder (measured
+earlier today), so the remaining scale dependence is in the entropy-gap path
+around it, not in the interpolation kernel. Separately: omitting Gemma-2's
+native final-logit softcap moves the gap 0.628530585884 -> 0.674409461208
+(**7.30%**) against the independently executed native value.
+
+Both open. Fixing one layer exposed the next, which is the pattern this whole
+campaign keeps producing.
+
+### `dynamics_stability` — astra CONFIRMED, my round-9 ladder was too short
+
+The `noise_std = 0` self-identity axiom returned **0.867291334397** instead of
+exactly 1.0 at 2.406159650500376e38 (astra measured 0.058812890322 on its own
+fixture — same failure, different cloud).
+
+My round-9 fix factored the row max out, which fixed the underflow end, and I
+verified the axiom at 1, 1e-30, 1e-13 and 1e25 and called it done. The axiom
+holds at every rung through **1e38**. It breaks only at the top:
+`row_scale = _rmax * ||row / _rmax||` overflows because the row max is
+representable while the true row norm — roughly 3x it — is not. `row_scale`
+becomes inf, and with `noise_std = 0`, `noise = raw * inf * 0` is NaN.
+
+Now computed in double and cast back after the multiply. The axiom holds at
+1, 1e25, 1e38, 2.406e38 and **3.4e38** — the last representable float32 value.
+
+**Testing "extreme scales" is not the same as testing the LAST representable
+one.** My ladder topped out at 1e25 for this task; the defect lived in the
+factor-of-14 gap between 1e25 and float32's ceiling, where the VALUE is
+representable but a derived quantity is not. Every scale ladder in this campaign
+should end at 3.4e38 for float32 paths, not at a round number below it.
+
+This is the first round-10 finding on a task I fixed today that was NOT a
+fixture artefact, and it was found by testing one rung further out than I did.
+
+### `geometry_correlation_dimension` — I refuted one leg and forgot the other
+
+Round 9's verdict had TWO legs. I refuted the Eckmann-Ruelle gating leg with
+ground-truth cubes and documented it thoroughly — and then never fixed the
+ATOM leg, which Opus had independently CONFIRMED in the same round. Astra
+re-raised it, correctly.
+
+A positive mass of coincident points puts a constant floor under C(r), so
+log C(r) is flat as r -> 0 and the Grassberger-Procaccia D2 is exactly 0.
+Measured before the fix:
+
+    one atom  -> plateau status "insufficient" -> ERROR   (exact D2 = 0)
+    two atoms -> plateau status "degenerate"   -> ERROR   (exact D2 = 0)
+
+The 0.0 branch existed but its gate was `_sr[2] == "unidentified"` alone, and a
+PURE atomic measure fails the plateau fit for a different reason. Widened to
+accept `insufficient` and `degenerate`: `_atom_frac > 0` is the load-bearing
+condition, and the status only records which way the fit gave up. Both now
+return exactly 0.0.
+
+**STILL OPEN, and deliberately not patched blind:** astra also reports the
+public headline computing the POSITIVE-DISTANCE exponent — on a 50% Dirac atom
+plus 50% uniform interval it returns 0.9873584353253599 where executed
+nolds 0.6.3 returns 5.35160579501927e-17 and the exact D2 is 0. The cause is
+visible in the source (`distances[distances > 0]` at two sites): filtering zero
+distances removes precisely the coincident pairs that create the atom's floor,
+so the measured object is no longer the measure that was sampled. Fixing it
+means C(r) must count zero-distance pairs while the RADII are still drawn from
+positive distances, which changes the headline on every atom-bearing corpus.
+That needs a head-to-head against executed nolds first — the standard this
+round is operating under — not a guess.
+
+**Process note:** refuting one leg of a multi-leg verdict is not the same as
+adjudicating the verdict. I recorded a careful refutation of the ER-bound
+argument and let the confirmed leg fall off the list. Multi-leg verdicts need
+each leg tracked separately.
+
+---
+
+## Two accounting defects in the campaign's own machinery (2026-09-07)
+
+### 1. "No hash" was counted as neither verified nor stale
+
+`source_hash.py --check` printed three lines: N matched, N unstamped, N stale —
+and every consumer, me included, read "stale" as the unverified count. **33
+verdicts sat in the unstamped bucket, invisible to both.** An absent hash is not
+evidence that the source is unchanged; it is the absence of evidence, which is
+the one thing this mechanism exists to prevent being counted as a match.
+
+Corrected: unstamped now reports as UNVERIFIED and the summary states
+`N of M verdicts are verified against current source`. The honest figure today
+is **0 of 75**.
+
+This is how I reported "1/51 dual sign-off" an hour ago: the single survivor was
+a pair whose Opus verdict simply carried no hash. Under the corrected accounting
+the number is **0/51**.
+
+### 2. The reviewers are reviewing a MOVING TREE
+
+None of the 24 round-10 verdicts carries a hash, because the runner does not
+stamp — stamping is a separate `--write` pass. That is survivable on its own.
+The real problem is what it exposed:
+
+**I have been fixing code while the review round runs.** `dynamics_stability`,
+`geometry_correlation_dimension` and the `source_hash` change all landed after
+round 10 started. So a verdict written at 18:25 and one written at 18:55
+describe DIFFERENT source trees, and stamping them afterwards against the
+current tree would certify both against a state neither reviewer saw.
+
+That is worse than having no hash at all: it manufactures false provenance.
+
+**Rule going forward — FREEZE THE TREE FOR THE DURATION OF A ROUND.** Stamp at
+launch, not at completion; queue fixes to `PENDING_FIXES.md` and apply them
+between rounds. The Pink-Ponk protocol already says both reviewers must score
+the same state; it did not say the state must also hold still while they do it,
+because until now the rounds were short enough that it never came up. Round 10
+runs ~20 minutes per task with 12 workers, which is exactly long enough for me
+to have broken it.
+
+**Consequence for round 10:** its verdicts are still USEFUL — every finding I
+have adjudicated from it was reproducible — but the round cannot be stamped as
+a whole. The tree is frozen from now until it completes; the fixes made during
+it must be re-reviewed in round 11.
+
+### `geometry_rsa` — round-10 RED REFUTED, and Opus was right in round 9
+
+Astra: "a pure coordinate permutation preserves all 21 exact correlation-RDM
+cells, yet both current collection paths emit RSA 0.9235444412580736 instead of
+the exact and executed released-reference value 1.0."
+
+The magnitude reproduces — on a 7-row (21-cell) tie-degenerate fixture BLME's
+worst RSA over 200 coordinate permutations is 0.980327868852. Coordinate
+permutation is an isometry on rows, so `pdist` is invariant mathematically, but
+it changes the SUMMATION ORDER; on generic data that is invisible (RSA
+1.000000000000, measured), and on a tie-heavy RDM a few tied cells swap ranks
+and Spearman moves a lot because there are only 21 of them.
+
+**The question is not whether BLME is exact — it is whether the RELEASED
+REFERENCE is.** `rsatoolbox` is installed, so this was settled by running it,
+head to head, on the same fixtures:
+
+    BLME        worst RSA over 60 permutations = 0.990482448294
+    rsatoolbox  worst RSA over 60 permutations = 0.988294314381
+
+**The reference is not exact either — it is marginally WORSE.** So the claim
+that the released reference "returns 1.0" is wrong, and on the implementation
+axis BLME is faithful. RED refuted.
+
+This exactly confirms Opus's round-9 assessment, which I recorded at the time
+without re-deriving: *"Only the corrdist twin is tie-sensitive, and rsatoolbox
+fails the same class head-to-head."* Opus had already run this comparison and
+was right.
+
+**Worth stating plainly for the scorecard:** round 9's lesson was that codex was
+the sharper reviewer and Opus the lax one. That generalisation does not hold
+here. On `geometry_rsa` Opus ran the reference and got it right; astra asserted
+what the reference "returns" without running it, and got it wrong — the very
+failure mode this round's prompt was written to prevent, quoting the `magnitude`
+episode. Reviewer quality is per-claim, not per-model.
+
+---
+
+## `tests/adversarial_fixtures.py` — closing MY validation gap (2026-09-07)
+
+Three distinct ways my own verification produced a confident "verified" claim
+that was wrong, all today:
+
+1. **Fixtures that destroy their payload** (5 occurrences: `intrinsic_dim`,
+   `collapse`, `perturbation_growth`, `homology`, `categories`).
+   `(P + 1e6).astype(float32)` quantises onto a 0.0625 lattice, so the task is
+   handed garbage and correctly reports garbage.
+2. **A ladder that stopped short.** `dynamics_stability` held at every rung
+   through 1e38 and broke at 2.406e38, because a DERIVED quantity overflowed
+   while the values were representable.
+3. **A fixture space that structurally excluded the defect.** `geometry_spectral`
+   was validated on 120 random spectra from full-rank Gaussians, which never
+   contain exact zeros; the defect was in a rank-deficient spectrum. More draws
+   of the same kind would never have found it.
+
+The module provides `scale_ladder`, `on_grid_translation`, `degenerate_spectra`,
+`wide_dynamic_range`, `centring_is_safe` and `narrowing_is_safe`.
+
+### Testing the helper found two defects IN THE HELPER
+
+- `scale_ladder` originally set the top rung from the reduction POWER alone, and
+  its own self-check failed: `x**2` fitting does not mean a SUM of d of them
+  fits. That is *literally the `dynamics_stability` bug* — row max representable,
+  row norm not — reproduced inside the tool written to catch it. Now takes
+  `n_terms` and budgets for the sum.
+- `centring_is_safe` reported the `geometry_svd` cloud as SAFE. That turned out
+  to be correct rather than broken, and revealed the real structure: the two
+  failure directions are INDEPENDENT. Centring that cloud in float64 is fine;
+  the loss happens only when it is narrowed to float32 first. Split into
+  `centring_is_safe` (Direction A) and `narrowing_is_safe` (Direction B), which
+  are now cleanly orthogonal on the three known-bad clouds:
+
+| cloud | centring lossy | narrowing lossy |
+|---|---|---|
+| collinear 0/1/1e25 (`magnitude`) | yes | no |
+| lattices 2^-80 ∪ 1/32 (`lid`) | yes | no |
+| 1e6 + tiny diag (`svd`) | no | yes |
+
+**A guard is code, and untested guard code is as likely to be wrong as anything
+else.** Both defects surfaced within a minute of running it, and one of them
+would have made the ladder silently miss the exact class it was built for.
+
+---
+
+## `verification_campaign/sweep_siblings.py` — the sweep rule, as a command
+
+The most repeated process failure of this campaign is fixing one instance of a
+defect and not sweeping for the same shape elsewhere. On 2026-09-07 I wrote the
+rule down twice and violated it twice the same day:
+
+  * the ripser unit-max rescale reached `homology` and not its 2 siblings
+    (found by a reviewer, hours later)
+  * `safe_svdvals` was wired at 28 sites and not at `schatten`, which the bare
+    `except` then hid for a whole round
+  * `hidden.mean(dim=0).float()` was fixed in `representation_engineering` and
+    left in **6 other files** — including the topology family the reviewers were
+    testing that same hour
+
+A rule I restate and then break is not a rule, so it is now a command:
+
+    python3 verification_campaign/sweep_siblings.py <file>:<line>
+
+It matches AST SHAPE rather than text, so a grep that guesses the wrong variable
+name cannot miss a site.
+
+### Testing it found a false claim in its own docstring
+
+The first version asserted that `hidden.mean(dim=0).float()` and
+`h.float().mean(dim=0)` "both reduce to the same skeleton". They do not — the
+call order differs — and it returned **3 of the 6** known sites while claiming
+completeness. That is exactly the defect class this session has been correcting
+all day: a comment describing behaviour the code does not have. It was caught
+only because the population was already known independently, which is the one
+condition under which a broken sweeper looks convincing.
+
+Fixed with a second, order-insensitive pass matching the method-name multiset of
+the chain. Validated against the known population:
+
+    6 site(s) share this shape (3 exact, 3 reordered)
+      neural_collapse.py:343      [reordered]
+      betti_curve.py:364          [exact]
+      homology.py:191             [exact]     <- the one changed
+      persistence_entropy.py:161  [exact]
+      persistence_landscape.py:450 [reordered]
+      zigzag.py:832               [reordered]
+
+**Always validate a sweeper against a population you already know.** A sweep
+that returns a plausible-looking subset is worse than no sweep, because it
+converts "I did not check" into "I checked and it is fine" — the same
+transformation the `source_hash` unstamped bucket was making with staleness.
+
+---
+
+## I fabricated provenance for 102 verdicts, then reverted it (2026-09-08)
+
+After the suite came back green I ran `source_hash.py --write`, which reported
+"stamped 86 task hashes" and turned the accounting from **0 of 102 verified**
+into **102 of 102 verified against current source**.
+
+Every one of those stamps was false:
+
+* the 51 Opus verdicts are from round 9, written before ~49 fixes;
+* the 51 codex round-10 verdicts were written before the 17 fixes applied after
+  that round closed — including the pooling population and the centring
+  deletions, which changed the very tasks they scored.
+
+Neither reviewer ever saw the tree I stamped them against. **This is the exact
+failure I identified and wrote down hours earlier**, in this file, when I found
+the runner does not stamp:
+
+> "stamping them afterwards against the current tree would certify both against
+> a state neither reviewer saw. That is worse than having no hash at all: it
+> manufactures false provenance."
+
+I then did it, because `--write` was the obvious next step after a green suite
+and I ran it without re-reading my own conclusion. The hashes are stripped; the
+count is back to an honest **0 of 102**.
+
+**The mechanism is the danger, not the mistake.** One command silently converted
+"no reviewer has checked this code" into "both reviewers verified this exact
+source", and the tool reported success. Nothing in `--write` asks *when* the
+verdict was written or whether the source moved since. Had I not been watching,
+the campaign's headline number would have gone from 0/51 to something like
+12/51 with no work done and no warning printed.
+
+**Fix required before `--write` is used again:** it must refuse to stamp a
+verdict whose file mtime predates the newest change to the source it covers,
+and print what it skipped. Stamping is only meaningful at the START of a round,
+against the tree the reviewer is about to read — never at the end, against the
+tree the fixes produced. Filed in PENDING_FIXES.md.
+
+---
+
+## Round 11, first returns (2026-09-08) — 10 of 51 Opus verdicts
+
+The Opus API failed repeatedly (six agents lost to 503s, none having written a
+verdict). Two survivors delivered six tasks between them, and the quality is the
+highest of the campaign.
+
+### `geometry_rsa` — my refutation was right, and theirs is far better evidence
+
+I refuted astra's permutation RED yesterday by sampling 60 permutations and
+running rsatoolbox head to head. The round-11 reviewer **enumerated all 5040
+permutations** of astra's own fixture through both implementations:
+
+    BLME       max error 0.1369018129224321   exact on 24/5040
+    rsatoolbox max error 0.1433226690657673   exact on  8/5040
+
+The reference is WORSE, and astra's cited "BLME 0.9235 vs reference 1.0" is
+**one of the 8 permutations where the reference happens to land on 1.0**. Same
+conclusion I reached, established at a completeness my sample could not claim —
+a sampled refutation is an existence proof about the sample, and enumeration is
+a statement about the property.
+
+They also found the direction reverses with dtype: euclidean at unit-scale
+float64 has BLME exact on 5040/5040 and the RELEASED reference failing at
+0.132137, while at float32/1e13 the roles swap. So this is a property of
+Spearman on exactly-tied RDMs, not of either implementation.
+
+### `geometry_spectral` — my fix confirmed, and two defects remain
+
+The reviewer noticed my **uncommitted 19:49 edit** and correctly marked astra's
+n=2/n=3 RED stale: `diag(2,1,0x62)` now returns 1.72134752044, exactly WWFit.
+(That is the moving-tree problem again — a reviewer having to reason about when
+a file changed mid-round.)
+
+Two residuals, both verified here independently:
+
+    [4 x8, 0 x56]     BLME 1.0   WWFit 0.0
+    np.full(20, 3.0)  BLME NaN   WWFit inf
+
+The first is the SAME constructor-overwrite subtlety I ported around: my
+small-N branch returns 1.0 from `fit_powerlaw_smallN`'s pathological path, but
+`WWFit.__init__` then overwrites it with `alphas[argmin(Ds)]` = **0.0**. I read
+that overwrite when porting, applied it to the normal path, and missed that it
+also governs the pathological one. The second is new, found via
+`degenerate_spectra()` from the fixture module I built — an exactly flat
+spectrum, which my 120 random Gaussian spectra structurally could not contain.
+
+Also: BLME filters `lam > 0` where WeightWatcher filters `> 1e-5`
+(`constants.py:190`), fitting **21 extra eigenvalues** across gpt2 and
+explaining the residual 3.47e-04 per-module drift. Deliberate and arguably
+better — exact positivity makes alpha exactly scale-invariant — but an
+undisclosed divergence from the reference.
+
+### `geometry_schatten` — the round-9 import fix confirmed, with a bound
+
+MNN is **bit-exact (max |delta| 0.0 over 100 float32 matrices)** against
+`MLGroupJLU/MatrixNuclearNorm` `code/MNN.py` executed at sha256
+`5f8a7a30…`. The round-9 import fix has effect end to end: 22 keys, **zero
+non-finite**.
+
+The mixed-magnitude defect reproduces (rescale of the UNCENTERED matrix in the
+input dtype, before centring — Direction B), but with a reachability bound worth
+recording: the guard fires only above `|X|max = 1.6641e17`, and gpt2's largest
+hidden magnitude is **3054.12**, a factor of 5.4e13 below. And the guard is not
+gratuitous — on a pure-scale ladder the *released reference itself* returns inf
+at 1e-30, 0.0 at 1e25 and nan at 8.5e37 where BLME stays correct.
+
+**A reachability bound is the missing half of every extreme-scale finding in
+this campaign.** "Wrong at 1e37" and "wrong at a magnitude no model reaches, and
+the reference is wrong there too" are different claims, and only the second one
+tells you whether to spend the fix.
+
+---
+
+## `dynamics_sharpness` — model mutation outside its own try/finally (2026-09-08)
+
+Round 11 found the caller's model being mutated **before** the `try` that
+restores it. Three mutations sat in that window:
+
+    model.eval()                        (line 425)
+    requires_grad_(False) on every param (line 430)
+    p_.data = p_.data.float()            (line 458)
+
+and the `finally` that undoes all three began only afterwards. An exception in
+that window — an OOM during the float32 promotion being the realistic one —
+left the model in eval mode, with gradients disabled everywhere except the last
+block, in float32; `core.py:439` then continued the sweep **with that same
+object**, so every later task measured a mutated model.
+
+Fixed by moving the `try` ahead of the first mutation, with the restore
+variables pre-initialised to inert values so the handler can never hit an
+unbound name on an early failure. Verified STRUCTURALLY with AST rather than by
+string search — my first check used index slicing on the source and reported
+the opposite of the truth:
+
+    Try block (424, 551)
+      line 425  model.eval()           inside a try: True
+      line 430  requires_grad_(False)  inside a try: True
+      line 458  p_.data.float()        inside a try: True
+
+**This file had already fixed this exact class once.** `_sam_sharpness` carries
+the comment: *"an exception raised by `compute_loss` used to leave the model
+PERTURBED ... silently poisoned every later task in the run"*. The inner
+perturbation was wrapped; the outer setup was left bare. Same shape as the
+ripser rescale, `safe_svdvals`, the pooling means, and the Gemma softcap — a
+defect fixed at one site while its sibling in the same file, or the same shared
+helper, was left alone.
+
+That is now **five** occurrences of one meta-pattern in this campaign, and it is
+the single most productive thing a reviewer can look for: not "is this line
+wrong" but "where else does this line live".
+
+### Two further sharpness findings, NOT fixed (filed)
+
+* `top_eigenvalue_estimate`'s SIGN is set by `n_power_iter`, not by the model:
+  pythia-70m gives **-104737 at 10 iterations** (the study config) and
+  **+111530 at 64** (the repo default), on 3/3 seeds, from a near-degenerate
+  +/-lambda pair at |lambda| ~ 1.24e5 that power iteration never separates. The
+  zero-crossing sits near iteration 37.
+* `_meta_power_iter_converged` cannot warn about it: **False on 5/5 real
+  models**, and it was True in 0/120 runs where the answer was exact to 4.3e-07.
+  A convergence flag that is False when the answer is right and cannot fire when
+  it is wrong is worse than absent — it invites the reader to trust it.
+* `_meta_hutchinson_trace_rel_se` = **8.18** on pythia-70m: the trace's own
+  standard error is 8x its magnitude and its sign flips across seeds
+  (+17273 / -31363 / +16156).
+
+`dynamics_sharpness` is currently DUAL-GREEN, and correctly so on the fidelity
+axis — its HVP is bit-identical (0.000e+00) to installed PyHessian and its
+eigenvalue exact to 1.09e-15. The defects above are estimator-quality and
+contamination, which the two-axis standard keeps off `verdict`. Worth stating
+plainly: **a dual-GREEN task can still be reporting a number whose sign depends
+on a config knob.**
+
+---
+
+## My `correlation_dimension` atom fix was DEAD CODE (2026-09-08)
+
+Round 11 found it by AST: `slope` is STORED at four points and LOADED at one,
+and the load comes first.
+
+    slope STORE lines: 190, 213, 237, 261      (local numbering)
+    slope LOAD  line : 204
+
+Line 280 snapshots `_pct_slope, _pct_r2 = slope, r_squared` — a deliberate
+round-6 fix so the atomic branch could not overwrite the percentile key — and
+the headline comes from `sr_slope`, computed later by the plateau kernel. So my
+2026-09-07 assignment inside the atomic branch wrote to a variable that, by
+construction, nothing reads again. A pure atomic measure still returned NaN.
+
+**How I fooled myself.** I "verified" that fix by calling
+`_gp_correlation_dimension_plateau` directly and RE-IMPLEMENTING the branch
+condition in my test script:
+
+    slope = 0.0 if (af>0 and sr[2] in ("unidentified","insufficient","degenerate")) else sr[0]
+
+That prints 0.0 whatever the task does, because it is my logic, not the task's.
+The repo's own rule is "never verify a fix by re-reading the diff; run it" —
+and simulating the surrounding logic is the same error wearing a measurement's
+clothes. It is arguably worse, because it produces a number.
+
+**The fix now lives where the headline is produced**, immediately after
+`_primary` is computed, and it is pinned by an END-TO-END test that drives the
+real `evaluate()`. The atom is injected at the MODEL (identical hidden states
+for every token), because this task runs its own forward pass — my first two
+attempts patched a collector it never calls, and one of them silently measured
+the mock model's real states and returned 6.903763602930653 while I read it as
+a failure of the fix.
+
+Guard-on-the-guard, run both ways:
+
+    with the fix     : 3 passed  (gpt2, llama, bert)
+    fix disabled     : 3 failed
+
+Kept as `tests/tasks/test_correlation_dimension_atom_e2e.py`.
+
+**Third instance today of a fix that landed in source and never ran**, after
+`safe_svdvals` at `schatten` and the `_meta_` flags that reported the opposite
+of the truth. The common thread is that all three were verified by inspecting
+or simulating rather than by executing the shipped path.
+
+## Round-11 fixes, batch 2 (2026-09-08)
+
+### `geometry_intrinsic_dim` — the CPU fallback, missed for the SECOND time
+
+The GPU branch uses double precision and `donot_use_mm_for_euclid_dist`
+specifically because the Gram identity cancels when `r1 << ||x||`. The CPU
+fallback used `.float()` and `algorithm="auto"` — brute force, i.e. that same
+identity — so the estimate was host-dependent, which is the exact failure the
+GPU comment claims to have fixed. Reported at −5.12% with exact duplicates at
+r1 = 3.576e-07 on d=768.
+
+I measured which combination actually fixes it rather than assuming, on a
+400x768 cloud offset by 50 (worst relative r1 error vs the GPU branch's own
+arithmetic):
+
+    auto/brute  float32   1.708e-07
+    auto/brute  float64   1.692e-12   <- Gram residue SURVIVES promotion
+    ball_tree   float32   1.356e-07
+    ball_tree   float64   0.000e+00   <- exact
+
+**The algorithm matters as much as the dtype.** Promoting alone leaves the
+identity's residue behind; only a tree computes the true distance. Had I
+"obviously" just added `.double()`, the defect would have shrunk by four orders
+of magnitude and survived — and looked fixed.
+
+Now `float64 + ball_tree`, verified through `_two_nearest_neighbor_distances`
+with CUDA hidden: **max rel r1 error 0.000e+00** against the GPU branch, 0
+spurious exact duplicates.
+
+**Second miss on this same fallback.** The 2026-09-07 unit-max rescale was
+applied to both paths and the dtype/algorithm was left GPU-only. A branch that
+runs only on hosts without CUDA is invisible to every check run on a GPU box —
+so it needs an explicit test that hides CUDA, not a hope that someone runs on
+CPU.
+
+### `isotropy` — two handlers that could never fire
+
+    np.linalg.LinAlgError   MRO: LinAlgError -> ValueError
+    torch._C._LinAlgError   MRO: _LinAlgError -> RuntimeError
+    issubclass(torch._C._LinAlgError, np.linalg.LinAlgError) -> False
+
+Both `except np.linalg.LinAlgError:` clauses guard calls that now go through
+`safe_svdvals`, which raises the torch type. Neither could catch it; the scipy
+fallbacks were dead and the exception propagated past a clause written to
+absorb it. Both reviewers found this independently.
+
+Widened to catch both, and PROVEN by raising through `safe_svdvals` and
+catching with the new clause. Same root cause as `schatten`'s
+`except Exception: return {}` — wiring `safe_svdvals` into 28+ sites changed
+what those sites raise and nobody re-checked the handlers. One was too broad,
+one too narrow; both were written against a call that had been replaced.
+
+### `apply_lm_head` — Gemma-2 softcap, fixed in the SHARED helper
+
+Verified on a real model: max|logit| 56.3212 -> 28.6277 with a cap of 30,
+matching `tanh(x/cap)*cap` bit-for-bit (`atol=0, rtol=0`), entropy 0.0031 ->
+3.2903 nats, and the uncapped path unchanged at 56.3212. Fixed in the helper
+rather than the caller because three tasks share it and one had already solved
+it locally without pushing the fix down.
+
+### `dynamics_perturbation_growth` — the sibling of today's `stability` fix
+
+`_rmax * ||row/_rmax||` in float32 goes non-finite at 1e38 and above; in double
+it survives to 3.4e38. Identical expression, same day, one sibling fixed and one
+missed — and `sweep_siblings.py` did NOT match it, because the surrounding
+expression differs enough to change both the AST shape and the method multiset.
+The tool answers "where else does this LINE appear"; it cannot answer "where
+else does this MISTAKE appear". Both of this round's misses were found by
+reviewers, not by my tooling.
+
+### `geometry_schatten` — and I made the SAME regression twice in one hour
+
+Applied promote-centre-rescale to `_normalise_matrix`. The mixed-magnitude
+fixture went from 0.0 to **0.9085408449172974**, exactly the executed official
+value. Then I checked ordinary data against the released `MNN.py`:
+
+    100 random float32 matrices: max |BLME - official| = 1.192e-07
+    (it was exactly 0.0 before my change)
+
+**I broke the bit-exact reference parity — the same regression I had fixed in
+`repe_task_vectors` less than an hour earlier, having written the lesson into
+this ledger in the meantime.**
+
+Fixed by making the promotion CONDITIONAL: the float32 path runs untouched
+wherever the magnitude guard does not fire, and promote/centre/rescale runs only
+outside the safe band — which is precisely where the released reference is also
+broken (inf at 1e-30, nan at 8.5e37). Both properties now hold:
+
+    ordinary data, 100 matrices : max |BLME - official| = 0.000e+00
+    mixed-magnitude fixture     : 0.9085408449172974 = official exactly
+
+**The pattern is mine, not the code's.** My default move on any precision
+finding is "promote to double", and it is wrong for every task whose value rests
+on bit-exact agreement with a released implementation — `cknna`, `coe`,
+`schatten`, `task_vectors`. Three of those four needed the correction applied
+after I had already promoted. The rule I keep failing to apply at the moment of
+writing the fix:
+
+  **Before promoting, ask what this task's verdict rests on. If the answer is
+  "bit-exact parity with a released reference", the promotion must be gated on
+  the float32 path having already failed — never unconditional.**
+
+That is now the third distinct instance today of me knowing a rule, recording
+it, and then breaking it within the hour (the others: sweeping for siblings,
+and verifying by execution rather than simulation). Writing a rule down has
+demonstrably not changed my behaviour; only a mechanical check has — the
+sibling sweeper caught the pooling population, and the ordinary-data parity
+assertion caught this. Rules need to become assertions in the test suite, not
+entries in a ledger.
+
+---
+
+## `tests/test_reference_parity_guard.py` — the rule as an assertion (2026-09-08)
+
+I concluded, after breaking bit-exact reference parity twice in one hour, that
+"writing the rule down has demonstrably not changed my behaviour; only a
+mechanical check has." So the rule is now a test.
+
+It pins the numbers whose loss defines the regression:
+
+  * `geometry_schatten` == released `MNN.py` at **exactly 0.0** over 50 random
+    float32 matrices — the value my unconditional `.double()` moved to
+    1.192e-07;
+  * and, in the SAME file, that the mixed-magnitude fixture still returns
+    0.9085408449172974, so parity cannot be bought back by re-breaking the
+    guard. The two assertions are adversaries on purpose: satisfying either one
+    alone is a known failure mode of this task;
+  * `geometry_spectral` == live WWFit at N = 8..20;
+  * `geometry_magnitude` == live magnipy on the collinear fixture that
+    motivated deleting its centring.
+
+Each skips if its reference is absent, so a minimal environment is unaffected —
+but it FAILS, loudly, when the reference is present and the number has moved.
+
+**Verified by reintroducing the exact regression**, not by assuming:
+
+    with the deliberate `X = X.double()` : 1 failed
+        assert 1.1920928955078125e-07 == 0.0
+    restored                             : 4 passed
+
+That is the same figure I had measured by hand, which is the point — the check
+reproduces the finding mechanically instead of depending on me to remember to
+look.
+
+**Why this matters more than the individual fixes.** Three rules were broken
+today within an hour of being recorded: sweep for siblings, verify by execution,
+and gate promotions on reference parity. In every case the ledger entry existed
+and did not help. The two things that DID catch defects were mechanical —
+`sweep_siblings.py` found the 6-site pooling population, and this assertion
+found the parity regression. The remaining ledger rules should be converted the
+same way, and a rule that cannot be made mechanical should be treated as
+unreliable rather than as policy.
+
+### `geometry_representation_sensitivity` — a guard whose margin was one part in a hundred
+
+The bf16 linearity guard tests `f(2h) - f(0) == 2(f(h) - f(0))` against
+`_tol = 3 * eps`. bfloat16's eps is 7.8e-3, so the tolerance is 0.0234 — and a
+genuine cap-30 softcap sat at **lin_rel 0.02309 against that 0.02344
+threshold**, passed, and the task reported a score **+8.57% above autograd**
+(Opus round 11). This is reachable now: bf16 is the dtype the sweep
+standardises on.
+
+Measured the discriminator before changing anything (linear control in the same
+dtype, in brackets):
+
+    |h| 0.5    softcap 0.0000000   [linear 0.0000000]
+    |h| 1.0    softcap 0.0065359   [linear 0.0000000]   <- under 3*eps
+    |h| 2.0    softcap 0.0263158   [linear 0.0000000]
+    |h| 4.6    softcap 0.1124260   [linear 0.0000000]
+    |h| 16     softcap 0.4219512   [linear 0.0000000]
+
+**A linear head reports EXACTLY zero at every magnitude; a saturating one grows
+with |h|.** So the level is the wrong statistic and the growth is the right
+one. Probing at rungs (1x, 2x, 4x) and taking the worst separates them cleanly:
+
+    |h| 0.5    single-rung 0.0000000 -> multi-rung 0.0263158   caught
+    |h| 1.0    single-rung 0.0065359 -> multi-rung 0.0878378   caught
+    |h| 4.6    single-rung 0.1124260 -> multi-rung 0.4467593   caught
+    linear control at every rung: 0.0000000                    never fires
+
+**The obvious fix was the wrong one.** Tightening the tolerance would catch the
+softcap and start firing on ordinary bf16 rounding, which the file records at
+0.00245 on real gpt2 — the guard would then reject healthy heads, which is how
+this task produced *no data at all* under bf16 in an earlier round. Scaling the
+probe instead costs three forward evaluations and moves the violation an order
+of magnitude clear of the floor without touching the threshold.
+
+71 tests pass across the touched geometry tasks.
+
+### The "five-file narrow-before-centre population" was five CANDIDATES, one defect
+
+Round 11 reported that `schatten`, `isotropy`, `consistency`,
+`superposition_strength` and `rmt_bulk` all still carried the old
+narrow-before-centre order, "all one-line fixes". I checked each against the
+data it actually receives rather than fixing all five:
+
+| site | verdict |
+|---|---|
+| `schatten` | REAL — fixed (conditionally, to preserve MNN parity) |
+| `isotropy:17` | REAL — fixed; same float64 data gave erank 14.19 (numpy) vs 1.0 (torch) |
+| `rmt_bulk:308` | REAL — fixed; `.float()` then `astype(float64)` on the next line, a pointless round trip that kept 5 of 7 distinct values |
+| `consistency:157` | **NOT a narrowing.** `_safe_unit(h.float())` receives hidden states, which are fp32/bf16; `.float()` on either is lossless — verified `torch.equal(t.float().double(), t.double())` is True for both |
+| `superposition_strength:59,166` | **NOT to be changed.** `W = W.float()` matches the official `overlap-0.py`, and this task's value rests on agreeing with it to 2.07e-09. The reviewer measured the residual float32 cost at <= 7.98e-09 and classed it robustness, not fidelity. Promoting here is the `schatten`/`task_vectors` regression waiting to happen |
+
+So: three real, one a non-issue, one where the "fix" would break a reference
+parity. Had I applied the reviewer's "all one-line fixes" summary literally, I
+would have introduced a fifth parity regression today.
+
+**A population is a list of places to LOOK, not a list of places to change.**
+The count-the-population discipline finds candidates; each still needs the
+question "is this wrong *here*, on the data this site actually receives, and
+what does this task's verdict rest on?" — and the answer differed for two of
+five.
+
+165 tests pass across the touched tasks.
+
+### `geometry_mahalanobis` and `dynamics_sharpness` — the last two queued defects
+
+**`mahalanobis`: a float32 covariance REORDERS the scores.** A Mahalanobis
+distance centres by the training mean, so it is translation invariant by
+construction. Measured against a float64 baseline:
+
+    +0      float32 spearman 1.000000000
+    +1e3    float32 spearman 1.000000000
+    +1e6    float32 spearman 0.998123827   <- REORDERED   (float64: 1.000000000)
+
+A reordering is worse than a shift here, because every reported number — AUROC
+above all — depends only on the ORDER, so the headline is corrupted while the
+distances still look plausible. Promoted the covariance fit to float64.
+
+Safe to promote unconditionally, and I checked why before doing it: this task is
+deliberately NOT bit-pinned to a released implementation (Ledoit-Wolf where Lee
+et al. use the empirical covariance, because at the shipped n_fit=50 / d=768 the
+empirical estimator has rank 49/768). No parity to lose — unlike `schatten` and
+`task_vectors`, where the same move was a regression. That check is now the
+first question I ask before any promotion.
+
+**`sharpness`: the eigenvalue's SIGN was an artefact of the iteration count.**
+pythia-70m reports **-104737 at 10 iterations and +111530 at 64**, on 3/3 seeds,
+from a near-degenerate +/-lambda pair at |lambda| ~ 1.24e5 that power iteration
+cannot separate; the zero-crossing sits near iteration 37.
+
+`_meta_power_iter_converged` could not warn: **False on 5/5 real models, and
+True in 0/120 runs where the answer was exact to 4.3e-07.** A flag that is false
+when the answer is right and silent when it is wrong is worse than no flag,
+because it invites the reader to trust it.
+
+Rather than tune the iteration count — which cannot fix a spectrum that has no
+stable sign — the task now runs a SECOND power iteration at 4x the count and
+emits `_meta_top_eigenvalue_sign_stable`, **derived from whether the two runs
+agree**, alongside the alternative estimate and its iteration count. This is the
+`fix-present-effect-absent` remedy applied as designed: a flag computed from
+what actually happened, never asserted.
+
+The headline is deliberately left signed rather than switched to |lambda|.
+Changing an estimand is a bigger decision than fixing a defect, and the caller
+can now see when the sign is meaningless — which is what they could not do
+before.
+
+---
+
+## `tests/test_defect_class_guards.py` — the population rule as an assertion (2026-09-08)
+
+Counting the population is a habit, and it failed four times on 2026-09-08
+alone. So the three classes fixed this campaign are now assertions:
+
+  * token-mean pooling in the model dtype (13 sites, found across THREE sweeps
+    with different matching criteria);
+  * absolute epsilon floors on a magnitude in a scale-free operation (4
+    instances, including one that broke `stability`'s defining axiom);
+  * `except np.linalg.LinAlgError` guarding a `safe_svdvals` call.
+
+**It immediately found two sites that two reviewers and I had all missed:**
+`contextualization.py:142` and `attention_rank.py:52`, both catching only the
+numpy error while guarding `safe_svdvals`, whose `torch._C._LinAlgError`
+derives from RuntimeError. Round 11 reported exactly one such site
+(`isotropy`). The reviewers sampled; the sweep counted.
+
+Both fixed. Safe to do mid-round: a handler that never fires cannot change any
+value a reviewer measures — its only effect is that a non-finite input now
+returns NaN instead of propagating an exception, which is the documented intent.
+
+**The allowlists are the substance, not the boilerplate.** Six sites the guards
+flag are CORRECT, and each carries its reason in the file:
+
+  * `representation_engineering`'s `mean_pos/mean_neg` stay in the model dtype
+    because `repe_task_vectors` is bit-pinned to the released
+    `ClusterMeanRepReader` at max abs error 0.0 — promoting moved it to
+    1.907e-06 and was reverted;
+  * `stability`'s and `representation_engineering`'s `clamp_min(1e-12)` guard a
+    fresh `torch.randn`, which is O(1) by construction and not data;
+  * `cknna`'s clamp only runs on rows already proven healthy by a per-row
+    finfo-derived test;
+  * two `information_geometry` clamps are denominators of relative-error
+    diagnostics, not magnitudes.
+
+Writing those reasons down is what converts "the sweep found 8 sites" into "3
+were defects and 5 were not". An allowlist without a reason is just a way to
+silence a guard.
+
+3 guards pass. When a new site appears it must be either fixed or justified in
+writing — which is the discipline I could not sustain by intention.
+
+---
+
+## `source_hash.py --write` now refuses stale verdicts (2026-09-08)
+
+Filed after `--write` silently converted "0 of 102 verified" into "102 of 102
+verified against current source" and reported success, certifying 51 Opus
+verdicts that predated ~49 fixes and 51 codex verdicts that predated 17 more.
+Now implemented.
+
+`--write` computes, per verdict, the newest mtime across the task's own module
+AND the shared surface (`geometry/utils.py`, `tasks/common.py`, `cache.py`,
+`normalization.py`, `config_loader.py`, `defaults.yaml`, and the study
+`tasks.yaml`), and refuses any verdict older than that — printing both
+timestamps so the refusal is auditable. It exits non-zero when it stamps
+nothing, so a caller cannot mistake "refused everything" for "verified
+everything".
+
+Verified against the real tree:
+
+    stamped 8 verdicts
+    REFUSED to stamp 48 verdicts whose source changed after they were written:
+      dynamics_sharpness.opus5.json   verdict 09-08 03:12  source 09-08 09:43
+      geometry_cka.opus5.json         verdict 09-08 03:42  source 09-08 04:20
+      ... (46 more)
+
+### The guard had the defect it was written to prevent
+
+My first version called `task_source_files(task)`, a function that **did not
+exist**, behind `if "task_source_files" in globals() else []`. It fell back to
+an empty list, `_newest` became 0.0, and the check could never fire — a guard
+that reports success while doing nothing, which is precisely the class
+(`fix present, effect absent`) this campaign keeps rediscovering. Then the
+implemented version resolved `SHARED` against the wrong base and returned 1 file
+instead of 8, so it would have missed every shared-helper change.
+
+Both caught by running it and reading the output rather than trusting the diff.
+Third time today that writing the guard was not the same as having the guard.
+
+### And I then reverted my own stamps
+
+Having fixed the tool, I ran it — and it stamped 8 verdicts MID-ROUND, while
+codex round 12 was running and I was still editing files. Those stamps would
+have been false the moment I touched another shared file. Restored the
+unstamped verdicts from backup; the honest count is back to **0 of 56 verified**.
+
+Stamping belongs at the START of a round, against the tree the reviewer is about
+to read. Having a correct tool is not permission to use it at the wrong moment.
+
+---
+
+## Round 12, first 9 verdicts: 7 GREEN / 2 YELLOW / 0 RED (2026-09-08)
+
+The first inflection of the campaign. The same tasks in round 10:
+`dynamics_coe` RED, `dynamics_interpolation` RED, `dynamics_stability` RED,
+`geometry_cka` RED. Now none of them is.
+
+Decisive confirmations of today's fixes, in the reviewer's own measurements:
+
+  * **`dynamics_interpolation` GREEN** — "the repaired Gemma-2 counterexample is
+    now **0.628530668095 versus native 0.628530633133**". The softcap fix in
+    `apply_lm_head` is verified against the model's own native value to ~6e-8
+    relative. The 194.6% `convexity_gap` SIGN INVERSION is gone.
+  * **`dynamics_stability` YELLOW (was RED)** — "self-stability exactly 1.0 at
+    every one of the 10 checked scale rungs through 2.406159650500376e38". The
+    axiom holds at the last representable float32 value, which is precisely
+    where it was breaking.
+  * **`geometry_cka` GREEN** — matches the authors' published demo outputs
+    (0.557613236510 vs 0.557613256612) to ~2e-8.
+
+### The tooling is being used, and it is preventing false findings
+
+The `dynamics_interpolation` verdict states: *"I checked fixture integrity using
+`on_grid_translation`'s returned baselines"*.
+
+That is the helper written this afternoon, in the signature I corrected AFTER a
+round-11 reviewer measured a phantom 14.3% homology shift by comparing against
+the unsnapped array. The correction — returning the baseline explicitly so the
+right comparison is the easy one — is now doing its job in a reviewer's hands.
+
+Round 10 produced 37 REDs, of which a large share were fixture artefacts at
+magnitudes no model reaches. Round 12's early verdicts pair every extreme-scale
+observation with a reachability bound and an integrity check, which is what the
+prompt asked for and what makes a verdict actionable rather than merely alarming.
+
+Still 42 tasks to report, and the two YELLOWs are real (a coordinate-permutation
+tie in `stability` that both reviewers now agree is bounded, and `coe`). But
+this is the first round where the fixes are demonstrably landing rather than
+being replaced by new findings.

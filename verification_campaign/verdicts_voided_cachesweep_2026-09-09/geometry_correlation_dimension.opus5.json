@@ -1,0 +1,20 @@
+{
+ "task": "geometry_correlation_dimension",
+ "reviewer": "opus5",
+ "verdict": "GREEN",
+ "verdict_reason": "Repaired and verified through the real evaluate(), not a simulated branch -- the error I made on this same task a round earlier. The headline replaced Grassberger-Procaccia's C(r) with the CONDITIONAL integral (C(r)-c0)/(1-c0), because coincident pairs were dropped from BOTH the numerator and the denominator: the plateau kernel already divides by distances.size and draws radii from its own positive distances, and the CALL SITE was handing it a pre-filtered array. An atom is the answer, not a nuisance -- a population with positive mass at a point has D2 = 0 because C(r) -> c0 > 0. On the independently specified mu = 0.5*delta(-2) + 0.5*U[0,1], where C(r) = 0.25 + 0.25(2r - r^2) and the exact D2 is 0, the filtered call returns 0.998264543712 and the repaired one 0.002955769916, against nolds' 5.35160579501927e-17. Known-dimension controls are bit-identical (3-cube and 8-cube at N=100..2000 give identical values filtered vs unfiltered, since a random cube has no coincident pairs).",
+ "defect_location": "NONE",
+ "comparable": "GREEN",
+ "comparable_reason": "No comparability defect established on the axes measured.",
+ "normalized_variant": "",
+ "normalized_ok": "ABSENT",
+ "github": "YES",
+ "github_repo": "CSchoel/nolds",
+ "github_reason": "Executed nolds' constant small-radius correlation integral as the reference on the specified population; 5 existing parity assertions plus tests/tasks/test_correlation_dimension_atom_e2e.py driven through evaluate().",
+ "paper_number": "NONE",
+ "paper_reason": "Not attempted in this pass.",
+ "confounds": "CONFIRMED",
+ "confounds_reason": "The defect is LIVE ON REAL DATA, not only on synthetic atoms: a real gpt2 run reports _meta_coincident_pair_fraction = 0.0052 (0.52% of pairs coincident) with _meta_correlation_integral_n_pairs = 5356 = 104*103/2. Separately, at sample sizes below the shipped num_samples=100 the task correctly returns NaN with status='insufficient' rather than a confident wrong number (verified at N=20).",
+ "defects": [],
+ "fix": "No change required."
+}

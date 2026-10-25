@@ -49,7 +49,13 @@ def _effective_rank(matrix: np.ndarray) -> float:
         # exponents (2026-09-07).
         from ..geometry.utils import safe_svdvals
         S = safe_svdvals(matrix)
-    except np.linalg.LinAlgError:
+    except (np.linalg.LinAlgError, torch._C._LinAlgError):
+        # BOTH types: `safe_svdvals` raises the torch one, which derives from
+        # RuntimeError, while the numpy one derives from ValueError — they
+        # share no ancestor, so naming only numpy left this fallback dead and
+        # the exception propagating past it. Found by
+        # tests/test_defect_class_guards.py, which located two sites beyond the
+        # one both round-11 reviewers reported in `isotropy`.
         return float("nan")
     s = S.sum()
     if s <= 0:
