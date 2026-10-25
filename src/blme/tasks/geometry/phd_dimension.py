@@ -227,7 +227,7 @@ def _gather_point_cloud(
                     # exactly what the promotion bought. Swept as a class: the first AST query
                     # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
                     # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
-                    vecs.append(ch.double().mean(0) if pooling == "mean" else ch[-1])
+                    vecs.append(np.asarray(ch, dtype=np.float64).mean(0) if pooling == "mean" else ch[-1])
                 if vecs:
                     return np.asarray(vecs, dtype=np.float64)
 
@@ -270,7 +270,7 @@ def _gather_point_cloud(
                 # exactly what the promotion bought. Swept as a class: the first AST query
                 # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
                 # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
-                collected.append(h.double().mean(0))
+                collected.append(np.asarray(h, dtype=np.float64).mean(0))
             elif pooling == "last":
                 collected.append(h[-1])
             else:  # all_tokens
@@ -325,7 +325,7 @@ def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
             idx = max(1, min(idx, len(hs) - 1))
             h = hs[idx][0].detach().float().cpu().numpy()
             if pooling == "mean":
-                h = h.mean(axis=0, keepdims=True)
+                h = np.asarray(h, dtype=np.float64).mean(axis=0, keepdims=True)
             elif pooling == "last":
                 h = h[-1:, :]
             yield np.asarray(h, dtype=np.float64)

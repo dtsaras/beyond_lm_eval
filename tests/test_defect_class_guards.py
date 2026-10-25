@@ -45,7 +45,13 @@ def test_no_token_pooling_in_the_model_dtype():
     for f in _py_files():
         for i, line in enumerate(f.read_text().splitlines(), 1):
             s = line.strip()
-            if s.startswith("#") or "double()" in s:
+            # An explicit float64 promotion in either spelling is compliant. The
+            # guard used to accept only torch's `.double()`, so it rejected the
+            # correct numpy form and ACCEPTED `ch.double().mean(0)` on a numpy
+            # array, which raised AttributeError on every call (phd, 2026-10-26).
+            # A text match rewards a spelling, not a behaviour; the AST rewrite
+            # is queued (plan, Phase 3).
+            if s.startswith("#") or "double()" in s or "float64" in s:
                 continue
             if any(f.name == fn and needle in s for (fn, needle) in ALLOW):
                 continue
