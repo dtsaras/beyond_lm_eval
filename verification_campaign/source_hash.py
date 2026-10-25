@@ -1,32 +1,56 @@
 #!/usr/bin/env python3
-"""Content hash of each task's source, with comments and docstrings stripped.
+"""Fingerprint of everything that can move a task's numbers.
 
-A verdict is a statement about a CODE STATE. Until now "is this verdict stale?"
-was answered by file mtime or by the maintainer's memory of what he edited,
-which is exactly the kind of judgement call this campaign keeps getting wrong:
-on 2026-09-05 thirty verdicts went stale by mtime, most of them because a
-one-line `post-final-norm:` marker was added to satisfy a new test, and there
-was no way to tell those apart from the six that were real semantic changes.
+A verdict is a statement about a CODE STATE, so "is this verdict stale?" must be
+answered mechanically. The fingerprint of a task covers:
 
-So the hash ignores comments, docstrings and formatting, and covers only what
-can change a number. Add `--write` to stamp the current hashes into each verdict
-file; run without it to list which verdicts no longer match their source.
+  * the task's own module and its in-package IMPORT CLOSURE (every ``blme``
+    module it imports, transitively, including imports nested in functions),
+    with comments, docstrings and formatting stripped, so only what can change
+    a number counts;
+  * the RUNTIME modules every task runs through without importing them
+    (``core.py`` decides dtype casts and forced-eager attention, ``cache.py``
+    decides what a task receives, ``models/wrapper.py`` loads the model);
+  * the task's RESOLVED CONFIG: shipped ``defaults.yaml`` merged with the
+    study's overrides for that task, exactly as a study run sees it, rather
+    than whole-file hashes that void all 51 verdicts on any edit;
+  * the versions of the numerical libraries the reference pins depend on.
+
+Usage::
+
+    python source_hash.py                  # check every verdict in verdicts/
+    python source_hash.py --launch TASK..  # fingerprints to embed at round START
+    python source_hash.py --launch all
+    python source_hash.py --self-test      # known-positive checks of the hasher
+
+Verdicts are stamped at LAUNCH, against the tree the reviewer is about to read
+(``fingerprint_at_launch``), never afterwards: stamping after the fact once
+turned "0 of 102 verified" into "102 of 102" while every verdict predated the
+code it was certified against. File mtimes are not used, because copying or
+moving a verdict file refreshes them.
+
+Package files are located from ``blme.__file__`` (set PYTHONPATH to test a
+worktree), and a file that should exist but does not is an ERROR, never a skip.
 """
 import ast
 import glob
 import hashlib
+import importlib.metadata
 import inspect
 import json
 import os
 import sys
-import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "src"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+VERDICTS = os.path.join(HERE, "verdicts")
+STUDY_TASKS_YAML = os.path.expanduser("~/projects/beyond_benchmarks/configs/tasks.yaml")
 
-from blme.tasks import geometry, dynamics, consistency, interpretability  # noqa: E402,F401
-from blme.tasks import causality, topology, representation_engineering  # noqa: E402,F401
-from blme.registry import _TASK_REGISTRY  # noqa: E402
+# Modules on every task's execution path that tasks do not import by name.
+RUNTIME_MODULES = ("blme.core", "blme.cache", "blme.registry", "blme.results",
+                   "blme.models.wrapper", "blme.tasks.base",
+                   "blme.tasks.config_loader")
+LIBRARIES = ("torch", "transformers", "numpy", "scipy", "scikit-learn",
+             "ripser", "dionysus")
 
 
 class _Strip(ast.NodeTransformer):
@@ -47,166 +71,252 @@ class _Strip(ast.NodeTransformer):
     visit_ClassDef = _strip
 
 
-def source_hash(path):
-    tree = _Strip().visit(ast.parse(open(path).read()))
+def source_hash(path, text=None):
+    """Hash of a module's AST with docstrings removed (comments never reach it)."""
+    if text is None:
+        with open(path) as fh:
+            text = fh.read()
+    tree = _Strip().visit(ast.parse(text))
     ast.fix_missing_locations(tree)
     return hashlib.sha256(ast.dump(tree).encode()).hexdigest()[:16]
 
 
-# Modules every task's numbers can depend on without importing them by name.
-# A change to `safe_unit_rows_torch` moves results in a dozen tasks whose own
-# files are untouched, and the per-task hash cannot see that -- so it is tracked
-# separately rather than left implicit.
-SHARED = ("tasks/geometry/utils.py", "tasks/common.py", "cache.py",
-          "normalization.py", "tasks/config_loader.py",
-          # Not code, but merged INTO self.config and therefore able to move
-          # every number a task reports. `dynamics_fractal`'s headline fell 79.5%
-          # to a one-line config override, so a hash that ignored configs would
-          # have called that verdict fresh.
-          "tasks/configs/defaults.yaml")
-
-# The study's own overrides win over `defaults.yaml`, so they belong here too.
-SHARED_EXTERNAL = (
-    os.path.expanduser("~/projects/beyond_benchmarks/configs/tasks.yaml"),
-)
+def _pkg_root():
+    import blme
+    return os.path.dirname(os.path.abspath(blme.__file__))
 
 
-def shared_hash():
-    h = hashlib.sha256()
-    for rel in SHARED:
-        path = os.path.join(ROOT, "src", "blme", rel)
-        if not os.path.exists(path):
-            continue
-        if path.endswith(".py"):
-            h.update(source_hash(path).encode())
-        else:
-            # Not parseable as Python, so hash the bytes -- which means a
-            # COMMENT in a config counts as a change. That is the conservative
-            # direction and configs are edited rarely.
-            h.update(hashlib.sha256(open(path, "rb").read()).hexdigest().encode())
-    for path in SHARED_EXTERNAL:
-        if os.path.exists(path):
-            h.update(hashlib.sha256(open(path, "rb").read()).hexdigest().encode())
-    return h.hexdigest()[:16]
-
-
-def task_source_files(task):
-    """Every file whose change invalidates a verdict for `task`.
-
-    The task's own module plus the shared helpers, since a change to
-    `geometry/utils.py` can alter a task that never mentions it.
-    """
-    files = []
-    cls = _TASK_REGISTRY.get(task)
-    if cls is not None:
-        try:
-            files.append(inspect.getfile(cls))
-        except Exception:
-            pass
-    for rel in SHARED:
-        cand = os.path.join(ROOT, "src", "blme", rel)   # same base as shared_hash()
+def module_file(modname):
+    """File for an in-package module name, or None if it is not one."""
+    if modname != "blme" and not modname.startswith("blme."):
+        return None
+    root = _pkg_root()
+    rel = modname.split(".")[1:]
+    base = os.path.join(root, *rel)
+    for cand in (base + ".py", os.path.join(base, "__init__.py")):
         if os.path.exists(cand):
-            files.append(cand)
-    for path in SHARED_EXTERNAL:
-        if os.path.exists(path):
-            files.append(path)
+            return cand
+    return None
+
+
+def _module_name(path):
+    root = _pkg_root()
+    rel = os.path.relpath(path, os.path.dirname(root))[:-3].split(os.sep)
+    if rel[-1] == "__init__":
+        rel = rel[:-1]
+    return ".".join(rel)
+
+
+def imports_of(path):
+    """In-package modules imported anywhere in ``path`` (nested imports too)."""
+    tree = ast.parse(open(path).read())
+    me = _module_name(path)
+    pkg = me if path.endswith("__init__.py") else me.rsplit(".", 1)[0]
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                out.add(a.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = pkg.split(".")
+                base = parts[: len(parts) - (node.level - 1)]
+                mod = ".".join(base + ([node.module] if node.module else []))
+            else:
+                mod = node.module or ""
+            out.add(mod)
+            for a in node.names:            # `from pkg import submodule`
+                out.add(f"{mod}.{a.name}")
+    files = set()
+    for m in out:
+        f = module_file(m)
+        if f is not None and f != path:
+            files.add(f)
     return files
 
 
-def task_hashes():
+def _registration_only(path):
+    """A package ``__init__`` that only imports task modules to register them.
+
+    Following it would put every task into every closure (``core.py`` imports
+    them all), so any edit anywhere would void all 51 verdicts.
+    """
+    if not path.endswith("__init__.py"):
+        return False
+    tree = ast.parse(open(path).read())
+    return not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                  ast.Assign, ast.AnnAssign))
+                   for n in tree.body)
+
+
+def import_closure(path, skip=frozenset()):
+    """``path`` plus every in-package module it reaches, not entering ``skip``."""
+    seen, todo = set(), [path]
+    while todo:
+        p = todo.pop()
+        if p in seen or (p != path and (p in skip or _registration_only(p))):
+            continue
+        seen.add(p)
+        todo.extend(imports_of(p) - seen)
+    return seen
+
+
+def _registry():
+    from blme.core import _register_all_tasks
+    from blme.registry import _TASK_REGISTRY
+    _register_all_tasks()
+    return _TASK_REGISTRY
+
+
+def task_files(task, registry=None):
+    """Every package file whose change can move ``task``'s numbers."""
+    reg = registry or _registry()
+    cls = reg.get(task)
+    if cls is None:
+        raise KeyError(f"unknown task {task!r}")
+    own = inspect.getfile(cls)
+    files = import_closure(own)
+    # The runtime path imports every task module to register it; those are
+    # other tasks' code, not this task's dependencies, so do not enter them.
+    other_tasks = {inspect.getfile(c) for c in reg.values()} - files
+    for m in RUNTIME_MODULES:
+        f = module_file(m)
+        if f is None:
+            raise FileNotFoundError(f"runtime module {m} not found under {_pkg_root()}")
+        files |= import_closure(f, skip=frozenset(other_tasks))
+    return sorted(files)
+
+
+def resolved_config(task):
+    from blme.tasks.config_loader import resolve_task_config
+    overrides = {}
+    if os.path.exists(STUDY_TASKS_YAML):
+        import yaml
+        with open(STUDY_TASKS_YAML) as fh:
+            overrides = (yaml.safe_load(fh).get("task_configs") or {}).get(task) or {}
+    return resolve_task_config(task, dict(overrides))
+
+
+def library_versions():
     out = {}
-    for name, cls in _TASK_REGISTRY.items():
+    for lib in LIBRARIES:
         try:
-            out[name] = source_hash(inspect.getfile(cls))
-        except Exception:
-            pass
+            out[lib] = importlib.metadata.version(lib)
+        except importlib.metadata.PackageNotFoundError:
+            out[lib] = None
     return out
 
 
-def main():
-    write = "--write" in sys.argv
-    hashes = task_hashes()
-    shared = shared_hash()
-    stale, ok, unstamped = [], [], []
-    stamped, skipped = [], []
-    for f in sorted(glob.glob(os.path.join(ROOT, "verification_campaign",
-                                           "verdicts", "*.json"))):
+def fingerprint(task, registry=None, overrides_text=None):
+    """``(digest, parts)``. ``overrides_text`` maps path -> replacement source
+    (used only by the self-test to simulate an edit without touching disk)."""
+    overrides_text = overrides_text or {}
+    root = os.path.dirname(_pkg_root())
+    files = task_files(task, registry)
+    parts = {
+        "files": {os.path.relpath(f, root): source_hash(f, overrides_text.get(f))
+                  for f in files},
+        "config": hashlib.sha256(json.dumps(resolved_config(task), sort_keys=True,
+                                            default=repr).encode()).hexdigest()[:16],
+        "libraries": library_versions(),
+    }
+    digest = hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:16]
+    return digest, parts
+
+
+def paper_core_tasks():
+    """The 51 paper-core task names, from the package repo's test fixtures."""
+    repo = os.path.dirname(os.path.dirname(_pkg_root()))     # <repo>/src/blme
+    with open(os.path.join(repo, "tests", "fixtures", "paper_core_tasks.json")) as fh:
+        return json.load(fh)
+
+
+def check_verdicts():
+    reg = _registry()
+    cache = {}
+    ok, stale, unstamped = [], [], []
+    paths = sorted(glob.glob(os.path.join(VERDICTS, "*.json")))
+    for f in paths:
         d = json.load(open(f))
         task = d.get("task") or os.path.basename(f).split(".")[0]
-        cur = hashes.get(task)
-        if cur is None:
+        if task not in reg:
+            stale.append((os.path.basename(f), "unknown task"))
             continue
-        rec = d.get("source_hash")
-        if write:
-            # REFUSE TO STAMP A VERDICT OLDER THAN THE CODE IT COVERS.
-            #
-            # `--write` used to stamp unconditionally. Run after a green suite
-            # on 2026-09-08 it turned the accounting from "0 of 102 verified"
-            # into "102 of 102 verified against current source" and reported
-            # success — while 51 Opus verdicts predated ~49 fixes and 51 codex
-            # verdicts predated 17 more. Neither reviewer had seen the tree it
-            # certified them against. That is worse than carrying no hash: it
-            # manufactures provenance, and it silently inverts the campaign's
-            # headline number.
-            #
-            # A verdict may only be stamped if the source it covers has not
-            # changed since the verdict was written. Stamping belongs at the
-            # START of a round, against the tree the reviewer is about to read.
-            _vm = os.path.getmtime(f)
-            _srcs = task_source_files(task)
-            _newest = max([os.path.getmtime(x) for x in _srcs] or [0.0])
-            if _newest > _vm:
-                skipped.append((os.path.basename(f),
-                                time.strftime("%m-%d %H:%M", time.localtime(_vm)),
-                                time.strftime("%m-%d %H:%M", time.localtime(_newest))))
-                continue
-            d["source_hash"] = cur
-            d["shared_hash"] = shared
-            json.dump(d, open(f, "w"), indent=2)
-            stamped.append(os.path.basename(f))
-            continue
-        if d.get("shared_hash") not in (None, shared):
-            stale.append((os.path.basename(f) + "  [shared helpers]",
-                          d.get("shared_hash"), shared))
-            continue
+        if task not in cache:
+            cache[task] = fingerprint(task, reg)[0]
+        rec = d.get("fingerprint_at_launch")
         if rec is None:
             unstamped.append(os.path.basename(f))
-        elif rec != cur:
-            stale.append((os.path.basename(f), rec, cur))
+        elif rec != cache[task]:
+            stale.append((os.path.basename(f), f"{rec} -> {cache[task]}"))
         else:
             ok.append(os.path.basename(f))
+    n = len(paths)
+    print(f"{len(ok)} of {n} verdicts VERIFIED against the current fingerprint")
+    # Absence of a fingerprint is absence of evidence, so it counts as UNVERIFIED.
+    print(f"{len(unstamped)} of {n} carry no fingerprint_at_launch -> UNVERIFIED")
+    print(f"{len(stale)} of {n} are STALE")
+    for name, why in stale:
+        print(f"  {name:50s} {why}")
+    return 0 if len(ok) == n else 1
 
-    if write:
-        print(f"stamped {len(stamped)} verdicts")
-        if skipped:
-            print(f"REFUSED to stamp {len(skipped)} verdicts whose source changed "
-                  f"after they were written:")
-            for n, vm, sm in skipped:
-                print(f"  {n:46s} verdict {vm}  source {sm}")
-        if not stamped:
-            print("nothing stamped — a verdict written before its own source "
-                  "cannot be certified against it")
-            sys.exit(1)
+
+def self_test():
+    """Known positives and negatives: a hasher that misses an edit is worse
+    than none, because it reports a stale verdict as verified."""
+    reg = _registry()
+    task = "geometry_svd"
+    base, parts = fingerprint(task, reg)
+    root = os.path.dirname(_pkg_root())
+    files = task_files(task, reg)
+    rels = set(parts["files"])
+    must = {"blme/tasks/geometry/utils.py", "blme/core.py", "blme/cache.py",
+            "blme/tasks/base.py", "blme/tasks/config_loader.py"}
+    missing = must - rels
+    assert not missing, f"closure misses {missing}"
+    # 1. A semantic edit to a TRANSITIVE dependency must change the fingerprint.
+    dep = os.path.join(root, "blme/tasks/geometry/utils.py")
+    edited = open(dep).read() + "\n_SELF_TEST_SENTINEL = 1\n"
+    assert fingerprint(task, reg, {dep: edited})[0] != base, "missed a dependency edit"
+    # 2. A comment-only edit must NOT change it.
+    commented = open(dep).read() + "\n# self-test comment\n"
+    assert fingerprint(task, reg, {dep: commented})[0] == base, "comment changed hash"
+    # 3. A runtime-module edit must change it.
+    core = os.path.join(root, "blme/core.py")
+    assert fingerprint(task, reg, {core: open(core).read() + "\nX_ = 2\n"})[0] != base
+    # 4. An edit to an UNRELATED task's module must not change it.
+    other = os.path.join(root, "blme/tasks/topology/zigzag.py")
+    assert other not in files, "closure leaked into an unrelated task module"
+    assert fingerprint(task, reg, {other: open(other).read() + "\nY_ = 3\n"})[0] == base
+    # 5. Every paper-core task resolves, and every closure file exists.
+    core_tasks = paper_core_tasks()
+    sizes = {}
+    for t in core_tasks:
+        fs = task_files(t, reg)
+        assert all(os.path.exists(f) for f in fs)
+        sizes[t] = len(fs)
+    print(f"self-test OK: {task} closure = {len(files)} files; "
+          f"{len(core_tasks)} paper-core tasks resolved "
+          f"(closure size min {min(sizes.values())}, max {max(sizes.values())})")
+
+
+def main():
+    argv = sys.argv[1:]
+    if "--write" in argv:
+        sys.exit("--write is retired: stamp at round START with --launch and "
+                 "store the value as fingerprint_at_launch in each verdict.")
+    if "--self-test" in argv:
+        self_test()
         return
-    print(f"{len(ok)} verdicts VERIFIED against their source")
-    # UNSTAMPED IS NOT VERIFIED.
-    #
-    # These used to be reported on their own line and then quietly excluded
-    # from the stale list, so a consumer counting "stale" saw a smaller number
-    # than the number of unverified verdicts -- 32 of them, on 2026-09-07,
-    # sitting in neither bucket. An absent hash is not evidence that the source
-    # is unchanged; it is the absence of evidence, and the conservative reading
-    # is the only safe one when the whole point of the mechanism is to stop
-    # unverified claims being counted as verified.
-    print(f"{len(unstamped)} verdicts carry NO HASH -> counted as UNVERIFIED "
-          f"(written before stamping; absence of a hash is not a match)")
-    print(f"{len(ok)} of {len(ok) + len(unstamped) + len(stale)} verdicts are "
-          f"verified against current source")
-    if stale:
-        print(f"\n{len(stale)} verdicts are STALE -- the source changed "
-              f"semantically since they were written:")
-        for n, r, c in stale:
-            print(f"  {n:46s} {r} -> {c}")
+    if argv and argv[0] == "--launch":
+        reg = _registry()
+        names = argv[1:]
+        if names == ["all"]:
+            names = paper_core_tasks()
+        out = {t: {"fingerprint_at_launch": fingerprint(t, reg)[0]} for t in names}
+        print(json.dumps(out, indent=1, sort_keys=True))
+        return
+    sys.exit(check_verdicts())
 
 
 if __name__ == "__main__":

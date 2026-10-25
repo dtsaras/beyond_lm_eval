@@ -15,8 +15,12 @@ trajectory_curvature) ran fine with NO cache and refused with an unusable one.
 The guard is therefore executed, not read.
 """
 import json
+import os
 
 import pytest
+
+PAPER_CORE_TASKS = os.path.join(os.path.dirname(__file__), "fixtures",
+                                "paper_core_tasks.json")
 
 transformers = pytest.importorskip("transformers")
 
@@ -53,7 +57,7 @@ def test_no_task_is_destroyed_by_an_unusable_cache(gpt2_and_attention_only_cache
     _register_all_tasks()
     model, tok, docs, cache = gpt2_and_attention_only_cache
     tasks = [t["task"] if isinstance(t, dict) else t
-             for t in json.load(open("verification_campaign/tasks.json"))]
+             for t in json.load(open(PAPER_CORE_TASKS))]
 
     def outcome(name, cls, cfg, c):
         try:

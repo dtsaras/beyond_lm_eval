@@ -33,22 +33,34 @@ import os
 import pytest
 import torch
 
-_SCRATCH = os.environ.get(
-    "BLME_REF_DIR",
-    "/tmp/claude-1736197890/-home-dtsaras-projects-beyond-lm-eval/"
-    "7d99fdd4-90f5-40ae-993c-0193a9a5f41b/scratchpad",
-)
+# Released references live under the shared refrepos convention
+# (`~/.cache/blme-refrepos/<repo>/...`). `BLME_REF_DIR` still selects a flat
+# directory holding `MNN_official.py`. With BLME_REQUIRE_REFS=1 a missing or
+# unloadable reference FAILS instead of skipping, so a pin cannot go quietly
+# dark on a new machine (the schatten pin skipped on pod1 for exactly that
+# reason: its default pointed at a scratch directory on the old host).
+_REFREPOS = os.environ.get("BLME_REFREPOS", os.path.expanduser("~/.cache/blme-refrepos"))
+_MNN_PATH = (os.path.join(os.environ["BLME_REF_DIR"], "MNN_official.py")
+             if os.environ.get("BLME_REF_DIR")
+             else os.path.join(_REFREPOS, "MatrixNuclearNorm", "code", "MNN.py"))
+_REQUIRE_REFS = os.environ.get("BLME_REQUIRE_REFS") == "1"
+
+
+def _unavailable(msg):
+    if _REQUIRE_REFS:
+        pytest.fail(msg)
+    pytest.skip(msg)
 
 
 def _load(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or not os.path.exists(path):
-        pytest.skip(f"reference not available: {path}")
+        _unavailable(f"reference not available: {path}")
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
     except Exception as exc:  # pragma: no cover - environment dependent
-        pytest.skip(f"reference failed to load: {type(exc).__name__}: {exc}")
+        _unavailable(f"reference failed to load: {type(exc).__name__}: {exc}")
     return mod
 
 
@@ -58,9 +70,9 @@ def test_schatten_mnn_is_bit_exact_against_released_reference():
     Guards the exact regression of 2026-09-08: an unconditional `.double()` in
     `_normalise_matrix` took this from 0.0 to 1.192e-07.
     """
-    M = _load(os.path.join(_SCRATCH, "MNN_official.py"), "mnn_official_guard")
+    M = _load(_MNN_PATH, "mnn_official_guard")
     if not hasattr(M, "matrix_nuclear_norm") or not hasattr(M, "normalize"):
-        pytest.skip("official MNN.py lacks the expected entry points")
+        _unavailable("official MNN.py lacks the expected entry points")
     from blme.tasks.geometry.schatten import (_matrix_nuclear_norm_fast,
                                               _normalise_matrix)
 

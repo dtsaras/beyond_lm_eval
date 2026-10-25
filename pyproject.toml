@@ -15,7 +15,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.9"
+# 3.10 is the real floor: numpy 2.x and transformers 5.x both require it,
+# and the package uses PEP 604 annotations (`bool | None`) at import time.
+requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0.0",
     "transformers>=4.35.0",
@@ -24,6 +26,9 @@ dependencies = [
     "scipy",
     "pyyaml",
     "datasets",
+    # Required, not optional: five paper-core tasks (both RepE probes,
+    # mahalanobis, intrinsic_dim, categories) need it.
+    "scikit-learn",
     # Pinned. dionysus 2.1.1 bundles fast_zigzag (Dey-Hou) under BSD-3-Clause,
     # which topology_zigzag_persistence needs for the paper's true multi-layer
     # barcode. It was declared under an OPTIONAL extra, so a production install

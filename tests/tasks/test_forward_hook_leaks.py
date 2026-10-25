@@ -19,8 +19,10 @@ import pytest
 import torch
 
 import ast
+import os
 import pathlib
 
+import blme
 from blme.tasks.common import get_layers
 from blme.registry import _TASK_REGISTRY
 from blme.tasks import geometry, dynamics, consistency, interpretability  # noqa: F401
@@ -99,6 +101,9 @@ def _uses_shared_helper(cls):
 HOOKING_TASKS = _tasks_that_register_hooks()
 
 
+_BLME_PKG_DIR = os.path.dirname(os.path.abspath(blme.__file__))
+
+
 def _is_blme_hook(fn):
     """True for a hook this repo registered.
 
@@ -111,10 +116,25 @@ def _is_blme_hook(fn):
     something the repo does not control and cannot fix. It would also be a
     false accusation in a campaign whose whole point is not making those.
     """
-    qual = getattr(fn, "__qualname__", "") or ""
     mod = getattr(fn, "__module__", "") or ""
-    return mod.startswith("blme") or "blme" in getattr(
-        getattr(fn, "__code__", None), "co_filename", "")
+    if mod == "blme" or mod.startswith("blme."):
+        return True
+    # Ownership is decided by the real package directory, never by a substring:
+    # a venv named `blme` put transformers' own `output_capturing_hook` under a
+    # path containing "blme" and produced 690 false failures.
+    filename = getattr(getattr(fn, "__code__", None), "co_filename", "") or ""
+    return bool(filename) and os.path.abspath(filename).startswith(_BLME_PKG_DIR + os.sep)
+
+
+def test_hook_ownership_is_decided_by_package_path_not_substring():
+    """Known positive and known negative for the helper above."""
+    from blme.tasks import common as _common
+    assert _is_blme_hook(_common.get_layers)
+    ns = {}
+    exec(compile("def output_capturing_hook(*a):\n    return None\n",
+                 "/venvs/blme/lib/python3.12/site-packages/transformers/x.py", "exec"), ns)
+    ns["output_capturing_hook"].__module__ = "transformers.utils.output_capturing"
+    assert not _is_blme_hook(ns["output_capturing_hook"])
 
 
 def _hook_counts(model):

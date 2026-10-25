@@ -17,6 +17,9 @@ import os
 
 import pytest
 
+PAPER_CORE_TASKS = os.path.join(os.path.dirname(__file__), "fixtures",
+                                "paper_core_tasks.json")
+
 transformers = pytest.importorskip("transformers")
 
 
@@ -76,7 +79,7 @@ def test_no_task_headline_moves_under_offload(gpt2, restore_offload):
     _register_all_tasks()
     model, tok, docs = gpt2
     tasks = [t["task"] if isinstance(t, dict) else t
-             for t in json.load(open("verification_campaign/tasks.json"))]
+             for t in json.load(open(PAPER_CORE_TASKS))]
 
     def run(cls, cfg, mode):
         os.environ["BLME_DISK_OFFLOAD"] = mode
