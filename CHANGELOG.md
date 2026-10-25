@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- **Python ≥ 3.10 is now required.** numpy 2.x and transformers 5.x need it, and the package evaluates PEP 604 annotations (`bool | None`) at import time. The CI matrix is now 3.10–3.12.
+- **scikit-learn is now a core dependency**, because five paper-core tasks need it.
+
 ### Fixed
 - **bfloat16 storage no longer crashes.** numpy has no bfloat16 dtype, so `.numpy()` raised `TypeError` on bf16 hidden states in three places:
   - disk offload in `collect_hidden_states` (`BLME_DISK_OFFLOAD=1`), which now stores the bf16 bit pattern and reads it back as bf16, bit for bit;

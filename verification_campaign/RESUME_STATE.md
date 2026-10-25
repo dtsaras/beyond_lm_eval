@@ -8,8 +8,13 @@ decisions are recorded in the plan and in memory (`hardening-plan-2026-10`).
 ## Where things stand
 - Branch `hardening/2026-10` (main tree):
   - `d106ef9` is the checkpoint of the rounds 12–15 state;
-  - the Phase 0 tooling commit follows (see `git log`).
-- Branch `hardening/2026-10-crashfix` (worktree `../blme_wt_crashfix`): verified crash fixes. Merge status is in `git log`.
+  - `bd3b9b7` holds the Phase 0 tooling;
+  - `5f6f36d` holds the crash fixes (made on `hardening/2026-10-crashfix`);
+  - `b6980a9` merges them.
+- `main` is untouched, and nothing has been pushed. Ask before any push.
+- Golden snapshots are in `~/hara-artifacts/blme/golden/`:
+  - `d106ef9_shipped_cache_run{A,B}` is the pre-CBWR pair (20 nondeterministic leaves);
+  - `b6980a9_shipped_cache_run{C,D}` is the post-merge CBWR pair, which is the **Phase 2 baseline**. Check it with `compare C D`; whether it was bit-identical is recorded below once known.
 - **Env:** venv `~/hara-venvs/beyond-lm-eval`. Never put "blme" in a venv path. pod1 has no git identity, so commits pass `GIT_AUTHOR_*`/`GIT_COMMITTER_*` for Dimitrios Tsaras.
 
 ## Done this session
