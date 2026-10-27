@@ -110,6 +110,45 @@ class LipschitzContinuityTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:1805.10965",
+        "code": "avirmaux/lipEstimation@336b6ccfecec6d965fda1798da8f9e204998766b",
+        "llm_precedent": ("Men et al. 2024 ShortGPT arXiv:2403.03853 (1 - cos between block "
+                          "input and output, all tokens); Gromov et al. 2024 arXiv:2403.17887 "
+                          "(angular distance between block inputs, final token)"),
+    }
+    ADAPTATION_NOTE = (
+        "The relative change ||h_{l+1} - h_l|| / ||h_l||, averaged over tokens, measures how "
+        "much each block rewrites the residual stream as a fraction of its size. It is a "
+        "BLME construct, not a Lipschitz estimate: Scaman and Virmaux bound Jacobian "
+        "operator norms, which needs per-layer power iterations and is not defined on "
+        "observed token states. ShortGPT's 1 - cos and Gromov et al.'s angular distance "
+        "are scale-free like this ratio but ignore the norm growth it captures. Position 0 "
+        "is excluded because the attention-sink transition dominates single layers, and "
+        "the embedding -> block 0 update is reported on its own because it reads the "
+        "embedding-scale convention. Since any uniform mean over blocks falls as L/(L+n) "
+        "under n inserted identity blocks, the headlines are the depth-additive "
+        "e2e_log_norm_growth (telescoping) and total_angular_path (an identity update has "
+        "angle 0)."
+    )
+    HEADLINE_KEYS = ("e2e_log_norm_growth", "total_angular_path", "relative_change_max",
+                     "embedding_relative_change")
+    _INV = "tests/tasks/invariance/test_geometry_lipschitz.py::"
+    # e2e_log_norm_growth is also pinned under redecompose:
+    # test_e2e_log_norm_growth_invariant_under_redecomposition. Width and scale
+    # (zero-pad, isometric embedding, rescale) for every feature key:
+    # tests/test_invariance_harness.py::test_isometry_and_scale_invariant_tasks.
+    SIZE_INVARIANT = {
+        "e2e_log_norm_growth": (
+            ("insert_identity_blocks",),
+            _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
+        "total_angular_path": (
+            ("insert_identity_blocks",),
+            _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
+        "relative_change_max": (
+            ("insert_identity_blocks",),
+            _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Lipschitz Continuity Analysis...")
