@@ -373,8 +373,15 @@ def test_accessor_reproduces_geometry_isoscore(tiny, route, monkeypatch):
         use_cache=cfg["use_cache"], replace_final_norm=False,
         min_cached_docs=n, max_tokens_per_doc=None)
     assert _equal(got, used)
+    assert info["source"] == ("shared_cache" if route == "shared_cache" else "self_collected")
     if route == "undersized_cache":
         assert info["cache_rejected"] == "too_few_docs"
+        # The comparison can tell the gates apart: ungated, the accessor reads
+        # the 3-document cache and no longer matches the task.
+        ungated, _ = hidden_states_for_task(
+            model, tok, docs, cache, num_samples=n, layer_idx=-1,
+            replace_final_norm=False, max_tokens_per_doc=None)
+        assert not _equal(ungated, used)
 
 
 @pytest.mark.parametrize("route", ROUTES)
