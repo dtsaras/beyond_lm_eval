@@ -1,6 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import hidden_states_for_task
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 from .utils import collected_layer_count
 import torch
 import numpy as np
@@ -53,8 +54,12 @@ class HSICDependenceTask(DiagnosticTask):
     subsample shared by every layer.
 
     The anchor ("input") is the first block's output: the layer set comes from
-    the cache, which does not include the embedding output hs[0].
+    the cache, which does not include the embedding output hs[0]. Rows follow
+    ``TOKEN_POLICY``: position 0 is dropped (Kornblith App. F.1 drops special
+    tokens; the sink otherwise dominates every Gram matrix,
+    tests/tasks/invariance/test_hsic.py).
     """
+    TOKEN_POLICY = "exclude_pos0"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running HSIC Dependence Analysis...")
@@ -68,12 +73,13 @@ class HSICDependenceTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
 
-        layer_activations, _info = hidden_states_for_task(
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            replace_final_norm=True, layer_idx="all", use_cache=use_cache)
+            replace_final_norm=True, layer_idx="all", use_cache=use_cache,
+            per_sample=True)
         _last_is_block = bool(_info["last_is_block"])
 
-        layers = sorted(layer_activations.keys())
+        layers = sorted(per_doc.keys())
         # Only a collection without the deepest-block hook still ends in the
         # post-norm entry; that entry is trimmed.
         if not _last_is_block:
@@ -87,21 +93,29 @@ class HSICDependenceTask(DiagnosticTask):
 
         # Subsample tokens for speed with the SAME seeded indices in every layer.
         max_tokens = self.config.get("max_hsic_tokens", 2000)
-        n_tokens = layer_activations[layers[0]].shape[0]
-        if n_tokens > max_tokens:
+        seed = int(self.config.get("seed", 42))
+
+        def _shared_perm(n_rows):
+            if n_rows <= max_tokens:
+                return None
             rng = torch.Generator(device="cpu")
-            rng.manual_seed(int(self.config.get("seed", 42)))
-            shared_perm = torch.randperm(n_tokens, generator=rng)[:max_tokens]
-        else:
-            shared_perm = None
+            rng.manual_seed(seed)
+            return torch.randperm(n_rows, generator=rng)[:max_tokens]
+
+        def _gram(idx, policy, perm):
+            X = select_rows(per_doc[idx], policy)[0].float()
+            if perm is not None:
+                X = X[perm]
+            return _centered_linear_gram(X).cpu()
+
+        _rows0, _rows_meta = select_rows(per_doc[layers[0]], self.TOKEN_POLICY)
+        shared_perm = _shared_perm(int(_rows0.shape[0]))
+        del _rows0
 
         logger.info("  Computing Gram matrices...")
         gram_matrices = {}
         for idx in tqdm(layers, desc="Gram Matrices"):
-            X = layer_activations[idx].float()
-            if shared_perm is not None:
-                X = X[shared_perm]
-            gram_matrices[idx] = _centered_linear_gram(X).cpu()
+            gram_matrices[idx] = _gram(idx, self.TOKEN_POLICY, shared_perm)
 
         logger.info("  Computing pairwise HSIC...")
         self_hsic = {}
@@ -132,7 +146,18 @@ class HSICDependenceTask(DiagnosticTask):
         _raw_hsic_first_last = float(torch.sum(_K0 * _KL))
         _raw_hsic_first_self = float(torch.sum(_K0 * _K0))
 
-        return {
+        # Position-0-inclusive anchor/last endpoints (_meta_), on the seeded
+        # subsample of the full cloud.
+        _perm_all = _shared_perm(int(sum(int(c.shape[0]) for c in per_doc[layers[0]])))
+        _K0a = _gram(layers[0], "all", _perm_all)
+        _KLa = _gram(layers[-1], "all", _perm_all)
+        _incl_ratio = _nhsic_from_grams(_K0a, _KLa)
+        _s0a = float(torch.sum(_K0a * _K0a))
+        _incl_raw = float(torch.sum(_K0a * _KLa)) / _s0a if _s0a else float("nan")
+        del _K0a, _KLa
+        _mid = per_doc[layers[n_layers // 2]]
+
+        out = {
             "adjacent_hsic": adjacent_hsic,
             "avg_adjacent_hsic": float(np.mean(adjacent_hsic)),
             "min_adjacent_hsic": float(np.min(adjacent_hsic)),
@@ -151,4 +176,13 @@ class HSICDependenceTask(DiagnosticTask):
             "hsic_compression_ratio": (
                 float(input_hsic[-1]) if input_hsic else float("nan")
             ),
+            "_meta_last_entry_is_block_output": _last_is_block,
+            # Sink diagnostics on the full (inclusive) middle-layer cloud.
+            "_meta_position0_share": position0_share(_mid),
+            "_meta_massive_token_share": massive_token_share(_mid),
+            "_meta_incl_pos0_hsic_compression_ratio": float(_incl_ratio),
+            "_meta_incl_pos0_hsic_compression_ratio_raw": float(_incl_raw),
+            "_meta_n_tokens_used": int(gram_matrices[layers[0]].shape[0]),
         }
+        out.update(_rows_meta.as_meta())
+        return out
