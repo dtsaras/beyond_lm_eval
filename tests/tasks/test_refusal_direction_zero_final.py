@@ -77,3 +77,19 @@ def test_zero_selected_direction_is_reported_as_zero(tiny, monkeypatch):
     monkeypatch.setattr(R, "_resid_pre_sites", same_for_every_prompt)
     res = _Loose({}).evaluate(model, tok, None)
     assert res["direction_norm"] == 0.0
+
+
+def test_instruct_model_is_scored_in_fp32(tiny):
+    """A bf16 model's selection and scores equal its fp32 copy's."""
+    import copy
+    model, _ = tiny
+    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+    tok.chat_template = CHAT
+    bf16 = copy.deepcopy(model).to(torch.bfloat16)
+    ref = _Loose({}).evaluate(copy.deepcopy(bf16).float(), tok, None)
+    out = _Loose({}).evaluate(bf16, tok, None)
+    for k in ("direction_norm", "refusal_score_bypass", "refusal_score_induce",
+              "_meta_kl_ablation", "_meta_selected_layer", "_meta_selected_position"):
+        assert out[k] == ref[k], (k, out[k], ref[k])
+    assert out["_meta_compute_dtype"] == "float32"
+    assert all(p.dtype == torch.bfloat16 for p in bf16.parameters())

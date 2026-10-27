@@ -18,6 +18,7 @@ import torch
 
 from ..base import DiagnosticTask
 from ...registry import register_task
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers
 from . import _common
 from ._common import logger
@@ -374,8 +375,12 @@ class RefusalDirectionTask(DiagnosticTask):
             return self._nan_result(
                 "base model: the tokenizer has no chat template; the paper protocol "
                 "needs an instruct model's template and post-instruction tokens", meta)
-        out = self._run(model, tokenizer, layers, h_tr, n_tr, h_va, n_va)
+        # fp32 arithmetic at every size: the selection compares refusal scores
+        # and KLs under small interventions (tests/tasks/test_refusal_direction_zero_final.py).
+        with fp32_compute(model) as prec:
+            out = self._run(model, tokenizer, layers, h_tr, n_tr, h_va, n_va)
         out.update(meta)
+        out.update(effective_dtype_meta(prec))
         return out
 
     def _run(self, model, tokenizer, layers, h_tr, n_tr, h_va, n_va):
