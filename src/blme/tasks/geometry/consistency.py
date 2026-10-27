@@ -68,6 +68,32 @@ class PredictionAlignmentTask(DiagnosticTask):
     back to input embeddings if ``lm_head`` is unavailable.
     """
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "none (BLME construct)",
+        "code": "none",
+        "llm_precedent": "arXiv:2303.08112 (Belrose et al. 2023, tuned lens: context only)",
+    }
+    ADAPTATION_NOTE = (
+        "The task asks whether the final hidden state points toward the output-"
+        "projection row of the token that actually comes next, beyond what "
+        "anisotropy and token frequency alone produce. It reports the mean per-token "
+        "difference between cos(h_t, w_{x_{t+1}}) and the cosine to the target of "
+        "another position in the same document (a frequency-preserving "
+        "derangement), after centring the output rows, a gauge freedom of the "
+        "softmax. Alternatives considered: the raw logit or log-probability of the "
+        "target (a capability measure), the raw cosine (reproduced by uniformly "
+        "random rows), and logit/tuned-lens divergences (Belrose et al. 2023), which "
+        "score distributions rather than geometry. The cosine margin separates "
+        "direction from norm and cancels anisotropy with a matched control. The "
+        "position-0 pair is dropped (its state is the context-free sink), and "
+        "centring and the uniform control use only rows the tokenizer can emit.")
+    HEADLINE_KEYS = ("prediction_alignment_mean", "prediction_alignment_std")
+    SIZE_INVARIANT = {
+        k: (("V_unused_zero_rows",),
+            "tests/tasks/invariance/test_prediction_alignment.py::"
+            "test_unused_vocabulary_rows_move_nothing")
+        for k in ("prediction_alignment_mean", "prediction_alignment_std")
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Prediction Alignment Analysis...")

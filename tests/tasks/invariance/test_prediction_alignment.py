@@ -81,3 +81,11 @@ def test_margin_uniform_is_not_a_headline(gpt2, stats):
     r = _run(*gpt2, stats)
     assert "prediction_alignment_margin_uniform" not in r
     assert "_meta_prediction_alignment_margin_uniform" in r
+
+
+def test_declarations():
+    from blme.tasks.geometry.consistency import PredictionAlignmentTask as P
+    assert P.TOKEN_POLICY == "exclude_pos0"
+    assert set(P.SIZE_INVARIANT) <= set(P.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(P.SOURCES)
+    assert P.ADAPTATION_NOTE.count(". ") <= 8
