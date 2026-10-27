@@ -98,6 +98,14 @@ class PredictionAlignmentTask(DiagnosticTask):
             return {"error": "Could not access output projection"}
 
         embeddings = embeddings.cpu()
+        # Only rows the tokenizer can emit enter the centroid and the uniform
+        # control: unused rows past len(tokenizer) are not tokens.
+        from .categories import _n_emittable
+        n_emit = _n_emittable(tokenizer, embeddings.shape[0])
+        _max_label = max((int(y.max()) for y in stats["labels"] if y.numel()), default=-1)
+        n_emit = max(n_emit, _max_label + 1)
+        n_unused = int(embeddings.shape[0] - n_emit)
+        embeddings = embeddings[:n_emit]
         # Centre the unembedding rows: adding v to every row adds h.v to every
         # logit, a softmax gauge no alignment measure may see. Promote, centre,
         # then rescale (`centre_and_rescale`) so no step over/underflows.
@@ -224,6 +232,8 @@ class PredictionAlignmentTask(DiagnosticTask):
             out["_meta_prediction_alignment_residual_collision_frac"] = float(
                 _residual_collisions[0] / _control_positions[0])
         out["_meta_n_position0_pairs_dropped"] = int(_n_p0_dropped[0])
+        out["_meta_n_emittable_rows"] = int(n_emit)
+        out["_meta_n_unused_rows"] = n_unused
         if baseline_unif:
             _bu = float(np.mean(baseline_unif))
             out["_meta_prediction_alignment_uniform_baseline"] = _bu

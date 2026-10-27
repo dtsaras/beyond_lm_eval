@@ -62,3 +62,16 @@ def test_position0_pair_is_dropped(gpt2, stats):
     inv.assert_invariant(base, other, ["prediction_alignment_mean",
                                        "prediction_alignment_std"], rtol=0.0)
     assert base["_meta_n_position0_pairs_dropped"] == len(TEXTS)
+
+
+def test_unused_vocabulary_rows_move_nothing(gpt2, stats):
+    """Appending 64 unused zero rows to the (tied) unembedding used to move the
+    centroid and the uniform-row control (dossier: +1.6% headline on gpt2 at
+    +10% rows, margin_uniform 0.0213 -> -0.0001); centring and the uniform draw
+    now use only the rows the tokenizer can emit."""
+    model, tok = gpt2
+    base = _run(model, tok, stats)
+    padded = _run(inv.pad_vocabulary(model, 64, kind="zero"), tok, stats)
+    assert padded["_meta_n_unused_rows"] == 64
+    keys = [k for k in base if isinstance(base[k], float)]
+    inv.assert_invariant(base, padded, keys, rtol=0.0)
