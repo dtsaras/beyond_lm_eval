@@ -35,6 +35,7 @@ import torch
 
 from ...registry import register_task
 from .._precision import effective_dtype_meta, fp32_compute
+from .._tokens import select_rows
 from ..geometry.utils import block_output_count, safe_unit_rows_torch
 from ...tasks.base import DiagnosticTask
 
@@ -77,6 +78,10 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
 @register_task("dynamics_perturbation_growth")
 class PerturbationGrowthTask(DiagnosticTask):
     """Seeded input-embedding perturbation; per-layer divergence growth."""
+
+    # The token mean of the divergence drops position 0 (a non-LLM
+    # dynamical-systems construct); the inclusive value is _meta_.
+    TOKEN_POLICY = "exclude_pos0"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Layer Perturbation Growth (quasi-Lyapunov)...")
@@ -184,11 +189,20 @@ class PerturbationGrowthTask(DiagnosticTask):
         if not n_used:
             return {"error": "No usable samples for perturbation growth"}
 
-        clean_layers = [torch.cat(c, dim=0) for c in clean_acc]
-        pert_layers = [torch.cat(c, dim=0) for c in pert_acc]
+        # The same rows are selected from the clean and perturbed states of each
+        # document, so the divergence is taken row by row as before.
+        policy = self.TOKEN_POLICY
+        clean_layers = [select_rows(c, policy)[0] for c in clean_acc]
+        pert_layers = [select_rows(c, policy)[0] for c in pert_acc]
+        row_meta = select_rows(clean_acc[0], policy)[1]
         results = _growth_profile(clean_layers, pert_layers)
         if not results:
             return {"error": "Degenerate divergence profile"}
+        incl = _growth_profile([torch.cat(c, dim=0) for c in clean_acc],
+                               [torch.cat(c, dim=0) for c in pert_acc])
+        results["_meta_growth_log_ratio_incl_pos0"] = incl.get(
+            "growth_log_ratio", float("nan"))
+        results.update(row_meta.as_meta())
         results["rel_eps"] = rel_eps
         _rz = float(np.mean(_realized)) if _realized else float("nan")
         results["_meta_realized_rel_eps"] = _rz

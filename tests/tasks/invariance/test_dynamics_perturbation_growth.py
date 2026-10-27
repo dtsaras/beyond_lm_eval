@@ -84,3 +84,15 @@ def test_headline_keys_are_depth_free():
     for k in ("growth_slope", "growth_rate_per_block", "initial_divergence"):
         assert k not in out, k
         assert f"_meta_{k}" in out, k
+
+
+def test_token_mean_excludes_position0():
+    """The divergence token mean drops position 0 (TOKEN_POLICY); the inclusive
+    log ratio is kept as _meta_."""
+    tok = tokenizer()
+    out = _run(tiny_gpt2(), tok)
+    n_tokens = sum(len(tok(d["text"])["input_ids"]) for d in dataset()[:CFG["num_samples"]])
+    assert PerturbationGrowthTask.TOKEN_POLICY == "exclude_pos0"
+    assert out["_meta_rows_policy"] == "exclude_pos0"
+    assert out["_meta_rows_n_rows"] == n_tokens - CFG["num_samples"]
+    assert out["growth_log_ratio"] != out["_meta_growth_log_ratio_incl_pos0"]
