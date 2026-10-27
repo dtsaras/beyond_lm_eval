@@ -19,7 +19,45 @@ class NeighborhoodStabilityTask(DiagnosticTask):
 
     This is a BLME embedding-graph diagnostic, not a Lyapunov exponent or
     Jacobian spectral-norm calculation.
+
+    k = 50, not Wendlandt et al.'s 10: their k suits word2vec-sized
+    vocabularies compared across training runs; at the same number of query
+    rows k = 10 roughly triples the standard error (gpt2, 500 queries: SEM
+    0.0049 at k = 10 vs 0.0018 at k = 50), and no precedent fixes k for a
+    noise-perturbation comparison. The value is a Jaccard, J = o / (2k - o) of
+    the overlap o, a monotone transform of their percent overlap o / k.
     """
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1804.09692",
+        "code": None,
+        "llm_precedent": None,
+    }
+    ADAPTATION_NOTE = (
+        "Wendlandt et al. define stability as the overlap of a word's ten nearest cosine "
+        "neighbours across independently trained embedding spaces. Released LLMs have no "
+        "sibling training runs, so BLME instead perturbs each input-embedding row by a seeded "
+        "isotropic direction of 1% of its norm and reports the mean Jaccard of the k = 50 "
+        "nearest-neighbour sets before and after, over sampled rows the tokenizer can emit. "
+        "This measures how much margin separates a token's neighbourhood boundary from its "
+        "runners-up, a local robustness property of the embedding graph. Alternatives were "
+        "base-vs-instruct embeddings (paired models only) and per-coordinate noise (whose "
+        "realised size grows as sqrt(d)); fixed-norm noise realises the requested 1% at every "
+        "width. Two mechanical size dependences remain: an isometric re-embedding into 2x/4x "
+        "width raises the value (0.950 -> 0.963 -> 0.973), and it depends on how many emittable "
+        "rows form the neighbourhoods."
+    )
+    HEADLINE_KEYS = ("stability_mean", "stability_std")
+    # Only the vocabulary-padding test passes (rows past the tokenizer are
+    # excluded); the width dependence (isometric re-embedding raises the value)
+    # has no structural inverse, so no width-free twin is declared.
+    SIZE_INVARIANT = dict.fromkeys(
+        ("stability_mean", "stability_std"),
+        (("pad_vocabulary(zero, small_random)",),
+         "tests/tasks/invariance/test_dynamics_stability.py::"
+         "test_rows_past_the_tokenizer_do_not_enter"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neighborhood Stability Analysis...")
         k = self.config.get("k", 50)
