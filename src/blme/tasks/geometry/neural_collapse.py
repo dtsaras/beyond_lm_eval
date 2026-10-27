@@ -325,6 +325,34 @@ class NeuralCollapseTask(DiagnosticTask):
     topics x 8 sentences, Papyan NC1) is kept as ``_meta_topic_*``; a
     dataset of ``{text, label}`` items still selects that supervised path.
     """
+    TOKEN_POLICY = ("paper_protocol:WuPapyan2024 every position t < T-1 "
+                    "labelled by token t+1, position 0 included")
+    SOURCES = {
+        "paper": "arXiv:2008.08186 (Papyan et al. 2020, neural collapse)",
+        "code": "rhubarbwu/linguistic-collapse@c782b91b54fce3c0043ada0898d5881ba952ffbb",
+        "llm_precedent": "arXiv:2405.17767 (Wu & Papyan 2024, next-token classes, CDNV)",
+    }
+    ADAPTATION_NOTE = (
+        "Neural collapse was defined for image classifiers; for an LM the "
+        "classifier is the unembedding, so, following Wu & Papyan 2024, every "
+        "corpus position t < T-1 is a sample whose feature is the post-final-norm "
+        "hidden state and whose class is the next token. NC1 is their CDNV "
+        "(Eq. 4, dist_exp 2) with Galanti's scale-free CDNV beside it. The corpus "
+        "is the run's documents (1000 by default, the same N for every model) "
+        "rather than TinyStories, so classes need at least min_per_class samples "
+        "(default 10), a threshold the paper leaves open. The previous construct, "
+        "Papyan NC1 of 40 mean-pooled sentences grouped by 5 topics, answers a "
+        "different question (does the last layer cluster sequences by topic) and "
+        "is kept as _meta_topic_*.")
+    HEADLINE_KEYS = ("nc1_cdnv", "nc1_cdnv_galanti")
+    # nc1_cdnv divides by one more squared distance, so it scales as 1/c^2 with
+    # the feature scale (the final norm's gain); the Galanti twin does not.
+    SIZE_INVARIANT = {
+        "nc1_cdnv_galanti": (
+            ("final_norm_gauge_scalar",),
+            "tests/tasks/invariance/test_neural_collapse.py::"
+            "test_galanti_twin_is_free_of_the_feature_scale"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neural Collapse Analysis...")

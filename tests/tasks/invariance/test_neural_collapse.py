@@ -76,3 +76,11 @@ def test_galanti_twin_is_free_of_the_feature_scale(tiny):
     gauged = _run(inv.final_norm_unembedding_gauge(model, D=2.0), tok)
     inv.assert_invariant(base, gauged, ["nc1_cdnv_galanti"], rtol=1e-12)
     assert gauged["nc1_cdnv"] == pytest.approx(base["nc1_cdnv"] / 4.0, rel=1e-9)
+
+
+def test_declarations():
+    from blme.tasks.geometry.neural_collapse import NeuralCollapseTask as N
+    assert N.TOKEN_POLICY.startswith("paper_protocol:")
+    assert set(N.SIZE_INVARIANT) <= set(N.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(N.SOURCES)
+    assert N.ADAPTATION_NOTE.count(". ") <= 8
