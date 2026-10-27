@@ -208,7 +208,19 @@ class ContextualizationTask(DiagnosticTask):
 
     Designed to be cheap: requires only `output_hidden_states=True` and a
     handful of frequent target words that appear in multiple contexts.
+
+    Word unit: a "word" is a TOKEN ID of the model's own tokenizer (no spaCy
+    word alignment and no punctuation filter, unlike kawine/contextual), so
+    the tracked set is tokenizer-specific (``_meta_n_words_tracked``).
+
+    Position 0 is dropped for every tokenizer (``TOKEN_POLICY``). The reference
+    strips special tokens, which removes the sink on BOS tokenizers only; on
+    GPT-2-style tokenizers the sink is the first real word and stayed in every
+    statistic (mev_corrected_sizematched flipped sign on gpt2 / pythia-1b in
+    the dossier). The reference protocol (special tokens dropped, first word
+    kept) is kept as ``_meta_paper_protocol_*``.
     """
+    TOKEN_POLICY = "exclude_pos0"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Contextualization Analysis (Ethayarajh 2019)...")
@@ -242,11 +254,13 @@ class ContextualizationTask(DiagnosticTask):
 
         device = next(model.parameters()).device
 
-        # Step 1: collect per-token hidden states grouped by token id, per layer.
-        # We also keep all-token vectors per layer to compute the random-pair
-        # baseline.
+        # Step 1: collect per-token hidden states grouped by token id, per layer,
+        # for every non-special position; `token_is_p0[token_id]` marks which
+        # occurrences sit at position 0, so both token policies read one store.
         token_states: Dict[int, Dict[int, List[np.ndarray]]] = defaultdict(lambda: defaultdict(list))
-        # token_states[layer_idx][token_id] = list of vectors
+        token_is_p0: Dict[int, List[bool]] = defaultdict(list)
+        intra_first_is_p0: List[bool] = []
+        pool_excl_per_layer: Dict[int, List[np.ndarray]] = defaultdict(list)
 
         all_states_per_layer: Dict[int, List[np.ndarray]] = defaultdict(list)
         # For intra-sentence similarity: list of (layer -> per-sample vectors).
@@ -257,6 +271,9 @@ class ContextualizationTask(DiagnosticTask):
         # the anisotropy baseline pool. Seeded for reproducibility, drawn
         # per sentence so the pool is not positionally biased.
         rng_pool = np.random.default_rng(20260902)
+        # Separate stream for the position-0-excluded pool, so the reference
+        # protocol's draws (rng_pool) are unchanged.
+        rng_pool_excl = np.random.default_rng(20260902)
 
         # post-final-norm=False, DELIBERATELY: kawine/contextual's vendored GPT-2
         # pops the pre-norm last layer and appends ln_f(...)
@@ -292,9 +309,17 @@ class ContextualizationTask(DiagnosticTask):
                 non_special_all = non_special
                 pool_pos = (int(rng_pool.choice(non_special))
                             if non_special else None)
+                non_special_excl = [p_ for p_ in non_special if p_ != 0]
+                pool_pos_excl = (int(rng_pool_excl.choice(non_special_excl))
+                                 if non_special_excl else None)
 
                 # IntraSim sees the same positions as SelfSim and MEV.
                 keep_pos = np.asarray(non_special_all, dtype=np.int64)
+                if keep_pos.size >= 2:
+                    intra_first_is_p0.append(bool(keep_pos[0] == 0))
+                for tok_pos, tok_id in enumerate(token_ids):
+                    if tok_id not in special_ids:
+                        token_is_p0[tok_id].append(tok_pos == 0)
 
                 for li, h in enumerate(per_layer):
                     h_np = h[0].float().cpu().numpy()  # (T, D)
@@ -302,6 +327,8 @@ class ContextualizationTask(DiagnosticTask):
                         intra_per_layer[li].append(h_np[keep_pos])
                     if pool_pos is not None:
                         all_states_per_layer[li].append(h_np[pool_pos])
+                    if pool_pos_excl is not None:
+                        pool_excl_per_layer[li].append(h_np[pool_pos_excl])
                     for tok_pos, tok_id in enumerate(token_ids):
                         if tok_id in special_ids:
                             continue
@@ -320,12 +347,11 @@ class ContextualizationTask(DiagnosticTask):
             n_pick = min(5, n_layers_seen)
             layers_to_report = list(np.linspace(0, n_layers_seen - 1, n_pick).astype(int))
 
-        # Step 2: per-layer metrics.
-        per_layer_metrics: Dict[str, Dict[str, float]] = {}
-
-        for li in layers_to_report:
-            # Random-pair baseline (anisotropy)
-            all_vecs = np.asarray(all_states_per_layer[li])
+        # Step 2: per-layer metrics, under the headline policy (position 0
+        # dropped) and the reference protocol (_meta_).
+        def _layer_metrics(li, drop_p0):
+            pool = pool_excl_per_layer if drop_p0 else all_states_per_layer
+            all_vecs = np.asarray(pool[li])
             baseline = _baseline_anisotropy(all_vecs)
 
             # 1. Self-similarity per word, then average across words.
@@ -333,6 +359,8 @@ class ContextualizationTask(DiagnosticTask):
             mevs = []
             occ_counts = []
             for tok_id, vecs in token_states[li].items():
+                if drop_p0:
+                    vecs = [v for v, p0 in zip(vecs, token_is_p0[tok_id]) if not p0]
                 if len(vecs) < min_word_occurrences:
                     continue
                 arr = np.asarray(vecs)
@@ -356,14 +384,16 @@ class ContextualizationTask(DiagnosticTask):
 
             # 2. IntraSim: mean cosine of each token to its sentence mean.
             intra_sims = []
-            for h_np in intra_per_layer[li]:
+            for h_np, p0 in zip(intra_per_layer[li], intra_first_is_p0):
+                if drop_p0 and p0:
+                    h_np = h_np[1:]
                 if h_np.shape[0] < 2:
                     continue
                 intra_sims.append(_intra_sentence_mean_cosine(h_np))
             intra_raw = float(np.nanmean(intra_sims)) if intra_sims else float("nan")
             intra_corr = (intra_raw - baseline) if not np.isnan(intra_raw) else float("nan")
 
-            per_layer_metrics[f"layer{li}"] = {
+            return {
                 "self_similarity_raw": self_sim_raw,
                 "self_similarity_corrected": self_sim_corr,
                 "intra_sentence_similarity_raw": intra_raw,
@@ -378,12 +408,31 @@ class ContextualizationTask(DiagnosticTask):
                 "_meta_n_words_tracked": len(self_sims),
             }
 
+        drop_p0 = self.TOKEN_POLICY == "exclude_pos0"
+        per_layer_metrics: Dict[str, Dict[str, float]] = {
+            f"layer{li}": _layer_metrics(li, drop_p0) for li in layers_to_report}
+        paper_metrics = {
+            f"layer{li}": _layer_metrics(li, False) for li in layers_to_report}
+
         # Compact aggregate summary across the reported layers.
-        def _agg(key):
-            xs = [v[key] for v in per_layer_metrics.values() if not np.isnan(v[key])]
+        def _agg(key, metrics=None):
+            metrics = per_layer_metrics if metrics is None else metrics
+            xs = [v[key] for v in metrics.values() if not np.isnan(v[key])]
             return float(np.mean(xs)) if xs else float("nan")
 
+        _AGG = ("self_similarity_corrected", "intra_sentence_similarity_corrected",
+                "mev", "mev_corrected_sizematched", "mev_corrected_pool1k",
+                "mev_baseline", "mev_baseline_pool1k", "anisotropy_baseline")
+        paper = {f"_meta_paper_protocol_mean_{k}": _agg(k, paper_metrics) for k in _AGG}
+        paper["_meta_paper_protocol_n_words_tracked_mean"] = _agg(
+            "_meta_n_words_tracked", paper_metrics)
+        n_p0 = sum(sum(v) for v in token_is_p0.values())
+
         return {
+            **paper,
+            "_meta_token_policy": self.TOKEN_POLICY,
+            "_meta_word_unit": "token_id",
+            "_meta_n_position0_occurrences_dropped": int(n_p0) if drop_p0 else 0,
             # False: the deepest layer is post-ln_f, as the reference defines it.
             "_meta_last_entry_is_block_output": False,
             "mean_self_similarity_corrected": _agg("self_similarity_corrected"),
