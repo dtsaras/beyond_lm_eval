@@ -43,10 +43,9 @@ Definition (Huh et al. 2024, `metrics.py:cknna`):
     dim=-1)``) and uses ``topk=10`` by default; BLME mirrors both.
 
 BLME wiring:
-    * Tier-2 task — reuses the same per-layer synchronised token cloud as
-      ``geometry_cka`` via ``collect_hidden_states(layer_idx="all")`` (same
-      forward pass, same tokens across layers). Without a populated cache it
-      runs its own collection pass.
+    * Points are texts: each layer of each text is its masked token mean
+      (reference pool='avg'), from the shared cache when it can supply them,
+      else from a pooled forward pass (``_pooled_layer_features``).
     * The verified numeric artifact is the module-level ``_cknna(X, Y,
       topk, unbiased=True)`` helper, which reproduces the reference
       ``cknna`` bit-for-bit (float32, <1e-6). See
@@ -65,7 +64,9 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task
+from ...cache import CACHE_TOKENIZER_MAX_LENGTH
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 import math
 
 logger = logging.getLogger("blme")
@@ -249,6 +250,75 @@ def _l2_normalize(X: torch.Tensor) -> torch.Tensor:
     return torch.where(_unsafe, _safe_unit(X), _out)
 
 
+_SHARE_DOCS = 200   # documents of the middle layer kept for the sink diagnostics
+
+
+def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
+                           use_cache, pool, include_embedding=False,
+                           min_cached_docs=None):
+    """One vector per text and layer: the masked mean over its tokens.
+
+    Mirrors platonic-rep ``extract_features.py:81-84`` (pool='avg'): every
+    entry of the raw HF ``hidden_states`` tuple (post-norm last entry kept),
+    averaged over the attention mask of each text. The shared cache supplies
+    the token rows when it can; otherwise one forward pass per text pools on
+    the fly, so no all-layer token cloud is held. Both routes average the same
+    float rows in float64 and agree bit for bit.
+
+    Returns ``(feats, feats_excl_pos0, mid_docs, info)``: ``{layer: (N, D)
+    float64}`` under ``pool`` and under ``mean_excl_pos0``, the middle layer's
+    token rows of the first ``_SHARE_DOCS`` texts, and the gate info.
+    """
+    per_doc, info = hidden_states_for_task(
+        model, tokenizer, dataset, cache, num_samples=num_samples,
+        # post-final-norm=False, DELIBERATELY: the released reference stacks
+        # the raw HF tuple, ln_f entry included (extract_features.py:82).
+        replace_final_norm=False, layer_idx="all", use_cache=use_cache,
+        per_sample=True, include_embedding=include_embedding,
+        min_cached_docs=min_cached_docs, fallback="none")
+    if per_doc:
+        layers = sorted(per_doc)
+        feats = {li: select_rows(per_doc[li], pool)[0] for li in layers}
+        excl = {li: select_rows(per_doc[li], "mean_excl_pos0")[0] for li in layers}
+        mid = list(per_doc[layers[len(layers) // 2]])[:_SHARE_DOCS]
+        return feats, excl, mid, info
+
+    if dataset is None:
+        raise ValueError("geometry_cknna: no usable cache and no dataset")
+    device = next(model.parameters()).device
+    sums, sums_excl, mid_rows = {}, {}, []
+    first = 0 if include_embedding else 1
+    n_done = 0
+    with torch.no_grad():
+        for sample in dataset:
+            if n_done >= num_samples:
+                break
+            text = sample["text"] if isinstance(sample, dict) else str(sample)
+            inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                               max_length=CACHE_TOKENIZER_MAX_LENGTH).to(device)
+            if inputs["input_ids"].shape[1] < 1:
+                continue
+            out = model(**inputs, output_hidden_states=True)
+            # post-final-norm=False, DELIBERATELY: the raw tuple, as the reference.
+            hs = out.hidden_states[first:]
+            for li, h in enumerate(hs):
+                rows = h[0].detach().to("cpu")
+                if not rows.is_floating_point():
+                    rows = rows.float()
+                docs = [rows]
+                sums.setdefault(li, []).append(select_rows(docs, pool)[0])
+                if rows.shape[0] > 1:
+                    sums_excl.setdefault(li, []).append(
+                        select_rows(docs, "mean_excl_pos0")[0])
+                if li == len(hs) // 2 and n_done < _SHARE_DOCS:
+                    mid_rows.append(rows.float())
+            n_done += 1
+    feats = {li: torch.cat(v, 0) for li, v in sums.items()}
+    excl = {li: torch.cat(v, 0) for li, v in sums_excl.items()}
+    info = dict(info, source="self_collected", fallback="pooled_forward")
+    return feats, excl, mid_rows, info
+
+
 @register_task("geometry_cknna")
 class CKNNATask(DiagnosticTask):
     """
@@ -256,21 +326,18 @@ class CKNNATask(DiagnosticTask):
     Representation Hypothesis", ICML 2024, arXiv:2405.07987) between all
     pairs of transformer layers and summarises the alignment profile.
 
-    CKNNA is the local-neighbourhood analog of ``geometry_cka``: instead of
-    the global CKA it restricts the kernel alignment to the mutual k-nearest
-    neighbour graph, so it measures whether *local* representational geometry
-    (not just global structure) is preserved across layers.
+    Points are TEXTS, not tokens: each layer of each text is its masked mean
+    over all positions, position 0 included, as the reference's pool='avg'
+    (the paper rejects last-token pooling, App. C.2). The within-model layer
+    profile is a BLME use of a cross-model metric.
 
     Config:
-        num_samples: number of documents to collect (default 100).
-        topk:        mutual k-NN neighbours (default 10). num_samples' worth
-                     of tokens must exceed topk.
+        num_samples: number of texts (default 100).
+        topk:        mutual k-NN neighbours (default 10); needs num_samples >= topk.
         unbiased:    unbiased HSIC + self-diagonal masking (default True).
         use_cache:   reuse the shared forward-pass cache (default True).
-
-    Outputs (flat floats): adjacent-layer and global off-diagonal
-    mean/min/max/std of CKNNA, early-vs-late and first-vs-middle values.
     """
+    TOKEN_POLICY = "paper_protocol:Huh2024 per-text masked mean, position 0 included"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKNNA (mutual k-NN conditional CKA) Analysis...")
@@ -284,20 +351,19 @@ class CKNNATask(DiagnosticTask):
             from ...cache import load_default_corpus
             dataset = load_default_corpus(50)
 
-        logger.info(f"  Collecting hidden states for {num_samples} samples...")
-        # post-final-norm=False, DELIBERATELY: the released reference stacks
-        # the raw HF tuple, ln_f entry included (extract_features.py:82).
-        layer_activations, _info = hidden_states_for_task(
+        pool = "mean_excl_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "mean"
+        logger.info(f"  Pooling hidden states over {num_samples} texts...")
+        feats, feats_excl, mid_docs, _info = _pooled_layer_features(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            replace_final_norm=False, layer_idx="all", use_cache=use_cache)
+            use_cache=use_cache, pool=pool)
 
-        if not layer_activations:
+        if not feats:
             return {"error": "No hidden states available for CKNNA"}
 
-        layers = sorted(layer_activations.keys())
+        layers = sorted(feats.keys())
         n_layers = len(layers)
 
-        n_points = int(layer_activations[layers[0]].shape[0])
+        n_points = int(feats[layers[0]].shape[0])
         # n_points == topk is the k -> n limit `_cknna` handles; unbiased HSIC
         # divides by (m-2)(m-3), so it needs at least 4 points.
         _min_n = 4 if unbiased else 3
@@ -311,23 +377,12 @@ class CKNNATask(DiagnosticTask):
                 )
             }
 
-        # Seeded token cap shared by every layer (unbiased HSIC is O(N^3)).
-        max_tokens = int(self.config.get("max_cknna_tokens", 2000))
-        shared_perm = None
-        if n_points > max_tokens:
-            rng = torch.Generator(device="cpu")
-            rng.manual_seed(int(self.config.get("seed", 42)))
-            shared_perm = torch.randperm(n_points, generator=rng)[:max_tokens]
-            n_points = max_tokens
+        def _prepare(F):
+            # Reference order: remove_outliers -> normalize.
+            return {li: _l2_normalize(_remove_outliers(F[li].float())) for li in F}
 
         logger.info("  Normalising activations...")
-        normed = {}
-        for idx in tqdm(layers, desc="Normalising"):
-            acts = layer_activations[idx]
-            if shared_perm is not None:
-                acts = acts[shared_perm]
-            # Reference order: remove_outliers -> normalize.
-            normed[idx] = _l2_normalize(_remove_outliers(acts.float()))
+        normed = _prepare(feats)
 
         logger.info("  Computing CKNNA matrix...")
         cknna_matrix = np.full((n_layers, n_layers), np.nan, dtype=np.float64)
@@ -344,6 +399,14 @@ class CKNNATask(DiagnosticTask):
                         _order_gap = max(_order_gap, abs(val - _rev))
                 cknna_matrix[i, j] = val
                 cknna_matrix[j, i] = val
+
+        # Position-0-excluded pooling (_meta_), endpoint pair only.
+        _excl_el = float("nan")
+        _ends = (layers[0], layers[-1])
+        if (all(li in feats_excl for li in _ends)
+                and feats_excl[_ends[0]].shape[0] == n_points and n_layers >= 2):
+            _ne = _prepare({li: feats_excl[li] for li in _ends})
+            _excl_el = _cknna(_ne[_ends[0]], _ne[_ends[1]], topk=topk, unbiased=unbiased)
 
         n = n_layers
         iu = np.triu_indices(n, k=1)
@@ -381,5 +444,13 @@ class CKNNATask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),
+            "_meta_pooling": pool,
+            "_meta_features_source": str(_info.get("source")),
             "_meta_cknna_order_asymmetry_max": float(_order_gap),
+            "_meta_excl_pos0_early_late_cknna": float(_excl_el),
+            # Sink diagnostics on the middle layer's token rows (first texts).
+            "_meta_position0_share": (position0_share(mid_docs) if mid_docs
+                                      else float("nan")),
+            "_meta_massive_token_share": (massive_token_share(mid_docs) if mid_docs
+                                          else float("nan")),
         }
