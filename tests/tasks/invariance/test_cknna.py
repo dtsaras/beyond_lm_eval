@@ -90,6 +90,26 @@ def test_points_are_per_text_means_with_one_joint_clamp(tiny_states):
     assert abs(per_layer - want) > 1e-4
 
 
+def test_reference_sample_size_and_no_silent_cache_cap(tiny):
+    """Q3: 1024 texts is the default, and a shared cache holding fewer
+    documents than requested cannot shrink N -- the task pools its own
+    forward pass over the requested texts and reports the N it used."""
+    from blme.cache import ModelOutputCache
+    from blme.registry import get_task
+    from blme.tasks.config_loader import resolve_task_config
+    from invariance import limit_threads
+    assert resolve_task_config(TASK, {})["num_samples"] == 1024
+    model, tok = tiny
+    data = [{"text": t} for t in TEXTS]
+    small = ModelOutputCache(model, tok, dataset=data[:6], num_samples=6)
+    with limit_threads(1):
+        small.populate(need_hidden=True, need_attentions=False, need_logits=False)
+        r = get_task(TASK)(config={"num_samples": 12, "topk": 5}).evaluate(
+            model, tok, dataset=data, cache=small)
+    assert r["_meta_n_points"] == 12 == r["_meta_n_texts_requested"]
+    assert r["_meta_features_source"] == "self_collected"
+
+
 def test_pooled_forward_matches_the_cache_route(tiny):
     """The self-collected route pools per text on the fly and reproduces the
     shared-cache route bit for bit."""

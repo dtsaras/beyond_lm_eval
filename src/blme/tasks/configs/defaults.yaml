@@ -398,7 +398,9 @@ geometry_phd_dimension:
   point_jump: 40
 
 geometry_cknna:
-  num_samples: 100
+  # Texts, not tokens: 1024 at k=10 is the reference protocol (platonic-rep
+  # extract_features.py:178). The task bypasses a cache holding fewer docs.
+  num_samples: 1024
   topk: 10
   unbiased: true
   use_cache: true

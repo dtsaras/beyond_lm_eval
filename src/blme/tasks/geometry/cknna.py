@@ -361,7 +361,7 @@ class CKNNATask(DiagnosticTask):
     profile is a BLME use of a cross-model metric.
 
     Config:
-        num_samples: number of texts (default 100).
+        num_samples: number of texts (default 1024, the reference size).
         topk:        mutual k-NN neighbours (default 10); needs num_samples >= topk.
         unbiased:    unbiased HSIC + self-diagonal masking (default True).
         use_cache:   reuse the shared forward-pass cache (default True).
@@ -371,7 +371,8 @@ class CKNNATask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKNNA (mutual k-NN conditional CKA) Analysis...")
 
-        num_samples = self.config.get("num_samples", 100)
+        # 1024 texts at k=10, the reference sample size (extract_features.py:178).
+        num_samples = int(self.config.get("num_samples", 1024))
         topk = int(self.config.get("topk", _DEFAULT_TOPK))
         unbiased = bool(self.config.get("unbiased", True))
         use_cache = self.config.get("use_cache", True)
@@ -386,10 +387,16 @@ class CKNNATask(DiagnosticTask):
         # extract_features.py:82 stacks them.
         feats, feats_excl, mid_docs, _info = _pooled_layer_features(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            use_cache=use_cache, pool=pool, include_embedding=True)
+            use_cache=use_cache, pool=pool, include_embedding=True,
+            # The cache serves at most cache_num_samples documents; one that
+            # holds fewer than requested is not allowed to shrink N silently.
+            min_cached_docs=num_samples)
 
         if not feats:
             return {"error": "No hidden states available for CKNNA"}
+        if int(next(iter(feats.values())).shape[0]) < num_samples:
+            logger.warning(f"  geometry_cknna: {next(iter(feats.values())).shape[0]} "
+                           f"texts available, {num_samples} requested")
 
         layers = sorted(feats.keys())
         n_layers = len(layers)
@@ -479,6 +486,7 @@ class CKNNATask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),
+            "_meta_n_texts_requested": int(num_samples),
             "_meta_pooling": pool,
             "_meta_outlier_clamp": "joint_over_layers",
             "_meta_outlier_clamp_bound": float(_clamp_bound),
