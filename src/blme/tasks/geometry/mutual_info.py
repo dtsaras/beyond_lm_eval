@@ -81,9 +81,10 @@ class HSICDependenceTask(DiagnosticTask):
 
         layers = sorted(per_doc.keys())
         # Only a collection without the deepest-block hook still ends in the
-        # post-norm entry; that entry is trimmed.
+        # post-norm entry; exactly that entry is dropped, counted from the data
+        # (a config without num_hidden_layers trimmed to 2 layers).
         if not _last_is_block:
-            _keep = collected_layer_count(model)
+            _keep = collected_layer_count(n_collected=len(layers))
             if _keep and len(layers) > _keep:
                 layers = layers[:_keep]
         n_layers = len(layers)
@@ -177,6 +178,7 @@ class HSICDependenceTask(DiagnosticTask):
                 float(input_hsic[-1]) if input_hsic else float("nan")
             ),
             "_meta_last_entry_is_block_output": _last_is_block,
+            "_meta_n_layers": int(n_layers),
             # Sink diagnostics on the full (inclusive) middle-layer cloud.
             "_meta_position0_share": position0_share(_mid),
             "_meta_massive_token_share": massive_token_share(_mid),
