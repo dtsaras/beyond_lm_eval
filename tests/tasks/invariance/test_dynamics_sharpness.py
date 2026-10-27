@@ -40,3 +40,17 @@ def test_bf16_buffers_are_promoted_and_restored():
     assert got["_meta_n_buffers_promoted"] >= 1
     assert {p.dtype for p in bf16.parameters()} == {torch.bfloat16}
     assert {b.dtype for b in bf16.buffers() if b.is_floating_point()} == {torch.bfloat16}
+
+
+def test_asam_is_invariant_under_a_function_preserving_rescale():
+    """Residual-stream gauge c = 2 with rescaled norm eps (exact): the last
+    block's output projections double and the function is unchanged. Adaptive
+    SAM does not move; plain SAM, the trace and the top eigenvalue do."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    scaled = inv.residual_scale_gauge(model, 2.0, rescale_eps=True,
+                                      verify_on=token_batches(tok), atol=0.0)
+    base, other = _run(model, tok), _run(scaled, tok)
+    inv.assert_invariant(base, other, ["asam_sharpness", "baseline_loss"], rtol=0.0)
+    for k in ("sam_sharpness", "hutchinson_trace_estimate", "top_eigenvalue_estimate"):
+        inv.assert_moves(base, other, k, 1e-3)

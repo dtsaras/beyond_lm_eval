@@ -10,6 +10,9 @@ Loss-landscape sharpness metrics:
     L(theta + rho * g/||g||) - L(theta), measured at the gradient
     direction. Closely related to the operator-norm sharpness used in
     sharpness-aware minimisation.
+  - **Adaptive SAM sharpness** — Kwon et al. 2021 (ASAM), arXiv:2102.11600 —
+    the same with the rho-ball taken in w / |w| coordinates, which makes it
+    invariant to function-preserving rescaling of the weights.
 
 For large LLMs the full-parameter Hessian is too big to handle, so by
 default we restrict the curvature computation to the **final transformer
@@ -230,6 +233,39 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
     return float("nan"), float("nan"), grad_norm
 
 
+def _asam_sharpness(compute_loss, params, rho: float,
+                    baseline_loss: float) -> Tuple[float, float, float]:
+    """Adaptive sharpness (Kwon et al. 2021, ASAM, arXiv:2102.11600) with the
+    element-wise operator T_w = |w|: ``L(w + eps*) - L(w)`` with
+    ``eps* = rho * T_w^2 g / ||T_w g||_2``, i.e. a rho-ball in the coordinates
+    w / |w|. Any function-preserving element-wise rescale w -> a w leaves T_w g
+    unchanged and scales eps* with w, so the perturbed function, and the value,
+    are unchanged (plain SAM's fixed-radius ball is not; Dinh et al. 2017).
+
+    T_w = |w| on every parameter, biases included, and no +eta: the released
+    ASAM code adds eta = 0.01 to |w| of weights only, which breaks the exact
+    invariance this twin exists for. Parameters are restored exactly.
+    Returns ``(sharpness, perturbed_loss, ||T_w g||)``; NaNs when T_w g = 0.
+    """
+    loss = compute_loss()
+    grads = torch.autograd.grad(loss, params, create_graph=False)
+    tw = [p.detach().abs() for p in params]
+    twg = [t * g.detach() for t, g in zip(tw, grads)]
+    norm = _safe_norm(_flatten_grads(twg))
+    if not norm > 0:
+        return float("nan"), float("nan"), norm
+    with torch.no_grad():
+        saved = [p.detach().clone() for p in params]
+        try:
+            for p, t, tg in zip(params, tw, twg):
+                p.add_(t * tg * (rho / norm))
+            perturbed = float(compute_loss().item())
+        finally:
+            for p, s_ in zip(params, saved):
+                p.copy_(s_)
+    return perturbed - baseline_loss, perturbed, norm
+
+
 def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                         baseline_loss: float, max_doublings: int = 30,
                         bisect_iters: int = 6,
@@ -368,6 +404,9 @@ class LossSharpnessTask(DiagnosticTask):
         hutchinson_tol = float(self.config.get("hutchinson_tol", 1e-3))
         power_iter_tol = float(self.config.get("power_iter_tol", 1e-3))
         sam_rho = self.config.get("sam_rho", 0.05)
+        # The adaptive twin uses the same radius by default, so it differs from
+        # sam_sharpness only by the T_w = |w| normaliser.
+        asam_rho = float(self.config.get("asam_rho", sam_rho))
         num_samples = self.config.get("num_samples", 4)
         seed = int(self.config.get("seed", 42))
 
@@ -480,6 +519,12 @@ class LossSharpnessTask(DiagnosticTask):
                 compute_loss, params, sam_rho, baseline_loss
             )
 
+            # 3b. Adaptive (scale-invariant) SAM on the same scope: the
+            # normalised version of sam_sharpness
+            # (tests/tasks/invariance/test_dynamics_sharpness.py).
+            asam_sharpness, asam_perturbed, _ = _asam_sharpness(
+                compute_loss, params, asam_rho, baseline_loss)
+
             # 4. Critical sharpness: largest stable descent step along the
             # gradient; lambda_c = 2/eta* (edge of stability).
             loss_for_cs = compute_loss()
@@ -522,6 +567,9 @@ class LossSharpnessTask(DiagnosticTask):
             "top_eigenvalue_estimate": top_eig,
             "sam_sharpness": sam_sharpness,
             "sam_perturbed_loss": perturbed_loss,
+            "asam_sharpness": asam_sharpness,
+            "_meta_asam_perturbed_loss": asam_perturbed,
+            "_meta_asam_rho": asam_rho,
             "critical_step_size": critical_step,
             "critical_sharpness": critical_sharpness,
             "sam_rho": sam_rho,

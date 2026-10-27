@@ -273,5 +273,27 @@ def test_sam_sharpness_matches_analytic_quadratic():
     assert torch.equal(m.theta.detach(), before), "params not restored"
 
 
+def test_asam_matches_analytic_quadratic():
+    """L = 0.5 * sum(d_i theta_i^2): g = d*theta, T_w g = |theta| d theta and
+    eps* = rho |theta|^2 d theta / ||T_w g||, so the perturbed loss is exact."""
+    from blme.tasks.dynamics.sharpness import _asam_sharpness
+    theta = [3.0, -4.0, 0.5]
+    diag = [1.0, 2.0, 5.0]
+    m = _Quad(theta, diag)
+    params = [m.theta]
+    baseline = float(m.loss().item())
+    rho = 0.1
+    t = torch.tensor(theta, dtype=torch.float64)
+    d = torch.tensor(diag, dtype=torch.float64)
+    twg = t.abs() * d * t
+    eps = rho * t.abs() * twg / twg.norm()
+    want = float(0.5 * (d * (t + eps) ** 2).sum()) - baseline
+    before = m.theta.detach().clone()
+    got, perturbed, norm = _asam_sharpness(m.loss, params, rho, baseline)
+    assert got == pytest.approx(want, rel=1e-12)
+    assert norm == pytest.approx(float(twg.norm()), rel=1e-12)
+    assert torch.equal(m.theta.detach(), before), "params not restored"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
