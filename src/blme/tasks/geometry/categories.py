@@ -17,6 +17,19 @@ logger = logging.getLogger("blme")
 # category size can differ across tokenizers.
 _MATCHED_CAT_SIZE = 10
 
+# Random non-category tokens each category is compared with (inter-distance).
+_N_COMPARE = 100
+
+
+def _n_emittable(tokenizer, n_rows: int) -> int:
+    """Rows the tokenizer can emit: ids below len(tokenizer) (added tokens
+    included), capped at the embedding's row count."""
+    try:
+        n_tok = int(len(tokenizer))
+    except TypeError:
+        n_tok = 0
+    return min(n_tok, int(n_rows)) if n_tok > 0 else int(n_rows)
+
 
 @register_task("geometry_categories")
 class CategoryGeometryTask(DiagnosticTask):
@@ -51,9 +64,15 @@ class CategoryGeometryTask(DiagnosticTask):
         # 4. Compute Metrics
         results = {}
         
+        # Rows the tokenizer can emit: unused padding rows past len(tokenizer)
+        # carry no word and must not enter any draw or search.
+        n_emit = _n_emittable(tokenizer, E.shape[0])
+        results["_meta_n_emittable_rows"] = int(n_emit)
+        results["_meta_n_unused_rows"] = int(E.shape[0] - n_emit)
+
         # Separation
         logger.info(" Computing Separation...")
-        sep_results = self._compute_separation(E, cat_tokens)
+        sep_results = self._compute_separation(E, cat_tokens, n_emit)
         results.update(sep_results)
         # Tokens claimed by more than one category, dropped from all of them.
         results["_meta_n_ambiguous_tokens"] = int(
@@ -174,25 +193,22 @@ class CategoryGeometryTask(DiagnosticTask):
 
         return cat_tokens, cat_labels
 
-    def _compute_separation(self, E, cat_tokens):
-        n_vocab = len(E)
+    def _compute_separation(self, E, cat_tokens, n_emit=None):
+        n_vocab = len(E) if n_emit is None else int(n_emit)
         results = {}
-        
-        # Pre-select random tokens for inter-class comparison
-        np.random.seed(42)
+
+        # Comparison tokens: a seeded draw over the EMITTABLE non-category ids
+        # with a local generator, so appending unused rows (V) cannot redraw
+        # them; all _N_COMPARE draws enter the mean (it used only 10 of 100).
         all_tids = set([t for tokens in cat_tokens.values() for t in tokens])
         replacement_candidates = [t for t in range(n_vocab) if t not in all_tids]
-        
-        # If vocab is tiny (test mode), handle gracefully
         if not replacement_candidates:
-             replacement_candidates = list(range(n_vocab))
+            replacement_candidates = list(range(n_vocab))
+        random_tids = np.random.default_rng(42).choice(
+            np.asarray(replacement_candidates),
+            size=min(_N_COMPARE, len(replacement_candidates)),
+            replace=False)
 
-        random_tids = np.random.choice(
-            replacement_candidates,
-            size=min(100, len(replacement_candidates)),
-            replace=False
-        )
-        
         # Scale-exact unit rows, then 1 - dot (scipy's cosine underflows).
         _U = _safe_unit_rows(E)
 
@@ -210,7 +226,7 @@ class CategoryGeometryTask(DiagnosticTask):
             # Inter
             inter_dists = []
             for tid in tids:
-                for rtid in random_tids[:10]:
+                for rtid in random_tids:
                     d = 1.0 - float(_U[tid] @ _U[rtid])
                     inter_dists.append(d)
             inter = np.mean(inter_dists) if inter_dists else 0
