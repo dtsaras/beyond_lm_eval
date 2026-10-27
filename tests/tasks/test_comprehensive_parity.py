@@ -3258,9 +3258,11 @@ def test_geometry_lipschitz():
     #     lipschitz_max_layer = 0
     #   contraction per token = ||h_1||/||h_0||:
     #     A: 3/5 = 0.6 ; B: sqrt(10)/1   ->  mean = (0.6 + sqrt(10)) / 2
-    h0 = torch.tensor([[3.0, 4.0], [1.0, 0.0]])
-    h1 = torch.tensor([[3.0, 0.0], [1.0, 3.0]])
-    fake_layers = {0: h0, 1: h1}
+    # One document; its position-0 row is a sink (ratio 99) that the task's
+    # exclude_pos0 policy drops, so tokens A and B (positions 1, 2) are scored.
+    h0 = torch.tensor([[1.0, 0.0], [3.0, 4.0], [1.0, 0.0]])
+    h1 = torch.tensor([[100.0, 0.0], [3.0, 0.0], [1.0, 3.0]])
+    fake_layers = {0: [h0], 1: [h1]}
 
     task = LipschitzContinuityTask(config={"num_samples": 5, "use_cache": False})
     # The task reads states through `hidden_states_for_task`, which imports the
@@ -3334,7 +3336,8 @@ def test_geometry_lipschitz():
             # the same population the task does (adversarial review round 2,
             # 2026-09-04).
             for li in range(len(hs)):
-                h = hs[li].reshape(-1, hs[li].shape[-1]).float().numpy()
+                # Position 0 excluded, as the task's exclude_pos0 policy does.
+                h = hs[li][0, 1:].float().numpy()
                 per_layer.setdefault(li, []).append(h)
     _lip_hook.remove()
     layers = {li: np.concatenate(v, axis=0) for li, v in per_layer.items()}
