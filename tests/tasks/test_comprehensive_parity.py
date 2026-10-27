@@ -2907,7 +2907,8 @@ def test_geometry_categories():
         assert res_m[f"{c}_purity"] == pytest.approx(ref_pur_m[c], abs=1e-9)
         assert 0.0 < res_m[f"{c}_purity"] < 1.0   # genuinely impure -> non-vacuous
 
-    assert res["n_category_tokens_mapped"] == 16
+    assert res["_meta_n_category_tokens_mapped"] == 16
+    assert "n_category_tokens_mapped" not in res
 
 # === geometry_collapse  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===
 def test_geometry_collapse():

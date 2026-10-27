@@ -106,7 +106,8 @@ class CategoryGeometryTask(DiagnosticTask):
             results.update(rel_results)
 
         n_mapped = sum(len(tids) for tids in cat_tokens.values())
-        results["n_category_tokens_mapped"] = int(n_mapped)
+        # A tokenizer count (which words are single tokens), not geometry.
+        results["_meta_n_category_tokens_mapped"] = int(n_mapped)
         # The word-to-token mapping is tokenizer-specific (single-token words).
         results["_meta_cross_model_comparable"] = False
         results["_meta_comparability_note"] = (

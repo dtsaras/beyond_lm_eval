@@ -72,3 +72,11 @@ def test_unused_rows_never_enter_a_neighbour_search(gpt2, base):
                                                       "_consistency"))]
     assert keys
     inv.assert_invariant(base, r, keys, rtol=1e-6)
+
+
+
+def test_token_count_is_not_a_headline(base):
+    """n_category_tokens_mapped counts single-token category words (704 gpt2,
+    711 pythia): a tokenizer property, emitted as _meta_ only."""
+    assert "n_category_tokens_mapped" not in base
+    assert base["_meta_n_category_tokens_mapped"] > 0
