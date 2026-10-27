@@ -438,7 +438,7 @@ def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
     return rec
 
 
-def _summarise(rec, threshold):
+def _summarise(rec, threshold, num_layers):
     """Headline and provenance keys from the recorded effects."""
     kl_by_layer = defaultdict(list)
     for l_idx, kl in rec.kl_pos:
@@ -469,7 +469,9 @@ def _summarise(rec, threshold):
     out["layer_steering_directional_effect"] = dir_pos
     # Signed argmax: a layer moving the output the wrong way cannot win.
     best_dir = max(layers_, key=lambda l: dir_pos[l])
-    out["best_directional_layer"] = int(best_dir)
+    # An absolute block index is a depth proxy: _meta_, with the depth fraction.
+    out["_meta_best_directional_layer"] = int(best_dir)
+    out["best_directional_layer_frac"] = float(best_dir) / max(1.0, float(num_layers - 1))
     out["best_directional_effect"] = float(dir_pos[best_dir])
     out["mean_directional_effect"] = float(np.mean([dir_pos[l] for l in layers_]))
 
@@ -586,7 +588,7 @@ class SteeringEffectivenessTask(DiagnosticTask):
         if not rec.kl_pos:
             return {"error": "No steering results computed."}
 
-        out = _summarise(rec, self.config.get("steering_threshold", 0.01))
+        out = _summarise(rec, self.config.get("steering_threshold", 0.01), num_layers)
         out["_meta_n_probe_triples"] = int(len(samples))
         out["_meta_probe_set_is_bundled"] = bool(using_fallback)
         # What the random control actually was, and how many draws it had.

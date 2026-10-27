@@ -6576,13 +6576,22 @@ def test_repe_steering_effectiveness():
 
     test_layers = list(range(num_layers))  # <=10 layers -> task tests them all
     ref_by_layer = {l: [] for l in test_layers}
+    # The injected vector is v rescaled to alpha * 0.1 (the default
+    # steering_rel_norm) times the norm of the block output it is added to, at
+    # the neutral prompt's last position (ActAdd App. F relative norm).
+    _rhook = layers[-1].register_forward_hook(_rcap)
     with torch.no_grad():
         for s in samples:
             nid = tok.encode(s["neutral"], return_tensors="pt",
                              truncation=True, max_length=128).to(device)
-            base_p = F.softmax(model(nid).logits[0, -1], dim=-1)
+            _ob = model(nid, output_hidden_states=True)
+            base_p = F.softmax(_ob.logits[0, -1], dim=-1)
+            _hb = list(_ob.hidden_states)
+            _hb[-1] = _rsink["h"]
             for l in test_layers:
-                vec = tv[l].to(device)
+                _res = torch.linalg.vector_norm(_hb[l + 1][0, -1].double())
+                _vn = torch.linalg.vector_norm(tv[l].double())
+                vec = (tv[l].double() * (0.1 * _res / _vn)).float().to(device)
 
                 def make_hook(v):
                     def hook(mod, inp, outp):
@@ -6597,6 +6606,7 @@ def test_repe_steering_effectiveness():
                     ref_by_layer[l].append(max(0.0, manual_kl(base_p, steered_p)))
                 finally:
                     h.remove()
+    _rhook.remove()
 
     ref_mean = {l: float(np.mean(v)) for l, v in ref_by_layer.items()}
     ref_best = max(ref_mean, key=ref_mean.get)

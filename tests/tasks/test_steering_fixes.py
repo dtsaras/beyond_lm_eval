@@ -101,3 +101,15 @@ def test_injected_size_is_relative_to_the_residual(monkeypatch):
     assert out["_meta_realized_rel_norm"] == pytest.approx(0.1, rel=1e-6)
     assert out["_meta_raw_vector_rel_norm"] == pytest.approx(
         2 * base["_meta_raw_vector_rel_norm"], rel=1e-6)
+
+
+def test_best_directional_layer_is_a_depth_fraction():
+    """The argmax block index is a depth proxy (it is L-1 on gpt2 and
+    pythia-410m): it is _meta_, and the comparable key is its depth fraction."""
+    tok = _gpt2_tokenizer()
+    model = _tiny_llama(len(tok), layers=3)
+    out = SteeringEffectivenessTask(dict(CFG)).evaluate(model, tok, None)
+    assert "best_directional_layer" not in out
+    idx = out["_meta_best_directional_layer"]
+    assert out["best_directional_layer_frac"] == idx / 2
+    assert 0.0 <= out["best_directional_layer_frac"] <= 1.0
