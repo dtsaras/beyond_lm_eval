@@ -61,6 +61,43 @@ def _transitions(rows, layer_indices):
     return means, rates, (float(np.mean(paper)) if paper else float("nan"))
 
 
+def _angle(a, b):
+    """Row-wise angle between a and b, 2 atan2(||a^ - b^||, ||a^ + b^||):
+    accurate near 0 and pi, where arccos of the cosine is not."""
+    na, nb = _rownorm(a), _rownorm(b)
+    ok = (na > 0) & (nb > 0)
+    ua = a[ok] / na[ok, None]
+    ub = b[ok] / nb[ok, None]
+    return 2.0 * np.arctan2(_rownorm(ua - ub), _rownorm(ua + ub))
+
+
+def _depth_additive(rows, block_indices):
+    """End-to-end log norm growth and total angular path over the block updates.
+
+    e2e_log_norm_growth = mean_i log(||h_last,i|| / ||h_first,i||) telescopes,
+    so it is unchanged by identity blocks and by any re-decomposition of the
+    same end-to-end map; total_angular_path = sum_l mean_i angle(h_l,i,
+    h_l+1,i) is unchanged by identity blocks (an identity update has angle 0)
+    (tests/tasks/invariance/test_geometry_lipschitz.py).
+    """
+    first = np.asarray(as_numpy(rows[block_indices[0]]), dtype=np.float64)
+    last = np.asarray(as_numpy(rows[block_indices[-1]]), dtype=np.float64)
+    n = min(len(first), len(last))
+    nf, nl = _rownorm(first[:n]), _rownorm(last[:n])
+    ok = (nf > 0) & (nl > 0)
+    e2e = float(np.mean(np.log(nl[ok] / nf[ok]))) if np.any(ok) else float("nan")
+    path = 0.0
+    for i in range(len(block_indices) - 1):
+        a = np.asarray(as_numpy(rows[block_indices[i]]), dtype=np.float64)
+        b = np.asarray(as_numpy(rows[block_indices[i + 1]]), dtype=np.float64)
+        m = min(len(a), len(b))
+        th = _angle(a[:m], b[:m])
+        if th.size == 0:
+            return e2e, float("nan")
+        path += float(np.mean(th))
+    return e2e, path
+
+
 @register_task("geometry_lipschitz")
 class LipschitzContinuityTask(DiagnosticTask):
     """Relative layer-wise change ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||.
@@ -121,11 +158,13 @@ class LipschitzContinuityTask(DiagnosticTask):
             return {"error": "Need at least 2 block outputs for Lipschitz analysis"}
         lipschitz_means, contraction_rates, _paper_eps_mean = _transitions(rows, block_indices)
         incl_means, _, _ = _transitions(every, block_indices)
+        e2e, path = _depth_additive(rows, block_indices)
         if has_embedding:
             emb_means, emb_rates, _ = _transitions(rows, layer_indices[:2])
             emb_rel, emb_rate = emb_means[0], emb_rates[0]
+            emb_growth, _ = _depth_additive(rows, layer_indices[:2])
         else:
-            emb_rel = emb_rate = float("nan")
+            emb_rel = emb_rate = emb_growth = float("nan")
 
         lip_arr = np.array(lipschitz_means)
         _lf = lip_arr[np.isfinite(lip_arr)]
@@ -173,8 +212,12 @@ class LipschitzContinuityTask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(last_is_block),
             "mean_contraction_rate": _cr_mean,
             "contraction_std": _cr_std,
+            # Depth-additive forms: invariant to identity-block insertion.
+            "e2e_log_norm_growth": e2e,
+            "total_angular_path": path,
             # The embedding -> block 0 update, on its own.
             "embedding_relative_change": emb_rel,
+            "_meta_embedding_log_norm_growth": emb_growth,
             "_meta_embedding_contraction_rate": emb_rate,
             "_meta_embedding_transition_available": bool(has_embedding),
             # Which rows were scored, and how much of the middle layer's centred

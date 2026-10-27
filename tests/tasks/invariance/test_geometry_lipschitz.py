@@ -77,3 +77,29 @@ def test_embedding_transition_is_reported_separately(states):
     inv.assert_invariant(base, big, keys, rtol=0.0)
     inv.assert_moves(base, big, "embedding_relative_change", min_rel=1e-2)
     assert base["_meta_embedding_transition_available"] is True
+
+
+def test_depth_additive_keys_invariant_under_identity_insertion(tiny, states):
+    """Identity blocks (exact) after blocks 0, 1 and 3: e2e_log_norm_growth and
+    total_angular_path are bit-identical, while the uniform layer mean of the
+    relative change falls as (L-1)/(L-1+3) (the known negative)."""
+    model, tok = tiny
+    S_new = inv.states_from_model(inv.insert_identity_blocks(model, [0, 1, 3]), tok, TEXTS)
+    base = inv.run_task_on_states(TASK, states)
+    ins = inv.run_task_on_states(TASK, S_new)
+    inv.assert_invariant(base, ins, ["e2e_log_norm_growth", "total_angular_path",
+                                     "relative_change_max", "embedding_relative_change"], rtol=0.0)
+    mean_key = "relative_change_mean" if "relative_change_mean" in base else "_meta_relative_change_mean"
+    L1 = states.n_layers - 1
+    assert ins[mean_key] / base[mean_key] == pytest.approx(L1 / (L1 + 3), rel=1e-12)
+
+
+def test_e2e_log_norm_growth_invariant_under_redecomposition(tiny, states):
+    """Splitting block 2 into attention-only and MLP-only blocks keeps the
+    end-to-end map: e2e_log_norm_growth does not move. The angular path, which
+    now passes through the mid-block state, may (it is not claimed here)."""
+    model, tok = tiny
+    S_new = inv.states_from_model(inv.redecompose(model, 2), tok, TEXTS)
+    base = inv.run_task_on_states(TASK, states)
+    split = inv.run_task_on_states(TASK, S_new)
+    inv.assert_invariant(base, split, ["e2e_log_norm_growth"], rtol=1e-12)
