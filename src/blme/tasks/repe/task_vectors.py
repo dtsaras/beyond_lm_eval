@@ -60,6 +60,24 @@ def _distinct_indices(samples):
     return uniq
 
 
+def _consensus_energy(D, H):
+    """U-statistic estimate of ||E d||^2 over the mean squared residual norm.
+
+    ``D`` (N, d) holds the per-pair differences d_i = h_i+ - h_i-, ``H`` the
+    states they came from. mean_{i != j} <d_i, d_j> is unbiased for ||E d||^2
+    (the plain ||mean d||^2 carries + tr(Sigma)/N), and dividing by mean ||h||^2
+    removes the residual scale. Signed: <= 0 means no consensus. NaN for N < 2.
+    """
+    D = D.double()
+    n = D.shape[0]
+    if n < 2:
+        return float("nan")
+    G = D @ D.t()
+    u = (G.sum() - torch.trace(G)) / (n * (n - 1))
+    h2 = (H.double() ** 2).sum(dim=1).mean()
+    return float(u / h2) if h2 > 0 else float("nan")
+
+
 @register_task("repe_task_vectors")
 class TaskVectorGeometryTask(DiagnosticTask):
     """Geometry of the RepE reading vector v = mean(h+) - mean(h-) per layer.
@@ -110,6 +128,7 @@ class TaskVectorGeometryTask(DiagnosticTask):
     def _summarise(pos_activations, neg_activations, uniq_idx, num_layers):
         results = {}
         task_vector_norms = []
+        consensus = []
         centroid_cosines = []
         pair_dir_cos_mean = []
         pair_dir_cos_min = []
@@ -138,8 +157,12 @@ class TaskVectorGeometryTask(DiagnosticTask):
 
             # Agreement of the per-pair directions d_i = h_i+ - h_i-.
             _d = A_pos - A_neg
+            _h = torch.cat([A_pos, A_neg])
             if len(uniq_idx) < _d.shape[0]:
-                _d = _d[torch.as_tensor(uniq_idx, dtype=torch.long)]
+                _u = torch.as_tensor(uniq_idx, dtype=torch.long)
+                _d = _d[_u]
+                _h = torch.cat([A_pos[_u], A_neg[_u]])
+            consensus.append(_consensus_energy(_d, _h))
             if _d.shape[0] >= 2:
                 _dn = F.normalize(_d, dim=1)
                 _G = _dn @ _dn.t()
@@ -157,6 +180,10 @@ class TaskVectorGeometryTask(DiagnosticTask):
         results["layer_pair_direction_cos_min"] = pair_dir_cos_min
         _finite = [c for c in pair_dir_cos_mean if c == c]
         results["pair_direction_cos_mean"] = float(np.mean(_finite)) if _finite else float("nan")
+        # Size-robust consensus magnitude (tests/tasks/invariance/test_repe_task_vectors.py).
+        results["layer_consensus_energy_rel"] = consensus
+        _fc = [c for c in consensus if c == c]
+        results["consensus_energy_rel"] = float(np.mean(_fc)) if _fc else float("nan")
 
         if task_vector_norms:
             results["_meta_max_norm_layer"] = int(np.argmax(task_vector_norms))
@@ -169,10 +196,12 @@ class TaskVectorGeometryTask(DiagnosticTask):
             results["_meta_mean_vector_norm"] = float(np.mean(task_vector_norms))
             d_model = pos_activations[0][0].numel()
             scale = float(np.sqrt(d_model))
-            results["layer_task_vector_norms_normalized"] = [
+            # /sqrt(d) moves x 1/sqrt(k) under isometric embedding and with the
+            # residual scale, and falls as N^-1/2: _meta_ only.
+            results["_meta_layer_task_vector_norms_normalized"] = [
                 n / scale for n in task_vector_norms
             ]
-            results["mean_vector_norm_normalized"] = (
+            results["_meta_mean_vector_norm_normalized"] = (
                 results["_meta_mean_vector_norm"] / scale
             )
 
