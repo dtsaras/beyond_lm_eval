@@ -260,6 +260,20 @@ def _resid_pre_sites(model, encoded, n_pos, n_layers):
             yield torch.stack([h[0, -n_pos:].float().cpu() for h in hs[:n_layers]], dim=1)
 
 
+def _rel_energy(h, n, pos, layer):
+    """[||mu_h - mu_n||^2 - tr S_h / n_h - tr S_n / n_n] / mean ||x||^2:
+    the unbiased squared separation over the mean squared residual norm."""
+    mh, mn = h.mean()[pos, layer], n.mean()[pos, layer]
+    diff2 = float(((mh - mn) ** 2).sum())
+    def tr_over_n(c, mu):
+        if c.n < 2:
+            return float("nan")
+        return float((c.sq[pos, layer] - c.n * (mu * mu).sum()) / (c.n - 1)) / c.n
+    denom = float((h.sq[pos, layer] + n.sq[pos, layer]) / (h.n + n.n))
+    num = diff2 - tr_over_n(h, mh) - tr_over_n(n, mn)
+    return num / denom if denom > 0 else float("nan")
+
+
 def _layer_separability(X, y, n_splits, seed):
     """Full-population direction norm and the held-out projection AUC / gap.
 
@@ -322,7 +336,8 @@ class RefusalDirectionTask(DiagnosticTask):
 
     TOKEN_POLICY = "paper_protocol:Arditi2024 post-instruction tokens"
     HEADLINE_KEYS = ("separability_auc", "mean_projection_gap", "direction_norm",
-                     "selected_layer_frac", "refusal_score_bypass", "refusal_score_induce")
+                     "rel_direction_energy", "selected_layer_frac",
+                     "refusal_score_bypass", "refusal_score_induce")
     PRUNE_LAYER_FRACTION = 0.2       # select_direction.py: prune_layer_percentage
     KL_THRESHOLD = 0.1
     INDUCE_THRESHOLD = 0.0
@@ -438,6 +453,9 @@ class RefusalDirectionTask(DiagnosticTask):
         _, auc, gap = _layer_separability(X, y, n_splits, int(self.config.get("seed", 42)))
         out = {
             "direction_norm": float(torch.linalg.vector_norm(mean_diff[pos, l])),
+            # Unbiased in the prompt count and free of the residual scale
+            # (tests/tasks/invariance/test_repe_refusal_direction.py).
+            "rel_direction_energy": _rel_energy(sums["h_tr"], sums["n_tr"], pos, l),
             "separability_auc": auc,
             "mean_projection_gap": gap,
             "selected_layer_frac": float(l) / float(L),
