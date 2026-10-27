@@ -3916,7 +3916,7 @@ def test_geometry_representation_sensitivity():
     task = RepresentationSensitivityTask({"num_samples": len(texts)})
     blme = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in blme, blme
-    assert blme["num_samples_analyzed"] == len(texts)
+    assert blme["_meta_num_samples_analyzed"] == len(texts)
     blme_val = blme["representation_sensitivity"]
 
     # -- INDEPENDENT reference: autograd on log_softmax(W h + b)[y] --

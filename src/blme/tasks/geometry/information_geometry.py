@@ -83,6 +83,7 @@ class RepresentationSensitivityTask(DiagnosticTask):
     states using a closed-form derivation for the linear LM head.
     Uses the true next token as the target rather than argmax.
     """
+
     @staticmethod
     def _logit_scale_for(model):
         """`config.logit_scale` as a float, or None when the head is unscaled
@@ -195,7 +196,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
         out = {
             "representation_sensitivity": float(np.mean(sensitivity_values)),
             "sensitivity_std": float(np.std(sensitivity_values)),
-            "num_samples_analyzed": len(sensitivity_values)
+            # The number of documents actually scored (a config echo otherwise).
+            "_meta_num_samples_analyzed": len(sensitivity_values),
         }
         if unit_reason is None and unit_values:
             tol = 1e-3 if all(p.dtype == torch.float32 for p in model.parameters()) else 3e-2
