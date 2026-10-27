@@ -177,7 +177,27 @@ def _fractal_params(nll_stream, eps: float = 5e-3) -> dict:
 @register_task("dynamics_fractal")
 class FractalLikelihoodTask(DiagnosticTask):
     """Hurst / Joseph / self-similarity exponents of the model's per-token
-    NLL stream over the evaluation corpus."""
+    NLL stream over natural long documents."""
+
+    # LLM-originated: the paper's stream, every next-token NLL after a 128-token
+    # burn-in (position 0 has no NLL target).
+    TOKEN_POLICY = ("paper_protocol:Alabdulmohsin et al. 2024 (arXiv:2402.01825) "
+                    "Sec. 2.1, notebook burn-in")
+    SOURCES = {
+        "paper": "arXiv:2402.01825",
+        "code": "google-research/google-research@700de9630a39cf1c0ded1ea7d1092ec0f467c7a7"
+                ":fractals_language",
+        "llm_precedent": "Alabdulmohsin et al. 2024 (arXiv:2402.01825) is itself the LLM paper",
+    }
+    HEADLINE_KEYS = (
+        "hurst_exponent", "joseph_exponent", "self_similarity_exponent",
+        "hurst_exponent_perdoc", "joseph_exponent_perdoc", "self_similarity_exponent_perdoc",
+        "hurst_exponent_std", "joseph_exponent_std", "self_similarity_exponent_std",
+    )
+    # None: dimensionless exponents of a token-time process with no mechanical
+    # d / L / V term; the Hurst exponent is size-linked by meaning (it tracks the
+    # model's NLL process). Segment length is pinned (use_tokens) across models.
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Fractal Likelihood Analysis (Hurst)...")
