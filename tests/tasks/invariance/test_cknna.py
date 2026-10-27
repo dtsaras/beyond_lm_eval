@@ -110,6 +110,12 @@ def test_reference_sample_size_and_no_silent_cache_cap(tiny):
     assert r["_meta_features_source"] == "self_collected"
 
 
+def test_max_offdiag_duplicate_is_not_emitted(tiny_states):
+    """max_offdiag_cknna equalled max_adjacent_cknna on 66/66 study models."""
+    r = inv.run_task_on_states(TASK, tiny_states, {"topk": 5})
+    assert [k for k in r if "max_offdiag" in k] == []
+
+
 def test_pooled_forward_matches_the_cache_route(tiny):
     """The self-collected route pools per text on the fly and reproduces the
     shared-cache route bit for bit."""

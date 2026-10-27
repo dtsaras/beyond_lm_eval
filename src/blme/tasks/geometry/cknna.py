@@ -472,7 +472,8 @@ class CKNNATask(DiagnosticTask):
             "mean_offdiag_cknna": _stat(off_diag, np.nanmean),
             "std_offdiag_cknna": _stat(off_diag, np.nanstd),
             "min_offdiag_cknna": _stat(off_diag, np.nanmin),
-            "max_offdiag_cknna": _stat(off_diag, np.nanmax),
+            # max_offdiag_cknna is not emitted: it equalled max_adjacent_cknna
+            # on 66/66 study models (the most aligned pair is adjacent).
             # Early-vs-late (layer 0 vs layer N-1).
             "early_late_cknna": (
                 float(cknna_matrix[0, -1]) if n >= 2 else float("nan")
