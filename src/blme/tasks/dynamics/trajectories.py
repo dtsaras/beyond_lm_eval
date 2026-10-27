@@ -67,6 +67,7 @@ class LatentInterpolationTask(DiagnosticTask):
         num_pairs = self.config.get("num_pairs", 50)
         steps = self.config.get("steps", 10)
         num_samples = self.config.get("num_samples", 10)
+        max_tokens = int(self.config.get("max_tokens", 128))
 
         device = next(model.parameters()).device
 
@@ -93,6 +94,7 @@ class LatentInterpolationTask(DiagnosticTask):
         _rng = _random.Random(int(self.config.get("seed", 0)))
         count = 0
         attempts = 0
+        ctx_lens = []
         # Attempts are capped so unusable rows cannot spin the loop forever
         # (tests/tasks/test_dynamics.py::test_interpolation_does_not_hang_on_unusable_samples).
         max_attempts = max(20, num_pairs * 20)
@@ -107,13 +109,16 @@ class LatentInterpolationTask(DiagnosticTask):
 
                 h_states = []
                 for s in [s1, s2]:
-                    if isinstance(s, str):
-                        inp = tokenizer(s, return_tensors="pt").to(device)
-                    elif 'text' in s:
-                        inp = tokenizer(s['text'][:128], return_tensors="pt").to(device)
+                    # Contexts are cut at `max_tokens` TOKENS, not characters, so
+                    # every tokenizer sees the same amount of context.
+                    if isinstance(s, str) or 'text' in s:
+                        text = s if isinstance(s, str) else s['text']
+                        inp = tokenizer(text, return_tensors="pt", truncation=True,
+                                        max_length=max_tokens).to(device)
                     elif 'input_ids' in s:
-                        inp = {'input_ids': torch.tensor(s['input_ids']).long().unsqueeze(0).to(device)}
+                        inp = {'input_ids': torch.tensor(s['input_ids'][:max_tokens]).long().unsqueeze(0).to(device)}
                     else: continue
+                    ctx_lens.append(int(inp['input_ids'].shape[1]))
 
                     out = model(**inp, output_hidden_states=True)
                     # post-final-norm: required, because the interpolant is decoded by
@@ -193,5 +198,7 @@ class LatentInterpolationTask(DiagnosticTask):
         # _meta_: equal to convexity_gap by construction (see the slerp arm).
         results["_meta_slerp_convexity_gap"] = mid_s - end_s
         results.update(effective_dtype_meta(_prec))
+        results["_meta_max_tokens"] = max_tokens
+        results["_meta_context_tokens_mean"] = float(np.mean(ctx_lens))
 
         return results

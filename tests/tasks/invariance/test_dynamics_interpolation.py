@@ -38,3 +38,22 @@ def test_bf16_model_computes_and_decodes_in_fp32(build):
     assert got["_meta_compute_dtype"] == "float32"
     assert got["_meta_promoted_to_fp32"] is True
     assert {p.dtype for p in bf16.parameters()} == {torch.bfloat16}
+
+
+def test_contexts_are_cut_by_tokens_not_characters():
+    """Two passages sharing their first 128 characters but not their first 128
+    tokens must give two different contexts. Pre-fix the 128-character cut made
+    them identical, so the pair's gap was exactly 0."""
+    tok = tokenizer()
+    shared = "The committee met in the old town hall on Thursday evening to discuss " \
+             "the new budget, the repairs to the bridge and the schedule for the summer fair."
+    assert len(shared) > 128 and len(tok(shared)["input_ids"]) < 100
+    data = [{"text": shared + " The mayor spoke first."},
+            {"text": shared + " Nobody came at all, and the doors stayed shut."}]
+    cfg = {"num_samples": 2, "num_pairs": 1, "steps": 3, "seed": 0}
+    with inv.limit_threads(1):
+        out = LatentInterpolationTask(config=cfg).evaluate(tiny_gpt2(), tok, data)
+    assert out["convexity_gap"] != 0.0
+    n_tok = sorted(len(tok(d["text"])["input_ids"]) for d in data)
+    assert out["_meta_context_tokens_mean"] == pytest.approx(sum(n_tok) / 2)
+    assert out["_meta_max_tokens"] == 128
