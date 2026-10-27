@@ -9,6 +9,7 @@ from ..base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_layers
 from ._common import logger
+from .concept_separability import _rep_token
 
 # Bundled true/false contrastive pairs, used when the caller's dataset carries
 # no {text_pos, text_neg} items (the default study corpus has only {text}).
@@ -135,11 +136,11 @@ class TaskVectorGeometryTask(DiagnosticTask):
             return {"error": "Need at least 1 sample with 'text_pos' and 'text_neg' keys"}
 
         pos_activations, neg_activations = self._collect(
-            model, tokenizer, samples, num_layers, device)
+            model, tokenizer, samples, num_layers, device, _rep_token(self.TOKEN_POLICY))
         return self._summarise(pos_activations, neg_activations, uniq_idx, num_layers)
 
     @staticmethod
-    def _collect(model, tokenizer, samples, num_layers, device):
+    def _collect(model, tokenizer, samples, num_layers, device, rep_token):
         """Last-token state of every pair at hs[1..L] of the raw tuple."""
         pos_activations = {l: [] for l in range(num_layers)}
         neg_activations = {l: [] for l in range(num_layers)}
@@ -152,8 +153,8 @@ class TaskVectorGeometryTask(DiagnosticTask):
                 ids_neg = tokenizer.encode(s["text_neg"], return_tensors="pt", truncation=True, max_length=128).to(device)
                 hs_neg = list(model(ids_neg, output_hidden_states=True).hidden_states)
                 for l in range(num_layers):
-                    pos_activations[l].append(hs_pos[l + 1][0, -1].cpu().float())
-                    neg_activations[l].append(hs_neg[l + 1][0, -1].cpu().float())
+                    pos_activations[l].append(hs_pos[l + 1][0, rep_token].cpu().float())
+                    neg_activations[l].append(hs_neg[l + 1][0, rep_token].cpu().float())
         return pos_activations, neg_activations
 
     @staticmethod
