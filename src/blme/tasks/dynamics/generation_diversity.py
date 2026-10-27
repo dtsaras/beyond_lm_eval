@@ -225,7 +225,12 @@ class GenerationDiversityTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
 
-        n_samples = self.config.get("n_samples_per_prompt", 6)
+        # Collection size: Texygen scores 500 sentences (SelfBleu sample_size), so
+        # n_completions (default 500) is split as evenly as possible over the
+        # prompts. An explicit n_samples_per_prompt overrides the split.
+        n_completions = int(self.config.get("n_completions", 500))
+        n_per_prompt = self.config.get("n_samples_per_prompt", None)
+        self_bleu_sample_size = int(self.config.get("self_bleu_sample_size", 500))
         temperature = self.config.get("temperature", 0.8)
         max_new_tokens = self.config.get("max_new_tokens", 32)
         num_prompts = self.config.get("num_prompts", len(_DIVERSITY_PROMPTS))
@@ -240,6 +245,12 @@ class GenerationDiversityTask(DiagnosticTask):
                 prompts = _DIVERSITY_PROMPTS[:num_prompts]
         else:
             prompts = _DIVERSITY_PROMPTS[:num_prompts]
+
+        if n_per_prompt is not None:
+            counts = [int(n_per_prompt)] * len(prompts)
+        else:
+            q, r = divmod(n_completions, max(1, len(prompts)))
+            counts = [q + (i < r) for i in range(len(prompts))]
 
         device = next(model.parameters()).device
 
@@ -263,7 +274,9 @@ class GenerationDiversityTask(DiagnosticTask):
                 # generate() takes no generator: seed the global RNG once,
                 # before the loop (a per-prompt reseed correlates prompts).
                 torch.manual_seed(int(seed))
-            for prompt in prompts:
+            for prompt, n_samples in zip(prompts, counts):
+                if n_samples < 1:
+                    continue
                 enc = tokenizer(prompt, return_tensors="pt").to(device)
                 prompt_len = enc["input_ids"].shape[1]
 
@@ -383,7 +396,8 @@ class GenerationDiversityTask(DiagnosticTask):
                     for n, v in _self_bleu_orders(comp, refs, orders).items():
                         vals[n].append(v)
             return {n: float(np.mean(v)) if v else float("nan") for n, v in vals.items()}
-        self_bleu = _self_bleu_means(all_words)
+        # Texygen's get_bleu_fast scores the first sample_size (500) sentences.
+        self_bleu = _self_bleu_means(all_words[:self_bleu_sample_size])
         mean_self_bleu = self_bleu[SELF_BLEU_HEADLINE_ORDER]
 
         return {
@@ -406,7 +420,9 @@ class GenerationDiversityTask(DiagnosticTask):
             "_meta_mean_distinct_2_subword": float(np.mean(sub_distinct[2])),
             "_meta_mean_distinct_3_subword": float(np.mean(sub_distinct[3])),
             "_meta_mean_self_bleu_subword": _self_bleu_means(
-                all_completions, (SELF_BLEU_HEADLINE_ORDER,))[SELF_BLEU_HEADLINE_ORDER],
+                all_completions[:self_bleu_sample_size],
+                (SELF_BLEU_HEADLINE_ORDER,))[SELF_BLEU_HEADLINE_ORDER],
+            "_meta_self_bleu_n_scored": min(len(all_words), self_bleu_sample_size),
             "_meta_self_bleu_gram": SELF_BLEU_HEADLINE_ORDER,
             **{f"_meta_self_bleu_{n}": v for n, v in self_bleu.items()
                if n != SELF_BLEU_HEADLINE_ORDER},
@@ -420,7 +436,8 @@ class GenerationDiversityTask(DiagnosticTask):
             "sampling_entropy_collapse_delta": float(np.mean(all_entropy_delta)) if all_entropy_delta else float("nan"),
             # Counts actually generated, not requested.
             "n_prompts": int(_n_ok_prompts[0]),
-            "n_samples_per_prompt": n_samples,
+            "n_samples_per_prompt": (int(n_per_prompt) if n_per_prompt is not None
+                                     else max(counts) if counts else 0),
             "_meta_n_prompts_requested": len(prompts),
             "_meta_n_prompts_failed": int(_n_failed_prompts[0]),
             "_meta_n_completions": len(all_completions),

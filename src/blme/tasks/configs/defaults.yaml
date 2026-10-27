@@ -303,10 +303,11 @@ dynamics_generation_diversity:
   # distribution and so decides what this task measures. 0 = no top-k
   # filtering (adversarial review round 2, 2026-09-04).
   top_k: 0
-  n_samples_per_prompt: 6
+  # Texygen's collection size: 500 completions over the 8 bundled prompts
+  # (63 x 4 + 62 x 4); Self-BLEU scores the first 500.
+  n_completions: 500
   temperature: 0.8
   max_new_tokens: 32
-  num_prompts: 6
 
 # ---- Consistency Tasks ----
 consistency_contrastive:

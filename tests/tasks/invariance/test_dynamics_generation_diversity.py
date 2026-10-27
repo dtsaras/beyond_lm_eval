@@ -84,6 +84,37 @@ def test_self_bleu_reported_at_texygen_orders_2_to_5():
         > out["_meta_self_bleu_5"]
 
 
+def test_default_collection_is_texygens_500(monkeypatch):
+    """With no per-prompt count configured the task generates 500 completions
+    (Texygen's sample size) split over the 8 bundled prompts, and Self-BLEU
+    scores the first 500. Pre-fix the default was 6 per prompt (36 or 48)."""
+    import blme.tasks.dynamics.generation_diversity as gd
+    from transformers import AutoTokenizer
+    monkeypatch.setattr(gd, "_self_bleu_orders",
+                        lambda h, r, orders=gd.SELF_BLEU_ORDERS: {n: 0.0 for n in orders})
+    tok = AutoTokenizer.from_pretrained("gpt2")
+    model = _ScriptedModel(tok)
+    sizes = []
+    orig = model.generate
+
+    def gen(input_ids, max_new_tokens, **kw):
+        sizes.append(int(input_ids.shape[0]))
+        return orig(input_ids, max_new_tokens, **kw)
+
+    model.generate = gen
+    out = GenerationDiversityTask(config={"max_new_tokens": 4, "seed": 0}).evaluate(
+        model, tok, None)
+    assert sizes == [63] * 4 + [62] * 4
+    assert out["_meta_n_completions"] == 500
+    assert out["_meta_self_bleu_n_scored"] == 500
+
+
+def test_self_bleu_scores_the_first_sample_size_completions():
+    cfg = dict(CFG, self_bleu_sample_size=4)
+    out = _run("gpt2", cfg)
+    assert out["_meta_n_completions"] == 6 and out["_meta_self_bleu_n_scored"] == 4
+
+
 def test_word_unit_metrics_do_not_depend_on_the_tokenizer():
     """The same six completions through two tokenizers (gpt2, pythia) give the
     same Self-BLEU and distinct-n over words (Texygen's unit); the subword forms
