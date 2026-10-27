@@ -36,6 +36,28 @@ def test_headline_ignores_position0_rows(tiny_states):
     assert base["_meta_rows_policy"] == "exclude_pos0"
 
 
+def test_headline_is_angular_not_norm_driven(tiny_states):
+    """RDMs are angular (Kriegeskorte's correlation distance): rescaling every
+    token's vector by its own positive factor (the same in every layer) leaves
+    each RDM's ranks -- and every headline -- unchanged, while the Euclidean
+    RDM, now _meta_, moves (known negative)."""
+    rng = np.random.default_rng(0)
+    scales = [rng.uniform(0.2, 5.0, size=(n, 1)) for n in tiny_states.lengths]
+    S = tiny_states
+    scaled = inv.States(
+        blocks={li: [np.asarray(x, dtype=np.float64) * c for x, c in zip(S.blocks[li], scales)]
+                for li in S.blocks},
+        final_norm=None if S.final_norm is None else
+        [np.asarray(x, dtype=np.float64) * c for x, c in zip(S.final_norm, scales)])
+    import torch
+    base = inv.run_task_on_states(TASK, S, store_dtype=torch.float64)
+    sc = inv.run_task_on_states(TASK, scaled, store_dtype=torch.float64)
+    keys = _headline(base)
+    assert keys and all(k.endswith("_corrdist") for k in keys)
+    inv.assert_invariant(base, sc, keys, rtol=1e-9)
+    inv.assert_moves(base, sc, "_meta_rsa_adjacent_mean_euclidean", 1e-3)
+
+
 @pytest.mark.parametrize("attrs", [{}, {"num_hidden_layers": None, "n_layer": None}])
 def test_legacy_cache_trims_only_the_post_norm_entry(attrs):
     """Without the deepest-block capture exactly the post-norm entry is dropped,

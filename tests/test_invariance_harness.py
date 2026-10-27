@@ -269,7 +269,7 @@ def test_profiles_keep_full_depth():
     assert len(hsic["_meta_adjacent_hsic"]) == L - 1
     rsa = inv.run_task_on_states("geometry_rsa", S)
     assert rsa["_meta_last_entry_is_block_output"] is True
-    assert rsa["rsa_early_late"] != rsa["rsa_adjacent_mean"]
+    assert rsa["rsa_early_late_corrdist"] != rsa["rsa_adjacent_min_corrdist"]
 
 
 def test_legacy_cache_trim_does_not_depend_on_the_stub_config():

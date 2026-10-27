@@ -4,8 +4,10 @@ Representational Similarity Analysis (RSA) across layers.
 At each layer a Representational Dissimilarity Matrix (RDM) of pairwise
 distances between the same sampled tokens is built, and RDMs are compared by
 Spearman rank correlation (Kriegeskorte, Mur & Bandettini 2008, Step 4). Two
-dissimilarities are reported: Euclidean, and Kriegeskorte's correlation
-distance 1 - r (``*_corrdist``).
+dissimilarity of the headline is Kriegeskorte's correlation distance 1 - r
+(``*_corrdist``; Abnar et al. 2019, the LM precedent, use cosine, which
+agrees to 1e-3 on residual streams). Euclidean RDMs, dominated by token norm
+and sink rows, are ``_meta_``.
 
 References:
 - "Representational Similarity Analysis — Connecting the Branches of Systems
@@ -138,15 +140,18 @@ class RepresentationalSimilarityTask(DiagnosticTask):
 
         _mid = per_doc[layer_indices[n_layers // 2]]
         out = {
-            "rsa_adjacent_mean": euc["adjacent_mean"],
+            # Euclidean RDMs mostly encode token norm (Kriegeskorte uses
+            # correlation distance, Abnar et al. 2019 cosine): _meta_ only.
+            "_meta_rsa_adjacent_mean_euclidean": euc["adjacent_mean"],
             "_meta_n_degenerate_rows_jittered": int(_n_degenerate[0]),
             "_meta_last_entry_is_block_output": bool(_last_is_block),
-            "rsa_adjacent_min": euc["adjacent_min"],
-            "rsa_adjacent_std": euc["adjacent_std"],
-            "rsa_early_late": euc["early_late"],
-            "rsa_first_middle": euc["first_middle"],
-            "_meta_rsa_min_continuity_layer": euc["min_continuity_layer"],
-            "_meta_rsa_n_undefined_pairs": euc["n_undefined_pairs"],
+            "_meta_rsa_adjacent_min_euclidean": euc["adjacent_min"],
+            "_meta_rsa_adjacent_std_euclidean": euc["adjacent_std"],
+            "_meta_rsa_early_late_euclidean": euc["early_late"],
+            "_meta_rsa_first_middle_euclidean": euc["first_middle"],
+            "_meta_rsa_min_continuity_layer_euclidean": euc["min_continuity_layer"],
+            "_meta_rsa_n_undefined_pairs_euclidean": euc["n_undefined_pairs"],
+            # Headline: angular (correlation-distance) RDMs.
             "rsa_adjacent_mean_corrdist": cor["adjacent_mean"],
             "rsa_adjacent_min_corrdist": cor["adjacent_min"],
             "rsa_adjacent_std_corrdist": cor["adjacent_std"],

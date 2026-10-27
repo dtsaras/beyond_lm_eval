@@ -4088,12 +4088,12 @@ def test_geometry_rsa():
     ref_min_layer = int(np.argmin(adj))
 
     TOL = 1e-9
-    assert out["rsa_adjacent_mean"] == pytest.approx(ref_adjacent_mean, abs=TOL)
-    assert out["rsa_adjacent_min"] == pytest.approx(ref_adjacent_min, abs=TOL)
-    assert out["rsa_adjacent_std"] == pytest.approx(ref_adjacent_std, abs=TOL)
-    assert out["rsa_early_late"] == pytest.approx(ref_early_late, abs=TOL)
-    assert out["rsa_first_middle"] == pytest.approx(ref_first_mid, abs=TOL)
-    assert out["_meta_rsa_min_continuity_layer"] == ref_min_layer
+    assert out["_meta_rsa_adjacent_mean_euclidean"] == pytest.approx(ref_adjacent_mean, abs=TOL)
+    assert out["_meta_rsa_adjacent_min_euclidean"] == pytest.approx(ref_adjacent_min, abs=TOL)
+    assert out["_meta_rsa_adjacent_std_euclidean"] == pytest.approx(ref_adjacent_std, abs=TOL)
+    assert out["_meta_rsa_early_late_euclidean"] == pytest.approx(ref_early_late, abs=TOL)
+    assert out["_meta_rsa_first_middle_euclidean"] == pytest.approx(ref_first_mid, abs=TOL)
+    assert out["_meta_rsa_min_continuity_layer_euclidean"] == ref_min_layer
 
     # sanity: rsatoolbox euclidean RDM is NOT scipy's pdist euclidean (the
     # reference is an independent transform, only rank-equivalent -> not tautological)
