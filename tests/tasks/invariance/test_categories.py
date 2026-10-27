@@ -80,3 +80,50 @@ def test_token_count_is_not_a_headline(base):
     711 pythia): a tokenizer property, emitted as _meta_ only."""
     assert "n_category_tokens_mapped" not in base
     assert base["_meta_n_category_tokens_mapped"] > 0
+
+
+# --------------------------------------------------------------------------
+# SIZE_INVARIANT declarations (key templates), checked against direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.categories import CategoryGeometryTask  # noqa: E402
+
+_SUFFIX = {t: t.split("}", 1)[1] for t in CategoryGeometryTask.HEADLINE_KEYS}
+
+
+@pytest.fixture(scope="module")
+def duplicate_padded(gpt2):
+    from blme.tasks.geometry.categories import CategoryGeometryTask as C
+    import json, os, blme
+    model, tok = gpt2
+    cats = json.load(open(os.path.join(os.path.dirname(blme.__file__), "assets",
+                                       "categories.json")))
+    cat_tokens, _ = C()._get_category_tokens(tok, cats)
+    ids = sorted({t for v in cat_tokens.values() for t in v})[:128]
+    padded = inv.pad_vocabulary(model, len(ids), kind="zero")
+    W = padded.get_input_embeddings().weight
+    V = model.get_input_embeddings().weight.shape[0]
+    with torch.no_grad():
+        W[V:] = W[torch.tensor(ids)]
+    return _run(padded, tok)
+
+
+@pytest.mark.parametrize("template", sorted(CategoryGeometryTask.SIZE_INVARIANT))
+def test_size_invariant_entry(template, base, zero_padded, duplicate_padded):
+    transforms, node = CategoryGeometryTask.SIZE_INVARIANT[template]
+    assert node.endswith(f"[{template}]")
+    keys = [k for k in _headline(base) if k.endswith(_SUFFIX[template])]
+    assert keys, template
+    other = {"V_unused_zero_rows": zero_padded, "V_unused_duplicate_rows": duplicate_padded}
+    for t in transforms:
+        inv.assert_invariant(base, other[t], keys, rtol=1e-6)
+
+
+def test_declarations(base):
+    C = CategoryGeometryTask
+    assert C.TOKEN_POLICY == "not_token_based"
+    assert {"paper", "code", "llm_precedent"} <= set(C.SOURCES)
+    assert C.ADAPTATION_NOTE.count(". ") <= 8
+    # Every emitted headline key matches one template.
+    for k in _headline(base):
+        assert any(k.endswith(sfx) for sfx in _SUFFIX.values()), k

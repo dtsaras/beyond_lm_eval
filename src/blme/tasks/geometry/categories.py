@@ -31,8 +31,52 @@ def _n_emittable(tokenizer, n_rows: int) -> int:
     return min(n_tok, int(n_rows)) if n_tok > 0 else int(n_rows)
 
 
+_SI_NODE = "tests/tasks/invariance/test_categories.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_categories")
 class CategoryGeometryTask(DiagnosticTask):
+    """Semantic-category geometry of the input embedding table (BLME construct).
+
+    Keys are per category / relation of the packaged taxonomy, so the
+    declarations below are key TEMPLATES ({category}, {relation}).
+    """
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "none (BLME construct)",
+        "code": "none",
+        "llm_precedent": "arXiv:2406.01506 (Park et al. 2024, categorical concepts "
+                         "in LLM representation space; alternative considered)",
+    }
+    ADAPTATION_NOTE = (
+        "The task asks whether semantically related words sit together in the input "
+        "embedding table: per category of single-token words it reports cosine "
+        "distances within the category and to 100 random emittable tokens, k-NN "
+        "purity over the emittable vocabulary with k capped at m-1, hubness inside "
+        "the category, and for relation pairs the consistency of offset vectors. "
+        "Alternatives considered: probing contextual hidden states (needs a forward "
+        "pass and a context per word) and the causal-inner-product polytopes of Park "
+        "et al. 2024, which are better grounded but need WordNet hierarchies and the "
+        "unembedding covariance. The input table was chosen because it is "
+        "weights-only and cheap. Its limit is that the word-to-token mapping is "
+        "tokenizer-specific (only single-token words count), so values are not "
+        "cross-model comparable; every draw and search uses only rows the "
+        "tokenizer can emit, so unused rows cannot move a value.")
+    HEADLINE_KEYS = (
+        "{category}_intra", "{category}_inter", "{category}_separation",
+        "{category}_purity", "{category}_hub_skew", "{category}_hub_max",
+        "{relation}_consistency",
+    )
+    # Vocabulary size: appended unused rows (zero, or copies of category
+    # vectors) move nothing, because draws and searches stop at len(tokenizer).
+    SIZE_INVARIANT = {
+        k: (("V_unused_zero_rows",) if k.endswith(("_intra", "_inter", "_separation"))
+            else ("V_unused_zero_rows", "V_unused_duplicate_rows"), _SI_NODE.format(k))
+        for k in ("{category}_intra", "{category}_inter", "{category}_separation",
+                  "{category}_purity", "{category}_hub_skew", "{category}_hub_max",
+                  "{relation}_consistency")
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Category Geometry Analysis...")
         
