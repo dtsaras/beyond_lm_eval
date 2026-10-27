@@ -71,12 +71,19 @@ def _angle_between(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(math.acos(max(-1.0, min(1.0, float(c)))))
 
 
-def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
+def _coe_from_chain(chain: list[torch.Tensor], storage_eps: float = None) -> dict:
     """Compute all Wang et al. 2025 CoE statistics for one sample.
 
     ``chain`` is ``[h_0, h_1, …, h_L]`` with ``L ≥ 1``. Returns a dict
     containing per-pair magnitudes + angles, the Eq. 3 normalised
     means, and the Eq. 5 / Eq. 7 scalar scores.
+
+    Arithmetic of the released score.py: every ratio is divided by Z_Mag /
+    Z_Ang whatever their size, and a value is NaN only where score.py itself
+    would give a non-finite value or raise (Z_Mag = 0, Z_Ang = 0). The margin
+    ``z_mag_margin_log10 = log10(Z_Mag / (storage_eps * max|chain|))`` shows a
+    normaliser that sits below the resolution of the stored states (<= 0)
+    instead of filtering it; ``storage_eps`` defaults to the chain's own dtype.
     """
     def _norm2(v):
         """`v.norm(p=2)` in the chain's dtype, with a double fallback only where
@@ -97,18 +104,23 @@ def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
     z_mag = _norm2(chain[-1] - chain[0])
     z_ang = _angle_between(chain[0], chain[-1])
 
-    # Degenerate chains (Z_Mag or Z_Ang ~ 0) give NaN. The Z_Mag test is
-    # relative to the chain's own scale, so a rescale cannot trip it.
+    # No floor beyond score.py's own (decision 1); the margin below discloses
+    # a normaliser near the storage resolution instead.
     _chain_scale = max((float(c.abs().max()) for c in chain), default=0.0)
-    _z_floor = 1e-12 * _chain_scale if _chain_scale > 0 else 1e-12
-    if not math.isfinite(z_mag) or z_mag <= _z_floor:
+    if not math.isfinite(z_mag) or z_mag == 0.0:
         mag_norm_pair = [float("nan")] * L
     else:
         mag_norm_pair = [m / z_mag for m in mags]
-    if z_ang <= 1e-12:
+    if not math.isfinite(z_ang) or z_ang == 0.0:
         ang_norm_pair = [float("nan")] * L
     else:
         ang_norm_pair = [a / z_ang for a in angs]
+    if storage_eps is None:
+        storage_eps = float(torch.finfo(chain[0].dtype).eps)
+    if _chain_scale > 0 and z_mag > 0 and math.isfinite(z_mag):
+        z_margin = math.log10(z_mag / (storage_eps * _chain_scale))
+    else:
+        z_margin = float("-inf") if _chain_scale > 0 else float("nan")
 
     mag_norm_mean = (
         float(np.mean(mag_norm_pair)) if np.all(np.isfinite(mag_norm_pair))
@@ -150,6 +162,7 @@ def _coe_from_chain(chain: list[torch.Tensor]) -> dict:
         "coe_r": coe_r,
         "coe_c": coe_c,
         "normalized_coe_c": normalized_coe_c,
+        "z_mag_margin_log10": z_margin,
     }
 
 
@@ -222,7 +235,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 if len(chain) < 2:
                     continue
                 chain_length = len(chain) - 1
-                sample_results.append(_coe_from_chain(chain))
+                _eps = float(torch.finfo(_hs[0].dtype).eps)
+                sample_results.append(_coe_from_chain(chain, storage_eps=_eps))
                 if _chain_blockout is not None and len(_chain_blockout) >= 2:
                     _blockout_results.append(_coe_from_chain(_chain_blockout))
 
@@ -292,6 +306,10 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "_meta_coe_r_blockout": (
                 float(np.mean([r["coe_r"] for r in _blockout_results]))
                 if _blockout_results else float("nan")),
+            # Smallest log10(Z_Mag / (eps_storage * max|chain|)) over samples:
+            # <= 0 means a normaliser below the stored states' resolution.
+            "_meta_z_mag_margin_log10_min": float(np.min(
+                [r["z_mag_margin_log10"] for r in sample_results])),
             "_meta_coe_c_blockout": (
                 float(np.mean([r["coe_c"] for r in _blockout_results]))
                 if _blockout_results else float("nan")),
