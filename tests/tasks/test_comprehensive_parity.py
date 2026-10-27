@@ -3263,8 +3263,10 @@ def test_geometry_lipschitz():
     fake_layers = {0: h0, 1: h1}
 
     task = LipschitzContinuityTask(config={"num_samples": 5, "use_cache": False})
+    # The task reads states through `hidden_states_for_task`, which imports the
+    # collector from `geometry.utils` at call time.
     with patch(
-        "blme.tasks.geometry.lipschitz.collect_hidden_states",
+        "blme.tasks.geometry.utils.collect_hidden_states",
         return_value=fake_layers,
     ):
         out_a = task.evaluate(model=None, tokenizer=None, dataset=[{"text": "x"}], cache=None)
