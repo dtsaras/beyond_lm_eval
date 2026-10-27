@@ -61,6 +61,34 @@ class GradientFlowTask(DiagnosticTask):
     # The per-layer Frobenius norm pools over tokens; position 0 is dropped from
     # that pool (non-LLM origin), the loss keeps every position.
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:1211.5063",
+        "code": None,
+        "llm_precedent": "Xiong et al. 2020 (arXiv:2002.04745) Sec. 3.4: per-layer "
+                         "gradient norms vs depth in Pre-/Post-LN Transformers",
+    }
+    ADAPTATION_NOTE = (
+        "Pascanu et al. (2013) study how the training-loss gradient shrinks or grows as it "
+        "is propagated back through time in an RNN; BLME maps time to depth. It "
+        "backpropagates the model's own next-token cross-entropy on held-out text and "
+        "records ||dL/dh||_F, over every position but the first, at the input of every "
+        "block and at the final residual (the input of the final norm). Activation "
+        "gradients are used instead of the parameter-gradient norms of Xiong et al. (2020), "
+        "because they are defined for a frozen pretrained model and do not depend on block "
+        "width or parameterisation; Jacobian spectra are too costly at 34B. The headline is "
+        "the end-to-end gain log(||g_emb|| / ||g_final||), which identity blocks anywhere and "
+        "a common residual rescale leave unchanged; entropy, slope, vanishing ratio and raw "
+        "norms move under one of them and are _meta_. The backward pass runs in fp32 "
+        "arithmetic, because bf16 doubles the slope on pythia-160m."
+    )
+    HEADLINE_KEYS = ("gradient_flow_log_ratio_in_out",)
+    SIZE_INVARIANT = {
+        "gradient_flow_log_ratio_in_out": (
+            ("insert_identity_blocks", "residual_scale_gauge(rescale_eps=True)"),
+            "tests/tasks/invariance/test_dynamics_gradient_flow.py::"
+            "test_end_to_end_log_ratio_invariant_under_identity_blocks",
+        ),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Gradient Flow Analysis...")
