@@ -299,10 +299,16 @@ class CKATask(DiagnosticTask):
                 if n > 1 else float("nan")),
             "_meta_debiased_mean_offdiag_cka": (
                 float(np.nanmean(dbg_matrix[iu])) if iu[0].size else float("nan")),
-            "_meta_debiased_min_offdiag_cka": (
-                float(np.nanmin(dbg_matrix[iu])) if iu[0].size else float("nan")),
-            "_meta_debiased_early_late_cka": (
+            # Debiased twins of the headline keys (Demo.ipynb debiased=True):
+            # the U-statistic has no d_eff/N floor, so they do not drift with N
+            # (test_cka.py permutation-null N test).
+            "early_late_cka_debiased": (
                 float(dbg_matrix[0, -1]) if n >= 2 else float("nan")),
+            "min_offdiag_cka_debiased": (
+                float(np.nanmin(dbg_matrix[iu])) if iu[0].size else float("nan")),
+            "min_adjacent_cka_debiased": (
+                float(np.nanmin([dbg_matrix[i, i + 1] for i in range(n - 1)]))
+                if n > 1 else float("nan")),
             "_meta_n_layers": int(n),
             "_meta_n_layers_centered_in_float64": int(_n_f64_centered),
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),

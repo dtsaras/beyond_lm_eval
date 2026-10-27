@@ -83,3 +83,37 @@ def test_headline_is_depth_invariant_under_identity_insertion(
     for k in ("_meta_avg_adjacent_cka", "_meta_mean_offdiag_cka",
               "_meta_max_adjacent_cka"):
         inv.assert_moves(base, ins, k, 1e-3)
+
+
+DEBIASED = ("early_late_cka_debiased", "min_offdiag_cka_debiased",
+            "min_adjacent_cka_debiased")
+
+
+def test_debiased_twin_has_no_sample_size_floor(tiny_states):
+    """N variation on a row-permutation null (the second layer's rows shuffled
+    across the cloud, so the population CKA is 0): the biased estimator's
+    d_eff/N floor falls ~4x from 3 to 12 documents, while the debiased twin
+    stays at 0 at every N."""
+    from _family_c import keep_layers, permute_layer_rows
+    L = tiny_states.n_layers
+    null = permute_layer_rows(keep_layers(tiny_states, [0, L // 2]), 1, seed=0)
+    small = [inv.run_task_on_states(TASK, inv.subsample_docs(null, 3, seed=s))
+             for s in (0, 1)]
+    full = inv.run_task_on_states(TASK, null)
+    biased_small = np.mean([r["early_late_cka"] for r in small])
+    assert biased_small - full["early_late_cka"] > 0.1      # known negative
+    for r in small + [full]:
+        for k in DEBIASED:
+            assert abs(r[k]) < 0.03, (k, r[k])
+
+
+@pytest.mark.parametrize("transform", ["zero_pad", "isometry", "rescale"])
+def test_headline_is_width_and_scale_invariant(tiny_states, transform):
+    """Zero-padding, a random isometric embedding (x2 width) and a global
+    power-of-two rescale leave every headline key in place."""
+    St = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}[transform](tiny_states)
+    base = inv.run_task_on_states(TASK, tiny_states)
+    keys = [k for k in base if not k.startswith("_meta_") and isinstance(base[k], float)]
+    inv.assert_invariant(base, inv.run_task_on_states(TASK, St), keys, rtol=1e-5)

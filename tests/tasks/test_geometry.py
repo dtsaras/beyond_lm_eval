@@ -648,11 +648,13 @@ def test_cka(mock_model, mock_tokenizer):
     # with stats of [0..N-1]; the rewrite intentionally drops them.
     assert "cka_matrix" not in results
     assert "layers" not in results
-    # Paper-faithful scalar summaries.
-    for k in ("avg_adjacent_cka", "mean_offdiag_cka", "early_late_cka",
-              "first_middle_cka", "_meta_n_layers"):
+    # Depth-invariant headline keys, their debiased twins, and the uniform
+    # layer summaries as _meta_ profiles (tests/tasks/invariance/test_cka.py).
+    for k in ("early_late_cka", "min_offdiag_cka", "min_adjacent_cka",
+              "early_late_cka_debiased", "_meta_avg_adjacent_cka",
+              "_meta_mean_offdiag_cka", "_meta_first_middle_cka", "_meta_n_layers"):
         assert k in results, f"missing {k}"
-    assert 0 <= results["avg_adjacent_cka"] <= 1.0
+    assert 0 <= results["_meta_avg_adjacent_cka"] <= 1.0
 
 
 def test_collapse(mock_model, mock_tokenizer):
