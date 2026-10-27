@@ -88,7 +88,7 @@ logger = logging.getLogger("blme")
 
 
 
-def _procrustes_similarity(X, Y, rank_aware: bool = False) -> float:
+def _procrustes_similarity(X, Y, rank_aware: bool = False, return_rank: bool = False):
     """Linearity score of Razzhigaev et al. 2024 (arXiv:2405.12250).
 
     Port of ``llm_microscope.procrustes_similarity`` (b6db939 / pip 0.0.7)
@@ -104,6 +104,8 @@ def _procrustes_similarity(X, Y, rank_aware: bool = False) -> float:
         Y: ``(N, D)`` token cloud at layer l+1, same token order.
         rank_aware: invert only singular values above numpy's pinv tolerance
             (Moore-Penrose); otherwise every positive one, as the reference.
+        return_rank: with ``rank_aware``, return ``(sim, r)`` where r is the
+            numerical rank of the centred X at that tolerance.
 
     Returns:
         Linearity in (-inf, 1]; NaN for degenerate (constant / mismatched /
@@ -138,7 +140,10 @@ def _procrustes_similarity(X, Y, rank_aware: bool = False) -> float:
             tol = float(S[0]) * max(Xc.shape) * torch.finfo(Xc.dtype).eps
             Sinv = torch.where(S > tol, 1.0 / S, torch.zeros_like(S))
             A_r = Vh.T * Sinv[None, ...] @ U.T @ Yc
-            return float(1.0 - (Xc @ A_r - Yc).square().sum())
+            sim_r = float(1.0 - (Xc @ A_r - Yc).square().sum())
+            if return_rank:
+                return sim_r, int((S > tol).sum())
+            return sim_r
         if float(S[-1]) <= 0.0:
             # Exactly singular X: 1/S would be inf; NaN instead.
             return float("nan")
@@ -149,6 +154,18 @@ def _procrustes_similarity(X, Y, rank_aware: bool = False) -> float:
         y_error = (Y_est - Yc).square().sum()
         sim = float(1.0 - y_error)
         return sim
+
+
+def _adjusted_linearity(sim: float, n: int, r: int) -> float:
+    """Adjusted R^2 of the fit (Wherry 1931): 1 - (1 - sim)(N - 1)/(N - 1 - r).
+
+    Least squares on r regressors explains r/(N-1) of an independent centred
+    target by chance; this removes exactly that term. NaN when N - 1 <= r.
+    """
+    dof = n - 1 - r
+    if not np.isfinite(sim) or dof <= 0:
+        return float("nan")
+    return float(1.0 - (1.0 - sim) * (n - 1) / dof)
 
 
 @register_task("geometry_procrustes_linearity")
@@ -208,6 +225,8 @@ class ProcrustesLinearityTask(DiagnosticTask):
         n_tokens = 0
         sims = []          # headline: rank-aware least-squares fit
         sims_ref = []      # released get_est_svd rule (unguarded 1/S)
+        sims_adj = []      # adjusted-R^2 twin of the headline
+        ranks = []
         for a, b in zip(layers[:-1], layers[1:]):
             X = layer_states[a]
             Y = layer_states[b]
@@ -221,10 +240,15 @@ class ProcrustesLinearityTask(DiagnosticTask):
             if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:
                 sims.append(float("nan"))
                 sims_ref.append(float("nan"))
+                sims_adj.append(float("nan"))
                 continue
             n_tokens = max(n_tokens, X.shape[0])
             sims_ref.append(_procrustes_similarity(X, Y))
-            sims.append(_procrustes_similarity(X, Y, rank_aware=True))
+            _fit = _procrustes_similarity(X, Y, rank_aware=True, return_rank=True)
+            _s, _r = _fit if isinstance(_fit, tuple) else (_fit, X.shape[0])
+            sims.append(_s)
+            sims_adj.append(_adjusted_linearity(_s, X.shape[0], _r))
+            ranks.append(_r)
 
         sim = np.asarray(sims, dtype=np.float64)
         _sref = np.asarray(sims_ref, dtype=np.float64)
@@ -238,6 +262,13 @@ class ProcrustesLinearityTask(DiagnosticTask):
         _d_over_n = (float(_d_model) / float(n_tokens)) if n_tokens else float("nan")
 
         out = _profile_summary(sim, "procrustes_linearity")
+        # Size-free twin: the chance fit r/(N-1) removed pair by pair (the
+        # slope's twin is not defined; test_procrustes_linearity.py N test).
+        _adj = _profile_summary(np.asarray(sims_adj, dtype=np.float64),
+                                "procrustes_linearity_adjusted")
+        _adj.pop("procrustes_linearity_adjusted_slope")
+        out.update(_adj)
+        out["_meta_fit_rank_max"] = int(max(ranks)) if ranks else 0
         _ref_fin = _sref[np.isfinite(_sref)]
         out.update({
             "_meta_n_layers": int(n_layers),

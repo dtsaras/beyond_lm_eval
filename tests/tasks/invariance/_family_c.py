@@ -72,13 +72,15 @@ def permute_layer_rows(S: "inv.States", layer: int, seed: int = 0) -> "inv.State
     return inv.States(blocks=blocks, final_norm=final, embedding=S.embedding)
 
 
-def keep_layers(S: "inv.States", layers) -> "inv.States":
+def keep_layers(S: "inv.States", layers, embedding: bool = True) -> "inv.States":
     """A States holding only ``layers`` (renumbered 0..k-1); the final norm is
-    dropped unless the original last block is kept last."""
+    dropped unless the original last block is kept last, the embedding unless
+    ``embedding``."""
     layers = list(layers)
     blocks = {i: S.blocks[l] for i, l in enumerate(layers)}
     final = S.final_norm if layers[-1] == S.n_layers - 1 else None
-    return inv.States(blocks=blocks, final_norm=final, embedding=S.embedding)
+    return inv.States(blocks=blocks, final_norm=final,
+                      embedding=S.embedding if embedding else None)
 
 
 WIDTH_TRANSFORMS = {
