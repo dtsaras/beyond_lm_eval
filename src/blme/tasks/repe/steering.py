@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from ..base import DiagnosticTask
 from ...registry import register_task
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers
 from ._common import find_final_norm, logger
 
@@ -429,30 +430,15 @@ class SteeringEffectivenessTask(DiagnosticTask):
             return {"error": "Could not detect model layers."}
         num_layers = len(layers)
 
-        # fp32 compute below 2e9 parameters: the directional columns flip sign
-        # in bf16 arithmetic.
-        lowp = {torch.float16, torch.bfloat16}
-        saved_dtypes = None
-        if (getattr(model, "dtype", None) in lowp
-                and sum(p_.numel() for p_ in model.parameters()) <= 2_000_000_000):
-            try:
-                saved_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
-                model.float()
-            except Exception as e:  # pragma: no cover - defensive
-                logger.info(f"steering: fp32 promotion failed ({e})")
-                saved_dtypes = None
-
-        def restore_dtypes():
-            if saved_dtypes is not None:
-                for p_, dt in saved_dtypes:
-                    p_.data = p_.data.to(dt)
-
-        # The shared model is restored on every exit, including an exception.
-        try:
-            return self._run(model, tokenizer, dataset, layers, num_layers, device,
-                             num_samples, steering_alpha, n_rand_draws)
-        finally:
-            restore_dtypes()
+        # fp32 arithmetic at every size: the directional columns are logit
+        # differences under a small perturbation and flip sign in bf16
+        # (tests/tasks/test_steering_fixes.py::test_fp32_compute_at_every_size).
+        with fp32_compute(model) as prec:
+            out = self._run(model, tokenizer, dataset, layers, num_layers, device,
+                            num_samples, steering_alpha, n_rand_draws)
+        if "error" not in out:
+            out.update(effective_dtype_meta(prec))
+        return out
 
     def _run(self, model, tokenizer, dataset, layers, num_layers, device,
              num_samples, steering_alpha, n_rand_draws):
