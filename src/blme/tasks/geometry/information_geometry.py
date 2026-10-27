@@ -84,6 +84,33 @@ class RepresentationSensitivityTask(DiagnosticTask):
     Uses the true next token as the target rather than argmax.
     """
 
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "DOI:10.1162/089976698300017746",
+        "code": "",
+        "llm_precedent": "none found; the softmax score identity is elementary (Amari 1998)",
+    }
+    ADAPTATION_NOTE = (
+        "Representation sensitivity is a BLME construct: the mean squared norm of the "
+        "gradient of the true-next-token log-probability with respect to the "
+        "representation the unembedding reads, in closed form W_y minus the expected "
+        "unembedding row (the softmax score identity), over every prediction position "
+        "like perplexity. The post-norm state h makes the raw value depend on how a "
+        "model splits scale between the final-norm gain and the unembedding, a free "
+        "gauge, so S_unit takes the gradient with respect to the unit-gain normalised "
+        "state n (gamma times n plus beta is h), which absorbs the gain into the "
+        "unembedding and is exactly invariant to that gauge and to a residual rescale. "
+        "The ||h||^2 ||grad_h||^2 twin was rejected because it fails the diagonal "
+        "gauge, and Fisher-trace or Hessian variants need second-order work over V. "
+        "Heads with a non-linear post-transform (final-logit softcapping) are refused "
+        "by the linearity guard."
+    )
+    HEADLINE_KEYS = ("representation_sensitivity", "S_unit")
+    SIZE_INVARIANT = {
+        "S_unit": (("final_norm_unembedding_gauge", "residual_scale_gauge"),
+                   "tests/tasks/invariance/test_geometry_representation_sensitivity.py::"
+                   "test_s_unit_invariant_under_final_norm_unembedding_gauge"),
+    }
     @staticmethod
     def _logit_scale_for(model):
         """`config.logit_scale` as a float, or None when the head is unscaled
