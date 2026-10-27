@@ -523,7 +523,7 @@ def test_precision_transforms(arch_model):
 # --------------------------------------------------------------------------
 
 def test_uniform_layer_mean_moves_under_identity_insertion(tiny_gpt2, tiny_states):
-    """lipschitz.relative_change_mean is a uniform mean over the L - 1
+    """lipschitz._meta_relative_change_mean is a uniform mean over the L - 1
     block-to-block updates (the embedding update is reported separately): each
     inserted identity block adds a zero update, so the mean falls by exactly
     (L - 1) / (L - 1 + n_inserted). The max does not move."""
@@ -533,8 +533,8 @@ def test_uniform_layer_mean_moves_under_identity_insertion(tiny_gpt2, tiny_state
     base = inv.run_task_on_states("geometry_lipschitz", tiny_states)
     ins = inv.run_task_on_states("geometry_lipschitz", S_new)
     n_tr = tiny_states.n_layers - 1
-    inv.assert_moves(base, ins, "relative_change_mean", min_rel=0.2)
-    assert ins["relative_change_mean"] / base["relative_change_mean"] == pytest.approx(
+    inv.assert_moves(base, ins, "_meta_relative_change_mean", min_rel=0.2)
+    assert ins["_meta_relative_change_mean"] / base["_meta_relative_change_mean"] == pytest.approx(
         n_tr / (n_tr + 2), rel=1e-12)
     inv.assert_invariant(base, ins, ["relative_change_max"], rtol=0.0)
 

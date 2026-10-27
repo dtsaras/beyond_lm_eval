@@ -3278,9 +3278,9 @@ def test_geometry_lipschitz():
     assert out_a["_meta_lipschitz_max"] == pytest.approx(1.9, abs=1e-6)
     assert out_a["_meta_lipschitz_std"] == pytest.approx(0.0, abs=1e-6)
     assert out_a["_meta_lipschitz_max_layer"] == 0
-    assert out_a["mean_contraction_rate"] == pytest.approx(exp_cr, abs=1e-6)
+    assert out_a["_meta_mean_contraction_rate"] == pytest.approx(exp_cr, abs=1e-6)
     # relative_change_* keys are documented aliases of the lipschitz_* keys.
-    assert out_a["relative_change_mean"] == pytest.approx(out_a["_meta_lipschitz_mean"], abs=1e-9)
+    assert out_a["_meta_relative_change_mean"] == pytest.approx(out_a["_meta_lipschitz_mean"], abs=1e-9)
     assert out_a["relative_change_max"] == pytest.approx(out_a["_meta_lipschitz_max"], abs=1e-9)
 
     # ---- (B) FULL task on a tiny real GPT-2 vs independent NumPy reference --
@@ -3382,8 +3382,8 @@ def test_geometry_lipschitz():
         "_meta_lipschitz_max": float(ref_arr.max()),
         "_meta_lipschitz_std": float(ref_arr.std()),
         "_meta_lipschitz_max_layer": int(np.argmax(ref_arr)),
-        "mean_contraction_rate": float(np.mean(ref_crs)),
-        "contraction_std": float(np.std(ref_crs)),
+        "_meta_mean_contraction_rate": float(np.mean(ref_crs)),
+        "_meta_contraction_std": float(np.std(ref_crs)),
     }
     for k, v in ref.items():
         if k == "_meta_lipschitz_max_layer":
@@ -3397,7 +3397,7 @@ def test_geometry_lipschitz():
     # non-negative, and the *_max stat is >= the *_mean stat.
     assert blme["_meta_lipschitz_mean"] >= 0.0
     assert blme["_meta_lipschitz_max"] >= blme["_meta_lipschitz_mean"] - 1e-9
-    assert blme["mean_contraction_rate"] >= 0.0
+    assert blme["_meta_mean_contraction_rate"] >= 0.0
 
     # determinism: same input twice -> identical output.
     blme2 = task_b.evaluate(model, tok, dataset, cache=None)

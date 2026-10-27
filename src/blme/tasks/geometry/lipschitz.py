@@ -190,16 +190,19 @@ class LipschitzContinuityTask(DiagnosticTask):
 
         mid = all_layers[layer_indices[n_layers // 2]]
         return {
-            "relative_change_mean": mean_v,
+            # Uniform means/std/fractions over the updates fall as L/(L+n) under
+            # n inserted identity blocks: _meta_ profile summaries
+            # (tests/test_invariance_harness.py pins the law).
+            "_meta_relative_change_mean": mean_v,
             # The maximum over per-update MEANS, not a token-level maximum.
             "relative_change_max": max_v,
-            "relative_change_std": std_v,
+            "_meta_relative_change_std": std_v,
             # An absolute depth index; the fraction is the comparable form.
             "_meta_relative_change_max_layer": max_layer,
             "_meta_relative_change_max_layer_frac": (
                 float(max_layer) / max(1, len(lip_arr) - 1)
                 if max_layer >= 0 else float("nan")),
-            "contractive_fraction": _contractive_fraction,
+            "_meta_contractive_fraction": _contractive_fraction,
             "_meta_relative_change_mean_paper_eps": _paper_eps_mean,
             # Every row, position 0 included (provenance).
             "_meta_relative_change_mean_incl_pos0": (
@@ -210,8 +213,8 @@ class LipschitzContinuityTask(DiagnosticTask):
             "_meta_lipschitz_std": std_v,
             "_meta_lipschitz_max_layer": max_layer,
             "_meta_last_entry_is_block_output": bool(last_is_block),
-            "mean_contraction_rate": _cr_mean,
-            "contraction_std": _cr_std,
+            "_meta_mean_contraction_rate": _cr_mean,
+            "_meta_contraction_std": _cr_std,
             # Depth-additive forms: invariant to identity-block insertion.
             "e2e_log_norm_growth": e2e,
             "total_angular_path": path,
