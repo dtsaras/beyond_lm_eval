@@ -82,6 +82,32 @@ class PerturbationGrowthTask(DiagnosticTask):
     # The token mean of the divergence drops position 0 (a non-LLM
     # dynamical-systems construct); the inclusive value is _meta_.
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:2503.13530",
+        "code": None,
+        "llm_precedent": "Li et al. 2025 (arXiv:2503.13530): quasi-Lyapunov exponent of "
+                         "a perturbation propagated through LLaMA-family layers",
+    }
+    ADAPTATION_NOTE = (
+        "The quasi-Lyapunov exponent of Li et al. (2025) perturbs one element of one "
+        "intermediate-layer row and tracks per-position divergence. BLME instead perturbs "
+        "every input embedding by a seeded isotropic direction of norm rel_eps * ||e_t|| "
+        "and tracks the token-mean divergence (position 0 excluded) through every block, "
+        "which costs two forward passes per passage; per-element QLE would need d x T x L "
+        "passes and Jacobian spectra are infeasible at 34B. The headline is the end-to-end "
+        "amplification growth_log_ratio = log(d_L / d_0), which identity-block insertion "
+        "leaves bit-identical; the per-block rate and the normalised-depth slope move under "
+        "it and are _meta_. The forward passes run in fp32 arithmetic, because bf16 rounding "
+        "is a noise floor of the same order as the perturbation."
+    )
+    HEADLINE_KEYS = ("growth_log_ratio",)
+    SIZE_INVARIANT = {
+        "growth_log_ratio": (
+            ("insert_identity_blocks",),
+            "tests/tasks/invariance/test_dynamics_perturbation_growth.py::"
+            "test_growth_log_ratio_invariant_under_identity_blocks",
+        ),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Layer Perturbation Growth (quasi-Lyapunov)...")
