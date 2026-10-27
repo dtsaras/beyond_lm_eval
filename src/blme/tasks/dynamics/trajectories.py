@@ -1,5 +1,6 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_embeddings, apply_lm_head
 import torch
 import torch.nn.functional as F
@@ -95,7 +96,11 @@ class LatentInterpolationTask(DiagnosticTask):
         # Attempts are capped so unusable rows cannot spin the loop forever
         # (tests/tasks/test_dynamics.py::test_interpolation_does_not_hang_on_unusable_samples).
         max_attempts = max(20, num_pairs * 20)
-        with torch.no_grad():
+        # fp32 arithmetic for the forward pass AND the LM-head decode of the
+        # interpolant: bf16 moves the gap by +21% on pythia-160m and is not even
+        # reproducible across thread counts
+        # (tests/tasks/invariance/test_dynamics_interpolation.py).
+        with torch.no_grad(), fp32_compute(model) as _prec:
             while count < num_pairs and attempts < max_attempts:
                 attempts += 1
                 s1, s2 = _rng.sample(samples, 2)
@@ -187,5 +192,6 @@ class LatentInterpolationTask(DiagnosticTask):
         ) / 2
         # _meta_: equal to convexity_gap by construction (see the slerp arm).
         results["_meta_slerp_convexity_gap"] = mid_s - end_s
+        results.update(effective_dtype_meta(_prec))
 
         return results
