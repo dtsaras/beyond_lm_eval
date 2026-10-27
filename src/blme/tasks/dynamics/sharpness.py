@@ -393,6 +393,31 @@ def _make_random_vec(params, rademacher: bool = True,
 class LossSharpnessTask(DiagnosticTask):
     """Loss-landscape sharpness via Hessian + SAM metrics."""
 
+    # The loss averages every next-token position, as any LM loss; no token pool.
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1912.07145; arXiv:2010.01412; arXiv:2102.11600",
+        "code": "amirgholami/PyHessian@de8cf239ace21c7754ee599255897ebf3eed19cb; "
+                "google-research/sam@dae9904c4cf3a57a304f7b04cecffe371679c702",
+        "llm_precedent": "Kalra et al. 2026 (arXiv:2601.16979): critical sharpness of "
+                         "LLMs up to 7B",
+    }
+    HEADLINE_KEYS = (
+        "baseline_loss", "hutchinson_trace_estimate", "hutchinson_trace_per_param",
+        "top_eigenvalue_estimate", "sam_sharpness", "sam_perturbed_loss",
+        "critical_step_size", "critical_sharpness", "asam_sharpness",
+    )
+    # Only adaptive SAM survives a function-preserving rescale; the trace, the
+    # top eigenvalue, plain SAM and the critical step move under it, and the
+    # baseline loss is size-linked by meaning.
+    SIZE_INVARIANT = {
+        "asam_sharpness": (
+            ("residual_scale_gauge(rescale_eps=True)",),
+            "tests/tasks/invariance/test_dynamics_sharpness.py::"
+            "test_asam_is_invariant_under_a_function_preserving_rescale",
+        ),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Loss-Landscape Sharpness Analysis...")
 
