@@ -79,6 +79,23 @@ def test_end_to_end_log_ratio_invariant_under_residual_rescale():
         base["gradient_norm_per_layer"][-1] / 2, rel=1e-12)
 
 
+def test_profile_summaries_move_under_identity_blocks_and_are_meta():
+    """Known negatives: the entropy, slope and vanishing ratio of the profile
+    move under function-preserving identity-block insertion; the raw norms
+    halve under a residual x2 rescale. None of them is a headline."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS["early"])
+    base, other = _run(model, tok), _run(deeper, tok)
+    inv.assert_moves(base, other, "_meta_gradient_flow_entropy", 1e-3)
+    inv.assert_moves(base, other, "_meta_gradient_flow_slope", 1e-3)
+    scaled = inv.residual_scale_gauge(model, 2.0, rescale_eps=True)
+    inv.assert_moves(base, _run(scaled, tok), "_meta_gradient_norm_mean", 0.4)
+    for k in ("gradient_flow_entropy", "gradient_flow_slope", "gradient_vanishing_ratio",
+              "gradient_norm_mean", "gradient_norm_max", "gradient_norm_min"):
+        assert k not in base and f"_meta_{k}" in base, k
+
+
 def test_norms_exclude_position0():
     """The per-layer token pool drops position 0; the loss and the inclusive
     profile (as _meta_) keep it."""

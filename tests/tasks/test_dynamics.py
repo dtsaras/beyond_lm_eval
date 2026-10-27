@@ -161,7 +161,7 @@ def test_gradient_flow_uses_cross_entropy_loss():
     )
     # Entropy must be finite (slope computation used to explode when
     # ``np.log`` was applied to an identically-zero layer norm).
-    assert np.isfinite(out["gradient_flow_entropy"])
+    assert np.isfinite(out["_meta_gradient_flow_entropy"])
 
 
 def test_chain_of_embedding_emits_paper_scores():

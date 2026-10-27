@@ -2422,9 +2422,9 @@ def test_dynamics_gradient_flow():
     assert blme_norms == pytest.approx(ref_norms, rel=1e-5, abs=1e-6)
 
     # derived scalars match the INDEPENDENT reference values
-    assert res["gradient_flow_entropy"] == pytest.approx(ref_entropy, rel=1e-5, abs=1e-6)
-    assert res["gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
-    assert res["gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
+    assert res["_meta_gradient_flow_entropy"] == pytest.approx(ref_entropy, rel=1e-5, abs=1e-6)
+    assert res["_meta_gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
+    assert res["_meta_gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
     assert res["loss"] == "cross_entropy"
     assert res["_meta_n_layers"] == n_layers
 

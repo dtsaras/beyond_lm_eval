@@ -17,21 +17,18 @@ expansive/exploding chain a NEGATIVE one: on matched six-layer chains a = 0.5
 gives slope +3.465736 and a = 2 gives -3.465736.
 
 Reported metrics:
-  - **gradient_norm_per_layer**: Frobenius norm of dL/dh_l at the input of
-    every block, then at the final residual (the input of the final norm).
-  - **gradient_flow_entropy**: Shannon entropy of the normalised per-layer
-    norms. High = signal distributed across layers; low = concentrated.
-  - **gradient_flow_slope**: linear regression slope of log(norm) vs.
-    NORMALIZED depth (layer index / (n_layers - 1)). Depth-corrected but not
-    architecture-free. POSITIVE = gradients shrink toward the input
-    (vanishing); NEGATIVE = they grow toward the input (exploding).
-  - **gradient_vanishing_ratio**: fraction of layers where the norm is
-    < 10% of the maximum norm. A DISPERSION statistic, direction-free by
-    construction (the matched a = 0.5 and a = 2 chains both return 0.333333).
-  - **gradient_flow_log_ratio_in_out**: log(||g_emb|| / ||g_final||), the
-    end-to-end backward gain from the final residual to the embeddings.
+  - **gradient_flow_log_ratio_in_out** (headline): log(||g_emb|| / ||g_final||),
+    the end-to-end backward gain from the final residual to the embeddings.
     Direction-aware and unit-free -- NEGATIVE means the input-side gradient
     is the smaller one, i.e. vanishing; POSITIVE means exploding.
+  - **gradient_norm_per_layer**: Frobenius norm of dL/dh_l at the input of
+    every block, then at the final residual (the input of the final norm).
+  - ``_meta_`` profile summaries, which move under identity-block insertion:
+    the entropy of the normalised norms, the slope of log(norm) vs normalised
+    depth i / (n_points - 1) (POSITIVE = vanishing toward the input), and the
+    vanishing ratio (fraction of points below 10% of the maximum; direction-
+    free: the matched a = 0.5 and a = 2 chains both return 0.333333). The raw
+    norm mean/max/min halve under a residual x2 rescale and are _meta_ too.
 
 Implementation: registers forward pre-hooks on each transformer block to
 capture the residual-stream input, calls `.retain_grad()`, then
@@ -233,11 +230,15 @@ class GradientFlowTask(DiagnosticTask):
 
         return {
             "gradient_norm_per_layer": mean_norms.tolist(),
-            "gradient_flow_entropy": flow_entropy,
-            "_meta_gradient_flow_entropy_norm": flow_entropy_norm,
-            "gradient_flow_slope": slope,
-            "gradient_vanishing_ratio": vanishing_ratio,
+            # Headline: the end-to-end gain. The profile summaries below move
+            # under function-preserving identity-block insertion and the raw
+            # norms under a residual rescale, so they are _meta_
+            # (tests/tasks/invariance/test_dynamics_gradient_flow.py).
             "gradient_flow_log_ratio_in_out": log_ratio_in_out,
+            "_meta_gradient_flow_entropy": flow_entropy,
+            "_meta_gradient_flow_entropy_norm": flow_entropy_norm,
+            "_meta_gradient_flow_slope": slope,
+            "_meta_gradient_vanishing_ratio": vanishing_ratio,
             "_meta_gradient_flow_log_ratio_block_inputs": log_ratio_block_inputs,
             "_meta_gradient_flow_log_ratio_in_out_incl_pos0": log_ratio_incl_pos0,
             "_meta_gradient_norm_per_layer_incl_pos0": mean_norms_incl.tolist(),
@@ -245,9 +246,9 @@ class GradientFlowTask(DiagnosticTask):
             "_meta_rows_n_rows": int(n_rows),
             "_meta_final_endpoint": _endpoint[0],
             "_meta_n_profile_points": n_points,
-            "gradient_norm_mean": float(mean_norms.mean()),
-            "gradient_norm_max": float(mean_norms.max()),
-            "gradient_norm_min": float(mean_norms.min()),
+            "_meta_gradient_norm_mean": float(mean_norms.mean()),
+            "_meta_gradient_norm_max": float(mean_norms.max()),
+            "_meta_gradient_norm_min": float(mean_norms.min()),
             "_meta_n_layers": n_layers,
             "loss": "cross_entropy",
             **effective_dtype_meta(_prec),
