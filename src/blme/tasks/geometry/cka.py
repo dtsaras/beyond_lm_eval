@@ -13,7 +13,8 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 
 logger = logging.getLogger("blme")
 
@@ -168,7 +169,14 @@ class CKATask(DiagnosticTask):
     (one forward pass); the deepest entry is the raw block output, not
     ``ln_f(b_{L-1})``. Biased CKA is the paper's Eq. 3-4; the debiased form
     (official Demo.ipynb) removes the d_eff/N null floor.
+
+    Rows follow ``TOKEN_POLICY``: position 0 is dropped, as Kornblith's own
+    Transformer experiment drops special tokens (App. F.1) -- the sink rows
+    otherwise carry most of the centred SS and pin mid-layer CKA near 1
+    (tests/tasks/invariance/test_cka.py).
     """
+    TOKEN_POLICY = "exclude_pos0"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKA Layer Similarity Analysis...")
 
@@ -181,19 +189,22 @@ class CKATask(DiagnosticTask):
         logger.info(f"  Collecting hidden states for {num_samples} samples...")
         # Block outputs only: a post-norm deepest entry would contaminate a
         # whole row and column of the cross-layer matrix.
-        layer_activations, _info = hidden_states_for_task(
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            replace_final_norm=True, layer_idx="all", use_cache=use_cache)
+            replace_final_norm=True, layer_idx="all", use_cache=use_cache,
+            per_sample=True)
 
-        layers = sorted(layer_activations.keys())
+        layers = sorted(per_doc.keys())
         n_layers = len(layers)
 
         logger.info("  Centering activations...")
         centered_acts = {}
         norms = {}  # ||X^T X||_F, max-relative
         _n_f64_centered = 0
+        _rows_meta = None
         for idx in tqdm(layers, desc="Centering"):
-            X, _f64 = _center_layer(layer_activations[idx])
+            X, _rows_meta = select_rows(per_doc[idx], self.TOKEN_POLICY)
+            X, _f64 = _center_layer(X)
             _n_f64_centered += int(_f64)
             centered_acts[idx] = X
             norms[idx] = _max_relative_gram_norm(X)
@@ -224,6 +235,28 @@ class CKATask(DiagnosticTask):
                     X, Y, hxx=_self_hsic[idx_i], hyy=_self_hsic[idx_j])
                 dbg_matrix[i, j] = dcka
                 dbg_matrix[j, i] = dcka
+
+        # Position-0-inclusive companions (_meta_): adjacent pairs and the
+        # endpoints only, one layer at a time, to bound the extra cost.
+        def _incl(idx):
+            Xi, _ = _center_layer(select_rows(per_doc[idx], "all")[0])
+            return Xi, _max_relative_gram_norm(Xi)
+
+        _incl_adj, _incl_el = [], float("nan")
+        if n_layers >= 2:
+            _first = _incl(layers[0])
+            _prev = _first
+            for k in range(1, n_layers):
+                _cur = _incl(layers[k])
+                _incl_adj.append(_linear_cka(_prev[0], _cur[0], norm_x=_prev[1],
+                                             norm_y=_cur[1], centered=True))
+                if k == n_layers - 1:
+                    _incl_el = _linear_cka(_first[0], _cur[0], norm_x=_first[1],
+                                           norm_y=_cur[1], centered=True)
+                _prev = _cur
+            del _first, _prev, _cur
+        _incl_adj = np.asarray(_incl_adj, dtype=float)
+        _mid = per_doc[layers[n_layers // 2]] if n_layers else []
 
         # Scalar summaries only; the matrix and layer indices are not emitted
         # (a flattened index vector would be a pure layer-count proxy).
@@ -268,5 +301,14 @@ class CKATask(DiagnosticTask):
             "_meta_n_layers": int(n),
             "_meta_n_layers_centered_in_float64": int(_n_f64_centered),
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
+            # Sink diagnostics on the full (inclusive) middle-layer cloud.
+            "_meta_position0_share": position0_share(_mid) if n_layers else float("nan"),
+            "_meta_massive_token_share": (
+                massive_token_share(_mid) if n_layers else float("nan")),
+            "_meta_incl_pos0_avg_adjacent_cka": _stat(_incl_adj, np.nanmean),
+            "_meta_incl_pos0_min_adjacent_cka": _stat(_incl_adj, np.nanmin),
+            "_meta_incl_pos0_early_late_cka": float(_incl_el),
         }
+        if _rows_meta is not None:
+            results.update(_rows_meta.as_meta())
         return results
