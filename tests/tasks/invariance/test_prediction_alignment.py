@@ -75,3 +75,9 @@ def test_unused_vocabulary_rows_move_nothing(gpt2, stats):
     assert padded["_meta_n_unused_rows"] == 64
     keys = [k for k in base if isinstance(base[k], float)]
     inv.assert_invariant(base, padded, keys, rtol=0.0)
+
+
+def test_margin_uniform_is_not_a_headline(gpt2, stats):
+    r = _run(*gpt2, stats)
+    assert "prediction_alignment_margin_uniform" not in r
+    assert "_meta_prediction_alignment_margin_uniform" in r

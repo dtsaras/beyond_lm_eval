@@ -237,5 +237,7 @@ class PredictionAlignmentTask(DiagnosticTask):
         if baseline_unif:
             _bu = float(np.mean(baseline_unif))
             out["_meta_prediction_alignment_uniform_baseline"] = _bu
-            out["prediction_alignment_margin_uniform"] = _mean - _bu
+            # _meta_: the uniform-row control ignores token frequency, and the
+            # margin over it is far more vocabulary-sensitive than the headline.
+            out["_meta_prediction_alignment_margin_uniform"] = _mean - _bu
         return out
