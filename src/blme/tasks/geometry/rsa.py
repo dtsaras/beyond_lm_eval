@@ -61,9 +61,10 @@ class RepresentationalSimilarityTask(DiagnosticTask):
 
         layer_indices = sorted(per_doc.keys())
         # Only a collection without the deepest-block hook still ends in the
-        # post-norm entry; that entry is trimmed.
+        # post-norm entry; exactly that entry is dropped, counted from the data
+        # (a config without num_hidden_layers trimmed to 2 layers).
         if not _last_is_block:
-            _keep = collected_layer_count(model)
+            _keep = collected_layer_count(n_collected=len(layer_indices))
             if _keep and len(layer_indices) > _keep:
                 layer_indices = layer_indices[:_keep]
         n_layers = len(layer_indices)
