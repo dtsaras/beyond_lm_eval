@@ -89,6 +89,38 @@ class TaskVectorGeometryTask(DiagnosticTask):
     is BLME's.
     """
 
+    TOKEN_POLICY = "paper_protocol:Zou2023 rep_token=-1"
+    SOURCES = {
+        "paper": "arXiv:2310.01405",
+        "code": "andyzoujm/representation-engineering@5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e",
+        "llm_precedent": ("Turner et al. 2023 arXiv:2308.10248 App. F (residual-norm "
+                          "denominator); Hendel et al. 2023 arXiv:2310.15916 and Todd et al. "
+                          "2024 arXiv:2310.15213 are different 'task vector' objects"),
+    }
+    ADAPTATION_NOTE = (
+        "The vector is the RepE ClusterMean reading vector (mean last-token state of "
+        "true statements minus that of their false minimal pairs, at every entry of the "
+        "raw hidden-state tuple), exactly as the released reader computes it. What is "
+        "reported about it is BLME's: whether the per-pair contrasts agree "
+        "(pair_direction_cos_mean, the mean pairwise cosine of d_i = h_i+ - h_i-) and "
+        "how large the consensus is (consensus_energy_rel, the U-statistic "
+        "mean_{i != j} <d_i, d_j> over the mean squared residual norm, averaged over "
+        "layers). Hendel-style ICL task vectors and Todd-style function vectors were "
+        "not used: they need ICL task suites and causal head search. A raw or "
+        "sqrt(d)-divided norm was rejected because it moves under isometric embedding, "
+        "under a function-preserving residual rescale, and with the number of pairs."
+    )
+    HEADLINE_KEYS = ("consensus_energy_rel", "pair_direction_cos_mean", "max_norm_layer_fraction")
+    # max_norm_layer_fraction is an argmax-layer fraction: it moves under
+    # identity-block insertion, so it has no entry here. consensus_energy_rel is
+    # also flat in the pair count:
+    # test_repe_task_vectors.py::test_consensus_energy_is_unbiased_in_the_pair_count.
+    SIZE_INVARIANT = dict.fromkeys(
+        ("consensus_energy_rel", "pair_direction_cos_mean"),
+        (("residual_scale_gauge", "zero_pad_width"),
+         "tests/tasks/invariance/test_repe_task_vectors.py::"
+         "test_consensus_energy_invariant_under_residual_gauge_and_width_padding"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Task Vector Geometry (RepE)...")
         num_samples = self.config.get("num_samples", 5)
