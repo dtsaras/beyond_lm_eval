@@ -136,11 +136,14 @@ class RarePPLTask(DiagnosticTask):
 
         return {
             # The buckets come from the per-document pass (they need per-token
-            # identity); their within-protocol ratio is emitted directly.
-            "ppl_rare": float(np.exp(nll_rare / cnt_rare)) if cnt_rare > 0 else float("inf"),
-            "ppl_freq": float(np.exp(nll_freq / cnt_freq)) if cnt_freq > 0 else float("inf"),
-            "ppl_rare_over_freq": (float(np.exp(nll_rare / cnt_rare - nll_freq / cnt_freq))
-                                   if cnt_rare > 0 and cnt_freq > 0 else float("nan")),
+            # identity). _meta_: bucket membership is each model's own tokens'
+            # bottom/top 20% on this corpus, so it changes with the tokenizer
+            # and the corpus size (ppl_rare_over_freq 4.0 -> 7.0 from 25 to 200
+            # docs on gpt2): neither tokenizer- nor N-comparable.
+            "_meta_ppl_rare": float(np.exp(nll_rare / cnt_rare)) if cnt_rare > 0 else float("inf"),
+            "_meta_ppl_freq": float(np.exp(nll_freq / cnt_freq)) if cnt_freq > 0 else float("inf"),
+            "_meta_ppl_rare_over_freq": (float(np.exp(nll_rare / cnt_rare - nll_freq / cnt_freq))
+                                         if cnt_rare > 0 and cnt_freq > 0 else float("nan")),
             "_meta_ppl_bucket_protocol": "per_document",
             "ppl_overall": ppl_overall,
             "mean_nll_nats": mean_nll_nats,

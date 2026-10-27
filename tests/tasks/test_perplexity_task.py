@@ -74,10 +74,10 @@ def test_ppl_rare_and_freq_are_finite_when_corpus_is_small():
     assert not np.isfinite(result["ppl_overall"])
     assert result["_meta_ppl_protocol"] == "per_document"
     assert np.isfinite(result["ppl_overall_perdoc"])
-    assert np.isfinite(result["ppl_rare"]), (
+    assert np.isfinite(result["_meta_ppl_rare"]), (
         "ppl_rare must be computed over observed rare tokens, not full vocab"
     )
-    assert np.isfinite(result["ppl_freq"])
+    assert np.isfinite(result["_meta_ppl_freq"])
     assert result["_meta_n_tokens_scored"] > 0
 
 
@@ -108,8 +108,8 @@ def test_ppl_rare_distinguishes_rare_from_freq():
         model=None, tokenizer=None,
         dataset=[{"text": "dummy"}], cache=_DummyCache(stats),
     )
-    assert np.isfinite(result["ppl_rare"])
-    assert np.isfinite(result["ppl_freq"])
+    assert np.isfinite(result["_meta_ppl_rare"])
+    assert np.isfinite(result["_meta_ppl_freq"])
     # Both must be positive
-    assert result["ppl_rare"] > 0
-    assert result["ppl_freq"] > 0
+    assert result["_meta_ppl_rare"] > 0
+    assert result["_meta_ppl_freq"] > 0

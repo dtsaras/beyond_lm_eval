@@ -99,8 +99,8 @@ def test_rare_freq_buckets_and_ppls_match_independent_reference():
     # reference reimplements is still emitted, explicitly named, and must
     # still match exactly -- that keeps the original regression coverage.
     assert out["ppl_overall_perdoc"] == pytest.approx(ref_overall, rel=1e-4)
-    assert out["ppl_rare"] == pytest.approx(ref_rare, rel=1e-4)
-    assert out["ppl_freq"] == pytest.approx(ref_freq, rel=1e-4)
+    assert out["_meta_ppl_rare"] == pytest.approx(ref_rare, rel=1e-4)
+    assert out["_meta_ppl_freq"] == pytest.approx(ref_freq, rel=1e-4)
 
     # Scoring each document from a cold start, and discarding everything past
     # 512 tokens, can only make the model look worse than giving it the real
@@ -129,7 +129,7 @@ def test_rare_freq_buckets_and_ppls_match_independent_reference():
     assert out["bits_per_byte"] == pytest.approx(out["bits_per_char"], rel=1e-9)
 
     # The buckets must actually differ (rare tokens are harder).
-    assert out["ppl_rare"] > out["ppl_freq"]
+    assert out["_meta_ppl_rare"] > out["_meta_ppl_freq"]
 
 
 class _BosTokenizer:
