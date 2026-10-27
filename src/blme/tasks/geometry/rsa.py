@@ -16,7 +16,8 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import hidden_states_for_task
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 from .utils import as_numpy, collected_layer_count
 import numpy as np
 from scipy.stats import spearmanr
@@ -33,7 +34,13 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     For each layer, constructs an RDM from pairwise distances between sampled
     token representations, then computes the Spearman rank correlation between
     RDMs of adjacent layers and between early/late layers.
+
+    Rows follow ``TOKEN_POLICY``: position 0 is dropped (RSA did not originate
+    on LLMs, and sink rows take the largest distances, so they occupy the top
+    ranks of every RDM; tests/tasks/invariance/test_rsa.py).
     """
+    TOKEN_POLICY = "exclude_pos0"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representational Similarity Analysis (RSA)...")
         if dataset is None:
@@ -43,15 +50,16 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         max_tokens_per_layer = self.config.get("max_tokens", 200)
         use_cache = self.config.get("use_cache", True)
 
-        all_layers, _info = hidden_states_for_task(
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            replace_final_norm=True, layer_idx="all", use_cache=use_cache)
+            replace_final_norm=True, layer_idx="all", use_cache=use_cache,
+            per_sample=True)
         _last_is_block = bool(_info["last_is_block"])
 
-        if not all_layers:
+        if not per_doc:
             return {"error": "No hidden states collected"}
 
-        layer_indices = sorted(all_layers.keys())
+        layer_indices = sorted(per_doc.keys())
         # Only a collection without the deepest-block hook still ends in the
         # post-norm entry; that entry is trimmed.
         if not _last_is_block:
@@ -63,6 +71,9 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         if n_layers < 2:
             return {"error": "Need at least 2 layers for RSA"}
 
+        all_layers, _rows_meta = {}, None
+        for li in layer_indices:
+            all_layers[li], _rows_meta = select_rows(per_doc[li], self.TOKEN_POLICY)
         min_tokens = min(len(all_layers[li]) for li in layer_indices)
         n_tokens = min(min_tokens, max_tokens_per_layer)
 
@@ -124,7 +135,8 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         euc = _summarize(_rdms("euclidean"))
         cor = _summarize(_rdms("correlation"))
 
-        return {
+        _mid = per_doc[layer_indices[n_layers // 2]]
+        out = {
             "rsa_adjacent_mean": euc["adjacent_mean"],
             "_meta_n_degenerate_rows_jittered": int(_n_degenerate[0]),
             "_meta_last_entry_is_block_output": bool(_last_is_block),
@@ -141,4 +153,11 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             "rsa_first_middle_corrdist": cor["first_middle"],
             "_meta_rsa_min_continuity_layer_corrdist": cor["min_continuity_layer"],
             "_meta_rsa_n_undefined_pairs_corrdist": cor["n_undefined_pairs"],
+            "_meta_n_layers": int(n_layers),
+            "_meta_n_tokens_used": int(len(sel)),
+            # Sink diagnostics on the full (inclusive) middle-layer cloud.
+            "_meta_position0_share": position0_share(_mid),
+            "_meta_massive_token_share": massive_token_share(_mid),
         }
+        out.update(_rows_meta.as_meta())
+        return out

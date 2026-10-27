@@ -4039,10 +4039,13 @@ def test_geometry_rsa():
     # with the deepest one recovered by a hook. HF's final entry is
     # ln_f(b_{L-1}), which had made rsa_adjacent_min the final NORM's own
     # transition in 16/16 gpt2 windows.
-    all_layers = collect_hidden_states(model, tok, dataset,
-                                       num_samples=config["num_samples"],
-                                       layer_idx="all",
-                                       replace_final_norm=True)
+    per_doc = collect_hidden_states(model, tok, dataset,
+                                    num_samples=config["num_samples"],
+                                    layer_idx="all",
+                                    replace_final_norm=True, per_sample=True)
+    # The task drops position 0 (TOKEN_POLICY) before selecting rows.
+    from blme.tasks._tokens import select_rows
+    all_layers = {li: select_rows(v, "exclude_pos0")[0] for li, v in per_doc.items()}
     layer_indices = sorted(all_layers.keys())
     n_layers = len(layer_indices)
     assert n_layers >= 2
