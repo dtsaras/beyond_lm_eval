@@ -42,6 +42,32 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     ranks of every RDM; tests/tasks/invariance/test_rsa.py).
     """
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "DOI:10.3389/neuro.06.004.2008",
+        "code": "rsagroup/rsatoolbox (parity via tests/tasks/test_comprehensive_parity.py; commit not pinned)",
+        "llm_precedent": "arXiv:1906.01539 (Abnar et al. 2019: layer RSA with an angular "
+                         "within-space measure)",
+    }
+    ADAPTATION_NOTE = (
+        "Tokens are the RSA conditions: 200 rows spaced evenly over the corpus "
+        "(position 0 excluded) give one RDM per layer, and RDMs are compared by "
+        "Spearman rank correlation (Kriegeskorte et al. 2008, Step 4). The "
+        "dissimilarity is Kriegeskorte's correlation distance; Abnar et al. 2019, "
+        "the LM precedent, use cosine, and the two agree to about 1e-3 on residual "
+        "streams. Euclidean RDMs are kept as _meta_ because they mostly encode "
+        "token norm and sink rows. Position 0 is excluded because RSA did not "
+        "originate on LLMs and sink rows occupy the top ranks of every RDM. Only "
+        "the adjacent minimum and the first-last pair are free of the number of "
+        "layers, so the uniform summaries are _meta_.")
+    HEADLINE_KEYS = ("rsa_adjacent_min_corrdist", "rsa_early_late_corrdist")
+    # Correlation distance centres each row over coordinates, so zero-padding
+    # and isometric embedding move it slightly (<= 6e-4 in the dossier); only
+    # identity blocks and a global rescale are exact.
+    SIZE_INVARIANT = {
+        k: (("identity_blocks", "rescale"),
+            f"tests/tasks/invariance/test_rsa.py::test_size_invariant_entry[{k}]")
+        for k in ("rsa_adjacent_min_corrdist", "rsa_early_late_corrdist")
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representational Similarity Analysis (RSA)...")

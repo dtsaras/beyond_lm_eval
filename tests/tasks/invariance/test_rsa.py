@@ -93,3 +93,26 @@ def test_legacy_cache_trims_only_the_post_norm_entry(attrs):
     r = RepresentationalSimilarityTask({"num_samples": 3}).evaluate(m, None, None, cache=cache)
     assert r["_meta_n_layers"] == L - 1
     assert r["_meta_last_entry_is_block_output"] is False
+
+
+# --------------------------------------------------------------------------
+# SIZE_INVARIANT declarations, checked against their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.rsa import RepresentationalSimilarityTask  # noqa: E402
+
+
+@pytest.mark.parametrize("key", sorted(RepresentationalSimilarityTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
+    from _family_c import check_size_invariant_entry
+    check_size_invariant_entry(
+        TASK, RepresentationalSimilarityTask, key, tiny_states, tiny_identity_states,
+        negatives={"identity_blocks": "_meta_rsa_adjacent_mean_corrdist"}, rtol_width=1e-9)
+
+
+def test_declarations():
+    R = RepresentationalSimilarityTask
+    assert R.TOKEN_POLICY == "exclude_pos0"
+    assert set(R.SIZE_INVARIANT) <= set(R.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(R.SOURCES)
+    assert R.ADAPTATION_NOTE and R.ADAPTATION_NOTE.count(". ") <= 8
