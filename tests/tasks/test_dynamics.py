@@ -14,9 +14,11 @@ def test_interpolation_does_not_hang_on_unusable_samples():
     import torch
     from blme.tasks.dynamics.trajectories import LatentInterpolationTask
 
-    class _M:
-        def parameters(self):
-            return iter([torch.zeros(1)])
+    class _M(torch.nn.Module):
+        # A module (the task computes under fp32_compute), never called.
+        def __init__(self):
+            super().__init__()
+            self.w = torch.nn.Parameter(torch.zeros(1))
 
     # rows match neither str / 'text' / 'input_ids' -> every pair is unusable
     dataset = [{"tokens": [1, 2]}, {"tokens": [3, 4]}, {"tokens": [5, 6]}]
