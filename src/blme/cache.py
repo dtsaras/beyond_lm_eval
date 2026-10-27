@@ -563,90 +563,154 @@ class ModelOutputCache:
         return chunks
 
 
-def load_default_corpus(num_samples: int, diverse: bool = False) -> list:
+# The default corpus: WikiText-103 validation paragraphs (one dataset row per
+# paragraph) and, for tasks that need long texts, whole validation articles.
+WIKITEXT_DATASET = ("Salesforce/wikitext", "wikitext-103-raw-v1", "validation")
+WIKITEXT_DOCUMENTS = ("EleutherAI/wikitext_document_level", "wikitext-103-raw-v1")
+MIN_PASSAGE_CHARS = 64
+
+
+def nested_order(n: int) -> List[int]:
+    """A fixed order of ``range(n)`` whose every prefix is evenly spread.
+
+    Base-2 van der Corput order scaled to ``n``: the k-th draw is
+    ``floor(rev(k) * n / M)`` with ``M`` the smallest power of two >= n and
+    ``rev`` the bit reversal over ``log2 M`` bits; repeats are skipped. Every
+    index appears once, prefixes nest (``order[:a]`` is a prefix of
+    ``order[:b]``), a prefix of length ``2**j`` is exactly the stride sample
+    ``{floor(i * n / 2**j)}``, and any prefix of length ``m`` leaves no gap
+    wider than ``ceil(2 n / m)`` indices.
     """
-    Load text passages from the WikiText-103 validation split.
+    n = int(n)
+    if n <= 0:
+        return []
+    bits = max(1, (n - 1).bit_length())
+    M = 1 << bits
+    seen = bytearray(n)
+    order: List[int] = []
+    for k in range(M):
+        r = int(format(k, f"0{bits}b")[::-1], 2)
+        j = (r * n) // M
+        if not seen[j]:
+            seen[j] = 1
+            order.append(j)
+    return order
 
-    NOT "diverse text passages", which is what this docstring used to claim.
-    It returns the FIRST ``num_samples`` passages of at least 50 characters, and
-    WikiText stores whole articles consecutively, so a small sample is a small
-    number of articles. Measured against the article headings in the split
-    (red-team review, 2026-09-05; re-measured here):
 
-        num_samples =   20  ->   1 distinct article  ("Homarus gammarus")
-                        50  ->   4
-                       100  ->   5
-                       200  ->   6
-                       500  ->  22
-                      1000  ->  37     (the whole split is 1747 passages)
-
-    That single fact is the root cause of three separate findings: the
-    `topology_homology` H0 outlier at its shipped ``num_samples: 20`` (gpt2's
-    `h0_fine_persistence_frac` = 0.8600 lies outside the entire [0.32, 0.78]
-    range of 30 random 20-of-200 resamples), the `geometry_tokenizer_efficiency`
-    measurement domain (1,400 words of one lobster article, WikiText ``@-@``
-    artifacts included), and the `geometry_mahalanobis` fit/score split, where
-    a contiguous half-and-half cut put DIFFERENT ARTICLES on the two sides and
-    made the "in-distribution" baseline a topic shift.
-
-    ``diverse=True`` takes an evenly spaced stride across the whole split
-    instead of a prefix, which at ``num_samples=20`` spans ~20 articles rather
-    than 1. It is OPT-IN and defaults to False: every archived run used the
-    prefix, and silently changing the corpus would silently change every
-    number. Callers that want breadth should ask for it, and say so in their
-    provenance.
-
-    Falls back to a small hardcoded corpus **with an explicit warning** if
-    WikiText loading fails (e.g. ``datasets`` not installed or no network).
-    The hardcoded fallback is unsuitable for publishable research — install
-    ``datasets`` and ensure network access to get the real corpus.
-    """
+def _load_split(path: str, name: str, split: str):
+    """``datasets.load_dataset`` (no remote code), with a clear error."""
     try:
         from datasets import load_dataset
-
-        ds = load_dataset(
-            "wikitext", "wikitext-103-raw-v1", split="validation", trust_remote_code=False,
-        )
-        passages = [
-            {"text": row["text"]}
-            for row in ds
-            if isinstance(row.get("text"), str) and len(row["text"]) >= 50
-        ]
-        if passages:
-            if diverse and num_samples < len(passages):
-                # Evenly spaced across the whole split, so a small sample is
-                # drawn from many articles rather than from the first one.
-                step = len(passages) / float(num_samples)
-                result = [passages[min(len(passages) - 1, int(i * step))]
-                          for i in range(num_samples)]
-            else:
-                result = passages[:num_samples]
-            logger.info(
-                f"Loaded {len(result)} passages from WikiText-103 validation "
-                f"({'evenly spaced' if diverse else 'prefix'})")
-            if not diverse and num_samples <= 200:
-                # A prefix this short is a handful of articles; say so once,
-                # rather than leaving it to be rediscovered a fourth time.
-                logger.info(
-                    f"  NOTE: the first {num_samples} passages of WikiText-103 "
-                    f"validation span very few ARTICLES (20 -> 1, 100 -> 5, "
-                    f"200 -> 6). Pass diverse=True for an evenly spaced draw "
-                    f"if the estimand depends on topic breadth.")
-            return result
-        logger.warning("WikiText-103 returned no usable passages; using fallback corpus")
+    except ImportError as e:
+        raise RuntimeError(
+            "The default corpus needs the `datasets` package; install it or pass "
+            "a dataset explicitly.") from e
+    try:
+        return load_dataset(path, name, split=split)
     except Exception as e:
-        logger.warning(f"Could not load WikiText-103 ({e}); using fallback corpus")
+        raise RuntimeError(
+            f"Could not load {path} ({name}, split={split}): {e}. The default corpus "
+            f"is not replaced by a fallback; make the dataset available (network or "
+            f"HF cache) or pass a dataset explicitly.") from e
 
-    logger.warning(
-        "USING HARDCODED FALLBACK CORPUS (3 sentences). "
-        "Results are NOT suitable for research. Install the `datasets` "
-        "package and ensure network access to load WikiText-103."
-    )
-    return [
-        {"text": "The quick brown fox jumps over the lazy dog."},
-        {"text": "In machine learning, a neural network is a computational model."},
-        {"text": "Large language models have transformed natural language processing."},
-    ] * max(1, num_samples // 3)
+
+def _stripped_texts(rows, field: str) -> List[str]:
+    out = []
+    for row in rows:
+        text = row.get(field) if isinstance(row, dict) else None
+        if isinstance(text, str):
+            text = text.strip()
+            if len(text) >= MIN_PASSAGE_CHARS:
+                out.append(text)
+    return out
+
+
+def _wikitext_passages() -> List[str]:
+    """Stripped WikiText-103 validation passages of >= MIN_PASSAGE_CHARS characters."""
+    path, name, split = WIKITEXT_DATASET
+    return _stripped_texts(_load_split(path, name, split), "text")
+
+
+def default_corpus_size() -> int:
+    """How many passages :func:`load_default_corpus` can return."""
+    return len(_wikitext_passages())
+
+
+def load_default_corpus(num_samples: int, diverse: bool = True) -> list:
+    """WikiText-103 validation passages as ``[{"text": ...}, ...]``.
+
+    The passages are the rows of ``Salesforce/wikitext`` /
+    ``wikitext-103-raw-v1`` / validation with at least ``MIN_PASSAGE_CHARS`` (64)
+    characters after stripping, returned STRIPPED: every WikiText row ends in a
+    newline token, and on pythia and TinyLlama that token is a massive-activation
+    sink (100% of its occurrences exceed 10x the median norm) that stripping
+    removes.
+
+    ``diverse=True`` (default) draws in :func:`nested_order`: every draw is
+    evenly spread across the split, so a small draw spans many articles, and
+    draws nest -- ``load_default_corpus(n)`` is a prefix of
+    ``load_default_corpus(m)`` for ``n < m``. ``diverse=False`` returns the
+    first ``num_samples`` passages in split order (same filter and stripping).
+    WikiText stores articles consecutively, so a short prefix is a handful of
+    articles: 20 passages are one article.
+
+    Raises ``ValueError`` if more passages are requested than exist and
+    ``RuntimeError`` if the dataset cannot be loaded; there is no fallback text.
+    """
+    n = int(num_samples)
+    if n < 0:
+        raise ValueError(f"num_samples must be >= 0, got {num_samples}")
+    passages = _wikitext_passages()
+    if n > len(passages):
+        raise ValueError(
+            f"load_default_corpus: {n} passages requested, but WikiText-103 validation "
+            f"has {len(passages)} of >= {MIN_PASSAGE_CHARS} characters.")
+    idx = nested_order(len(passages))[:n] if diverse else range(n)
+    result = [{"text": passages[i]} for i in idx]
+    logger.info(f"Loaded {len(result)} passages from WikiText-103 validation "
+                f"({'nested evenly spread order' if diverse else 'split-order prefix'})")
+    return result
+
+
+def load_long_documents(
+    n: int,
+    min_tokens: Optional[int] = None,
+    tokenizer: Any = None,
+    split: str = "validation",
+) -> list:
+    """Whole WikiText-103 articles as ``[{"text": ...}, ...]``.
+
+    From ``EleutherAI/wikitext_document_level`` (``wikitext-103-raw-v1``),
+    stripped, in :func:`nested_order` over the articles of ``split``, so draws
+    nest and spread evenly. With ``min_tokens`` (which needs ``tokenizer``)
+    articles shorter than ``min_tokens`` tokens -- counted as the model sees
+    them, special tokens included -- are skipped in that order; the result is
+    still nested for a fixed tokenizer. Raises ``ValueError`` if fewer than
+    ``n`` articles qualify. The validation split holds 60 articles.
+    """
+    n = int(n)
+    if n < 0:
+        raise ValueError(f"n must be >= 0, got {n}")
+    if min_tokens is not None and tokenizer is None:
+        raise ValueError("load_long_documents: min_tokens needs a tokenizer")
+    path, name = WIKITEXT_DOCUMENTS
+    docs = _stripped_texts(_load_split(path, name, split), "page")
+    out = []
+    for i in nested_order(len(docs)):
+        if len(out) >= n:
+            break
+        text = docs[i]
+        if min_tokens is not None:
+            n_tok = len(tokenizer(text, verbose=False)["input_ids"])
+            if n_tok < int(min_tokens):
+                continue
+        out.append({"text": text})
+    if len(out) < n:
+        need = f" of >= {min_tokens} tokens" if min_tokens is not None else ""
+        raise ValueError(
+            f"load_long_documents: {n} articles requested, but {path} {split} has "
+            f"{len(out)}{need}.")
+    return out
 
 
 # Keep backward-compatible private alias

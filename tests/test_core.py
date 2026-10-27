@@ -148,7 +148,8 @@ def test_corpus_sized_to_largest_task_num_samples(mock_get_task, mock_load, mock
     cls = MagicMock(return_value=inst)
     mock_get_task.side_effect = lambda n: cls if n == "my_diag" else None
 
-    with patch("blme.cache.load_default_corpus", return_value=[{"text": "x"}]) as mock_corpus:
+    with patch("blme.cache.default_corpus_size", return_value=1691), \
+         patch("blme.cache.load_default_corpus", return_value=[{"text": "x"}]) as mock_corpus:
         evaluate(
             model_args="pretrained=test",
             tasks=["my_diag"],
@@ -156,6 +157,27 @@ def test_corpus_sized_to_largest_task_num_samples(mock_get_task, mock_load, mock
         )
     requested = mock_corpus.call_args[0][0]
     assert requested >= 500, f"corpus sized {requested}, expected >= 500"
+
+
+@patch("blme.core.load_model_and_tokenizer")
+@patch("blme.core.get_task")
+def test_corpus_request_is_capped_at_the_corpus_size(mock_get_task, mock_load, mock_model, mock_tokenizer):
+    """`num_samples` of 5000 (dynamics_stability counts vocabulary rows) must
+    not make the strict loader raise: the request is capped at what exists."""
+    mock_load.return_value = (mock_model, mock_tokenizer)
+    inst = MagicMock()
+    inst.evaluate.return_value = {"m": 1.0}
+    cls = MagicMock(return_value=inst)
+    mock_get_task.side_effect = lambda n: cls if n == "my_diag" else None
+
+    with patch("blme.cache.default_corpus_size", return_value=1691), \
+         patch("blme.cache.load_default_corpus", return_value=[{"text": "x"}]) as mock_corpus:
+        evaluate(
+            model_args="pretrained=test",
+            tasks=["my_diag"],
+            task_configs={"my_diag": {"num_samples": 5000}},
+        )
+    assert mock_corpus.call_args[0][0] == 1691
 
 
 @patch("blme.core.load_model_and_tokenizer")
