@@ -1,9 +1,11 @@
 """Relative-change ratio between adjacent layers ("empirical Lipschitz").
 
-Per residual update l -> l+1 (embedding -> block 0 included):
+Per residual update l -> l+1:
     ratio(l, x_i) = ||h_{l+1}(x_i) - h_l(x_i)|| / ||h_l(x_i)||
     L_hat(l)      = mean_i ratio(l, x_i)
-summarised by the mean, max and std over updates. This is not an operator
+summarised over the block-to-block updates; the embedding -> block 0 update
+is reported on its own (it reads the embedding-scale convention, and it was
+the maximum on every model measured). This is not an operator
 Lipschitz constant (Scaman & Virmaux 2018 bound Jacobian norms); it measures
 how much each block rewrites the residual stream relative to its size.
 Position 0 is excluded (``TOKEN_POLICY``): the attention-sink transition
@@ -13,6 +15,7 @@ dominates single layers.
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .._tokens import hidden_states_for_task, massive_token_share, position0_share, select_rows
+from ..common import get_num_layers
 from .utils import as_numpy
 import numpy as np
 import logging
@@ -63,8 +66,9 @@ class LipschitzContinuityTask(DiagnosticTask):
     """Relative layer-wise change ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||.
 
     The per-update value is the mean over tokens (position 0 excluded);
-    ``relative_change_max`` is the maximum of those per-update means across
-    depth. The deepest entry is the hooked raw block output (the post-ln_f
+    ``relative_change_max`` is the maximum of those per-update means over the
+    block-to-block updates, and ``embedding_relative_change`` is the
+    embedding -> block 0 update. The deepest entry is the hooked raw block output (the post-ln_f
     entry is trimmed when the hook does not fire).
     """
 
@@ -90,6 +94,10 @@ class LipschitzContinuityTask(DiagnosticTask):
             return {"error": "No hidden states collected"}
 
         layer_indices = sorted(all_layers.keys())
+        # Key 0 is the embedding output when the source supplied it (one more
+        # entry than blocks); decided before the post-norm trim below.
+        n_blocks = int(get_num_layers(model) or 0)
+        has_embedding = n_blocks > 0 and len(layer_indices) == n_blocks + 1
         # Without the hooked block output the deepest entry is ln_f(b_{L-1}),
         # not a block output: drop it.
         if not last_is_block:
@@ -108,8 +116,16 @@ class LipschitzContinuityTask(DiagnosticTask):
             rows[k], row_meta = select_rows(all_layers[k], policy)
         every = {k: select_rows(all_layers[k], "all")[0] for k in layer_indices}
 
-        lipschitz_means, contraction_rates, _paper_eps_mean = _transitions(rows, layer_indices)
-        incl_means, _, _ = _transitions(every, layer_indices)
+        block_indices = layer_indices[1:] if has_embedding else layer_indices
+        if len(block_indices) < 2:
+            return {"error": "Need at least 2 block outputs for Lipschitz analysis"}
+        lipschitz_means, contraction_rates, _paper_eps_mean = _transitions(rows, block_indices)
+        incl_means, _, _ = _transitions(every, block_indices)
+        if has_embedding:
+            emb_means, emb_rates, _ = _transitions(rows, layer_indices[:2])
+            emb_rel, emb_rate = emb_means[0], emb_rates[0]
+        else:
+            emb_rel = emb_rate = float("nan")
 
         lip_arr = np.array(lipschitz_means)
         _lf = lip_arr[np.isfinite(lip_arr)]
@@ -157,6 +173,10 @@ class LipschitzContinuityTask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(last_is_block),
             "mean_contraction_rate": _cr_mean,
             "contraction_std": _cr_std,
+            # The embedding -> block 0 update, on its own.
+            "embedding_relative_change": emb_rel,
+            "_meta_embedding_contraction_rate": emb_rate,
+            "_meta_embedding_transition_available": bool(has_embedding),
             # Which rows were scored, and how much of the middle layer's centred
             # sum of squares sits in position 0 / in massive non-initial rows.
             **row_meta.as_meta(),

@@ -3344,7 +3344,9 @@ def test_geometry_lipschitz():
     idxs = sorted(layers.keys())
 
     ref_means, ref_crs = [], []
-    for i in range(len(idxs) - 1):
+    # Block-to-block updates only: the embedding -> block 0 update (idxs[0] ->
+    # idxs[1]) is reported separately as embedding_relative_change.
+    for i in range(1, len(idxs) - 1):
         a = layers[idxs[i]]
         b = layers[idxs[i + 1]]
         n = min(len(a), len(b))
