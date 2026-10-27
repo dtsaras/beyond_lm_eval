@@ -80,9 +80,16 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         E1_np = E1.float().cpu().numpy()
         E2_np = E2.float().cpu().numpy()
 
-        n_vocab = len(E1_np)
-        if len(E2_np) != n_vocab:
+        # Only rows the tokenizer can emit (ids < len(tokenizer)) are queries or
+        # neighbours: embedding matrices are padded past the tokenizer (pythia
+        # 27 rows, Qwen3 267), and such rows are not tokens.
+        n_rows_total = len(E1_np)
+        n_tok = len(tokenizer) if hasattr(tokenizer, "__len__") else None
+        n_vocab = min(n_rows_total, n_tok) if n_tok else n_rows_total
+        E1_np = E1_np[:n_vocab]
+        if len(E2_np) < n_vocab:
             return {"error": f"Vocab mismatch: {n_vocab} vs {len(E2_np)}"}
+        E2_np = E2_np[:n_vocab]
 
         E1_norm = safe_unit_rows(E1_np)
         E2_norm = safe_unit_rows(E2_np)
@@ -124,5 +131,8 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             "stability_std": float(np.std(jaccards)),
             "_meta_stability_sem": _sem,
             "_meta_stability_n_rows": int(_n),
+            "_meta_n_rows_emittable": int(n_vocab),
+            "_meta_n_rows_excluded": int(n_rows_total - n_vocab),
+            "_meta_k": int(k),
             "stability_mode": stability_mode,
         }
