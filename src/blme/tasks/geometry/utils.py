@@ -332,7 +332,8 @@ def safe_svdvals(M):
 def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=-1,
                           use_disk_offload=False, replace_final_norm=False,
                           status=None, max_tokens_per_doc=10,
-                          include_embedding=False):
+                          include_embedding=False, per_sample=False,
+                          max_length=512):
     """Collect hidden states from a specific layer or all layers.
 
     Uses `output_hidden_states=True` for universal compatibility.
@@ -365,13 +366,26 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
             while TRUNCATING it away silently deletes the deepest block
             (gpt2 collapse_ratio 0.5200 trimmed vs 0.4626 hook-recovered,
             +12.4%; max_erank -11.0%).
+        per_sample: bool. When True, keep the documents apart: each layer's
+            value is a ``DocList`` (``blme.tasks._tokens``) of per-document
+            ``(T_i, D)`` tensors whose concatenation is exactly the default
+            flat return. ``.positions[i]`` holds the original token position
+            of every row of document i (the ``max_tokens_per_doc`` subsample
+            is in random order, so row order is not position order) and
+            ``.doc_ids[i]`` its index in ``dataset``. With disk offload the
+            tensors are views into the memory map.
+        max_length: tokenisation window. 512 matches the shared cache.
 
     Returns:
         If layer_idx != "all": single tensor (TotalTokens, D)
         If layer_idx == "all": dict {layer_idx: (TotalTokens, D)}
+        With ``per_sample=True`` each tensor above is a ``DocList`` instead.
     """
     use_offload = use_disk_offload or (os.environ.get("BLME_DISK_OFFLOAD", "0") == "1")
     all_hidden = {}  # layer_index -> list of (N_tokens, D) tensors
+    # Per collected document (shared by every layer key): rows written, the
+    # original position of each row, and the document's dataset index.
+    _doc_rows, _doc_pos, _doc_ids = [], [], []
 
     # Optional recovery of the deepest block's RAW output (see docstring).
     _last_block_out = {}
@@ -406,7 +420,7 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                 else:
                     text = sample.get("text", "")
                 inputs = tokenizer(text, return_tensors="pt", truncation=True,
-                                   max_length=512).to(model.device)
+                                   max_length=max_length).to(model.device)
 
                 # Skip empty / single-token docs: an empty forward pass crashes
                 # ("cannot reshape tensor of 0 elements").
@@ -448,6 +462,11 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                     # updates, and the first is systematically the largest
                     # (adversarial review round 2, 2026-09-04).
                     _first = 0 if include_embedding else 1
+                    if per_sample:
+                        _T = int(hidden_states[-1].shape[1])
+                        _doc_rows.append(_T)
+                        _doc_pos.append(torch.arange(_T, dtype=torch.int64))
+                        _doc_ids.append(i)
                     for _slot, li in enumerate(range(_first, n_layers + 1)):
                         # post-final-norm: reads the tuple AFTER the swap
                         # above, so entry -1 is already the raw block output
@@ -512,12 +531,21 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                     # review round 2, 2026-09-04).
                     T = h.shape[1]
                     _cap = max_tokens_per_doc
+                    indices = None
                     if _cap is not None and T > _cap:
                         rng = torch.Generator(device=h.device)
                         rng.manual_seed(42 + i * 1009 + actual_idx)
                         indices = torch.randperm(T, generator=rng,
                                                  device=h.device)[:_cap]
                         h = h[:, indices, :]
+                    if per_sample:
+                        # The subsample is in randperm order: record each
+                        # row's position rather than assume it.
+                        _doc_pos.append(
+                            torch.arange(T, dtype=torch.int64) if indices is None
+                            else indices.detach().cpu().to(torch.int64))
+                        _doc_rows.append(int(h.shape[1]))
+                        _doc_ids.append(i)
 
                     h_flat = h.reshape(-1, h.shape[-1]).detach().cpu()
                     # PRESERVE the incoming float dtype. `.float()` is a
@@ -572,6 +600,10 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                 if isinstance(meta, dict) and "handle" in meta and not meta["handle"].closed:
                     meta["handle"].close()
 
+    if per_sample:
+        return _split_collected(all_hidden, layer_idx, use_offload,
+                                _doc_rows, _doc_pos, _doc_ids)
+
     # Concatenate or MemMap
     results = {}
     if use_offload:
@@ -590,6 +622,35 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
         return list(results.values())[0] if results else torch.empty(0)
     else:
         return results
+
+
+def _split_collected(all_hidden, layer_idx, use_offload, doc_rows, doc_pos, doc_ids):
+    """``collect_hidden_states(per_sample=True)``: one DocList per layer key.
+
+    In memory the per-document tensors are returned as collected; offloaded,
+    the memory map is split by the recorded row counts, so each chunk is a
+    view. Either way ``torch.cat(chunks)`` equals the flat return.
+    """
+    from .._tokens import DocList
+
+    def _doclist(chunks):
+        return DocList(chunks, positions=list(doc_pos), doc_ids=list(doc_ids))
+
+    results = {}
+    for idx, store in all_hidden.items():
+        if use_offload:
+            store["handle"].close()
+            if store["count"] > 0:
+                view = _offload_view(store["path"], store["dtype_tag"],
+                                     (store["count"], store["D"]))
+                results[idx] = _doclist(list(torch.split(view, doc_rows, dim=0)))
+            else:
+                results[idx] = _doclist([])
+        else:
+            results[idx] = _doclist(list(store))
+    if layer_idx != "all":
+        return list(results.values())[0] if results else DocList([], positions=[], doc_ids=[])
+    return results
 
 
 def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_disk_offload=False):
