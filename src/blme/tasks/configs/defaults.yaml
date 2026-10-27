@@ -455,9 +455,12 @@ geometry_effective_depth:
   max_length: 512
 
 dynamics_fractal:
-  # num_samples counts DOCUMENTS built by joining corpus rows to >= 4K tokens,
-  # not corpus rows, so this consumes many more rows than the number here.
+  # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
+  # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).
   num_samples: 100
+  documents: long_documents
+  doc_split: train
+  min_doc_tokens: 4096
   # Pinned across models. seg_len = min(use_tokens, model context) otherwise
   # gives 1024-context models ~895 usable tokens and >=2048-context models
   # ~1919, and the Joseph exponent moves +0.021 across that split -- a

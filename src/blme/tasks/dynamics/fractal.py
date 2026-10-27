@@ -25,11 +25,12 @@ Headline finding: language is self-similar and long-range dependent
 bits-per-byte for predicting downstream performance — which makes H a
 mandatory comparison baseline for capability-prediction studies.
 
-PROTOCOL: consecutive corpus rows are joined into contiguous documents of
->= 4K tokens, the first min(use_tokens, model context) tokens of each are
-scored in ONE forward pass, a 128-token burn-in prefix is dropped, and the
-three parameters are fitted on the pooled per-document statistics (per-document
-means as ``*_perdoc``). The concatenated-stream values are ``*_concat_legacy``.
+PROTOCOL: natural documents of >= 4K tokens (whole WikiText-103 articles,
+``cache.load_long_documents``), the first min(use_tokens, model context)
+tokens of each scored in ONE forward pass, a 128-token burn-in prefix dropped,
+and the three parameters fitted on the pooled per-document statistics
+(per-document means as ``*_perdoc``). The concatenated-stream values are
+``*_concat_legacy``.
 
 Estimator parity is pinned against ``nolds`` (hurst_rs) and analytic anchors
 (white noise H ~ 0.5; J = 0.5 for iid).
@@ -41,6 +42,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from ...cache import load_long_documents
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 
@@ -192,9 +194,27 @@ class FractalLikelihoodTask(DiagnosticTask):
         # the notebook drops the first 128 scored tokens.
         burn_in = int(self.config.get("burn_in", 128))
 
-        if dataset is None:
-            dataset = [{"text": "The quick brown fox jumps over the lazy dog. " * 8}
-                       for _ in range(20)]
+        # Natural long documents (paper Sec. 2.1: documents > 4K tokens), whole
+        # WikiText-103 articles in a fixed nested order. The shared corpus is
+        # passages, and joining passages from different articles would measure
+        # the splices; documents="dataset" scores each given row as a document.
+        source = self.config.get("documents", "long_documents")
+        doc_split = self.config.get("doc_split", "train")
+        if source == "dataset":
+            if not dataset:
+                return {"error": "documents='dataset' needs a dataset"}
+            texts = [s["text"] if isinstance(s, dict) else str(s)
+                     for s in list(dataset)[:num_samples]]
+            texts = [t for t in texts if t]
+            source_name = "dataset"
+        else:
+            try:
+                docs = load_long_documents(num_samples, min_tokens=min_doc_tokens,
+                                           tokenizer=tokenizer, split=doc_split)
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"dynamics_fractal: long documents unavailable: {e}"}
+            texts = [d["text"] for d in docs]
+            source_name = f"wikitext_document_level:{doc_split}"
 
         device = next(model.parameters()).device
         ctx = (getattr(model.config, "max_position_embeddings", None)
@@ -205,24 +225,6 @@ class FractalLikelihoodTask(DiagnosticTask):
         seg_len = int(min(use_tokens, ctx))
         if seg_len <= burn_in + 128:
             burn_in = max(0, seg_len // 8)
-
-        # ---- Build LONG documents: consecutive rows joined into text ----
-        texts, buf, buf_tok = [], [], 0
-        for i, sample in enumerate(dataset):
-            if len(texts) >= num_samples:
-                break
-            t = sample["text"] if isinstance(sample, dict) else str(sample)
-            if not t:
-                continue
-            buf.append(t)
-            buf_tok += len(tokenizer(t)["input_ids"])
-            if buf_tok >= min_doc_tokens:
-                texts.append("\n\n".join(buf))
-                buf, buf_tok = [], 0
-        if not texts and buf:
-            # Corpus too short to make even one 4K document: use what we have
-            # rather than returning nothing, and record it.
-            texts.append("\n\n".join(buf))
 
         per_doc, all_nll, per_doc_streams = [], [], []
         with torch.no_grad():
@@ -270,6 +272,8 @@ class FractalLikelihoodTask(DiagnosticTask):
             "n_tokens_in_stream": int(sum(d["n_tokens_in_stream"]
                                           for d in per_doc)),
             "_meta_n_documents": len(per_doc),
+            "_meta_document_source": source_name,
+            "_meta_min_doc_tokens": int(min_doc_tokens),
             "_meta_segment_len": int(seg_len),
             "_meta_burn_in": int(burn_in),
             "protocol": "per_document_paper_protocol",
