@@ -336,6 +336,25 @@ class RefusalDirectionTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "paper_protocol:Arditi2024 post-instruction tokens"
+    SOURCES = {
+        "paper": "arXiv:2406.11717",
+        "code": "andyrdt/refusal_direction@9d852fae1a9121c78b29142de733cb1340770cc3",
+        "llm_precedent": "Arditi et al. 2024 (the proposing paper is an LLM paper)",
+    }
+    _INV = "tests/tasks/invariance/test_repe_refusal_direction.py::"
+    # rel_direction_energy is also flat in the prompt count:
+    # test_rel_direction_energy_is_unbiased_in_the_prompt_count.
+    SIZE_INVARIANT = {
+        "rel_direction_energy": (
+            ("prompt_count_N", "residual_scale_gauge", "zero_pad_width"),
+            _INV + "test_rel_direction_energy_invariant_under_residual_gauge_and_width_padding"),
+        "separability_auc": (
+            ("residual_scale_gauge",),
+            _INV + "test_rel_direction_energy_invariant_under_residual_gauge_and_width_padding"),
+        "selected_layer_frac": (
+            ("residual_scale_gauge",),
+            _INV + "test_rel_direction_energy_invariant_under_residual_gauge_and_width_padding"),
+    }
     HEADLINE_KEYS = ("separability_auc", "mean_projection_gap", "direction_norm",
                      "rel_direction_energy", "selected_layer_frac",
                      "refusal_score_bypass", "refusal_score_induce")
