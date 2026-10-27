@@ -90,13 +90,23 @@ def test_width_padding_preserves_the_function(llama, tok):
     assert inv.max_logit_delta(llama, pad, ids) < 1e-5
 
 
-def test_concept_over_random_invariant_under_width_padding(llama, tok):
+INVARIANT_KEYS = ["steering_concept_over_random", "steering_beats_random_frac",
+                  "directional_consistency", "directional_success_rate",
+                  "steering_sign_reversal"]
+
+
+def test_steering_keys_invariant_under_width_padding_and_residual_gauge(llama, tok):
+    """Width: 4x function-preserving zero-padding (rtol 1e-4, float rounding of
+    the padded reductions). Scale: residual-scale gauge c=2 with eps rescaled."""
     base = _run(llama, tok)
     pad = _run(zero_pad_llama_width(llama), tok)
-    inv.assert_invariant(base, pad, ["steering_concept_over_random",
-                                     "steering_beats_random_frac"], rtol=1e-4)
+    inv.assert_invariant(base, pad, INVARIANT_KEYS, rtol=1e-4)
     assert base["_meta_random_control"] == "text_difference"
     assert base["_meta_n_random_draws"] == CFG["n_random_draws"]
+
+    ids = tok(TEXT, return_tensors="pt")["input_ids"]
+    gauged = inv.residual_scale_gauge(llama, 2.0, rescale_eps=True, verify_on=ids, atol=0.0)
+    inv.assert_invariant(base, _run(gauged, tok), INVARIANT_KEYS, rtol=1e-5)
 
 
 def test_isotropic_control_moves_under_width_padding(llama, tok, monkeypatch):
@@ -106,13 +116,3 @@ def test_isotropic_control_moves_under_width_padding(llama, tok, monkeypatch):
     pad = _run(zero_pad_llama_width(llama), tok, monkeypatch, isotropic=True)
     inv.assert_moves(base, pad, "steering_concept_over_random", min_rel=0.2)
     assert pad["steering_concept_over_random"] > base["steering_concept_over_random"]
-
-
-def test_concept_over_random_invariant_under_residual_gauge(llama, tok):
-    ids = tok(TEXT, return_tensors="pt")["input_ids"]
-    gauged = inv.residual_scale_gauge(llama, 2.0, rescale_eps=True, verify_on=ids, atol=0.0)
-    base = _run(llama, tok)
-    g = _run(gauged, tok)
-    inv.assert_invariant(base, g, ["steering_concept_over_random",
-                                   "steering_beats_random_frac",
-                                   "directional_consistency"], rtol=1e-5)

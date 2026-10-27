@@ -533,6 +533,43 @@ class SteeringEffectivenessTask(DiagnosticTask):
     token-anchor effect. KL is sign-blind and is ``_meta_`` only.
     """
 
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2308.10248",
+        "code": "andyzoujm/representation-engineering@5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e",
+        "llm_precedent": ("Turner et al. 2023 ActAdd arXiv:2308.10248 (App. F relative "
+                          "norm, App. G random-text control); Panickssery et al. 2024 CAA "
+                          "arXiv:2312.06681; Zou et al. 2023 RepE control arXiv:2310.01405"),
+    }
+    ADAPTATION_NOTE = (
+        "Steering effectiveness is a BLME construct. The last-token mean difference "
+        "of eight truthful/untruthful sentence pairs is rescaled to 0.1 times the "
+        "norm of the residual it is added to (the relative norm of ActAdd App. F; "
+        "ActAdd and CAA sweep a raw multiplier instead) and added at the last "
+        "position of a neutral prompt. The effect is the signed change of next-token "
+        "logits along the vector's own logit-space direction (W_U times the "
+        "final-norm Jacobian), with a sign-reversal (-v) check and a data-defined "
+        "token-anchor effect. Generation-based scoring (ActAdd topic rates, CAA "
+        "answer probabilities) was not used: it needs behaviour-specific "
+        "classifiers or A/B formats that base models do not follow. The control is "
+        "norm-matched differences of the last-token states of unrelated sentences "
+        "(ActAdd App. G's random-text vector), scored along its own logit direction; "
+        "an isotropic Gaussian control was rejected because unused width dilutes it. "
+        "All arithmetic is fp32 at every model size."
+    )
+    HEADLINE_KEYS = (
+        "steering_concept_over_random", "steering_beats_random_frac",
+        "directional_consistency", "directional_success_rate", "steering_sign_reversal",
+        "steering_semantic_effect", "steering_semantic_success_rate",
+        "best_directional_effect", "mean_directional_effect", "best_directional_layer_frac",
+    )
+    SIZE_INVARIANT = dict.fromkeys(
+        ("steering_concept_over_random", "steering_beats_random_frac",
+         "directional_consistency", "directional_success_rate", "steering_sign_reversal"),
+        (("zero_pad_width", "residual_scale_gauge"),
+         "tests/tasks/invariance/test_repe_steering_effectiveness.py::"
+         "test_steering_keys_invariant_under_width_padding_and_residual_gauge"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Steering Vector Effectiveness...")
         num_samples = self.config.get("num_samples", 3)
