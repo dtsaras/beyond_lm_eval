@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 from ...registry import register_task
-from ..geometry.utils import block_output_count
+from ..geometry.utils import block_output_count, safe_unit_rows_torch
 from ...tasks.base import DiagnosticTask
 
 logger = logging.getLogger("blme")
@@ -43,28 +43,9 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
     L = min(len(clean_layers), len(perturbed_layers))
     if L < 2:
         return {}
-    # DOUBLE, on both sides of the subtraction.
-    #
-    # Li et al. Eq. 9 is homogeneous of degree zero, so a positive rescale must
-    # cancel exactly, and the perturbation is a DIFFERENCE, so a common
-    # translation must cancel too. Neither did, and for two different reasons
-    # that the same cast causes:
-    #
-    #  * `.norm()` squares before summing, so in float32 it underflows to 0 at
-    #    1e-30/1e-25 and overflows at 1e25/2.406e38. `d` then contains a zero
-    #    or a non-finite value, the guard below returns `{}`, and the task
-    #    emits **no metric at all** rather than a wrong one. On the
-    #    one-coordinate trajectory delta_l = s * 0.5^l the exact rate is
-    #    -0.693147180560 for every positive s; BLME returned it at 1e-13, 1 and
-    #    1e13 and nothing at the other four rungs.
-    #  * casting to float32 BEFORE subtracting quantises away a common offset:
-    #    a +1e6 translation moved an exact 0.139761942549 to 0.110812307057
-    #    (**-20.71%**). Same defect as `matrix_entropy`, same day.
-    #
-    # float64 covers the whole ladder on its own here -- squaring 2.4e38 gives
-    # 5.8e76 and squaring 1e-30 gives 1e-60, both comfortably inside double's
-    # range -- so no rescale is needed, only the promotion.
-    # (gpt-5.6-sol round 9, 2026-09-07.)
+    # Both operands in double before the subtraction: a float32 norm under- and
+    # overflows at extreme scales, and casting before subtracting quantises a
+    # common offset away (tests/tasks/test_perturbation_growth.py scale/offset).
     d = []
     for l in range(L):
         diff = (clean_layers[l].double() - perturbed_layers[l].double())
@@ -75,14 +56,6 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
     log_d = np.log(d)
     x = np.arange(L, dtype=np.float64) / max(1, L - 1)
     slope = float(np.polyfit(x, log_d, 1)[0])
-    # PER-BLOCK exponent (the source paper's Eq. 9 normalisation, 1/(n-m)).
-    #
-    # Both `growth_slope` and `growth_log_ratio` carry a depth factor:
-    # log_ratio accumulates over every block traversed, so a deeper model
-    # scores higher for being deeper rather than for amplifying more per block.
-    # The paper's own quantity is the average log-growth PER BLOCK, i.e.
-    # lambda = (log d_L - log d_0) / (L - 1), which is what a Lyapunov-style
-    # exponent means and is one division away.
     n_transitions = max(1, L - 1)
     return {
         "perturbation_growth_per_layer": (log_d - log_d[0]).tolist(),
@@ -101,23 +74,9 @@ class PerturbationGrowthTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Layer Perturbation Growth (quasi-Lyapunov)...")
         num_samples = self.config.get("num_samples", 10)
-        # 1e-2, not 1e-3. `rel_eps` is a RELATIVE displacement, and bf16 cannot
-        # represent one of 1e-3: its eps is 7.812e-03, so adding `1e-3 * ||E||`
-        # to a bf16 embedding rounds part of the displacement away. Measured
-        # realized ||dE||/||E|| against the request (this file's own harness,
-        # 2026-09-05):
-        #
-        #             requested 1e-3        1e-2          5e-2
-        #   float32   1.000e-03 (100%)   1.000e-02     5.000e-02
-        #   bfloat16  8.166e-04 ( 82%)   1.013e-02     5.002e-02
-        #   float16   1.022e-03 (102%)   1.000e-02     5.000e-02
-        #
-        # So at 1e-3 a bf16 checkpoint was perturbed 18% LESS than an fp32 one
-        # for the same config -- a cross-model difference produced by STORAGE
-        # FORMAT. The ratio metrics divide by `d[0]` and absorb the first-order
-        # part of that, but `initial_divergence` does not, and the growth is
-        # not linear in the displacement. At 1e-2 all three dtypes realize the
-        # request exactly.
+        # 1e-2: the smallest relative displacement fp32, fp16 and bf16 storage
+        # all realise exactly (bf16 realises only 82% of a 1e-3 request); the
+        # realised size is measured and emitted as _meta_realized_rel_eps.
         rel_eps = float(self.config.get("rel_eps", 1e-2))
         seed = int(self.config.get("seed", 42))
 
@@ -145,15 +104,8 @@ class PerturbationGrowthTask(DiagnosticTask):
                               else output).detach()
             _hook = _blocks[-1].register_forward_hook(_cap_last)
         n_used = 0
-        # try/FINALLY, not a straight-line remove. The first fix moved
-        # `_hook.remove()` above the two early returns, which closed the
-        # "no usable samples" and "degenerate profile" paths and left the
-        # EXCEPTION path wide open. Measured directly: raise inside the loop
-        # and `layers[-1]._forward_hooks` goes 0 -> 1 and STAYS there for the
-        # life of the process, so every later task in the run pays the hook on
-        # every forward and the last activation tensor is pinned alive. The
-        # sibling `coe.py` already used try/finally; this one did not
-        # (independent Opus review, 2026-09-05).
+        # The hook is removed on every path, exceptions included
+        # (tests/tasks/test_forward_hook_leaks.py).
         try:
             with torch.no_grad():
                 for i, s in enumerate(dataset):
@@ -167,30 +119,9 @@ class PerturbationGrowthTask(DiagnosticTask):
                     E = emb_layer(enc["input_ids"])  # (1, T, D)
                     noise = torch.randn(E.shape, generator=gen).to(
                         device=E.device, dtype=E.dtype)
-                    # Per-token relative scaling so every token is perturbed by
-                    # rel_eps of its own norm.
-                    # `safe_norm`-style rowwise scaling, not `.norm().clamp_min(1e-12)`:
-                    # an ABSOLUTE floor on a scale-free normalisation, and a norm
-                    # that squares before summing, are the two mechanisms behind
-                    # this campaign's most repeated numeric defect.
-                    from ..geometry.utils import safe_unit_rows_torch
-                    # IN DOUBLE — the identical expression `stability.py` was
-                    # promoted for on 2026-09-07, left in float32 here.
-                    #
-                    # `_rmax * ||row / _rmax||` overflows float32 at the top of
-                    # the range: the row max is representable while the true row
-                    # norm, several times larger, is not, so `scale` becomes inf
-                    # and the perturbation NaN. In `stability` that broke the
-                    # `noise_std = 0` self-identity axiom (0.867 instead of
-                    # exactly 1.0 at 2.406e38); here the guard downstream then
-                    # returns no metric at all.
-                    #
-                    # Two siblings, same defect, same day — one fixed and one
-                    # missed, and my sweep for the fixed line did not match this
-                    # one because the surrounding expression differs. Found by
-                    # a reviewer (Opus round 11, 2026-09-08), which is the
-                    # fourth time this campaign a sweep has come up short of the
-                    # population it was run for.
+                    # Per-token scale rel_eps * ||e_t||, with the row max factored
+                    # out and the product taken in double, so it neither under-
+                    # nor overflows (tests/tasks/test_perturbation_growth.py).
                     _E64 = E.double()
                     _rmax = _E64.abs().amax(dim=-1, keepdim=True)
                     _tiny = torch.finfo(_E64.dtype).tiny
@@ -198,8 +129,6 @@ class PerturbationGrowthTask(DiagnosticTask):
                         dim=-1, keepdim=True)) * rel_eps).to(E.dtype)
                     noise = safe_unit_rows_torch(noise)
                     E_pert = E + noise * scale
-                    # The REALIZED displacement, measured rather than assumed --
-                    # see the dtype note at `rel_eps`.
                     _realized.append(float(
                         ((E_pert - E).float().norm(dim=-1)
                          / E.float().norm(dim=-1).clamp_min(_tiny)).mean().item()))
@@ -212,24 +141,10 @@ class PerturbationGrowthTask(DiagnosticTask):
                     out_p = model(inputs_embeds=E_pert, output_hidden_states=True, **kw)
                     _sink_p = dict(_sink)
 
-                    # DROP the final entry: for most architectures HuggingFace's
-                    # last hidden_states element has already passed through the
-                    # final norm, so treating it as a block output makes the last
-                    # "layer" a LayerNorm. Measured impact here is the largest of
-                    # any task: mean |42%| change in growth_log_ratio (gpt2-large
-                    # -68.6%, 0.886 -> 2.826), the SIGN of the change is
-                    # architecture-determined (all GPT-2 contract, all Pythia/Qwen
-                    # expand), and spearman(as-reported, corrected) = +0.571 --
-                    # i.e. 43% of the cross-model ordering was a normalization
-                    # (adversarial review, 2026-09-03).
-                    # Recover the deepest block's RAW output instead of trimming
-                    # it away. The trim kept the first L of L+1 entries, which drops
-                    # the last BLOCK, so the divergence profile never reached the
-                    # deepest layer -- the same defect fixed with a hook in coe.py,
-                    # and the same hook applies verbatim here.
-                    # post-final-norm: SUBSTITUTED. The divergence PROFILE spans
-                    # every layer, and its deepest point is the one the growth
-                    # ratio is read off.
+                    # HF's last hidden_states entry is post-final-norm; the
+                    # deepest block's raw output (hooked) replaces it so the
+                    # profile ends at a block output. States keep their dtype
+                    # here: narrowing before the subtraction loses the signal.
                     _hc = list(out_c.hidden_states)
                     _hp = list(out_p.hidden_states)
                     if (_sink_c.get("h") is not None
@@ -237,20 +152,6 @@ class PerturbationGrowthTask(DiagnosticTask):
                         _hc[-1] = _sink_c["h"]
                         _hp[-1] = _sink_p["h"]
                         _used_hook[0] = True
-                        # PRESERVE the incoming float dtype at collection.
-                        #
-                        # `_growth_profile` promotes BOTH subtraction operands to
-                        # double, but that cannot recover what was already thrown
-                        # away here: narrowing happens BEFORE the difference is
-                        # taken, and the difference is the whole measurement. On
-                        # a native float64 ten-block affine contraction
-                        # h -> 1000 + (h - 1000)/2 the exact rate is
-                        # log(1/2) = -0.693147180560; collection drove the final
-                        # divergence 1.9531302035810137e-05 to 0.0 and the task
-                        # refused outright, and at 8 blocks it emitted
-                        # -0.676376923249. `narrowing_is_safe` returns False on
-                        # this fixture and `centring_is_safe` True, so the loss is
-                        # precisely the narrowing (codex round 15, 2026-09-09).
                         hs_c = [h[0].cpu() for h in _hc]
                         hs_p = [h[0].cpu() for h in _hp]
                     else:
@@ -280,10 +181,6 @@ class PerturbationGrowthTask(DiagnosticTask):
         if not results:
             return {"error": "Degenerate divergence profile"}
         results["rel_eps"] = rel_eps
-        # MEASURED, not requested. On a bf16 checkpoint at the old rel_eps=1e-3
-        # these two differed by 18%; they should now agree to <1%, and a run
-        # where they do not is a run whose perturbation size is not what its
-        # config says.
         _rz = float(np.mean(_realized)) if _realized else float("nan")
         results["_meta_realized_rel_eps"] = _rz
         if np.isfinite(_rz) and rel_eps > 0 and abs(_rz - rel_eps) / rel_eps > 0.05:
