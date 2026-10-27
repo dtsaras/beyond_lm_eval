@@ -266,7 +266,7 @@ def test_profiles_keep_full_depth():
     L = 6
     S = {li: [rng.standard_normal((40, 8)) + li for _ in range(3)] for li in range(L)}
     hsic = inv.run_task_on_states("geometry_hsic", S)
-    assert len(hsic["adjacent_hsic"]) == L - 1
+    assert len(hsic["_meta_adjacent_hsic"]) == L - 1
     rsa = inv.run_task_on_states("geometry_rsa", S)
     assert rsa["_meta_last_entry_is_block_output"] is True
     assert rsa["rsa_early_late"] != rsa["rsa_adjacent_mean"]

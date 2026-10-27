@@ -794,7 +794,8 @@ def test_mutual_info(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "avg_adjacent_hsic" in results
+        assert "min_adjacent_hsic" in results
+        assert "_meta_avg_adjacent_hsic" in results
 
 
 def test_perplexity_rare_freq(mock_model, mock_tokenizer):

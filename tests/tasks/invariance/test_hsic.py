@@ -51,8 +51,7 @@ def test_legacy_cache_trims_only_the_post_norm_entry(attrs):
     cache = inv.InjectedStateCache(S, m, inv.StubTokenizer())
     cache._last_block_raw = None          # a cache built before the hook existed
     r = HSICDependenceTask({"num_samples": 3}).evaluate(m, None, None, cache=cache)
-    assert len(r["_meta_adjacent_hsic"] if "_meta_adjacent_hsic" in r
-               else r["adjacent_hsic"]) == L - 2
+    assert len(r["_meta_adjacent_hsic"]) == L - 2
     assert r["_meta_n_layers"] == L - 1
     assert r["_meta_last_entry_is_block_output"] is False
 
@@ -69,3 +68,26 @@ def test_headline_keys_are_bounded_similarities(tiny_states):
     assert "hsic_compression_ratio_raw" not in r
     for k in _headline(r):
         assert -1.0 - 1e-9 <= r[k] <= 1.0 + 1e-9, (k, r[k])
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_headline_is_depth_invariant_under_identity_insertion(
+        tiny_states, tiny_identity_states):
+    """P4: identity blocks move no headline key; the uniform adjacent mean
+    and the per-layer lists (now _meta_) do move (known negative)."""
+    base = inv.run_task_on_states(TASK, tiny_states)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states)
+    assert ins["_meta_n_layers"] == base["_meta_n_layers"] + 2
+    keys = _headline(base)
+    assert {"min_adjacent_hsic", "hsic_compression_ratio"} <= set(keys)
+    inv.assert_invariant(base, ins, keys, rtol=1e-9)
+    inv.assert_moves(base, ins, "_meta_avg_adjacent_hsic", 1e-3)
+    assert len(ins["_meta_adjacent_hsic"]) == len(base["_meta_adjacent_hsic"]) + 2
+    assert not any(isinstance(v, list) for k, v in base.items()
+                   if not k.startswith("_meta_"))

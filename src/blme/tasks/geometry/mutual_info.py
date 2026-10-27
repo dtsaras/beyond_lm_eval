@@ -158,11 +158,14 @@ class HSICDependenceTask(DiagnosticTask):
         del _K0a, _KLa
         _mid = per_doc[layers[n_layers // 2]]
 
+        # Headline keys are the ones an identity block cannot move (P4): the
+        # adjacent minimum and the anchor-last endpoint. The per-layer lists
+        # and their uniform mean are _meta_ profiles (test_hsic.py).
         out = {
-            "adjacent_hsic": adjacent_hsic,
-            "avg_adjacent_hsic": float(np.mean(adjacent_hsic)),
+            "_meta_adjacent_hsic": adjacent_hsic,
+            "_meta_avg_adjacent_hsic": float(np.mean(adjacent_hsic)),
             "min_adjacent_hsic": float(np.min(adjacent_hsic)),
-            "input_to_layer_hsic": input_hsic,
+            "_meta_input_to_layer_hsic": input_hsic,
             # nCKA(anchor, L-1) / nCKA(anchor, 1): unbounded ([X, Y, X] gives
             # 9.40) and its denominator follows a layer index, so _meta_.
             "_meta_hsic_deep_to_shallow_ratio": (
