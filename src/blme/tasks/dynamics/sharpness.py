@@ -32,6 +32,7 @@ References:
     computation problems", J. Comput. Appl. Math. 74, 1996.
 """
 
+import contextlib
 import math
 import logging
 from typing import List, Tuple
@@ -42,6 +43,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers, get_lm_head
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -340,8 +342,7 @@ class LossSharpnessTask(DiagnosticTask):
         # mode, requires_grad, dtype), so every exit path restores all three.
         was_training = model.training
         orig_grad_state = {}
-        _saved_param_dtypes = []
-        _promoted = False
+        _stack = contextlib.ExitStack()
         try:
             model.eval()
             orig_grad_state = {p: p.requires_grad for p in model.parameters()}
@@ -350,18 +351,10 @@ class LossSharpnessTask(DiagnosticTask):
             for p in params:
                 p.requires_grad_(True)
 
-            # Every probe runs in fp32 arithmetic on a bf16/fp16 model: bf16
-            # arithmetic biases curvature (~21% on tiny-random-gpt2's top eigenvalue).
-            _model_dtype = next(model.parameters()).dtype
-            _promoted = _model_dtype in (torch.bfloat16, torch.float16)
-            _saved_param_dtypes = []
-            if _promoted:
-                logger.info(f"  sharpness: promoting model {_model_dtype} -> "
-                            f"float32 for all curvature probes")
-                _saved_param_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
-                with torch.no_grad():
-                    for p_ in model.parameters():
-                        p_.data = p_.data.float()
+            # Every probe runs in fp32 arithmetic on a bf16/fp16 model, parameters
+            # AND buffers: bf16 arithmetic biases curvature (~21% on
+            # tiny-random-gpt2's top eigenvalue). Restored on every exit path.
+            _prec = _stack.enter_context(fp32_compute(model))
             # Build a fresh computational graph and compute the per-batch loss.
             def compute_loss():
                 losses = []
@@ -448,11 +441,7 @@ class LossSharpnessTask(DiagnosticTask):
             )
 
         finally:
-            # Restore parameter dtypes (buffers were not promoted).
-            if _promoted:
-                with torch.no_grad():
-                    for p_, dt in _saved_param_dtypes:
-                        p_.data = p_.data.to(dt)
+            _stack.close()
             # Restore original requires_grad state and training mode.
             for p, grad_flag in orig_grad_state.items():
                 p.requires_grad_(grad_flag)
@@ -481,4 +470,5 @@ class LossSharpnessTask(DiagnosticTask):
             "sam_rho": sam_rho,
             "n_hutchinson_samples": n_hutchinson,
             "n_power_iterations": n_power_iter,
+            **effective_dtype_meta(_prec),
         }
