@@ -251,3 +251,15 @@ take natural long documents (`wikitext_document_level`, cached).
 - the normalised versions passed their direct tests, but none has a measured cross-model reduction yet; that needs a zoo rerun after implementation;
 - width tests for gradient_flow, perturbation_growth and sharpness, where zero-padding a pre-LN model is not function-preserving;
 - the Phase 3 precision oracle.
+
+## User answers (2026-10-28)
+- **Q1 → one point per sequence.**
+  - Last token, as in the LLM precedents.
+  - N pinned at ≥1000 sequences, the same for every model.
+  - The token-cloud value is kept as `_meta_`.
+- **Q2 → the paper definition wins.**
+  - A demonstrable code bug is never reproduced.
+  - Code fills in what the paper leaves unspecified.
+  - Each case is recorded. CoE therefore generates greedily and pools the generated tokens.
+- **Q3 → restore the reference sample sizes.** Time each task on Qwen3-8B first, and bring back only the prohibitive ones.
+- **Q4 → refusal_direction runs on instruct models with their chat template.** Base models get NaN plus a `_meta_` reason.

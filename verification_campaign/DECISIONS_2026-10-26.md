@@ -98,3 +98,12 @@ terminator in WikiText's formatting, not content):
 **No norm-outlier exclusion rule is adopted**, because no row
 remains for it to act on. If the user prefers a Sun et al. (2024)-style
 outlier exclusion as defence in depth, that is a separate decision.
+
+## Methods-dossier questions — answered 2026-10-28
+The user chose the recommended option for Q1–Q4 in `METHODS_DOSSIER_2026-10-28.md`:
+- per-sequence (last-token) clouds with N≥1000 pinned;
+- paper definition over code, and no reproduced code bugs;
+- reference sample sizes restored after a cost measurement on Qwen3-8B;
+- refusal on instruct models only.
+
+Policies P1–P7 in that document stand, unless the user objects.
