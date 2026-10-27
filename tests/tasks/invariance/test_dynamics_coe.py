@@ -102,6 +102,28 @@ def test_chain_pools_the_states_that_emit_generated_tokens():
     assert out["coe_r"] != out["_meta_coe_r_last_prompt"]
 
 
+# tiny gpt2 has 5 blocks; identity copies are inserted MID-STACK only: one
+# appended after the last block would expose its raw output before ln_f as an
+# extra chain point (HF's last entry is post-norm), which is not neutral.
+MID_LAYOUTS = {"early": [0, 0], "late": [3, 3], "uniform": [0, 1, 2, 3]}
+
+
+@pytest.mark.parametrize("where", sorted(MID_LAYOUTS))
+def test_coe_r_sum_invariant_under_identity_blocks(where):
+    """L * coe_r is bit-identical under mid-stack identity blocks; coe_r itself
+    (Eq. 5's mean over L transitions) falls exactly as L / L'."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, MID_LAYOUTS[where],
+                                        verify_on=token_batches(tok))
+    base, other = _run(model, tok), _run(deeper, tok)
+    inv.assert_invariant(base, other, ["coe_r_sum"], rtol=0.0)
+    L0, L1 = base["_meta_chain_length_per_sample"], other["_meta_chain_length_per_sample"]
+    assert L1 == L0 + len(MID_LAYOUTS[where])
+    assert other["coe_r"] == pytest.approx(base["coe_r"] * L0 / L1, rel=1e-12)
+    inv.assert_moves(base, other, "coe_r", 0.1)
+
+
 def test_zero_normaliser_is_nan_as_in_the_release():
     """A chain that returns to its start: Z_Mag = 0 (score.py divides by zero)."""
     chain = [torch.tensor(v, dtype=torch.float64)

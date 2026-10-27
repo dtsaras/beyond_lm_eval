@@ -140,8 +140,12 @@ def _coe_from_chain(chain: list[torch.Tensor], storage_eps: float = None) -> dic
     # CoE-R (Eq. 5) — only meaningful when both normalisers are finite.
     if np.isfinite(mag_norm_mean) and np.isfinite(ang_norm_mean):
         coe_r = mag_norm_mean - ang_norm_mean
+        # L * CoE-R as an exact sum over transitions: an identity block adds a
+        # zero step and leaves it bit-identical, while Eq. 5's 1/L moves.
+        coe_r_sum = math.fsum(m - a for m, a in zip(mag_norm_pair, ang_norm_pair))
     else:
         coe_r = float("nan")
+        coe_r_sum = float("nan")
 
     # CoE-C (Eq. 6/7) as score.py compute_CoE_C: normalised magnitude as radius
     # AND normalised angle as phase (the paper's prose and Algorithm 2 differ;
@@ -169,6 +173,7 @@ def _coe_from_chain(chain: list[torch.Tensor], storage_eps: float = None) -> dic
         "coe_c": coe_c,
         "normalized_coe_c": normalized_coe_c,
         "z_mag_margin_log10": z_margin,
+        "coe_r_sum": coe_r_sum,
     }
 
 
@@ -321,6 +326,12 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             # Paper Eq. 5 + Eq. 7 — the headline output-free scores.
             "coe_r": _mean("coe_r"),
             "coe_r_std": _std("coe_r"),
+            # Depth-normalised twin: L * coe_r, invariant under function-
+            # preserving mid-stack identity blocks
+            # (tests/tasks/invariance/test_dynamics_coe.py). Caveat: the same
+            # inverse on the angle term raises its association with depth
+            # (dossier: rho(L) -0.356 -> +0.664 for L * Ang on the study data).
+            "coe_r_sum": _mean("coe_r_sum"),
             "coe_c": _mean("coe_c"),
             "coe_c_std": _std("coe_c"),
             # _meta_: a documented alias, bit-identical to coe_c.
