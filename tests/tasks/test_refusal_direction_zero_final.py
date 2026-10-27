@@ -1,89 +1,79 @@
-"""A zero final direction must be reported as 0.0, not replaced by an earlier layer.
+"""repe_refusal_direction protocol checks (Arditi et al. 2024; Q4).
 
-`direction_norm` names the FINAL layer's mean-difference norm. Zero-direction
-layers used to be dropped with `continue`, and the headline was taken from the
-last SURVIVING entry -- so when the final layer's class means coincided, an
-earlier block's numbers were published under the final layer's name. The
-released `get_mean_diff` returns the zero vector there.
+Base models (no chat template) get NaN headline values with a ``_meta_``
+reason; instruct models are read at the post-instruction tokens of their chat
+template, at resid_pre layers below 0.8 L. A selected direction whose class
+means coincide is reported as 0.0, not replaced by another layer's norm.
 """
 import numpy as np
 import pytest
 import torch
 
-N_PER_CLASS = 12
+pytest.importorskip("sklearn")
+transformers = pytest.importorskip("transformers")
+
+from blme.tasks.repe.refusal import RefusalDirectionTask  # noqa: E402
+
+CHAT = ("{% for m in messages %}<|user|>{{ m['content'] }}<|end|>{% endfor %}"
+        "{% if add_generation_prompt %}<|assistant|>{% endif %}")
 
 
-def _dataset():
-    return ([{"text": f"harmful prompt number {i}", "label": "harmful"}
-             for i in range(N_PER_CLASS)]
-            + [{"text": f"harmless prompt number {i}", "label": "harmless"}
-               for i in range(N_PER_CLASS)])
+class _Loose(RefusalDirectionTask):
+    """The paper's rule with the KL/induce filters opened, so a random model
+    keeps candidates; the layer prune (l < 0.8 L) stays."""
+    KL_THRESHOLD, INDUCE_THRESHOLD = 1e9, -1e9
 
 
-def test_zero_final_direction_is_reported_as_zero(mock_model, mock_tokenizer,
-                                                  monkeypatch):
-    """The final block's output is made CLASS-INDEPENDENT but sample-varied.
+@pytest.fixture(scope="module")
+def tiny():
+    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    cfg = transformers.LlamaConfig(
+        vocab_size=len(tok), hidden_size=32, intermediate_size=64, num_hidden_layers=5,
+        num_attention_heads=4, num_key_value_heads=2, max_position_embeddings=256,
+        attn_implementation="eager")
+    return transformers.LlamaForCausalLM(cfg).eval(), tok
 
-    Both classes then have identical final means, so the exact mean-difference
-    norm is 0.0 while the representations stay nonzero and varied -- the
-    reviewer's `zero_final` condition. The final block is patched at the module
-    level because the task re-reads it through a forward hook on `layers[-1]`,
-    which would otherwise overwrite anything injected into `hidden_states`.
-    """
-    from blme.tasks.common import get_layers
-    from blme.tasks.representation_engineering import RefusalDirectionTask
 
-    layers = get_layers(mock_model)
-    last = layers[-1]
-    real_forward = last.forward
-    calls = {"i": 0}
-
-    def class_independent(*a, **k):
-        out = real_forward(*a, **k)
-        h = out[0] if isinstance(out, tuple) else out
-        j = calls["i"] % N_PER_CLASS      # depends on the SAMPLE, not the class
-        calls["i"] += 1
-        new = torch.zeros_like(h)
-        new[..., 0] = float(j + 1)        # varied across samples
-        new[..., 1] = float(-(j + 1))
-        if isinstance(out, tuple):
-            return (new,) + tuple(out[1:])
-        return new
-
-    monkeypatch.setattr(last, "forward", class_independent)
-    res = RefusalDirectionTask(config={"cv_splits": 3, "seed": 42}).evaluate(
-        mock_model, mock_tokenizer, dataset=_dataset())
+def test_base_model_gets_nan_and_a_reason(mock_model, mock_tokenizer):
+    res = RefusalDirectionTask({}).evaluate(mock_model, mock_tokenizer, None)
     if "error" in res:
         pytest.skip(f"task declined: {res['error']}")
-
-    # FIXTURE INTEGRITY: the hook really did supply the final block output,
-    # and every prompt was seen exactly once per class.
-    assert res.get("_meta_last_entry_is_block_output") is True
-    assert calls["i"] == 2 * N_PER_CLASS
-
-    assert res["direction_norm"] == 0.0, (
-        f"direction_norm = {res['direction_norm']!r}; the pre-fix code dropped "
-        f"the zero-direction final layer and published an earlier block's norm")
-    # THE CROSS-VALIDATED AUC IS NOT UNDEFINED HERE, and asserting that it was
-    # is a mistake this test used to make. `separability_auc` is fitted on
-    # TRAINING FOLDS, and a fold's mean difference can be nonzero while the
-    # full-population one cancels to exactly zero -- so a zero `direction_norm`
-    # must not suppress it (codex round 13, 2026-09-08). The first version of
-    # this test asserted isnan() and passed, encoding the same conflation as the
-    # repair it was written to guard.
-    assert not np.isnan(res["separability_auc"]), (
-        "a zero FULL-POPULATION direction wrongly suppressed the "
-        "cross-validated AUC, which is fitted per training fold")
-    assert 0.0 <= res["separability_auc"] <= 1.0, res["separability_auc"]
+    assert res["_meta_is_instruct"] is False
+    assert res["_meta_instruct_detected_by"] == "tokenizer.chat_template"
+    assert "chat template" in res["_meta_refusal_skipped_reason"]
+    for k in RefusalDirectionTask.HEADLINE_KEYS:
+        assert np.isnan(res[k]), k
 
 
-def test_depth_fraction_stays_within_range(mock_model, mock_tokenizer):
-    """best_layer_fraction must never exceed 1.0 or promote a dropped layer."""
-    from blme.tasks.representation_engineering import RefusalDirectionTask
-    res = RefusalDirectionTask(config={"cv_splits": 3, "seed": 42}).evaluate(
-        mock_model, mock_tokenizer, dataset=_dataset())
-    if "error" in res:
-        pytest.skip(f"task declined: {res['error']}")
-    frac = res.get("best_layer_fraction")
-    assert frac is not None
-    assert np.isnan(frac) or 0.0 <= frac <= 1.0, frac
+def test_instruct_model_is_read_below_0_8L(tiny):
+    model, tok = tiny
+    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+    tok.chat_template = CHAT
+    res = _Loose({}).evaluate(model, tok, None)
+    assert res["_meta_is_instruct"] is True
+    assert res["_meta_selected_layer"] < int(0.8 * 5)
+    assert 0.0 <= res["selected_layer_frac"] < 0.8
+    assert -res["_meta_n_post_instruction_tokens"] <= res["_meta_selected_position"] <= -1
+    assert res["_meta_ablation_hooks_complete"] is True
+
+
+def test_zero_selected_direction_is_reported_as_zero(tiny, monkeypatch):
+    """Class-independent resid_pre states at every site: every candidate's mean
+    difference is exactly zero, and the selected one reports 0.0."""
+    from blme.tasks.repe import refusal as R
+    model, _ = tiny
+    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+    tok.chat_template = CHAT
+    real = R._resid_pre_sites
+    fixed = {}
+
+    def same_for_every_prompt(model, encoded, n_pos, n_layers):
+        if "x" not in fixed:
+            fixed["x"] = next(real(model, encoded[:1], n_pos, n_layers))
+        for _ in encoded:
+            yield fixed["x"].clone()
+
+    monkeypatch.setattr(R, "_resid_pre_sites", same_for_every_prompt)
+    res = _Loose({}).evaluate(model, tok, None)
+    assert res["direction_norm"] == 0.0

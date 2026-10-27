@@ -84,6 +84,9 @@ def test_no_absolute_epsilon_floors_on_a_magnitude():
             "log guard on softmax probabilities, not a magnitude",
         ("stability.py", "raw.norm"):
             "`raw` is a fresh torch.randn, O(1) by construction — not data",
+        ("refusal.py", "direction.norm(dim=-1, keepdim=True) + 1e-8"):
+            "the released refusal_direction ablation hook's own normalisation "
+            "(hook_utils.py), kept for parity with select_direction",
         ("steering.py", "vector_norm(_rv)"):
             "`_rv` is a fresh torch.randn control vector, O(1) by construction",
         ("cknna.py", "clamp_min(1e-12)"):
