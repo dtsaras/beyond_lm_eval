@@ -2382,8 +2382,9 @@ def test_dynamics_gradient_flow():
         shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
     )
     grads = torch.autograd.grad(loss, [captured[li] for li in range(n_points)])
+    # Position 0 is excluded from the token pool of each norm (TOKEN_POLICY).
     ref_norms = np.array(
-        [float(g.detach().double().norm().item()) for g in grads],
+        [float(g.detach().double()[0, 1:].norm().item()) for g in grads],
         dtype=np.float64,
     )
     assert np.all(ref_norms > 0)

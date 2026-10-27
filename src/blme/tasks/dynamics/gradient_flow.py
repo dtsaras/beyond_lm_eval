@@ -50,6 +50,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._precision import effective_dtype_meta, fp32_compute
+from .._tokens import select_rows
 from ..common import get_final_norm, get_layers
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -59,6 +60,10 @@ logger = logging.getLogger("blme")
 @register_task("dynamics_gradient_flow")
 class GradientFlowTask(DiagnosticTask):
     """Per-layer gradient norm profile."""
+
+    # The per-layer Frobenius norm pools over tokens; position 0 is dropped from
+    # that pool (non-LLM origin), the loss keeps every position.
+    TOKEN_POLICY = "exclude_pos0"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Gradient Flow Analysis...")
@@ -92,6 +97,8 @@ class GradientFlowTask(DiagnosticTask):
         n_points = n_layers + 1
         _endpoint = ["missing"]
         all_norms = []  # list of (n_points,) arrays
+        all_norms_incl = []
+        n_rows = 0
 
         # fp32 arithmetic on a bf16/fp16 model, at every size: bf16 forward and
         # backward double the slope on pythia-160m even with fp32 logits
@@ -154,12 +161,19 @@ class GradientFlowTask(DiagnosticTask):
                         h.remove()
 
                 norms = np.zeros(n_points, dtype=np.float64)
+                norms_incl = np.zeros(n_points, dtype=np.float64)
+                row_meta = None
                 for li in range(n_points):
                     if li in captured and captured[li].grad is not None:
                         g = captured[li].grad.detach().float()
                         # Scale-exact norm: `.norm()` underflows long before the data.
-                        norms[li] = _safe_norm(g)
+                        norms_incl[li] = _safe_norm(g)
+                        rows, row_meta = select_rows([g[0]], self.TOKEN_POLICY)
+                        norms[li] = _safe_norm(rows)
                 all_norms.append(norms)
+                all_norms_incl.append(norms_incl)
+                if row_meta is not None:
+                    n_rows += row_meta.n_rows
 
                 model.zero_grad(set_to_none=True)
 
@@ -174,6 +188,7 @@ class GradientFlowTask(DiagnosticTask):
             return {"error": "No samples produced gradient norms"}
 
         mean_norms = np.mean(np.stack(all_norms), axis=0)  # (n_points,)
+        mean_norms_incl = np.mean(np.stack(all_norms_incl), axis=0)
 
         # Entropy of the normalised norm profile. It is bounded by log(n_points),
         # so it is depth-linked; exp(H)/n is emitted as _meta_ only (it moves
@@ -208,6 +223,7 @@ class GradientFlowTask(DiagnosticTask):
         # The former endpoint, the input of the last block, moves when an
         # identity block is appended.
         log_ratio_block_inputs = _log_ratio(mean_norms[0], mean_norms[n_layers - 1])
+        log_ratio_incl_pos0 = _log_ratio(mean_norms_incl[0], mean_norms_incl[-1])
 
         max_norm = mean_norms.max()
         if max_norm > 0:
@@ -223,6 +239,10 @@ class GradientFlowTask(DiagnosticTask):
             "gradient_vanishing_ratio": vanishing_ratio,
             "gradient_flow_log_ratio_in_out": log_ratio_in_out,
             "_meta_gradient_flow_log_ratio_block_inputs": log_ratio_block_inputs,
+            "_meta_gradient_flow_log_ratio_in_out_incl_pos0": log_ratio_incl_pos0,
+            "_meta_gradient_norm_per_layer_incl_pos0": mean_norms_incl.tolist(),
+            "_meta_rows_policy": self.TOKEN_POLICY,
+            "_meta_rows_n_rows": int(n_rows),
             "_meta_final_endpoint": _endpoint[0],
             "_meta_n_profile_points": n_points,
             "gradient_norm_mean": float(mean_norms.mean()),

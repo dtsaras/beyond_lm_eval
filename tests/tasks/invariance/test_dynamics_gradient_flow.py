@@ -77,3 +77,16 @@ def test_end_to_end_log_ratio_invariant_under_residual_rescale():
     inv.assert_invariant(base, other, ["gradient_flow_log_ratio_in_out"], rtol=1e-12)
     assert other["gradient_norm_per_layer"][-1] == pytest.approx(
         base["gradient_norm_per_layer"][-1] / 2, rel=1e-12)
+
+
+def test_norms_exclude_position0():
+    """The per-layer token pool drops position 0; the loss and the inclusive
+    profile (as _meta_) keep it."""
+    tok = tokenizer()
+    out = _run(tiny_gpt2(), tok)
+    n_tokens = sum(len(tok(d["text"])["input_ids"]) for d in dataset()[:CFG["num_samples"]])
+    assert GradientFlowTask.TOKEN_POLICY == "exclude_pos0"
+    assert out["_meta_rows_n_rows"] == n_tokens - CFG["num_samples"]
+    excl = out["gradient_norm_per_layer"]
+    incl = out["_meta_gradient_norm_per_layer_incl_pos0"]
+    assert all(e < i for e, i in zip(excl, incl))
