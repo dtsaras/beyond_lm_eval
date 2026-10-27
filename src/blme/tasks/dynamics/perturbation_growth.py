@@ -32,6 +32,7 @@ import numpy as np
 import torch
 
 from ...registry import register_task
+from .._precision import effective_dtype_meta, fp32_compute
 from ..geometry.utils import block_output_count, safe_unit_rows_torch
 from ...tasks.base import DiagnosticTask
 
@@ -105,9 +106,11 @@ class PerturbationGrowthTask(DiagnosticTask):
             _hook = _blocks[-1].register_forward_hook(_cap_last)
         n_used = 0
         # The hook is removed on every path, exceptions included
-        # (tests/tasks/test_forward_hook_leaks.py).
+        # (tests/tasks/test_forward_hook_leaks.py). fp32 arithmetic on a
+        # bf16/fp16 model: bf16 rounding inside the forward pass is a noise floor
+        # comparable to the perturbation (tests/tasks/test_perturbation_growth.py).
         try:
-            with torch.no_grad():
+            with torch.no_grad(), fp32_compute(model) as _prec:
                 for i, s in enumerate(dataset):
                     if i >= num_samples:
                         break
@@ -192,4 +195,5 @@ class PerturbationGrowthTask(DiagnosticTask):
                 f"Growth is not comparable against a model in a wider dtype.")
         results["n_samples_used"] = n_used
         results["_meta_last_entry_is_block_output"] = bool(_used_hook[0])
+        results.update(effective_dtype_meta(_prec))
         return results
