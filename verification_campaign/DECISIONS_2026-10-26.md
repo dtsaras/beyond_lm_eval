@@ -67,3 +67,34 @@ reported only under its own name. Normalised variants are emitted **by the
 task itself**, declared in `task_metadata.py` and pinned by the invariance
 test. `normalization.py`'s divide-by-arch registry is empty and moves to
 beyond_benchmarks with `is_feature`.
+
+## Amendment to items 5 and 6 — 2026-10-28 (measured; it changes the premise of item 6)
+
+The 2026-10-26 census covered only gpt2 and Qwen3, and on those models
+position 0 is the only massive token. The activation bank
+(`~/hara-artifacts/blme/actbank/`, built by `build_actbank.py` there) adds
+pythia-160m/410m/1b and TinyLlama-1.1B, the latter being a BOS-adding model.
+**On those four models a second sink exists.** It is the newline that
+terminates every WikiText paragraph (`' \n'` / `'\n'`). 100% of its
+occurrences are more than 10× the median norm, and they carry **19–42%** of
+the centred sum of squares at the middle layers. Position 0's share drops to
+48–71% as a result.
+
+**Stripping the passage (`text.strip()`) removes every such row.** Over three
+layers each of pythia-410m, pythia-1b and TinyLlama, the count of non-position-0
+rows above 10× goes from 26–32 to **0**, and position 0's share returns to
+78–96%. Raw lines are in `census_strip_2026-10-28.txt`, produced by
+`census_strip.py`. The final layer (post-norm) is unaffected in every model.
+
+Resolution, consistent with rule 2 (the trailing newline is a paragraph
+terminator in WikiText's formatting, not content):
+- the corpus loader **strips each passage** (an addition to item 5);
+- the position-0 rule stays as it is;
+- every point-cloud task emits a derived `_meta_massive_token_share`, the
+  share of centred SS held by rows other than position 0 whose norm exceeds
+  10× the median. This keeps any in-text sink in another corpus or model
+  visible instead of silent.
+
+**No norm-outlier exclusion rule is adopted**, because no row
+remains for it to act on. If the user prefers a Sun et al. (2024)-style
+outlier exclusion as defence in depth, that is a separate decision.
