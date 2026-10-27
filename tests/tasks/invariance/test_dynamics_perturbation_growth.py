@@ -86,6 +86,24 @@ def test_headline_keys_are_depth_free():
         assert f"_meta_{k}" in out, k
 
 
+def test_projecting_model_keeps_its_last_block():
+    """OPT with word_embed_proj_dim < hidden_size projects HF's last entry to
+    the embedding width. The raw last-block capture (hidden width) used to be
+    rejected for not matching that entry, and the profile then dropped the last
+    block (SIGNOFF_MATRIX codex RED: rate +50% on a 3-block model)."""
+    from transformers import OPTConfig, OPTForCausalLM
+    torch.manual_seed(0)
+    cfg = OPTConfig(vocab_size=1000, hidden_size=32, word_embed_proj_dim=16,
+                    num_hidden_layers=3, ffn_dim=64, num_attention_heads=4,
+                    max_position_embeddings=128, do_layer_norm_before=False,
+                    attn_implementation="eager")
+    model = OPTForCausalLM(cfg).eval()
+    out = _run(model, tokenizer())
+    assert out["_meta_last_entry_is_block_output"] is True
+    assert out["_meta_n_transitions"] == 3
+    assert len(out["perturbation_growth_per_layer"]) == 4
+
+
 def test_token_mean_excludes_position0():
     """The divergence token mean drops position 0 (TOKEN_POLICY); the inclusive
     log ratio is kept as _meta_."""

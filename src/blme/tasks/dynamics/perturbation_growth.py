@@ -187,8 +187,12 @@ class PerturbationGrowthTask(DiagnosticTask):
                     # here: narrowing before the subtraction loses the signal.
                     _hc = list(out_c.hidden_states)
                     _hp = list(out_p.hidden_states)
-                    if (_sink_c.get("h") is not None
-                            and tuple(_sink_c["h"].shape) == tuple(_hc[-1].shape)):
+                    # The raw capture is accepted when clean and perturbed match
+                    # the block-output shape (entry 0), not HF's last entry, which
+                    # a projecting model (OPT word_embed_proj_dim) maps elsewhere.
+                    if (_sink_c.get("h") is not None and _sink_p.get("h") is not None
+                            and tuple(_sink_c["h"].shape) == tuple(_hc[0].shape)
+                            and tuple(_sink_p["h"].shape) == tuple(_hp[0].shape)):
                         _hc[-1] = _sink_c["h"]
                         _hp[-1] = _sink_p["h"]
                         _used_hook[0] = True
