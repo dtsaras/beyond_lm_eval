@@ -37,6 +37,7 @@ backpropagates the shifted next-token cross-entropy loss (result key
 ``loss: 'cross_entropy'``).
 """
 
+import contextlib
 import logging
 from typing import Dict
 
@@ -46,6 +47,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -83,7 +85,12 @@ class GradientFlowTask(DiagnosticTask):
 
         all_norms = []  # list of (n_layers,) arrays
 
+        # fp32 arithmetic on a bf16/fp16 model, at every size: bf16 forward and
+        # backward double the slope on pythia-160m even with fp32 logits
+        # (tests/tasks/invariance/test_dynamics_gradient_flow.py).
+        _stack = contextlib.ExitStack()
         try:
+            _prec = _stack.enter_context(fp32_compute(model))
             for i, sample in enumerate(dataset):
                 if i >= num_samples:
                     break
@@ -138,6 +145,7 @@ class GradientFlowTask(DiagnosticTask):
                 model.zero_grad(set_to_none=True)
 
         finally:
+            _stack.close()
             for p, grad_flag in orig_grad_state.items():
                 p.requires_grad_(grad_flag)
             if was_training:
@@ -198,4 +206,5 @@ class GradientFlowTask(DiagnosticTask):
             "gradient_norm_min": float(mean_norms.min()),
             "_meta_n_layers": n_layers,
             "loss": "cross_entropy",
+            **effective_dtype_meta(_prec),
         }
