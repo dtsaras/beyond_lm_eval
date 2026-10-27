@@ -3819,8 +3819,9 @@ def test_geometry_prediction_alignment():
             ids = tok(sample["text"], return_tensors="pt")["input_ids"]
             hs = model(input_ids=ids, output_hidden_states=True).hidden_states[-1]
             h = hs[0].cpu().numpy()              # (T, D) final hidden states
-            labels = ids[0, 1:].cpu().numpy()    # next tokens y_{t+1}
-            h_pred = h[:-1]                      # h_t aligned to y_{t+1}
+            labels = ids[0, 2:].cpu().numpy()    # next tokens y_{t+1}, t >= 1
+            h_pred = h[1:-1]                     # h_t aligned to y_{t+1}; the
+            # position-0 pair is dropped, as the task's TOKEN_POLICY does
             for i in range(h_pred.shape[0]):
                 cos = sklearn_pw.cosine_similarity(
                     h_pred[i:i + 1], W[labels[i]:labels[i] + 1]

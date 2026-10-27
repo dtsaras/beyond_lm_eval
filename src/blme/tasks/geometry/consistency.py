@@ -67,6 +67,8 @@ class PredictionAlignmentTask(DiagnosticTask):
     interpretation for untied-head architectures (Gemma 3/4, etc.). Falls
     back to input embeddings if ``lm_head`` is unavailable.
     """
+    TOKEN_POLICY = "exclude_pos0"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Prediction Alignment Analysis...")
         if dataset is None:
@@ -110,6 +112,7 @@ class PredictionAlignmentTask(DiagnosticTask):
         margin_tokens = []
         _coll_hits, _coll_tot = [0], [0]
         _g = torch.Generator().manual_seed(20260903)
+        _n_p0_dropped = [0]
         _vocab = embeddings.shape[0]
 
         for h, labels in zip(stats["hidden"], stats["labels"]):
@@ -121,6 +124,13 @@ class PredictionAlignmentTask(DiagnosticTask):
                 h = h.reshape(-1, D)
             if hasattr(labels, "dim") and labels.dim() >= 2:
                 labels = labels.reshape(-1)
+            # Row r is position r predicting token r+1. The position-0 state
+            # is the context-free sink, so its pair is dropped (TOKEN_POLICY).
+            if self.TOKEN_POLICY == "exclude_pos0" and labels.shape[0] > 0:
+                h, labels = h[1:], labels[1:]
+                _n_p0_dropped[0] += 1
+            if labels.shape[0] == 0:
+                continue
 
             target_embs = F.embedding(labels, embeddings)
             # At this point both should be 2D of shape (N, D).
@@ -213,6 +223,7 @@ class PredictionAlignmentTask(DiagnosticTask):
         if _control_positions[0]:
             out["_meta_prediction_alignment_residual_collision_frac"] = float(
                 _residual_collisions[0] / _control_positions[0])
+        out["_meta_n_position0_pairs_dropped"] = int(_n_p0_dropped[0])
         if baseline_unif:
             _bu = float(np.mean(baseline_unif))
             out["_meta_prediction_alignment_uniform_baseline"] = _bu
