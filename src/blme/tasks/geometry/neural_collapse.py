@@ -19,9 +19,10 @@ class label. Three metrics from the Neural Collapse phenomenon:
     statistic). This is a lightweight ETF-alignment proxy,
     not the full normalized Gram/Frobenius NC2 measure from Papyan et al.
 
-Because BLME is unsupervised, we use a small bundled topic-classification
-dataset. The user can override `dataset` with their own
-`{text, label}` items if they want to compute NC on a different task.
+The task follows the LLM adaptation of Wu & Papyan 2024 (arXiv:2405.17767):
+next-token classes over a corpus, token-level post-norm features, CDNV. The
+Papyan statistics above are computed on the old bundled topic proxy and on a
+user-supplied ``{text, label}`` dataset.
 """
 
 import logging
@@ -195,60 +196,179 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     }
 
 
+def _cdnv(means: np.ndarray, variances: np.ndarray, dist_exp: float,
+          tile: int = 1024) -> float:
+    """Mean over class pairs c < c' of ((s_c + s_c') / 2) / (||mu_c - mu_c'||^2)^dist_exp.
+
+    ``neural_collapse.measure.variability_cdnv`` with ``kernels.
+    class_dist_norm_vars``: dist_exp = 1 is Galanti et al.'s CDNV; Wu & Papyan
+    (2024, Eq. 4) divide by one more power of the squared distance, which
+    linguistic-collapse/analyze.py calls with dist_exp = 2. Distances come
+    from the float64 Gram, tiled by rows; a pair with zero distance is
+    skipped (the reference would divide by zero).
+    """
+    M = np.asarray(means, dtype=np.float64)
+    v = np.asarray(variances, dtype=np.float64)
+    C = M.shape[0]
+    if C < 2:
+        return float("nan")
+    sq = np.einsum("ij,ij->i", M, M)
+    total, count = 0.0, 0
+    for a in range(0, C, tile):
+        b = min(C, a + tile)
+        d2 = sq[a:b, None] + sq[None, :] - 2.0 * (M[a:b] @ M.T)
+        # Gram form, clamped at 0 against cancellation; upper triangle only.
+        rows = np.arange(a, b)
+        upper = np.arange(C)[None, :] > rows[:, None]
+        d2 = np.where(upper, np.maximum(d2, 0.0), 0.0)
+        num = 0.5 * (v[a:b, None] + v[None, :])
+        ok = upper & (d2 > 0)
+        total += float(np.sum(num[ok] / d2[ok] ** dist_exp))
+        count += int(ok.sum())
+    return total / count if count else float("nan")
+
+
+def _next_token_class_stats(model, tokenizer, texts, min_per_class: int,
+                            max_length: int = 512):
+    """Per next-token class: count, feature mean and mean squared deviation.
+
+    Wu & Papyan (linguistic-collapse lib/collection.py:103-112): features are
+    the post-final-norm hidden states at every position t < T-1 (position 0
+    included), labelled by the token at t+1. Classes with fewer than
+    ``min_per_class`` samples are dropped before the forward pass (a token
+    count needs only the tokenizer), so only kept classes are accumulated.
+    """
+    enc = []
+    counts: Dict[int, int] = defaultdict(int)
+    for t in texts:
+        ids = tokenizer(t, return_tensors="pt", truncation=True,
+                        max_length=max_length)
+        if ids["input_ids"].shape[1] < 2:
+            continue
+        enc.append(ids)
+        for y in ids["input_ids"][0, 1:].tolist():
+            counts[int(y)] += 1
+    keep = sorted(c for c, n in counts.items() if n >= int(min_per_class))
+    index = {c: i for i, c in enumerate(keep)}
+    device = next(model.parameters()).device
+    sums = sumsq = n = None
+    n_tokens = 0
+    with torch.no_grad():
+        for ids in tqdm(enc, desc="Neural collapse (next-token)"):
+            ids = ids.to(device)
+            out = model(**ids, output_hidden_states=True)
+            # post-final-norm: DELIBERATELY post-norm -- the classifier input
+            # (the reference replaces lm_head by Identity, model.py:261-268).
+            h = out.hidden_states[-1][0, :-1].detach().to("cpu", torch.float64).numpy()
+            y = ids["input_ids"][0, 1:].tolist()
+            n_tokens += len(y)
+            sel = [(r, index[c]) for r, c in enumerate(y) if c in index]
+            if not sel:
+                continue
+            if sums is None:
+                sums = np.zeros((len(keep), h.shape[1]), dtype=np.float64)
+                sumsq = np.zeros(len(keep), dtype=np.float64)
+                n = np.zeros(len(keep), dtype=np.int64)
+            rows = np.fromiter((r for r, _ in sel), dtype=np.int64)
+            cls = np.fromiter((c for _, c in sel), dtype=np.int64)
+            np.add.at(sums, cls, h[rows])
+            np.add.at(sumsq, cls, np.einsum("ij,ij->i", h[rows], h[rows]))
+            np.add.at(n, cls, 1)
+    if sums is None:
+        return None
+    means = sums / n[:, None]
+    # Mean squared deviation (the reference's VarNormAccumulator, 1/n_c).
+    variances = np.maximum(sumsq / n - np.einsum("ij,ij->i", means, means), 0.0)
+    return {"means": means, "variances": variances, "counts": n,
+            "n_tokens": n_tokens, "n_docs": len(enc), "n_classes_seen": len(counts)}
+
+
+def _topic_proxy(model, tokenizer, samples):
+    """The previous BLME construct: NC1 of mean-pooled sentences by topic."""
+    device = next(model.parameters()).device
+    feats, labs = [], []
+    with torch.no_grad():
+        for text, label in tqdm(samples, desc="Neural collapse (topic proxy)"):
+            inputs = tokenizer(text, return_tensors="pt",
+                               truncation=True, max_length=128).to(device)
+            if inputs["input_ids"].shape[1] < 1:
+                continue
+            out = model(**inputs, output_hidden_states=True)
+            # post-final-norm: DELIBERATELY post-norm -- neural collapse
+            # concerns the features the LM head reads.
+            h = out.hidden_states[-1][0]  # (T, D) — already normed
+            # Mean in float64, kept in float64 (no narrowing cast).
+            feats.append(h.double().mean(dim=0).cpu().numpy())
+            labs.append(label)
+    if len(feats) < 4:
+        return {"error": "Too few samples for Neural Collapse"}
+    label_to_id: Dict[str, int] = {}
+    labs_int = []
+    for lb in labs:
+        if lb not in label_to_id:
+            label_to_id[lb] = len(label_to_id)
+        labs_int.append(label_to_id[lb])
+    return _neural_collapse_metrics(np.stack(feats, axis=0),
+                                    np.array(labs_int, dtype=np.int64))
+
+
 @register_task("geometry_neural_collapse")
 class NeuralCollapseTask(DiagnosticTask):
-    """Neural Collapse NC1 + NC2 on a small bundled topic dataset."""
+    """Neural collapse of an LM's classifier features (Wu & Papyan 2024).
+
+    Classes are next tokens: every position t < T-1 of every corpus text is a
+    sample, its feature the post-final-norm hidden state and its label the
+    token at t+1 (linguistic-collapse lib/collection.py). NC1 is reported as
+    Wu & Papyan's CDNV (Eq. 4: Galanti's CDNV with one more power of the
+    squared class-mean distance; analyze.py dist_exp=2) and, beside it, the
+    scale-free Galanti CDNV. The previous topic-label construct (5 bundled
+    topics x 8 sentences, Papyan NC1) is kept as ``_meta_topic_*``; a
+    dataset of ``{text, label}`` items still selects that supervised path.
+    """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neural Collapse Analysis...")
 
-        # Allow override; otherwise use bundled topic dataset.
+        # A labelled dataset selects the supervised (Papyan) path.
         if dataset is not None and isinstance(dataset, list) and dataset and (
             isinstance(dataset[0], dict) and {"text", "label"} <= set(dataset[0])
         ):
-            samples = [(d["text"], d["label"]) for d in dataset]
-        else:
-            samples = list(_TOPIC_BUNDLE)
-            # Optional cap on sentences per topic; _meta_n_per_topic records it.
-            _n_per = self.config.get("n_sentences_per_topic")
-            if isinstance(_n_per, int) and _n_per > 0:
-                from collections import defaultdict as _dd
-                _by = _dd(list)
-                for _t, _lab in samples:
-                    _by[_lab].append((_t, _lab))
-                samples = [x for _lab in _by for x in _by[_lab][:_n_per]]
+            return _topic_proxy(model, tokenizer,
+                                [(d["text"], d["label"]) for d in dataset])
 
-        device = next(model.parameters()).device
+        samples = list(_TOPIC_BUNDLE)
+        # Optional cap on sentences per topic; _meta_n_per_topic records it.
+        _n_per = self.config.get("n_sentences_per_topic")
+        if isinstance(_n_per, int) and _n_per > 0:
+            _by = defaultdict(list)
+            for _t, _lab in samples:
+                _by[_lab].append((_t, _lab))
+            samples = [x for _lab in _by for x in _by[_lab][:_n_per]]
+        topic = _topic_proxy(model, tokenizer, samples)
+        out = {f"_meta_topic_{k.replace('_meta_', '')}": v for k, v in topic.items()}
 
-        # Mean-pool the post-norm final hidden state (the classifier input).
-        feats = []
-        labs = []
-        with torch.no_grad():
-            for text, label in tqdm(samples, desc="Neural collapse"):
-                inputs = tokenizer(text, return_tensors="pt",
-                                   truncation=True, max_length=128).to(device)
-                if inputs["input_ids"].shape[1] < 1:
-                    continue
-                out = model(**inputs, output_hidden_states=True)
-                # post-final-norm: DELIBERATELY post-norm -- neural collapse
-                # concerns the features the LM head reads.
-                h = out.hidden_states[-1][0]  # (T, D) — already normed
-                # Mean in float64, kept in float64 (no narrowing cast).
-                pooled = h.double().mean(dim=0).cpu().numpy()
-                feats.append(pooled)
-                labs.append(label)
-
-        if len(feats) < 4:
-            return {"error": "Too few samples for Neural Collapse"}
-
-        feats_arr = np.stack(feats, axis=0)
-        # Map string labels to integer ids
-        label_to_id: Dict[str, int] = {}
-        labs_int = []
-        for lb in labs:
-            if lb not in label_to_id:
-                label_to_id[lb] = len(label_to_id)
-            labs_int.append(label_to_id[lb])
-        labs_arr = np.array(labs_int, dtype=np.int64)
-
-        return _neural_collapse_metrics(feats_arr, labs_arr)
+        num_samples = int(self.config.get("num_samples", 1000))
+        min_per_class = int(self.config.get("min_per_class", 10))
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
+        texts = [d["text"] if isinstance(d, dict) else str(d)
+                 for d in list(dataset)[:num_samples]]
+        st = _next_token_class_stats(model, tokenizer, texts, min_per_class)
+        if st is None or len(st["counts"]) < 2:
+            out.update({"nc1_cdnv": float("nan"), "nc1_cdnv_galanti": float("nan"),
+                        "_meta_nc_reason": "fewer than 2 next-token classes "
+                                           f"with >= {min_per_class} samples"})
+            return out
+        out.update({
+            "nc1_cdnv": _cdnv(st["means"], st["variances"], dist_exp=2.0),
+            "nc1_cdnv_galanti": _cdnv(st["means"], st["variances"], dist_exp=1.0),
+            "_meta_nc_n_classes": int(len(st["counts"])),
+            "_meta_nc_n_classes_seen": int(st["n_classes_seen"]),
+            "_meta_nc_n_samples": int(st["counts"].sum()),
+            "_meta_nc_n_tokens": int(st["n_tokens"]),
+            "_meta_nc_n_docs": int(st["n_docs"]),
+            "_meta_nc_min_per_class": min_per_class,
+            "_meta_nc_mean_within_class_variance": float(np.mean(st["variances"])),
+        })
+        return out

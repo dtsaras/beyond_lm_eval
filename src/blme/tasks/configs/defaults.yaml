@@ -110,13 +110,12 @@ geometry_categories:
   projection_method: null
 
 geometry_neural_collapse:
-  # Sentences per topic used from the bundled proxy set. The three NC2
-  # statistics are UNDERPOWERED at the shipped bundle -- all three lie inside
-  # their own 200-draw label-permutation null on every model measured, so they
-  # are emitted under `_meta_` and excluded from the feature matrix. NC1 passes
-  # at p = 0/200 and remains a feature. Raising this needs a larger
-  # _TOPIC_BUNDLE; 30-50 per topic is the level at which NC2 would be
-  # resolvable (adversarial review, 2026-09-04).
+  # Wu & Papyan next-token protocol: corpus documents (the same N for every
+  # model) and the minimum samples per next-token class (the paper is silent;
+  # the reference's default of 1 assumes TinyStories-scale counts).
+  num_samples: 1000
+  min_per_class: 10
+  # Sentences per topic for the _meta_topic_* proxy (bundled 5 x 8).
   n_sentences_per_topic: null
 
 geometry_mahalanobis:
