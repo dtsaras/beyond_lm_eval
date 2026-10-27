@@ -195,6 +195,30 @@ def _eos_ids(model, tokenizer) -> list:
 class ChainOfEmbeddingTask(DiagnosticTask):
     """Wang et al. 2025 Chain-of-Embedding scores (Eq. 3/5/7)."""
 
+    # LLM-originated, so the paper's token set: the generated tokens' emitting
+    # states, position 0 not involved (the release's [0][0] is not reproduced).
+    TOKEN_POLICY = "paper_protocol:Wang et al. 2025 (arXiv:2410.13640) Sec. 2.1"
+    SOURCES = {
+        "paper": "arXiv:2410.13640",
+        "code": "Alsace08/Chain-of-Embedding@eef2d8f1910f0b7c5acfa550b3cb8fcaa5130aa0",
+        "llm_precedent": "Wang et al. 2025 (arXiv:2410.13640) is itself the LLM paper",
+    }
+    HEADLINE_KEYS = (
+        "coe_r", "coe_c", "mean_normalized_angle", "coe_r_std", "coe_c_std",
+        "mean_magnitude_change", "std_magnitude_change", "mean_angle_change",
+        "std_angle_change", "coe_r_sum",
+    )
+    # coe_r / coe_c / the normalised angle carry the paper's 1/L; only L * coe_r
+    # passes the identity-block test (coe_c has no exact inverse under a
+    # refinement of the chain, and the raw magnitudes move under a residual rescale).
+    SIZE_INVARIANT = {
+        "coe_r_sum": (
+            ("insert_identity_blocks",),
+            "tests/tasks/invariance/test_dynamics_coe.py::"
+            "test_coe_r_sum_invariant_under_identity_blocks",
+        ),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Chain-of-Embedding (Wang et al. 2025)...")
         num_samples = int(self.config.get("num_samples", 5))
