@@ -40,6 +40,34 @@ def _nhsic_from_grams(K_i: torch.Tensor, K_j: torch.Tensor,
     return float(hsic_ij / denom)
 
 
+def _debiased_hsic_from_grams(K: torch.Tensor, L: torch.Tensor) -> float:
+    """Unbiased HSIC (Song et al. 2007) from two Gram matrices in O(N^2).
+
+    Same estimator as ``cka._debiased_hsic`` (pinned against it in
+    tests/tasks/invariance/test_hsic.py), with sum(K~ L~) taken as a dot
+    product of row sums instead of a full matrix product.
+    """
+    K = K.double().clone()
+    L = L.double().clone()
+    n = K.shape[0]
+    if n < 4:
+        return float("nan")
+    K.fill_diagonal_(0.0)
+    L.fill_diagonal_(0.0)
+    kt = float(K.sum())
+    lt = float(L.sum())
+    term = float(K.sum(dim=0) @ L.sum(dim=1))
+    return float(float((K * L).sum()) + kt * lt / ((n - 1) * (n - 2))
+                 - 2.0 * term / (n - 2)) / (n * (n - 3))
+
+
+def _debiased_ncka(h_ij: float, h_ii: float, h_jj: float) -> float:
+    den = float(np.sqrt(max(h_ii, 0.0)) * np.sqrt(max(h_jj, 0.0)))
+    if not np.isfinite(den) or den <= 0.0:
+        return float("nan")
+    return float(h_ij / den)
+
+
 def _normalized_linear_hsic(X: torch.Tensor, Y: torch.Tensor) -> float:
     """Normalized linear HSIC, equivalent to linear CKA."""
     return _nhsic_from_grams(_centered_linear_gram(X), _centered_linear_gram(Y))
@@ -140,6 +168,16 @@ class HSICDependenceTask(DiagnosticTask):
                 self_hsic[layers[0]], self_hsic[layers[i]],
             ))
 
+        # Debiased twins (U-statistic HSIC, no d_eff/N floor at the token cap).
+        _uself = {idx: _debiased_hsic_from_grams(gram_matrices[idx], gram_matrices[idx])
+                  for idx in layers}
+        _uadj = [_debiased_ncka(
+            _debiased_hsic_from_grams(gram_matrices[layers[i]], gram_matrices[layers[i + 1]]),
+            _uself[layers[i]], _uself[layers[i + 1]]) for i in range(n_layers - 1)]
+        _uanchor_last = _debiased_ncka(
+            _debiased_hsic_from_grams(gram_matrices[layers[0]], gram_matrices[layers[-1]]),
+            _uself[layers[0]], _uself[layers[-1]])
+
         # Raw (unnormalised) centred HSIC endpoints for the manuscript's ratio
         # tr(K_0 K_{L-1}) / tr(K_0 K_0); the 1/(n-1)^2 factor cancels.
         _K0 = gram_matrices[layers[0]]
@@ -181,6 +219,9 @@ class HSICDependenceTask(DiagnosticTask):
             "hsic_compression_ratio": (
                 float(input_hsic[-1]) if input_hsic else float("nan")
             ),
+            "hsic_compression_ratio_debiased": float(_uanchor_last),
+            "min_adjacent_hsic_debiased": (
+                float(np.nanmin(_uadj)) if np.isfinite(_uadj).any() else float("nan")),
             "_meta_last_entry_is_block_output": _last_is_block,
             "_meta_n_layers": int(n_layers),
             # Sink diagnostics on the full (inclusive) middle-layer cloud.
