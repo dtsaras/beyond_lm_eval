@@ -101,25 +101,11 @@ def _power_iteration_top_eigenvalue(hvp, v, n_iter: int, status=None) -> float:
     ``hvp(v)`` returns ``H @ v`` as a list of tensors shaped like ``v``.
     """
     flat = _flatten_grads(v)
-    # Scale-exact throughout: `.norm()` squares first. On the end-to-end
-    # cross-entropy anchor every Hessian entry was the representable
-    # 1.0000000787060493e-23 with a true top eigenvalue of
-    # 2.0000001574120985e-23, yet the HVP norm underflowed to 0.0 and the
-    # headline collapsed (adversarial review round 3, 2026-09-04).
+    # Scale-exact norms (`.norm()` underflows on tiny Hessians).
     vn = _safe_norm(flat)
     if vn > 0:
         v = [vi / vn for vi in v]
-    # CONVERGENCE IS MEASURED AND REPORTED, never used to stop early.
-    #
-    # The shipped 8 iterations returned 2.019681747104697 against an exact
-    # 2.056211316963325 on the analytic MLP (-1.78%), so the count was raised
-    # to 64 (adversarial review round 2, 2026-09-04). It is NOT an early-exit
-    # criterion: a start vector that lies near a NON-dominant eigenvector makes
-    # the Rayleigh quotient look stationary while the dominant component is
-    # still growing -- diag(2, 1) started at [1e-6, 1] sits at lambda = 1 for
-    # several iterations before turning toward the true 2. Any local test is
-    # fooled there, so the loop always runs its full budget and the last
-    # relative change is emitted as a diagnostic instead.
+    # Fixed budget; the last relative change is reported, not used to stop.
     _tol = 1e-7
     _prev = None
     _iters = 0
@@ -157,17 +143,10 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
     loss_for_grad = compute_loss()
     grads = torch.autograd.grad(loss_for_grad, params, create_graph=False)
     grad_flat = _flatten_grads(list(grads))
-    # Two nonzero gradients of -5.000000097707407e-25 produced norm 0.0 and
-    # SAM NaN under the naive form; max-coordinate-first gives the exact
-    # 7.071067629665599e-25 (adversarial review round 3, 2026-09-04).
     grad_norm = _safe_norm(grad_flat)
 
     if grad_norm > 0:
-        # try/finally: an exception raised by `compute_loss` used to leave the
-        # model PERTURBED. Injecting a loss failure left a scalar parameter at
-        # 1.1 instead of 1.0 -- absolute corruption 0.1 that then silently
-        # poisoned every later task in the run (adversarial review round 2,
-        # 2026-09-04).
+        # try/finally: a failing loss must not leave the model perturbed.
         with torch.no_grad():
             saved = [p.detach().clone() for p in params]
             try:
@@ -209,30 +188,13 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
         return float("nan"), float("nan")
     gvecs = [g.detach() for g in grads]
 
-    # eta0 must be large enough that theta - eta*g is REPRESENTABLE.
-    #
-    # In bf16 the 1e-6 default is BELOW parameter resolution (bf16 eps
-    # 7.81e-03, so `p - 1e-6*g` returns exactly `p`): every probe returned the
-    # unperturbed loss, and critical_step_size / critical_sharpness were NaN on
-    # EVERY model in the study -- which core.py forces to bf16 precisely
-    # because this task needs eager attention.
-    #
-    # The CALLER additionally promotes the whole model to float32 for this
-    # measurement when it is stored in bf16/fp16. That matters beyond
-    # representability: lambda_c is dtype-BIASED by +13.8% (gpt2 bf16) to
-    # +34.7% (fp16), and an ablation isolates the bias to bf16 ARITHMETIC
-    # rather than weight rounding -- pythia-160m in bf16 gives loss 2.328 /
-    # ||g|| 171 against fp32 1.652 / 18.90, while bf16-ROUNDED weights
-    # evaluated in fp32 math give 1.654 / 20.34. Without the promotion,
-    # `dtype="auto"` would split the zoo by checkpoint storage format rather
-    # than by any property of the model (adversarial review, 2026-09-03).
+    # eta0 is raised until theta - eta*g is representable in the parameters'
+    # dtype (in bf16, 1e-6 * g rounds away and every probe returns the baseline).
     try:
         _eps = float(torch.finfo(params[0].dtype).eps)
         _pnorm = _safe_norm(torch.cat([p_.detach().float().reshape(-1)
                                        for p_ in params]))
-        # Exact guards: these are physical magnitudes, and clamping them at an
-        # absolute 1e-12 makes the floor depend on the units the weights happen
-        # to be in. A zero gradient norm means there is no step to take at all.
+        # Exact guards on physical magnitudes, no absolute floor.
         if not (grad_norm > 0.0):
             return float("nan"), float("nan")
         _min_eta = 8.0 * _eps * _pnorm / grad_norm
@@ -244,9 +206,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
     saved = [p.detach().clone() for p in params]
 
     def probe(eta: float) -> float:
-        # Same try/finally reason as _sam_sharpness: a loss failure mid-probe
-        # left the model stepped (0.9 instead of 1.0 on the injected-exception
-        # anchor) rather than restored.
+        # try/finally: a failing loss must not leave the model stepped.
         with torch.no_grad():
             try:
                 for p_, g_ in zip(params, gvecs):
@@ -257,16 +217,9 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                     p_.copy_(s_)
         return val
 
-    # STRICT inequality, per Kalra & Barkeshli Definition 2.1: a step is
-    # unstable when the loss INCREASES, so equality is stable. With `>=`, the
-    # exactly-flat case was classified unstable and the search converged to
-    # eta = 0.9999999999995453 / lambda_c = 2.0000000000009095 on
-    # D(eta) = -eta(eta-1)^2(4-eta), whose first strict increase is elsewhere
-    # (adversarial review, 2026-09-04).
-    #
-    # Doubling phase: find the first unstable eta. If already unstable at
-    # eta0, HALVE downward first (Kalra et al. search in both directions;
-    # audit 2026-07-16) so extremely sharp scopes still resolve eta*.
+    # A step is unstable when the loss strictly INCREASES (Kalra Def. 2.1).
+    # Doubling phase: find the first unstable eta; if eta0 is already unstable,
+    # halve downward first so very sharp scopes still resolve eta*.
     eta = eta0
     if probe(eta) > baseline_loss:
         hi0 = eta
@@ -274,12 +227,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
             eta /= 2.0
             if eta < 1e-30:
                 return float("nan"), float("nan")
-            # `<=`, not `<`. Kalra Def. 2.1 calls a step unstable when the
-            # loss INCREASES, so equality is STABLE -- and the upward branch
-            # already uses `> baseline`. The asymmetry made the downward search
-            # return NaN on a loss that is exactly flat for eta <= 1e-9, where
-            # eta* = 1e-9 and the mirrored upward case returns 0.000996
-            # (independent Opus review, 2026-09-04).
+            # Equality is stable, mirroring the upward branch's `> baseline`.
             if probe(eta) <= baseline_loss:
                 lo, hi = eta, eta * 2.0
                 for _ in range(bisect_iters):
@@ -288,12 +236,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                         hi = mid
                     else:
                         lo = mid
-                # Bracket MIDPOINT, exactly as the upward branch does. The
-                # downward branch used to return `lo`, which is the last
-                # KNOWN-STABLE point rather than Kalra's approximation of the
-                # critical step: on the lambda = 100 quadratic with 6
-                # bisections it reported 101.135802 where the midpoint gives
-                # 100.515337 (adversarial review, 2026-09-04).
+                # Bracket midpoint, as the upward branch returns.
                 eta_star = 0.5 * (lo + hi)
                 return float(eta_star), float(2.0 / eta_star)
         return float("nan"), float("nan")
@@ -306,11 +249,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
             break
         lo = eta
     if hi is None:
-        # Never became unstable within the search range. Returning the cap
-        # (eta0 * 2^max_doublings, a CONSTANT) polluted cross-model
-        # regressions with an indistinguishable sentinel (audit 2026-07-16:
-        # random-init gpt2 returned exactly 1073.74). NaN is honest: eta*
-        # exceeds the search range.
+        # eta* is beyond the search range: NaN, not the cap as a sentinel.
         return float("nan"), float("nan")
 
     # Bisection between last stable (lo) and first unstable (hi).
@@ -397,56 +336,22 @@ class LossSharpnessTask(DiagnosticTask):
         if not encs:
             return {"error": "No valid encodings"}
 
-        # The forward pass needs requires_grad=True; ensure model is in
-        # eval mode but parameters can compute gradients.
-        # THE try MUST OPEN BEFORE THE FIRST MUTATION.
-        #
-        # `model.eval()`, the `requires_grad_` rewrite and the float32 promotion
-        # below all mutate the CALLER'S model, and the `finally` that restores
-        # them used to begin only after all three had run. An exception in that
-        # window — an OOM during the promotion is the realistic one — left the
-        # model in eval mode, with `requires_grad=False` on every parameter
-        # except the last block, and in float32; `core.py:439` then continued
-        # the run with that same object, so every later task in the sweep
-        # measured a mutated model (Opus round 11, 2026-09-08).
-        #
-        # This file already fixed exactly this class once, at
-        # `_sam_sharpness` (see its comment: an exception left a parameter at
-        # 1.1 instead of 1.0 and "silently poisoned every later task in the
-        # run"). The inner perturbation was wrapped; the outer setup was not.
-        #
-        # The restore variables are initialised to inert values first so the
-        # `finally` can never reference an unbound name when the failure
-        # happens early.
+        # The try opens before the first mutation of the caller's model (eval
+        # mode, requires_grad, dtype), so every exit path restores all three.
         was_training = model.training
         orig_grad_state = {}
         _saved_param_dtypes = []
         _promoted = False
         try:
             model.eval()
-            # Save original requires_grad state so we can restore it — other
-            # tasks or user code may depend on the model's grad configuration.
             orig_grad_state = {p: p.requires_grad for p in model.parameters()}
             for p in model.parameters():
                 p.requires_grad_(False)
             for p in params:
                 p.requires_grad_(True)
 
-            # Promote to float32 for EVERY measurement, not only the critical step.
-            #
-            # Curvature is a second-order quantity, so storage precision biases all
-            # four probes, not just the one that takes an explicit step. Measured on
-            # cached tiny-random-gpt2: bf16 power iteration gave 2.4375 against
-            # 3.109532833 in fp32, and evaluating the SAME bf16-rounded weights in
-            # fp32 arithmetic gave 3.111037254 -- isolating a ~21% error to the
-            # ARITHMETIC rather than to the weights (adversarial review,
-            # 2026-09-04). Without this, trace/eigenvalue/SAM split the zoo by
-            # checkpoint storage format rather than by model.
-            #
-            # Parameters ONLY. `model.float()` then `model.to(dtype)` is not a round
-            # trip -- it downcasts buffers that were deliberately float32 (on
-            # pythia-160m it turned `rotary_emb.inv_freq` float32 -> bfloat16, rel
-            # 3.65e-03, and PERSISTED into every later task in the run).
+            # Every probe runs in fp32 arithmetic on a bf16/fp16 model: bf16
+            # arithmetic biases curvature (~21% on tiny-random-gpt2's top eigenvalue).
             _model_dtype = next(model.parameters()).dtype
             _promoted = _model_dtype in (torch.bfloat16, torch.float16)
             _saved_param_dtypes = []
@@ -475,9 +380,7 @@ class LossSharpnessTask(DiagnosticTask):
             loss = compute_loss()
             baseline_loss = float(loss.item())
 
-            # 1. Hutchinson trace estimator
-            # Seeded generator on the params' device: Hutchinson and
-            # power-iteration probes are otherwise irreproducible run to run.
+            # 1. Hutchinson trace estimator, seeded on the params' device.
             gen = torch.Generator(device=params[0].device)
             gen.manual_seed(seed)
             trace_estimates = []
@@ -491,12 +394,7 @@ class LossSharpnessTask(DiagnosticTask):
                 trace_estimates.append(vhv)
             mean_trace = float(np.mean(trace_estimates))
             trace_per_param = mean_trace / max(1, n_params)
-            # UNCERTAINTY, reported. Hutchinson is a Monte Carlo estimator and
-            # the shipped 5 probes are few: on the exact-trace MLP the 5-probe
-            # mean was 4.464863030275032 against an exact 5.0693436557608935
-            # (-11.92%) at a relative standard error of 86.16% (adversarial
-            # review round 2, 2026-09-04). A reader cannot judge the number
-            # without this.
+            # Monte Carlo uncertainty of the trace, reported as a relative SE.
             _tr_sd = float(np.std(trace_estimates, ddof=1)) if len(trace_estimates) > 1 else float("nan")
             _tr_se = _tr_sd / np.sqrt(len(trace_estimates)) if len(trace_estimates) > 1 else float("nan")
             _tr_rel_se = (abs(_tr_se / mean_trace) if mean_trace not in (0.0,)
@@ -513,24 +411,9 @@ class LossSharpnessTask(DiagnosticTask):
                 status=_pi_status,
             )
 
-            # SIGN STABILITY, MEASURED — because the reported sign can be an
-            # artefact of the iteration count.
-            #
-            # Power iteration cannot separate a near-degenerate +/-lambda pair:
-            # on pythia-70m the SAME model reports **-104737 at 10 iterations
-            # and +111530 at 64**, on 3/3 seeds, with |lambda| ~ 1.24e5 and a
-            # zero-crossing near iteration 37 (Opus round 11, 2026-09-08).
-            #
-            # `_meta_power_iter_converged` cannot warn about it: it was False on
-            # 5/5 real models, and True in 0/120 runs where the answer was exact
-            # to 4.3e-07 — a flag that is false when the answer is right and
-            # silent when it is wrong is worse than absent, because it invites
-            # the reader to trust it.
-            #
-            # So the flag is DERIVED from a second run at a different iteration
-            # count rather than asserted from an internal convergence test. If
-            # the two disagree in sign, the sign is not a property of the model
-            # and the caller is told so. Costs one extra power iteration.
+            # Sign check: a second run at 4x the iterations. Power iteration
+            # cannot separate a near-degenerate +/-lambda pair (pythia-70m:
+            # -104737 at 10 iterations, +111530 at 64).
             _sign_stable = None
             try:
                 _alt_status = {}
@@ -554,17 +437,8 @@ class LossSharpnessTask(DiagnosticTask):
                 compute_loss, params, sam_rho, baseline_loss
             )
 
-            # 4. Critical sharpness (B8): largest stable descent step along
-            # the normalized gradient; lambda_c = 2/eta* (edge of stability).
-            # Measure in float32. bf16 cannot represent the probe step, and
-            # its ARITHMETIC biases lambda_c by 14-35% in a way that tracks the
-            # checkpoint's storage format rather than the model. Promote the
-            # WHOLE model, not just the differentiated parameters: promoting
-            # params alone leaves buffers in the original dtype and the forward
-            # pass raises on mixed dtypes.
-            # The model is already in float32 here (hoisted above), so
-            # `baseline_loss` was itself measured in float32 and needs no
-            # separate re-measurement.
+            # 4. Critical sharpness: largest stable descent step along the
+            # gradient; lambda_c = 2/eta* (edge of stability).
             loss_for_cs = compute_loss()
             grads_cs = torch.autograd.grad(loss_for_cs, params,
                                            create_graph=False)
@@ -574,8 +448,7 @@ class LossSharpnessTask(DiagnosticTask):
             )
 
         finally:
-            # Restore parameters to their ORIGINAL dtypes individually.
-            # Buffers were never touched, so they keep the checkpoint's dtype.
+            # Restore parameter dtypes (buffers were not promoted).
             if _promoted:
                 with torch.no_grad():
                     for p_, dt in _saved_param_dtypes:
@@ -594,8 +467,7 @@ class LossSharpnessTask(DiagnosticTask):
             "_meta_hutchinson_trace_rel_se": _tr_rel_se,
             "_meta_power_iter_rel_change": float(_pi_status.get("rel_change", float("nan"))),
             "_meta_power_iter_converged": bool(_pi_status.get("converged", False)),
-            # DERIVED from a second run at 4x the iteration count -- see the
-            # note at the call site. None when the second run could not be made.
+            # Derived from the 4x run; None when it could not be made.
             "_meta_top_eigenvalue_sign_stable": _sign_stable,
             "_meta_top_eigenvalue_alt_estimate": _pi_status.get("alt_estimate"),
             "_meta_top_eigenvalue_alt_n_iter": _pi_status.get("alt_n_iter"),
