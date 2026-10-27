@@ -53,3 +53,12 @@ def test_position0_is_dropped_on_a_bos_less_tokenizer(gpt2):
     # reference protocol's mean (known negative).
     assert (r["_meta_paper_protocol_mean_self_similarity_corrected"]
             > r["mean_self_similarity_corrected"] + 1e-3)
+
+
+def test_declarations(gpt2):
+    from blme.tasks.geometry.contextualization import ContextualizationTask as C
+    assert C.TOKEN_POLICY == "exclude_pos0"
+    assert C.SIZE_INVARIANT == {}
+    assert {"paper", "code", "llm_precedent"} <= set(C.SOURCES)
+    r = _run(*gpt2)
+    assert set(C.HEADLINE_KEYS) == {k for k in r if k.startswith("mean_")}

@@ -221,6 +221,20 @@ class ContextualizationTask(DiagnosticTask):
     kept) is kept as ``_meta_paper_protocol_*``.
     """
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:1909.00512",
+        "code": "kawine/contextual@c10c992a20d09660bcbac1e84466a3004374317c",
+        "llm_precedent": "arXiv:1909.00512 (proposed on GPT-2, BERT and ELMo)",
+    }
+    HEADLINE_KEYS = (
+        "mean_self_similarity_corrected", "mean_intra_sentence_similarity_corrected",
+        "mean_mev", "mean_mev_corrected_sizematched", "mean_mev_corrected_pool1k",
+        "mean_mev_baseline", "mean_mev_baseline_pool1k", "mean_anisotropy_baseline",
+    )
+    # Empty: the cosine/PCA kernels are width-free analytically (dossier: orth
+    # x2 unchanged to 1e-6), but this self-collecting task has no direct test
+    # through a width transform, and every key drifts with corpus size.
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Contextualization Analysis (Ethayarajh 2019)...")
