@@ -445,7 +445,6 @@ class ContextualizationTask(DiagnosticTask):
         return {
             **paper,
             "_meta_token_policy": self.TOKEN_POLICY,
-            "_meta_word_unit": "token_id",
             "_meta_n_position0_occurrences_dropped": int(n_p0) if drop_p0 else 0,
             # False: the deepest layer is post-ln_f, as the reference defines it.
             "_meta_last_entry_is_block_output": False,

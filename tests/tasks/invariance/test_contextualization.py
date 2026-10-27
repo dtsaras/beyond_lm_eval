@@ -44,7 +44,6 @@ def test_position0_is_dropped_on_a_bos_less_tokenizer(gpt2):
     model, tok = gpt2
     r = _run(model, tok)
     assert r["_meta_token_policy"] == "exclude_pos0"
-    assert r["_meta_word_unit"] == "token_id"
     assert r["_meta_n_position0_occurrences_dropped"] == len(SENTENCES)
     tracked = [v["_meta_n_words_tracked"] for v in r["per_layer"].values()]
     assert r["_meta_paper_protocol_n_words_tracked_mean"] == pytest.approx(

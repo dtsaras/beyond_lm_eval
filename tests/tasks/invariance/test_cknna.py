@@ -81,7 +81,7 @@ def test_points_are_per_text_means_with_one_joint_clamp(tiny_states):
     assert r["_meta_n_layers"] == S.n_layers + 1        # embedding included
     assert r["_meta_includes_embedding_layer"] is True
     assert r["_meta_pooling"] == "mean"
-    assert r["_meta_outlier_clamp"] == "joint_over_layers"
+    assert r["_meta_outlier_clamp_n_layers"] == S.n_layers + 1
     assert r["early_late_cknna"] == pytest.approx(want, rel=1e-6)
     # Known negative: the per-layer clamp the task used before scores differently.
     from blme.tasks.geometry.cknna import _remove_outliers

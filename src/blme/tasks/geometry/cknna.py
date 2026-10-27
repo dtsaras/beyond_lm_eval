@@ -310,6 +310,8 @@ def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
         feats = {li: select_rows(per_doc[li], pool)[0] for li in layers}
         excl = {li: select_rows(per_doc[li], "mean_excl_pos0")[0] for li in layers}
         mid = list(per_doc[layers[len(layers) // 2]])[:_SHARE_DOCS]
+        info = dict(info, includes_embedding=bool(
+            include_embedding and getattr(cache, "_embedding_states", None) is not None))
         return feats, excl, mid, info
 
     if dataset is None:
@@ -344,7 +346,8 @@ def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
             n_done += 1
     feats = {li: torch.cat(v, 0) for li, v in sums.items()}
     excl = {li: torch.cat(v, 0) for li, v in sums_excl.items()}
-    info = dict(info, source="self_collected", fallback="pooled_forward")
+    info = dict(info, source="self_collected", fallback="pooled_forward",
+                includes_embedding=bool(first == 0))
     return feats, excl, mid_rows, info
 
 
@@ -497,13 +500,13 @@ class CKNNATask(DiagnosticTask):
                 float(cknna_matrix[0, n // 2]) if n >= 3 else float("nan")
             ),
             "_meta_n_layers": int(n),
-            "_meta_includes_embedding_layer": True,
+            "_meta_includes_embedding_layer": bool(_info.get("includes_embedding")),
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),
             "_meta_n_texts_requested": int(num_samples),
             "_meta_pooling": pool,
-            "_meta_outlier_clamp": "joint_over_layers",
+            "_meta_outlier_clamp_n_layers": int(n_layers),
             "_meta_outlier_clamp_bound": float(_clamp_bound),
             "_meta_features_source": str(_info.get("source")),
             "_meta_cknna_order_asymmetry_max": float(_order_gap),
