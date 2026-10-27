@@ -65,7 +65,41 @@ _EFFICIENCY_CORPUS = [
 
 @register_task("geometry_tokenizer_efficiency")
 class TokenizerEfficiencyTask(DiagnosticTask):
-    """Tokenizer compression and efficiency metrics (Tier 1)."""
+    """Tokenizer compression and efficiency metrics (Tier 1).
+
+    The word unit is a whitespace token (``text.split()``) of the shared
+    WikiText corpus, tokenised in context, not a treebank word tokenised on its
+    own as in Rust et al. 2021 (App. A.3).
+    """
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2012.15613",
+        "code": "",
+        "llm_precedent": ("Dagan et al. 2024 arXiv:2402.01035 (bytes per token, NSL); "
+                          "Zouhar et al. 2023 arXiv:2306.16842 (token entropy); "
+                          "Ali et al. 2024 arXiv:2310.08754"),
+    }
+    ADAPTATION_NOTE = (
+        "Fertility (tokens per word, Rust et al. 2021) is computed with whitespace-delimited "
+        "words of the shared WikiText corpus as the word unit, not the UD treebank words of "
+        "the paper: WikiText-raw already space-separates punctuation (' , ', ' @-@ '), so "
+        "whitespace words approximate treebank tokens on this corpus. The text is tokenised "
+        "in context rather than word by word, because per-word tokenisation changes "
+        "byte-level BPE counts (leading-space variants). On a fixed corpus fertility, "
+        "bytes per token and NSL against a reference tokenizer are one degree of freedom, "
+        "so only fertility is a feature; it is not V-linked mechanically (50,000 unused "
+        "added tokens leave it unchanged). token_entropy is a plug-in estimate that grows "
+        "with corpus size, and the compression ratio counts Unicode code points, not bytes."
+    )
+    HEADLINE_KEYS = ("fertility", "token_entropy", "vocab_size")
+    # token_entropy is also unchanged by unused tokens but grows with corpus
+    # size, so it has no entry; vocab_size is V by definition.
+    SIZE_INVARIANT = {
+        "fertility": (("add_unused_tokens",),
+                      "tests/tasks/invariance/test_geometry_tokenizer_efficiency.py::"
+                      "test_fertility_invariant_under_unused_vocabulary"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Tokenizer Efficiency Analysis...")

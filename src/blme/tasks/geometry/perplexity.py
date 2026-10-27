@@ -37,8 +37,25 @@ class RarePPLTask(DiagnosticTask):
     character, and token-frequency-stratified perplexity.
 
     Bits per UTF-8 byte is invariant to the tokenisation (The Pile, Gao et al.
-    2020, Sec 3.1); per-token perplexity is comparable only within a tokenizer.
+    2020, Sec 3.1) and is the headline; per-token perplexity is comparable only
+    within a tokenizer.
     """
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2101.00027",
+        "code": "huggingface/transformers docs 'Perplexity of fixed-length models' (strided window; web page, no commit)",
+        "llm_precedent": "Gao et al. 2020 The Pile Sec 3.1 (bits per UTF-8 byte across tokenizers)",
+    }
+    # Size-linked by meaning (a capability): larger models reach lower loss, so
+    # bpb is disclosed, not normalised. Pinned: never-emitted vocabulary rows.
+    HEADLINE_KEYS = ("bits_per_byte",)
+    SIZE_INVARIANT = {
+        "bits_per_byte": (("pad_vocabulary_masked",),
+                          "tests/tasks/invariance/test_geometry_perplexity.py::"
+                          "test_bits_per_byte_invariant_under_masked_vocabulary_padding"),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Rare Token PPL + BPC Analysis...")
         if dataset is None:
