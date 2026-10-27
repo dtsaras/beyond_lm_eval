@@ -274,20 +274,24 @@ class CKATask(DiagnosticTask):
 
         # NaN policy: a degenerate pair is dropped by every summary (nan*
         # reducers), and "no pair to measure" is NaN, never 0.0.
+        # Headline keys are the ones an identity block cannot move (P4): the
+        # endpoint pair and the minima. Uniform means, spreads, the maximum
+        # (an identity pair reads 1.0) and the index-based first-middle pair
+        # are _meta_ profile summaries (test_cka.py identity-insertion test).
         results = {
-            "avg_adjacent_cka": _stat(diagonal_off1, np.nanmean),
             "min_adjacent_cka": _stat(diagonal_off1, np.nanmin),
-            "max_adjacent_cka": _stat(diagonal_off1, np.nanmax),
-            "std_adjacent_cka": _stat(diagonal_off1, np.nanstd),
-            "mean_offdiag_cka": _stat(off_diag, np.nanmean),
-            "std_offdiag_cka": _stat(off_diag, np.nanstd),
             "min_offdiag_cka": _stat(off_diag, np.nanmin),
             # max_offdiag_cka is not emitted: the most similar pair is an
             # adjacent one, so it duplicated max_adjacent_cka (65/66 models).
+            "_meta_avg_adjacent_cka": _stat(diagonal_off1, np.nanmean),
+            "_meta_max_adjacent_cka": _stat(diagonal_off1, np.nanmax),
+            "_meta_std_adjacent_cka": _stat(diagonal_off1, np.nanstd),
+            "_meta_mean_offdiag_cka": _stat(off_diag, np.nanmean),
+            "_meta_std_offdiag_cka": _stat(off_diag, np.nanstd),
             "early_late_cka": (
                 float(cka_matrix[0, -1]) if n >= 2 else float("nan")
             ),
-            "first_middle_cka": (
+            "_meta_first_middle_cka": (
                 float(cka_matrix[0, n // 2]) if n >= 3 else float("nan")
             ),
             "_meta_debiased_avg_adjacent_cka": (

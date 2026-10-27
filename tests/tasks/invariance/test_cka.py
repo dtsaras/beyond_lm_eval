@@ -60,3 +60,26 @@ def test_max_offdiag_duplicate_is_not_emitted(tiny_states):
     assert "max_offdiag_cka" not in r
     off = [k for k in r if "max_offdiag" in k]
     assert off == [], off
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_headline_is_depth_invariant_under_identity_insertion(
+        tiny_states, tiny_identity_states):
+    """P4: inserting function-preserving identity blocks must not move any
+    headline key; the uniform layer means it replaced do move (known negative)."""
+    base = inv.run_task_on_states(TASK, tiny_states)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states)
+    assert ins["_meta_n_layers"] == base["_meta_n_layers"] + 2
+    keys = [k for k in base if not k.startswith("_meta_")
+            and isinstance(base[k], float)]
+    assert {"early_late_cka", "min_offdiag_cka", "min_adjacent_cka"} <= set(keys)
+    inv.assert_invariant(base, ins, keys, rtol=1e-9)
+    for k in ("_meta_avg_adjacent_cka", "_meta_mean_offdiag_cka",
+              "_meta_max_adjacent_cka"):
+        inv.assert_moves(base, ins, k, 1e-3)
