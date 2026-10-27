@@ -346,7 +346,7 @@ class RefusalDirectionTask(DiagnosticTask):
     # test_rel_direction_energy_is_unbiased_in_the_prompt_count.
     SIZE_INVARIANT = {
         "rel_direction_energy": (
-            ("prompt_count_N", "residual_scale_gauge", "zero_pad_width"),
+            ("residual_scale_gauge", "zero_pad_width"),
             _INV + "test_rel_direction_energy_invariant_under_residual_gauge_and_width_padding"),
         "separability_auc": (
             ("residual_scale_gauge",),
