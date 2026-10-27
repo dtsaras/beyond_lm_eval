@@ -24,6 +24,7 @@ For each prompt, generate N completions (with temperature > 0) and measure:
 """
 
 import logging
+import re
 from collections import Counter
 from typing import Dict, List, Optional
 
@@ -85,6 +86,24 @@ def _distinct_n_corpus(completions: List[List[int]], n: int) -> float:
     if total_tokens == 0:
         return float("nan")
     return len(types) / total_tokens
+
+
+def _word_tokenize(text: str):
+    """Texygen's unit: ``nltk.word_tokenize`` (SelfBleu.py:38, :52).
+
+    Returns ``(words, tokenizer_name)``. Without NLTK's punkt_tab data the
+    Treebank tokenizer runs on the whole string (``preserve_line=True``), which
+    differs only in not splitting sentence-internal periods; without NLTK a
+    regex word/punctuation split is used. The name actually used is reported.
+    """
+    try:
+        import nltk
+    except ImportError:
+        return re.findall(r"\w+|[^\w\s]", text), "regex_word_punct"
+    try:
+        return nltk.word_tokenize(text), "nltk_word_tokenize"
+    except LookupError:
+        return nltk.word_tokenize(text, preserve_line=True), "nltk_treebank_no_punkt"
 
 
 def _trim_completion(tokens: List[int], eos_token_id: Optional[int],
@@ -173,9 +192,9 @@ def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]
 class GenerationDiversityTask(DiagnosticTask):
     """Distinct-n, Self-BLEU, and entropy collapse over generated tokens.
 
-    Self-BLEU and distinct-n are computed over model SUBWORD TOKEN IDS, while
-    Texygen uses nltk.word_tokenize word n-grams, so absolute values are
-    comparable only across models sharing a tokenizer."""
+    Self-BLEU and distinct-n are computed over WORDS (each completion decoded
+    and split by nltk.word_tokenize, as Texygen does), so the tokenizer does not
+    enter them; the subword-id versions are _meta_."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
@@ -201,8 +220,10 @@ class GenerationDiversityTask(DiagnosticTask):
         all_distinct1 = []
         all_distinct2 = []
         all_distinct3 = []
-        all_self_bleu = []
         all_completions = []
+        all_words = []
+        units_used = set()
+        sub_distinct = {1: [], 2: [], 3: []}
         _n_ok_prompts = [0]
         _n_failed_prompts = [0]
         all_entropy_first_q = []
@@ -251,11 +272,28 @@ class GenerationDiversityTask(DiagnosticTask):
                     for row in gen_ids
                 ]
 
-                # Distinct-n per completion, averaged
+                # Word units (Texygen): decode, then nltk.word_tokenize. A
+                # tokenizer without decode() leaves the ids as the units.
+                _dec = getattr(tokenizer, "decode", None)
+                words = []
                 for comp in completions:
+                    if callable(_dec):
+                        w, unit_name = _word_tokenize(_dec(comp, skip_special_tokens=True))
+                    else:
+                        w, unit_name = list(comp), "token_ids"
+                    words.append(w)
+                    units_used.add(unit_name)
+                all_words.extend(words)
+
+                # Distinct-n per completion, averaged
+                for comp in words:
                     all_distinct1.append(_distinct_n(comp, 1))
                     all_distinct2.append(_distinct_n(comp, 2))
                     all_distinct3.append(_distinct_n(comp, 3))
+                for comp in completions:
+                    sub_distinct[1].append(_distinct_n(comp, 1))
+                    sub_distinct[2].append(_distinct_n(comp, 2))
+                    sub_distinct[3].append(_distinct_n(comp, 3))
 
                 # Self-BLEU is computed over the whole collection below, as
                 # Texygen scores each sentence against every other one.
@@ -311,21 +349,36 @@ class GenerationDiversityTask(DiagnosticTask):
             return {"error": "No completions generated"}
 
         # Texygen aggregation: every completion against every other one.
-        for i, comp in enumerate(all_completions):
-            refs = [c for j, c in enumerate(all_completions) if j != i]
-            if refs:
-                all_self_bleu.append(_self_bleu_single(comp, refs))
+        def _self_bleu_mean(units):
+            vals = []
+            for i, comp in enumerate(units):
+                refs = [c for j, c in enumerate(units) if j != i]
+                if refs:
+                    vals.append(_self_bleu_single(comp, refs))
+            return float(np.mean(vals)) if vals else float("nan")
+        mean_self_bleu = _self_bleu_mean(all_words)
 
         return {
-            # Li et al.'s own collection-level ratio (see _distinct_n_corpus).
-            "distinct_1": _distinct_n_corpus(all_completions, 1),
-            "distinct_2": _distinct_n_corpus(all_completions, 2),
-            "distinct_3": _distinct_n_corpus(all_completions, 3),
+            # Li et al.'s own collection-level ratio (see _distinct_n_corpus),
+            # over words.
+            "distinct_1": _distinct_n_corpus(all_words, 1),
+            "distinct_2": _distinct_n_corpus(all_words, 2),
+            "distinct_3": _distinct_n_corpus(all_words, 3),
             "mean_distinct_1": float(np.mean(all_distinct1)),
             "mean_distinct_2": float(np.mean(all_distinct2)),
             "mean_distinct_3": float(np.mean(all_distinct3)),
-            "mean_self_bleu": float(np.mean(all_self_bleu)),
-            # _meta_: equals 1 - mean_distinct_1 by definition.
+            "mean_self_bleu": mean_self_bleu,
+            # The unit actually used, and the subword-id forms (tokenizer-
+            # dependent: the same 48 strings span Self-BLEU 0.084-0.161).
+            "_meta_diversity_unit": "+".join(sorted(units_used)),
+            "_meta_distinct_1_subword": _distinct_n_corpus(all_completions, 1),
+            "_meta_distinct_2_subword": _distinct_n_corpus(all_completions, 2),
+            "_meta_distinct_3_subword": _distinct_n_corpus(all_completions, 3),
+            "_meta_mean_distinct_1_subword": float(np.mean(sub_distinct[1])),
+            "_meta_mean_distinct_2_subword": float(np.mean(sub_distinct[2])),
+            "_meta_mean_distinct_3_subword": float(np.mean(sub_distinct[3])),
+            "_meta_mean_self_bleu_subword": _self_bleu_mean(all_completions),
+            # _meta_: equals 1 - _meta_mean_distinct_1_subword by definition.
             "_meta_mean_token_repetition_rate": float(np.mean(all_token_rep_rate)) if all_token_rep_rate else float("nan"),
             "mean_phrase_repetition_rate": float(np.mean(all_phrase_rep_rate)) if all_phrase_rep_rate else float("nan"),
             # Entropy of the SAMPLING distribution (temperature applied, full
