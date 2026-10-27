@@ -1,8 +1,8 @@
 """Chain-of-Embedding (CoE) — Wang et al., ICLR 2025 (arXiv:2410.13640).
 
 Given the chain of hidden states
-``H = h^(0), h^(1), …, h^(L)`` at a fixed token (``h^(0)`` is the
-embedding output, ``h^(L)`` is the final transformer block output),
+``H = h^(0), h^(1), …, h^(L)`` (``h^(0)`` is the embedding output,
+``h^(L)`` HF's last entry, the post-final-norm state, as in the release),
 CoE measures how the representation *changes* between adjacent layers:
 
   * Magnitude change   ``M(h_l, h_{l+1}) = ‖h_{l+1} − h_l‖₂``               (Eq. 2)
@@ -24,12 +24,18 @@ The paper's headline "output-free" scores:
               work is internally inconsistent, and BLME follows the
               official implementation.
 
-Note on token position (departure from the paper): Wang et al. run
-``model.generate`` and mean-pool ``h^(l)`` across every generated
-output token. BLME is comparing *base and instruct models without
-generating* — we read the final token of the prompt instead. The two
-give highly correlated but not identical signals; we flag
-``token_position`` in the result so reviewers can see the choice.
+Token protocol (paper Sec. 2.1 and App. C.2.2; inference.py): greedy
+generation with a fresh GenerationConfig (do_sample=False, max_new_tokens 128,
+the release's setting for non-Instruct names, EOS from the tokenizer and the
+model's generation config), then, per layer, the mean over the T output
+tokens of the hidden state that emits each of them: the last prompt position
+for token 0 and the fed-back generated tokens 0..T-2 after it. The release
+indexes generation step 0 with ``[0][0]``, which is prompt position 0, not the
+state that emits token 0; that quirk is not reproduced (the paper pools output
+tokens) and is disclosed as ``_meta_coe_*_release_pos0``. Prompts are raw
+corpus passages without a chat template, so base and instruct models share
+one protocol; the last-prompt-token chain BLME used before is
+``_meta_coe_*_last_prompt``.
 """
 
 import logging
@@ -166,6 +172,20 @@ def _coe_from_chain(chain: list[torch.Tensor], storage_eps: float = None) -> dic
     }
 
 
+def _eos_ids(model, tokenizer) -> list:
+    """EOS ids: the tokenizer's (as inference.py) plus any further ids in the
+    model's generation config (the release adds Llama-3's <|eot_id|> by name)."""
+    ids = []
+    t = getattr(tokenizer, "eos_token_id", None)
+    if t is not None:
+        ids.append(int(t))
+    g = getattr(getattr(model, "generation_config", None), "eos_token_id", None)
+    for e in ([g] if isinstance(g, int) else list(g or [])):
+        if int(e) not in ids:
+            ids.append(int(e))
+    return ids
+
+
 @register_task("dynamics_coe")
 class ChainOfEmbeddingTask(DiagnosticTask):
     """Wang et al. 2025 Chain-of-Embedding scores (Eq. 3/5/7)."""
@@ -173,7 +193,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Chain-of-Embedding (Wang et al. 2025)...")
         num_samples = int(self.config.get("num_samples", 5))
-        token_position = self.config.get("token_position", "last")
+        max_new_tokens = int(self.config.get("max_new_tokens", 128))
 
         device = next(model.parameters()).device
 
@@ -185,10 +205,29 @@ class ChainOfEmbeddingTask(DiagnosticTask):
         if len(samples) < 1:
             return {"error": "Need at least 1 sample"}
 
-        sample_results = []
-        chain_length = None
-        _used_hook = [False]
+        cfg = getattr(model, "config", None)
+        ctx = (getattr(cfg, "max_position_embeddings", None)
+               or getattr(cfg, "n_positions", None) or 2048)
+        ctx = int(ctx)
+        # Prompt + generated tokens must fit the context window.
+        max_prompt = max(1, ctx - max_new_tokens if ctx > max_new_tokens else ctx // 2)
+        eos = _eos_ids(model, tokenizer)
+        pad = getattr(tokenizer, "pad_token_id", None)
+        if pad is None:
+            pad = eos[0] if eos else 0
+        from transformers import GenerationConfig
+        # A fresh config, as inference.py passes GenerationConfig(): the model's
+        # own sampling or repetition defaults must not apply.
+        gen_cfg = GenerationConfig(do_sample=False, num_beams=1,
+                                   max_new_tokens=max_new_tokens,
+                                   eos_token_id=eos or None, pad_token_id=pad)
+
+        sample_results, last_prompt_results, release_results = [], [], []
         _blockout_results = []
+        chain_length = None
+        n_generated = []
+        n_eos = 0
+        _used_hook = [False]
 
         # The deepest block's raw output is hooked only for the _meta_ blockout
         # disclosure; the headline chain is the raw HF tuple, as in inference.py.
@@ -206,39 +245,53 @@ class ChainOfEmbeddingTask(DiagnosticTask):
           with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                input_ids = tokenizer.encode(text, return_tensors="pt").to(device)
-                if input_ids.shape[1] < 1:
+                enc = tokenizer(text, return_tensors="pt", truncation=True,
+                                max_length=max_prompt)
+                input_ids = enc["input_ids"][:, :max_prompt].to(device)
+                P = int(input_ids.shape[1])
+                if P < 1 or ctx - P < 1:
                     continue
-
-                out = model(input_ids, output_hidden_states=True)
+                seq = model.generate(input_ids=input_ids,
+                                     attention_mask=torch.ones_like(input_ids),
+                                     generation_config=gen_cfg,
+                                     max_new_tokens=min(max_new_tokens, ctx - P))
+                T = int(seq.shape[1]) - P
+                if T < 1:
+                    continue
+                n_generated.append(T)
+                n_eos += int(bool(eos) and int(seq[0, -1]) in eos)
+                # One forward over prompt + generated[:-1]: positions P-1 .. P+T-2
+                # hold the states that emit output tokens 0 .. T-1.
+                out = model(seq[:, :P + T - 1], output_hidden_states=True)
                 if not getattr(out, "hidden_states", None):
                     continue
-
-                pos = -1 if token_position == "last" else int(token_position)
-                # Full chain h_0 .. h_L at the chosen position, from the raw HF
-                # tuple including the post-final-norm entry, as inference.py does
-                # (post-final-norm=False is deliberate: the released code wins).
+                emit = slice(P - 1, P + T - 1)
+                release = [0] + list(range(P, P + T - 1))
+                # post-final-norm=False is deliberate: the chain is the raw HF
+                # tuple including ln_f(...), as inference.py does (the released
+                # code wins). Pooling is in double.
                 _hs = list(out.hidden_states)
-                _h = _sink.get("h")
-                if _h is not None and tuple(_h.shape) == tuple(_hs[-1].shape):
-                    _used_hook[0] = True
-                    chain = [h[0, pos].detach().float().cpu() for h in _hs]
-                    _hs_blockout = list(_hs)
-                    _hs_blockout[-1] = _h
-                    _chain_blockout = [
-                        h[0, pos].detach().float().cpu() for h in _hs_blockout]
-                else:
-                    # No usable hook: same headline chain, no blockout disclosure.
-                    _used_hook[0] = False
-                    chain = [h[0, pos].detach().float().cpu() for h in _hs]
-                    _chain_blockout = None
+                _eps = float(torch.finfo(_hs[0].dtype).eps)
+                chain = [h[0, emit].detach().double().mean(dim=0).cpu() for h in _hs]
                 if len(chain) < 2:
                     continue
                 chain_length = len(chain) - 1
-                _eps = float(torch.finfo(_hs[0].dtype).eps)
                 sample_results.append(_coe_from_chain(chain, storage_eps=_eps))
-                if _chain_blockout is not None and len(_chain_blockout) >= 2:
-                    _blockout_results.append(_coe_from_chain(_chain_blockout))
+                last_prompt_results.append(_coe_from_chain(
+                    [h[0, P - 1].detach().double().cpu() for h in _hs], storage_eps=_eps))
+                release_results.append(_coe_from_chain(
+                    [h[0, release].detach().double().mean(dim=0).cpu() for h in _hs],
+                    storage_eps=_eps))
+                _h = _sink.get("h")
+                if _h is not None and tuple(_h.shape) == tuple(_hs[-1].shape):
+                    _used_hook[0] = True
+                    _hs_blockout = list(_hs)
+                    _hs_blockout[-1] = _h
+                    _blockout_results.append(_coe_from_chain(
+                        [h[0, emit].detach().double().mean(dim=0).cpu()
+                         for h in _hs_blockout], storage_eps=_eps))
+                else:
+                    _used_hook[0] = False
 
         finally:
             if _hook is not None:
@@ -249,8 +302,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
 
         # Aggregate across samples. For Eq. 5 / Eq. 7 the paper reports
         # mean (and later uses this for ROC-AUC) — we report mean + std.
-        def _mean(key):
-            vs = [r[key] for r in sample_results if np.isfinite(r[key])]
+        def _mean(key, results=sample_results):
+            vs = [r[key] for r in results if np.isfinite(r[key])]
             return float(np.mean(vs)) if vs else float("nan")
         def _std(key):
             vs = [r[key] for r in sample_results if np.isfinite(r[key])]
@@ -302,22 +355,29 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "_meta_last_entry_is_block_output": False,
             "_meta_blockout_hook_fired": bool(_used_hook[0]),
             # Disclosure: coe_r / coe_c with the raw deepest block output in
-            # place of ln_f(...); it flips the sign on gpt2, pythia and distilgpt2.
-            "_meta_coe_r_blockout": (
-                float(np.mean([r["coe_r"] for r in _blockout_results]))
-                if _blockout_results else float("nan")),
+            # place of ln_f(...).
+            "_meta_coe_r_blockout": _mean("coe_r", _blockout_results),
+            "_meta_coe_c_blockout": _mean("coe_c", _blockout_results),
             # Smallest log10(Z_Mag / (eps_storage * max|chain|)) over samples:
             # <= 0 means a normaliser below the stored states' resolution.
             "_meta_z_mag_margin_log10_min": float(np.min(
                 [r["z_mag_margin_log10"] for r in sample_results])),
-            "_meta_coe_c_blockout": (
-                float(np.mean([r["coe_c"] for r in _blockout_results]))
-                if _blockout_results else float("nan")),
-            "token_position": token_position,
+            # Disclosures of the two other token sets: the released [0][0]
+            # indexing (prompt position 0 in place of the state that emits
+            # token 0) and the last prompt token alone (BLME's former reading).
+            "_meta_coe_r_release_pos0": _mean("coe_r", release_results),
+            "_meta_coe_c_release_pos0": _mean("coe_c", release_results),
+            "_meta_coe_r_last_prompt": _mean("coe_r", last_prompt_results),
+            "_meta_coe_c_last_prompt": _mean("coe_c", last_prompt_results),
+            "_meta_n_generated_tokens_mean": float(np.mean(n_generated)),
+            "_meta_max_new_tokens": max_new_tokens,
+            "_meta_n_samples_ended_by_eos": int(n_eos),
+            "_meta_n_samples": len(sample_results),
+            "token_position": "generated_mean",
             "note": (
-                "Token position is the last-token hidden state of the "
-                "prompt, not a mean over generated output tokens as in "
-                "the paper — used to keep the metric output-free for "
-                "base models that cannot be safely generated with."
+                "Greedy generation (max_new_tokens tokens, EOS-truncated); per "
+                "layer, the mean over output tokens of the state that emits each "
+                "one, as in the paper. The release's [0][0] prompt-position-0 "
+                "index is not reproduced (disclosed as *_release_pos0)."
             ),
         }

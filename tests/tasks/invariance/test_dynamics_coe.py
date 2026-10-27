@@ -48,6 +48,60 @@ def test_no_floor_beyond_the_release():
     assert out["coe_c"] == pytest.approx(ref.compute_CoE_C(), rel=1e-9)
 
 
+GEN_CFG = {"num_samples": 3, "max_new_tokens": 8}
+
+
+def _run(model, tok, cfg=GEN_CFG):
+    with inv.limit_threads(1):
+        out = ChainOfEmbeddingTask(config=dict(cfg)).evaluate(model, tok, dataset())
+    assert "error" not in out, out
+    return out
+
+
+def _reference_chains(model, tok, text, max_new_tokens):
+    """The release's own route: generate(output_hidden_states=True), then per
+    layer the mean over steps of hidden_states[step][layer][0, -1] (the state
+    that emits each output token; the release's [0][0] at step 0 instead reads
+    prompt position 0)."""
+    from transformers import GenerationConfig
+    ids = tok(text, return_tensors="pt")["input_ids"]
+    g = model.generate(input_ids=ids, attention_mask=torch.ones_like(ids),
+                       generation_config=GenerationConfig(
+                           do_sample=False, num_beams=1, max_new_tokens=max_new_tokens,
+                           eos_token_id=tok.eos_token_id, pad_token_id=tok.eos_token_id),
+                       output_hidden_states=True, return_dict_in_generate=True)
+    hs = g.hidden_states
+    n_layers = len(hs[1])
+    emit = [torch.stack([hs[t][j][0, -1].double() for t in range(len(hs))]).mean(0)
+            for j in range(n_layers)]
+    release = [torch.stack([hs[t][j][0, 0].double() for t in range(len(hs))]).mean(0)
+               for j in range(n_layers)]
+    return emit, release
+
+
+def test_chain_pools_the_states_that_emit_generated_tokens():
+    """Greedy generation, then per layer the mean over output tokens of the
+    emitting state (paper Sec. 2.1). Checked against generate()'s own cached
+    hidden states, the route inference.py takes; the [0][0] variant is the
+    _meta_ disclosure. Pre-fix the task read the last prompt token only."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    out = _run(model, tok)
+    texts = [d["text"] for d in dataset()[:GEN_CFG["num_samples"]]]
+    emit_r, rel_r = [], []
+    with inv.limit_threads(1):
+        for t in texts:
+            emit, release = _reference_chains(model, tok, t, GEN_CFG["max_new_tokens"])
+            emit_r.append(_coe_from_chain(emit)["coe_r"])
+            rel_r.append(_coe_from_chain(release)["coe_r"])
+    assert out["per_sample_coe_r"] == pytest.approx(emit_r, rel=1e-5, abs=1e-7)
+    assert out["_meta_coe_r_release_pos0"] == pytest.approx(float(np.mean(rel_r)),
+                                                            rel=1e-5, abs=1e-7)
+    assert out["token_position"] == "generated_mean"
+    assert out["_meta_n_generated_tokens_mean"] <= GEN_CFG["max_new_tokens"]
+    assert out["coe_r"] != out["_meta_coe_r_last_prompt"]
+
+
 def test_zero_normaliser_is_nan_as_in_the_release():
     """A chain that returns to its start: Z_Mag = 0 (score.py divides by zero)."""
     chain = [torch.tensor(v, dtype=torch.float64)

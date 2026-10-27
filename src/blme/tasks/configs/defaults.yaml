@@ -286,7 +286,9 @@ dynamics_interpolation:
 
 dynamics_coe:
   num_samples: 5
-  token_position: last
+  # Greedy generation, then the mean over the output tokens' emitting states
+  # (Wang et al. 2025 Sec. 2.1); 128 is the release's setting for base models.
+  max_new_tokens: 128
 
 dynamics_generation_diversity:
   # SEED PINNED (2026-09-04). This task SAMPLES, and with no seed three runs of

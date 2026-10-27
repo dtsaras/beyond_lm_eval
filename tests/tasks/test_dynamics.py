@@ -101,7 +101,7 @@ def test_chain_of_embedding(mock_model, mock_tokenizer):
     layers of a single forward pass (Wang et al., ICLR 2025)."""
     from blme.tasks.dynamics.coe import ChainOfEmbeddingTask
 
-    task = ChainOfEmbeddingTask(config={"num_samples": 2})
+    task = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
@@ -200,7 +200,7 @@ def test_chain_of_embedding_emits_paper_scores():
             ids = torch.randint(0, 200, (1, 10))
             return ids if return_tensors == "pt" else ids[0].tolist()
 
-    res = ChainOfEmbeddingTask(config={"num_samples": 2}).evaluate(
+    res = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8}).evaluate(
         model, Tok(), dataset=[{"text": f"s{i}"} for i in range(2)],
     )
     assert "error" not in res
@@ -255,7 +255,7 @@ def test_chain_of_embedding_is_layerwise(mock_model, mock_tokenizer):
     independent of ``generation_steps``."""
     from blme.tasks.dynamics.coe import ChainOfEmbeddingTask
 
-    task = ChainOfEmbeddingTask(config={"num_samples": 2})
+    task = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "error" not in results
