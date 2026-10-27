@@ -181,8 +181,8 @@ class PerturbationGrowthTask(DiagnosticTask):
                     out_p = model(inputs_embeds=E_pert, output_hidden_states=True, **kw)
                     _sink_p = dict(_sink)
 
-                    # HF's last hidden_states entry is post-final-norm; the
-                    # deepest block's raw output (hooked) replaces it so the
+                    # post-final-norm: substituted. HF's last entry is ln_f(...);
+                    # the deepest block's raw output (hooked) replaces it so the
                     # profile ends at a block output. States keep their dtype
                     # here: narrowing before the subtraction loses the signal.
                     _hc = list(out_c.hidden_states)
