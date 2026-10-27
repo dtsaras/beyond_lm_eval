@@ -17,8 +17,9 @@ parameters of that process:
   * Joseph exponent J: sigma_tau ~ tau^J, the std of tau-increments of X.
 
 CAVEAT on the self-similarity (Holder) exponent S: it is weakly identified at
-our sample budget; switching eps between 5e-3 and 5e-2 reorders models
-(cross-model Spearman 0.143). eps is recorded as ``_meta_holder_eps``.
+small budgets; switching eps between the paper's 5e-3 and the notebook's 5e-2
+reordered models on spliced passages (cross-model Spearman 0.143). The paper's
+5e-3 is the default; eps is recorded as ``_meta_holder_eps``.
 
 Headline finding: language is self-similar and long-range dependent
 (H ~ 0.70), and SMALL cross-model differences in H improve on
@@ -52,6 +53,12 @@ logger = logging.getLogger("blme")
 # Minimum lag/window for every scaling fit (the notebook fits tau >= 25): the
 # short-lag end is dominated by discretisation and tokenizer artifacts.
 _TAU_MIN = 25
+
+# Alabdulmohsin et al. 2024 Sec. 2.2. Two notebook defects are not reproduced
+# (Q2): cell 27 scores log_softmax(logits)[i, ts[i]], the token AT i under the
+# prediction for i+1 (BLME shifts targets by one), and cell 46's
+# get_joseph_exponent never resets its accumulator across scales (BLME does).
+PAPER_HOLDER_EPS = 5e-3
 
 
 def _min_lag(N: int, upper: int) -> int:
@@ -175,17 +182,10 @@ class FractalLikelihoodTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Fractal Likelihood Analysis (Hurst)...")
         num_samples = self.config.get("num_samples", 100)
-        # 5e-2 is the released notebook's DEFAULT_EPS; the run warns below it.
-        eps = float(self.config.get("holder_eps", 5e-2))
-        _eps_ok = eps >= 5e-2
-        if not _eps_ok:
-            logger.warning(
-                f"  dynamics_fractal: holder_eps={eps:g} is below the released "
-                f"notebook's DEFAULT_EPS of 5e-2. The notebook's own docstring "
-                f"warns that probability estimates are unreliable there, and "
-                f"BLME measures the pooled self-similarity exponent collapsing "
-                f"to ~0.04 (vs ~0.57 at 5e-2). `self_similarity_exponent` from "
-                f"this run should NOT be reported.")
+        # The paper's eps (Sec. 2.2: eps = 5e-3, S robust over [1e-3, 1e-2]); the
+        # notebook's DEFAULT_EPS of 5e-2 is labelled there as differing from the
+        # paper (Q2: the paper's definition wins).
+        eps = float(self.config.get("holder_eps", PAPER_HOLDER_EPS))
         # Paper protocol (Sec. 2.1): documents longer than 4K tokens, first 2K
         # tokens of each.
         min_doc_tokens = int(self.config.get("min_doc_tokens", 4096))
@@ -278,7 +278,7 @@ class FractalLikelihoodTask(DiagnosticTask):
             "_meta_burn_in": int(burn_in),
             "protocol": "per_document_paper_protocol",
             "_meta_holder_eps": float(eps),
-            "_meta_holder_eps_at_or_above_reference": bool(_eps_ok),
+            "_meta_holder_eps_is_paper_value": bool(eps == PAPER_HOLDER_EPS),
             "_meta_tau_min": int(_TAU_MIN),
         }
         # Legacy concatenated-stream values.
@@ -290,7 +290,7 @@ class FractalLikelihoodTask(DiagnosticTask):
 
 
 
-def _pooled_fractal_params(streams, eps: float = 5e-2) -> dict:
+def _pooled_fractal_params(streams, eps: float = PAPER_HOLDER_EPS) -> dict:
     """Pooled fractal parameters: accumulate the statistic across documents at
     each scale, then fit ONE power law (the notebook's get_hurst_exponent).
 

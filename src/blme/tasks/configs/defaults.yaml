@@ -466,11 +466,9 @@ dynamics_fractal:
   # ~1919, and the Joseph exponent moves +0.021 across that split -- a
   # context-window confound correlated with model recency.
   use_tokens: 1024
-  # The authors' released notebook uses DEFAULT_EPS = 5e-2 and warns that a
-  # too-small eps makes the probability estimates unreliable. At 5e-3 the
-  # per-tau counts are single-digit and the Holder exponent is noise
-  # (0.31 +/- 0.27 against the paper's 0.59 +/- 0.08).
-  holder_eps: 0.05
+  # The paper's eps (Sec. 2.2); the notebook's DEFAULT_EPS of 5e-2 is labelled
+  # there as differing from the paper.
+  holder_eps: 0.005
 
 dynamics_perturbation_growth:
   num_samples: 10

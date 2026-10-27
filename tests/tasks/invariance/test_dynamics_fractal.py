@@ -41,3 +41,10 @@ def test_documents_are_natural_long_articles(monkeypatch):
     assert calls == [{"n": 2, "min_tokens": 4096, "split": "train", "tokenizer": True}]
     assert out["_meta_document_source"] == "wikitext_document_level:train"
     assert out["_meta_n_documents"] == 2
+
+
+def test_holder_eps_is_the_papers(monkeypatch):
+    """Paper Sec. 2.2: eps = 5e-3 (pre-fix the notebook's 5e-2)."""
+    out, _ = _run(monkeypatch, CFG)
+    assert out["_meta_holder_eps"] == 5e-3
+    assert out["_meta_holder_eps_is_paper_value"] is True
