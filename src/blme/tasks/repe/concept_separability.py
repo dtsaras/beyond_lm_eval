@@ -16,6 +16,7 @@ import torch
 
 from ..base import DiagnosticTask
 from ...registry import register_task
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers
 from . import _common
 from ._common import logger
@@ -316,9 +317,13 @@ class ConceptSeparabilityTask(DiagnosticTask):
             return {"error": "Could not detect model layers"}
         num_layers = len(layers)
 
-        out = self._lat_headline(model, tokenizer, pairs, gid, num_layers, device)
-        out.update(self._legacy_lr_auc(model, tokenizer, samples, texts, labels,
-                                       used_fallback, num_layers, device))
+        # fp32 arithmetic at every size (bf16 forwards move the reading states;
+        # tests/tasks/test_concept_separability_fixes.py).
+        with fp32_compute(model) as prec:
+            out = self._lat_headline(model, tokenizer, pairs, gid, num_layers, device)
+            out.update(self._legacy_lr_auc(model, tokenizer, samples, texts, labels,
+                                           used_fallback, num_layers, device))
+        out.update(effective_dtype_meta(prec))
         return out
 
     def _lat_headline(self, model, tokenizer, pairs, gid, num_layers, device):
