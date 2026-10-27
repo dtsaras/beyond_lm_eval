@@ -137,7 +137,11 @@ class TaskVectorGeometryTask(DiagnosticTask):
 
         pos_activations, neg_activations = self._collect(
             model, tokenizer, samples, num_layers, device, _rep_token(self.TOKEN_POLICY))
-        return self._summarise(pos_activations, neg_activations, uniq_idx, num_layers)
+        out = self._summarise(pos_activations, neg_activations, uniq_idx, num_layers)
+        # The pair count the estimates actually rest on.
+        out["_meta_n_pairs"] = len(samples)
+        out["_meta_n_distinct_pairs"] = len(uniq_idx)
+        return out
 
     @staticmethod
     def _collect(model, tokenizer, samples, num_layers, device, rep_token):
