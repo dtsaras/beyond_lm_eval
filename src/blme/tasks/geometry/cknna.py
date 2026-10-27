@@ -367,6 +367,20 @@ class CKNNATask(DiagnosticTask):
         use_cache:   reuse the shared forward-pass cache (default True).
     """
     TOKEN_POLICY = "paper_protocol:Huh2024 per-text masked mean, position 0 included"
+    SOURCES = {
+        "paper": "arXiv:2405.07987",
+        "code": "minyoungg/platonic-rep@dcd76ba3c950c1b197a2ae8b1c6713535c94ecf9",
+        "llm_precedent": "arXiv:2405.07987 App. C.2 (LLM features: per-text average pool)",
+    }
+    HEADLINE_KEYS = (
+        "avg_adjacent_cknna", "min_adjacent_cknna", "max_adjacent_cknna",
+        "std_adjacent_cknna", "mean_offdiag_cknna", "std_offdiag_cknna",
+        "min_offdiag_cknna", "early_late_cknna", "first_middle_cknna",
+    )
+    # Empty: the reference's coordinate-wise outlier clamp is basis-dependent,
+    # so no key is invariant under isometric embedding or zero-padding (dossier:
+    # orth x2 0.711 -> 0.647 on gpt2), and at fixed k the value moves with N.
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKNNA (mutual k-NN conditional CKA) Analysis...")

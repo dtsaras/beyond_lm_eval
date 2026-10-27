@@ -116,6 +116,21 @@ def test_max_offdiag_duplicate_is_not_emitted(tiny_states):
     assert [k for k in r if "max_offdiag" in k] == []
 
 
+def test_declarations_and_why_no_key_is_size_invariant(tiny_states):
+    """SIZE_INVARIANT is empty because the reference clamp is coordinate-wise:
+    an exact isometric embedding moves the headline (known negative)."""
+    from blme.tasks.geometry.cknna import CKNNATask
+    assert CKNNATask.SIZE_INVARIANT == {}
+    assert CKNNATask.TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(CKNNATask.SOURCES)
+    base = inv.run_task_on_states(TASK, tiny_states, {"topk": 5})
+    assert set(CKNNATask.HEADLINE_KEYS) == {
+        k for k in base if not k.startswith("_meta_") and isinstance(base[k], float)}
+    iso = inv.run_task_on_states(TASK, inv.embed_isometric_docs(tiny_states, 2, 3),
+                                 {"topk": 5})
+    inv.assert_moves(base, iso, "mean_offdiag_cknna", 1e-4)
+
+
 def test_pooled_forward_matches_the_cache_route(tiny):
     """The self-collected route pools per text on the fly and reproduces the
     shared-cache route bit for bit."""
