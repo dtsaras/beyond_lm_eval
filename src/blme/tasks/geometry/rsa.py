@@ -152,11 +152,14 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             "_meta_rsa_min_continuity_layer_euclidean": euc["min_continuity_layer"],
             "_meta_rsa_n_undefined_pairs_euclidean": euc["n_undefined_pairs"],
             # Headline: angular (correlation-distance) RDMs.
-            "rsa_adjacent_mean_corrdist": cor["adjacent_mean"],
+            # Only the adjacent minimum and the endpoint pair survive identity
+            # blocks (P4); the uniform mean, spread and the index-based
+            # first-middle pair are _meta_ profile summaries (test_rsa.py).
+            "_meta_rsa_adjacent_mean_corrdist": cor["adjacent_mean"],
             "rsa_adjacent_min_corrdist": cor["adjacent_min"],
-            "rsa_adjacent_std_corrdist": cor["adjacent_std"],
+            "_meta_rsa_adjacent_std_corrdist": cor["adjacent_std"],
             "rsa_early_late_corrdist": cor["early_late"],
-            "rsa_first_middle_corrdist": cor["first_middle"],
+            "_meta_rsa_first_middle_corrdist": cor["first_middle"],
             "_meta_rsa_min_continuity_layer_corrdist": cor["min_continuity_layer"],
             "_meta_rsa_n_undefined_pairs_corrdist": cor["n_undefined_pairs"],
             "_meta_n_layers": int(n_layers),

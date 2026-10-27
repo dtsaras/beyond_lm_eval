@@ -58,6 +58,26 @@ def test_headline_is_angular_not_norm_driven(tiny_states):
     inv.assert_moves(base, sc, "_meta_rsa_adjacent_mean_euclidean", 1e-3)
 
 
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_headline_is_depth_invariant_under_identity_insertion(
+        tiny_states, tiny_identity_states):
+    """P4: identity blocks move no headline key; the adjacent mean (now
+    _meta_) does (known negative)."""
+    base = inv.run_task_on_states(TASK, tiny_states)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states)
+    assert ins["_meta_n_layers"] == base["_meta_n_layers"] + 2
+    keys = _headline(base)
+    assert set(keys) == {"rsa_adjacent_min_corrdist", "rsa_early_late_corrdist"}
+    inv.assert_invariant(base, ins, keys, rtol=1e-9)
+    inv.assert_moves(base, ins, "_meta_rsa_adjacent_mean_corrdist", 1e-3)
+
+
 @pytest.mark.parametrize("attrs", [{}, {"num_hidden_layers": None, "n_layer": None}])
 def test_legacy_cache_trims_only_the_post_norm_entry(attrs):
     """Without the deepest-block capture exactly the post-norm entry is dropped,
