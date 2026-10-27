@@ -4,8 +4,6 @@ Width: a Llama (RMSNorm) model zero-padded from d to k*d with every function
 preserved (dead residual coordinates, gains divided by sqrt(k), eps by k).
 Scale: the residual-scale gauge with eps rescaled (exact for power-of-two c).
 """
-import copy
-import math
 import sys
 from pathlib import Path
 
@@ -15,8 +13,10 @@ import torch
 pytest.importorskip("sklearn")
 transformers = pytest.importorskip("transformers")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import invariance as inv  # noqa: E402
+from repe_width_padding import zero_pad_llama_width  # noqa: E402
 from blme.tasks.repe import steering  # noqa: E402
 from blme.tasks.repe.steering import SteeringEffectivenessTask  # noqa: E402
 
@@ -40,33 +40,6 @@ def llama(tok):
         num_hidden_layers=3, num_attention_heads=4, num_key_value_heads=2,
         max_position_embeddings=128, attn_implementation="eager")
     return transformers.LlamaForCausalLM(cfg).eval()
-
-
-def zero_pad_llama_width(model, k=4):
-    """Function-preserving width padding d -> k*d of a Llama-family model.
-
-    Residual-reading projections get zero input columns, residual-writing ones
-    zero output rows, embeddings/unembedding zero columns; RMSNorm over k*d sees
-    mean(x^2)/k, so its eps is divided by k and its live gains by sqrt(k).
-    """
-    cfg = copy.deepcopy(model.config)
-    d = cfg.hidden_size
-    cfg.head_dim = getattr(cfg, "head_dim", None) or d // cfg.num_attention_heads
-    cfg.hidden_size = k * d
-    cfg.rms_norm_eps = cfg.rms_norm_eps / k
-    new = type(model)(cfg).eval()
-    src = model.state_dict()
-    with torch.no_grad():
-        for name, p in new.state_dict().items():
-            s = src[name]
-            p.zero_()
-            if name.endswith("norm.weight"):
-                p[:d] = s / math.sqrt(k)
-            elif p.ndim == 2:
-                p[:s.shape[0], :s.shape[1]] = s
-            else:
-                p[:s.shape[0]] = s
-    return new
 
 
 def _isotropic_controls(model, tokenizer, layers, num_layers, device, n_draws):

@@ -6263,11 +6263,14 @@ def test_repe_concept_separability_full_pipeline_matches_sklearn_cv():
     dataset = [{"text": pool[i], "label": int(labels[i])} for i in range(2 * n)]
 
     # ---- BLME full pipeline ------------------------------------------------
+    # The logistic-regression AUC on mean-pooled sentences is the task's
+    # `_meta_` (legacy) estimator; the headline is the RepE LAT reading, pinned
+    # in tests/tasks/parity/test_repe_concept_separability_lat_parity.py.
     task = ConceptSeparabilityTask(config={"num_samples": n})
     out = task.evaluate(model, tok, [dict(d) for d in dataset])
     assert "error" not in out, out
-    blme_aucs = out["layer_separability_auc"]
-    blme_accs = out["layer_separability_acc"]
+    blme_aucs = out["_meta_layer_separability_auc"]
+    blme_accs = out["_meta_layer_separability_acc"]
 
     # ---- INDEPENDENT reference --------------------------------------------
     # Re-extract the exact mean-pooled per-layer activations (hidden_states
@@ -6315,9 +6318,9 @@ def test_repe_concept_separability_full_pipeline_matches_sklearn_cv():
         assert got == pytest.approx(exp, rel=1e-9, abs=1e-9)
 
     # Summary fields are the documented reductions of the per-layer AUC list.
-    assert out["max_auc_layer"] == int(np.argmax(ref_aucs))
-    assert out["max_auc"] == pytest.approx(float(np.max(ref_aucs)), rel=1e-9, abs=1e-9)
-    assert out["mean_auc"] == pytest.approx(float(np.mean(ref_aucs)), rel=1e-9, abs=1e-9)
+    assert out["_meta_max_auc_layer"] == int(np.argmax(ref_aucs))
+    assert out["_meta_max_auc"] == pytest.approx(float(np.max(ref_aucs)), rel=1e-9, abs=1e-9)
+    assert out["_meta_mean_auc"] == pytest.approx(float(np.mean(ref_aucs)), rel=1e-9, abs=1e-9)
 
     # The dataset is engineered to be non-degenerate: at least one layer must
     # have an AUC strictly inside (0.01, 0.99). This guards against the trivial
@@ -6328,8 +6331,8 @@ def test_repe_concept_separability_full_pipeline_matches_sklearn_cv():
     out2 = ConceptSeparabilityTask(config={"num_samples": n}).evaluate(
         model, tok, [dict(d) for d in dataset]
     )
-    assert out2["layer_separability_auc"] == out["layer_separability_auc"]
-    assert out2["layer_separability_acc"] == out["layer_separability_acc"]
+    assert out2["_meta_layer_separability_auc"] == out["_meta_layer_separability_auc"]
+    assert out2["_meta_layer_separability_acc"] == out["_meta_layer_separability_acc"]
 
 # === repe_refusal_direction  [NUMERIC_PARITY / strong_independent_numeric / ref=transcribed_repo] ===
 def test_repe_refusal_direction():

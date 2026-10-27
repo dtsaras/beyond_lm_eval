@@ -1,4 +1,14 @@
-"""``repe_concept_separability``: linear separability of a concept per layer."""
+"""``repe_concept_separability``: RepE LAT concept reading (Zou et al. 2023).
+
+The headline follows the released concept-reading protocol
+(andyzoujm/representation-engineering @5455d8a): LAT task template,
+``rep_token=-1`` on the raw hidden-state tuple, ``hidden_layers = -1..-(L-1)``,
+PCA(1) of the paired differences as the reading vector with its sign from the
+training labels, pairwise choice accuracy, and the layer chosen on a
+validation split with the test accuracy reported there. The earlier
+logistic-regression AUC on mean-pooled sentences is kept as ``_meta_``.
+"""
+import random
 import re
 
 import numpy as np
@@ -134,15 +144,136 @@ def _auc_summary(layer_aucs, layer_accs):
     }
 
 
+# LAT task template for the truthfulness concept (Zou et al. 2023 Sec 3.1.1:
+# "Consider the amount of <concept> in the following: ... The amount of
+# <concept> is"); the stimulus is the statement.
+_LAT_TEMPLATE = ("Consider the amount of truthfulness in the following statement:\n"
+                 "{s}\nThe amount of truthfulness in the statement is")
+
+
+def _rep_token(policy):
+    """The token index a ``paper_protocol:... rep_token=K`` policy reads (-1 default)."""
+    m = re.search(r"rep_token=(-?\d+)", policy or "")
+    return int(m.group(1)) if m else -1
+
+
+def _pairs(samples, labels):
+    """(positive, negative) sample pairs in order, with one group id per pair.
+
+    The bundled set is laid out as all positives then all negatives with
+    matching order; caller rows are paired the same way. A pair takes its
+    positive's ``group`` when every row has one, else its own index.
+    """
+    pos = [s for s, y in zip(samples, labels) if y == 1]
+    neg = [s for s, y in zip(samples, labels) if y == 0]
+    n = min(len(pos), len(neg))
+    pairs = list(zip(pos[:n], neg[:n]))
+    if pairs and all(isinstance(a, dict) and a.get("group") is not None for a, _ in pairs):
+        gid = [a["group"] for a, _ in pairs]
+    else:
+        gid = list(range(n))
+    return pairs, gid
+
+
+def _reading_states(model, tokenizer, texts, num_layers, device, rep_token):
+    """``{h: (n, d) float32}`` at ``rep_token`` for h in -1..-(L-1).
+
+    post-final-norm=False, DELIBERATELY: ``rep_reading_pipeline.py:23-27``
+    reads ``outputs['hidden_states'][layer][:, rep_token]`` from the raw tuple
+    (hs[-1] is post-ln_f) and casts bf16 to float32.
+    """
+    hidden_layers = list(range(-1, -num_layers, -1))
+    states = {h: [] for h in hidden_layers}
+    last_ids = []
+    with torch.no_grad():
+        for text in texts:
+            enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(device)
+            last_ids.append(int(enc["input_ids"][0, rep_token]))
+            hs = model(**enc, output_hidden_states=True).hidden_states
+            for h in hidden_layers:
+                states[h].append(hs[h][0, rep_token].detach().float().cpu().numpy())
+    return {h: np.stack(v).astype(np.float32) for h, v in states.items()}, hidden_layers, last_ids
+
+
+def _project(H, mean, direction):
+    """``rep_readers.recenter`` + ``project_onto_direction`` (float32 torch)."""
+    x = torch.Tensor(H) - torch.Tensor(mean)
+    d = torch.Tensor(direction)
+    return x.matmul(d) / torch.norm(d)
+
+
+def _pca_reader(H_train, train_labels):
+    """``PCARepReader`` on one layer: PCA(1) of the recentred differences of
+    consecutive (shuffled) pairs, then the sign from the training labels
+    (``rep_readers.py:137-184``, ``rep_reading_pipeline.py:141-156``)."""
+    from sklearn.decomposition import PCA
+    rel = H_train[::2] - H_train[1::2]
+    mean = rel.mean(axis=0, keepdims=True)
+    centred = (torch.Tensor(rel) - torch.Tensor(mean)).numpy()
+    pca = PCA(n_components=1, whiten=False).fit(np.vstack(centred))
+    direction = pca.components_[0].astype(np.float32)
+    proj = _project(H_train, mean, direction).numpy()
+    outs = [proj[i:i + 2] for i in range(0, len(proj), 2)]
+    p_min = np.mean([o[lab.index(1)] == min(o) for o, lab in zip(outs, train_labels)])
+    p_max = np.mean([o[lab.index(1)] == max(o) for o, lab in zip(outs, train_labels)])
+    sign = np.sign(np.mean(p_max) - np.mean(p_min))
+    return direction, mean, (1.0 if sign == 0 else float(sign)), float(pca.explained_variance_ratio_[0])
+
+
+def _choice_accuracy(H_true, H_false, mean, direction, sign):
+    """``rep_reading_eval.py:67-75``: a pair is correct when the true item has
+    the larger (sign +1) / smaller (sign -1) projection."""
+    pt = _project(H_true, mean, direction).numpy()
+    pf = _project(H_false, mean, direction).numpy()
+    pick = np.argmax if sign != -1 else np.argmin
+    return float(np.mean([pick([a, b]) == 0 for a, b in zip(pt, pf)]))
+
+
+def _lat_reading(states, hidden_layers, n_pairs, gid, seed):
+    """Val-selected-layer test accuracy, averaged over the 3 rotations of three
+    group folds (each fold is the test split once; train and val are the other
+    two), so every bundled pair is tested once and entity-swap partners never
+    straddle a split."""
+    from sklearn.model_selection import GroupKFold
+    folds = [te for _, te in GroupKFold(n_splits=3).split(
+        np.zeros(n_pairs), np.zeros(n_pairs), np.asarray(gid))]
+    per_rot = []
+    for r in range(3):
+        te, tr, va = folds[r], folds[(r + 1) % 3], folds[(r + 2) % 3]
+        rng = random.Random(seed)
+        order = []
+        for _ in tr:
+            o = [0, 1]           # 0 = the true statement
+            rng.shuffle(o)
+            order.append(o)
+        train_labels = [[int(j == 0) for j in o] for o in order]
+        val, test, evr = [], [], []
+        for h in hidden_layers:
+            T, Fz = states[h]
+            H_train = np.concatenate([(T if j == 0 else Fz)[[i]]
+                                      for i, o in zip(tr, order) for j in o], axis=0)
+            direction, mean, sign, ev = _pca_reader(H_train, train_labels)
+            val.append(_choice_accuracy(T[va], Fz[va], mean, direction, sign))
+            test.append(_choice_accuracy(T[te], Fz[te], mean, direction, sign))
+            evr.append(ev)
+        best = val.index(max(val))      # first maximum in -1, -2, ... order
+        per_rot.append({"layer": hidden_layers[best], "val": val[best], "test": test[best],
+                        "val_curve": val, "test_curve": test, "evr": evr})
+    return per_rot
+
+
 @register_task("repe_concept_separability")
 class ConceptSeparabilityTask(DiagnosticTask):
-    """Held-out linear separability (AUC/accuracy) of a concept at each layer.
+    """RepE LAT concept reading of truthfulness (Zou et al. 2023, arXiv:2310.01405).
 
-    Following Zou et al. (2023), tests whether a concept is linearly readable
-    from the representations. Estimator: stratified/grouped-CV logistic
-    regression on the mean-pooled sentence state of every block (hs[1..L] of
-    the raw tuple, as the released reader indexes it).
+    Each true/false statement is wrapped in the LAT template and read at the
+    last token at hidden_states -1..-(L-1). Per layer, the reading vector is
+    PCA(1) of the training pairs' differences; a held-out pair is correct when
+    the true statement projects further along it. The layer is chosen on a
+    validation split and ``lat_test_acc`` is the test accuracy there.
     """
+
+    TOKEN_POLICY = "paper_protocol:Zou2023 rep_token=-1"
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Concept Separability Analysis (RepE)...")
@@ -150,7 +281,7 @@ class ConceptSeparabilityTask(DiagnosticTask):
         if not _common.HAS_SKLEARN:
             return {"error": "scikit-learn is required for concept separability. Install via: pip install scikit-learn"}
 
-        num_samples = self.config.get("num_samples", 20)
+        num_samples = self.config.get("num_samples", len(_FACT_PAIRS))
 
         # Only a dataset whose every row carries a real label is used; the
         # caller's corpus is never mutated.
@@ -174,6 +305,10 @@ class ConceptSeparabilityTask(DiagnosticTask):
         if _counts.min() < 2:
             return {"error": "concept labels too imbalanced for stratified CV "
                              f"(class counts: {_counts.tolist()})"}
+        pairs, gid = _pairs(samples, labels)
+        if len(set(gid)) < 3:
+            return {"error": "the LAT protocol needs at least 3 independent pair "
+                             f"groups for train/val/test (got {len(set(gid))})"}
 
         device = next(model.parameters()).device
         layers = get_layers(model)
@@ -181,18 +316,64 @@ class ConceptSeparabilityTask(DiagnosticTask):
             return {"error": "Could not detect model layers"}
         num_layers = len(layers)
 
+        out = self._lat_headline(model, tokenizer, pairs, gid, num_layers, device)
+        out.update(self._legacy_lr_auc(model, tokenizer, samples, texts, labels,
+                                       used_fallback, num_layers, device))
+        return out
+
+    def _lat_headline(self, model, tokenizer, pairs, gid, num_layers, device):
+        rep_token = _rep_token(self.TOKEN_POLICY)
+        use_template = bool(self.config.get("lat_template", True))
+        fmt = (lambda t: _LAT_TEMPLATE.format(s=t)) if use_template else (lambda t: t)
+        texts = [fmt(a["text"]) for a, _ in pairs] + [fmt(b["text"]) for _, b in pairs]
+        raw, hidden_layers, last_ids = _reading_states(
+            model, tokenizer, texts, num_layers, device, rep_token)
+        n = len(pairs)
+        states = {h: (raw[h][:n], raw[h][n:]) for h in hidden_layers}
+        rot = _lat_reading(states, hidden_layers, n, gid, int(self.config.get("seed", 0)))
+
+        # hidden_states index of -k is L+1-k: depth fraction in [2/L, 1].
+        frac = [(num_layers + 1 + r["layer"]) / num_layers for r in rot]
+        asc = sorted(range(len(hidden_layers)), key=lambda i: hidden_layers[i])
+        special = set(getattr(tokenizer, "all_special_ids", None) or [])
+        return {
+            "lat_test_acc": float(np.mean([r["test"] for r in rot])),
+            "lat_layer_frac": float(np.mean(frac)),
+            "_meta_lat_val_acc": float(np.mean([r["val"] for r in rot])),
+            "_meta_lat_selected_layers": [int(num_layers + 1 + r["layer"]) for r in rot],
+            "_meta_layer_lat_test_acc": [float(np.mean([r["test_curve"][i] for r in rot])) for i in asc],
+            "_meta_layer_lat_val_acc": [float(np.mean([r["val_curve"][i] for r in rot])) for i in asc],
+            "_meta_layer_pca_explained_ratio": [float(np.mean([r["evr"][i] for r in rot])) for i in asc],
+            "_meta_lat_hidden_state_indices": [int(num_layers + 1 + hidden_layers[i]) for i in asc],
+            "_meta_lat_n_pairs": int(n),
+            "_meta_lat_n_groups": int(len(set(gid))),
+            "_meta_lat_rotations": len(rot),
+            "_meta_rep_token": int(rep_token),
+            "_meta_lat_template_used": use_template,
+            # The share of readouts that land on a special token (e.g. an
+            # appended EOS), which a last-token protocol would read.
+            "_meta_rep_token_is_special_frac": float(np.mean([i in special for i in last_ids])),
+        }
+
+    def _legacy_lr_auc(self, model, tokenizer, samples, texts, labels, used_fallback,
+                       num_layers, device):
+        """The earlier estimator, ``_meta_`` only: CV logistic-regression AUC on
+        mean-pooled raw sentences. An unstandardised L2 penalty makes it move
+        under a function-preserving residual rescale."""
         layer_reps = self._mean_pooled_states(model, tokenizer, texts, num_layers, device)
         y = np.array(labels)
         n_splits = min(3, np.min(np.bincount(y)))
         if n_splits < 2: n_splits = 2
         split = self._splitter(samples, y, used_fallback, n_splits)
-
         layer_aucs, layer_accs = [], []
         for l_idx in range(num_layers):
             auc, acc = self._layer_cv(np.array(layer_reps[l_idx]), y, n_splits, split)
             layer_aucs.append(auc)
             layer_accs.append(acc)
-        return _auc_summary(layer_aucs, layer_accs)
+        summ = _auc_summary(layer_aucs, layer_accs)
+        if "error" in summ:
+            return {"_meta_lr_error": summ["error"]}
+        return {f"_meta_{k}": v for k, v in summ.items()}
 
     @staticmethod
     def _binary_labels(samples):

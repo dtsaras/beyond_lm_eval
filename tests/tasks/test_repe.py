@@ -91,9 +91,10 @@ def test_concept_separability(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # May error if get_layers returns None for this architecture
     if "error" not in results:
-        assert "layer_separability_auc" in results
-        assert "max_auc" in results
-        assert 0 <= results["max_auc"] <= 1.0
+        assert "_meta_layer_separability_auc" in results
+        assert "_meta_max_auc" in results
+        assert 0 <= results["lat_test_acc"] <= 1.0
+        assert 0 < results["lat_layer_frac"] <= 1.0
 
 
 def test_refusal_direction_architecture_agnostic_output(mock_model, mock_tokenizer):
@@ -236,12 +237,13 @@ def test_concept_separability_runs_on_default_text_corpus(mock_model, mock_token
     corpus = [{"text": f"Wikipedia sentence number {i}."} for i in range(8)]
     snapshot = copy.deepcopy(corpus)
 
-    task = ConceptSeparabilityTask(config={"num_samples": 4})
+    # 8 bundled pairs form 4 entity groups; the LAT train/val/test split needs 3.
+    task = ConceptSeparabilityTask(config={"num_samples": 8})
     res_text = task.evaluate(mock_model, mock_tokenizer, dataset=corpus)
     assert corpus == snapshot, "task mutated the caller's shared corpus"
     assert isinstance(res_text, dict)
     assert "error" not in res_text, res_text
-    assert "mean_auc" in res_text
+    assert "lat_test_acc" in res_text and "_meta_mean_auc" in res_text
 
     # Bare strings — the other unlabelled shape a caller can pass.
     res_str = task.evaluate(mock_model, mock_tokenizer,
@@ -252,8 +254,9 @@ def test_concept_separability_runs_on_default_text_corpus(mock_model, mock_token
     # the same bundled fact pairs, so all three must produce the same number.
     res_none = task.evaluate(mock_model, mock_tokenizer, dataset=None)
     assert "error" not in res_none, res_none
-    assert res_text["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
-    assert res_str["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
+    for key in ("lat_test_acc", "_meta_mean_auc"):
+        assert res_text[key] == pytest.approx(res_none[key], abs=1e-12)
+        assert res_str[key] == pytest.approx(res_none[key], abs=1e-12)
 
     # And a LABELLED GENERATOR must still work — the case the broken fix was
     # written for, which must not regress while fixing the common path.
