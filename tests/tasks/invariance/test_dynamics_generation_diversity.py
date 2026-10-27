@@ -61,6 +61,29 @@ WORD_KEYS = ["mean_self_bleu", "distinct_1", "distinct_2", "distinct_3",
              "mean_distinct_1", "mean_distinct_2", "mean_distinct_3"]
 
 
+def test_self_bleu_reported_at_texygen_orders_2_to_5():
+    """Texygen reports Self-BLEU at orders 2-5; each equals Texygen's own
+    calc_bleu (one sentence_bleu per order, uniform weights, method1), and
+    order 4 is mean_self_bleu."""
+    pytest.importorskip("nltk")
+    from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
+    from blme.tasks.dynamics.generation_diversity import _self_bleu_orders, _word_tokenize
+    words = [_word_tokenize(t)[0] for t in COMPLETIONS]
+    for i, hyp in enumerate(words):
+        refs = words[:i] + words[i + 1:]
+        got = _self_bleu_orders(hyp, refs)
+        for n in (2, 3, 4, 5):
+            want = sentence_bleu(refs, hyp, tuple(1.0 / n for _ in range(n)),
+                                 smoothing_function=SmoothingFunction().method1)
+            assert got[n] == want, (i, n)
+    out = _run("gpt2", CFG)
+    assert out["_meta_self_bleu_gram"] == 4
+    for n in (2, 3, 5):
+        assert f"_meta_self_bleu_{n}" in out
+    assert out["_meta_self_bleu_2"] > out["_meta_self_bleu_3"] > out["mean_self_bleu"] \
+        > out["_meta_self_bleu_5"]
+
+
 def test_word_unit_metrics_do_not_depend_on_the_tokenizer():
     """The same six completions through two tokenizers (gpt2, pythia) give the
     same Self-BLEU and distinct-n over words (Texygen's unit); the subword forms

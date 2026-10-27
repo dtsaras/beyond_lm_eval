@@ -151,6 +151,32 @@ def _self_bleu_single(hypothesis: List[int], references: List[List[int]],
     ))
 
 
+# Texygen reports Self-BLEU at n-gram orders 2-5 (docs/evaluation.md, the
+# paper's result tables); its SelfBleu class defaults to 3. BLME emits all four
+# and keeps order 4 as mean_self_bleu (also Holtzman et al. 2020's Self-BLEU4).
+SELF_BLEU_ORDERS = (2, 3, 4, 5)
+SELF_BLEU_HEADLINE_ORDER = 4
+
+
+def _self_bleu_orders(hypothesis: List, references: List[List],
+                      orders=SELF_BLEU_ORDERS) -> Dict[int, float]:
+    """Self-BLEU of one hypothesis at several orders in one NLTK pass: the
+    modified precisions p_1..p_max are shared, so this equals one
+    ``sentence_bleu`` call per order (uniform weights, method1)."""
+    if not references or len(hypothesis) < 1:
+        return {n: 0.0 for n in orders}
+    try:
+        from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+    except ImportError:
+        return {n: _self_bleu_single_fallback(hypothesis, references, n) for n in orders}
+    weights = [tuple(1.0 / n for _ in range(n)) for n in orders]
+    vals = sentence_bleu(references, hypothesis, weights,
+                         smoothing_function=SmoothingFunction().method1)
+    if not isinstance(vals, list):
+        vals = [vals] * len(orders)
+    return {n: float(v) for n, v in zip(orders, vals)}
+
+
 def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]],
                                max_n: int = 4) -> float:
     """NLTK-free fallback for Self-BLEU (used only when nltk is unavailable).
@@ -349,14 +375,16 @@ class GenerationDiversityTask(DiagnosticTask):
             return {"error": "No completions generated"}
 
         # Texygen aggregation: every completion against every other one.
-        def _self_bleu_mean(units):
-            vals = []
+        def _self_bleu_means(units, orders=SELF_BLEU_ORDERS):
+            vals = {n: [] for n in orders}
             for i, comp in enumerate(units):
                 refs = [c for j, c in enumerate(units) if j != i]
                 if refs:
-                    vals.append(_self_bleu_single(comp, refs))
-            return float(np.mean(vals)) if vals else float("nan")
-        mean_self_bleu = _self_bleu_mean(all_words)
+                    for n, v in _self_bleu_orders(comp, refs, orders).items():
+                        vals[n].append(v)
+            return {n: float(np.mean(v)) if v else float("nan") for n, v in vals.items()}
+        self_bleu = _self_bleu_means(all_words)
+        mean_self_bleu = self_bleu[SELF_BLEU_HEADLINE_ORDER]
 
         return {
             # Li et al.'s own collection-level ratio (see _distinct_n_corpus),
@@ -377,7 +405,11 @@ class GenerationDiversityTask(DiagnosticTask):
             "_meta_mean_distinct_1_subword": float(np.mean(sub_distinct[1])),
             "_meta_mean_distinct_2_subword": float(np.mean(sub_distinct[2])),
             "_meta_mean_distinct_3_subword": float(np.mean(sub_distinct[3])),
-            "_meta_mean_self_bleu_subword": _self_bleu_mean(all_completions),
+            "_meta_mean_self_bleu_subword": _self_bleu_means(
+                all_completions, (SELF_BLEU_HEADLINE_ORDER,))[SELF_BLEU_HEADLINE_ORDER],
+            "_meta_self_bleu_gram": SELF_BLEU_HEADLINE_ORDER,
+            **{f"_meta_self_bleu_{n}": v for n, v in self_bleu.items()
+               if n != SELF_BLEU_HEADLINE_ORDER},
             # _meta_: equals 1 - _meta_mean_distinct_1_subword by definition.
             "_meta_mean_token_repetition_rate": float(np.mean(all_token_rep_rate)) if all_token_rep_rate else float("nan"),
             "mean_phrase_repetition_rate": float(np.mean(all_phrase_rep_rate)) if all_phrase_rep_rate else float("nan"),
