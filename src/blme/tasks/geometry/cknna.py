@@ -232,6 +232,33 @@ def _remove_outliers(X: torch.Tensor, q: float = 0.95) -> torch.Tensor:
     return X.clamp(min=-bound, max=bound)
 
 
+def _remove_outliers_joint(F, layers, q: float = 0.95):
+    """``metrics.remove_outliers(exact=False)`` on the stacked (N, L, D)
+    features, as ``measure_alignment.py:103`` applies it: each text's
+    ``q``-quantile of |x| over ALL its layers and dims, averaged over texts,
+    gives ONE bound that clamps every layer.
+
+    Quantiles are taken row by row (the same per-row values as the batched
+    call, without materialising N x L x D), float32 first and double only if
+    the float32 bound is non-finite, as ``_remove_outliers``. Returns
+    ``({layer: clamped (N, D)}, bound)``.
+    """
+    n = int(F[layers[0]].shape[0])
+
+    def _bound(dtype):
+        qs = [torch.quantile(torch.cat([F[li][i].to(dtype) for li in layers]).abs(), q)
+              for i in range(n)]
+        return torch.stack(qs).mean()
+
+    bound = _bound(torch.float32)
+    if not torch.isfinite(bound):
+        bound = _bound(torch.float64)
+        if not torch.isfinite(bound):
+            return {li: F[li].float() for li in layers}, float("nan")
+    out = {li: F[li].float().clamp(min=-bound, max=bound) for li in layers}
+    return out, float(bound)
+
+
 def _l2_normalize(X: torch.Tensor) -> torch.Tensor:
     """Row-wise L2 normalisation, matching the reference preprocessing
     (``measure_alignment.py:compute_score`` -> ``F.normalize(x, p=2, dim=-1)``)."""
@@ -378,11 +405,14 @@ class CKNNATask(DiagnosticTask):
             }
 
         def _prepare(F):
-            # Reference order: remove_outliers -> normalize.
-            return {li: _l2_normalize(_remove_outliers(F[li].float())) for li in F}
+            # Reference order: one joint remove_outliers bound -> per-layer
+            # row normalisation (measure_alignment.py:103, compute_score).
+            ls = sorted(F)
+            clamped, bound = _remove_outliers_joint(F, ls)
+            return {li: _l2_normalize(clamped[li]) for li in ls}, bound
 
         logger.info("  Normalising activations...")
-        normed = _prepare(feats)
+        normed, _clamp_bound = _prepare(feats)
 
         logger.info("  Computing CKNNA matrix...")
         cknna_matrix = np.full((n_layers, n_layers), np.nan, dtype=np.float64)
@@ -403,9 +433,9 @@ class CKNNATask(DiagnosticTask):
         # Position-0-excluded pooling (_meta_), endpoint pair only.
         _excl_el = float("nan")
         _ends = (layers[0], layers[-1])
-        if (all(li in feats_excl for li in _ends)
-                and feats_excl[_ends[0]].shape[0] == n_points and n_layers >= 2):
-            _ne = _prepare({li: feats_excl[li] for li in _ends})
+        if (set(feats_excl) == set(layers) and n_layers >= 2
+                and all(feats_excl[li].shape[0] == n_points for li in layers)):
+            _ne, _ = _prepare(feats_excl)
             _excl_el = _cknna(_ne[_ends[0]], _ne[_ends[1]], topk=topk, unbiased=unbiased)
 
         n = n_layers
@@ -445,6 +475,8 @@ class CKNNATask(DiagnosticTask):
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),
             "_meta_pooling": pool,
+            "_meta_outlier_clamp": "joint_over_layers",
+            "_meta_outlier_clamp_bound": float(_clamp_bound),
             "_meta_features_source": str(_info.get("source")),
             "_meta_cknna_order_asymmetry_max": float(_order_gap),
             "_meta_excl_pos0_early_late_cknna": float(_excl_el),

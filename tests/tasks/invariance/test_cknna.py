@@ -3,6 +3,9 @@ joint outlier clamp, embedding layer, 1024 texts), driven through the real
 ``evaluate()``."""
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -27,20 +30,62 @@ def _doc_means(docs):
                         for d in docs]).float()
 
 
-def test_points_are_per_text_means(tiny_states):
-    """Huh et al. score one vector per text (extract_features.py pool='avg'):
-    early_late_cknna equals the reference pipeline on per-document means of
-    the first and last HF entries (the last is post-norm, as in the tuple)."""
-    from blme.tasks.geometry.cknna import _cknna, _l2_normalize, _remove_outliers
+_REF = Path.home() / ".cache" / "blme-refrepos" / "platonic-rep" / "metrics.py"
+
+
+def _reference_remove_outliers():
+    """platonic-rep@dcd76ba ``remove_outliers``, extracted by AST (the module
+    imports torchaudio, which the test environment does not need)."""
+    if not _REF.exists():
+        pytest.skip(f"reference not available: {_REF}")
+    tree = ast.parse(_REF.read_text())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "remove_outliers")
+    ns = {"torch": torch}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(_REF), "exec"), ns)
+    return ns["remove_outliers"]
+
+
+def _all_entries(S):
+    """The raw HF tuple without the embedding: blocks 0..L-2, then post-norm."""
+    return [S.blocks[i] for i in range(S.n_layers - 1)] + [S.final_norm]
+
+
+def test_joint_clamp_matches_the_reference_bit_for_bit():
+    """One bound over all layers, as measure_alignment.py:103 applies
+    remove_outliers(exact=False) to the N x L x D tensor."""
+    from blme.tasks.geometry.cknna import _remove_outliers_joint
+    ref = _reference_remove_outliers()
+    g = torch.Generator().manual_seed(0)
+    F = {li: torch.randn(30, 17, generator=g) * (1 + 10 * li) for li in range(4)}
+    got, bound = _remove_outliers_joint(F, [0, 1, 2, 3])
+    want = ref(torch.stack([F[li] for li in range(4)], dim=1), q=0.95, exact=False)
+    for li in range(4):
+        assert torch.equal(got[li], want[:, li, :])
+
+
+def test_points_are_per_text_means_with_one_joint_clamp(tiny_states):
+    """Huh et al. score one vector per text (extract_features.py pool='avg'),
+    clamped by one bound over all layers: early_late_cknna equals the
+    reference preprocessing on per-document means of the HF entries."""
+    from blme.tasks.geometry.cknna import _cknna, _l2_normalize
+    ref = _reference_remove_outliers()
     r = inv.run_task_on_states(TASK, tiny_states, {"topk": 5})
     S = tiny_states
-    first = _doc_means(S.blocks[0])
-    last = _doc_means(S.final_norm)
-    prep = lambda F: _l2_normalize(_remove_outliers(F))   # noqa: E731
-    want = _cknna(prep(first), prep(last), topk=5, unbiased=True)
+    entries = _all_entries(S)
+    feats = torch.stack([_doc_means(e) for e in entries], dim=1)     # N x L x D
+    clamped = ref(feats, q=0.95, exact=False)
+    first, last = _l2_normalize(clamped[:, 0]), _l2_normalize(clamped[:, -1])
+    want = _cknna(first, last, topk=5, unbiased=True)
     assert r["_meta_n_points"] == S.n_docs
     assert r["_meta_pooling"] == "mean"
+    assert r["_meta_outlier_clamp"] == "joint_over_layers"
     assert r["early_late_cknna"] == pytest.approx(want, rel=1e-6)
+    # Known negative: the per-layer clamp the task used before scores differently.
+    from blme.tasks.geometry.cknna import _remove_outliers
+    per_layer = _cknna(_l2_normalize(_remove_outliers(feats[:, 0])),
+                       _l2_normalize(_remove_outliers(feats[:, -1])), topk=5)
+    assert abs(per_layer - want) > 1e-4
 
 
 def test_pooled_forward_matches_the_cache_route(tiny):
