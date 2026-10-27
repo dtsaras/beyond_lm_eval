@@ -117,3 +117,37 @@ def test_headline_is_width_and_scale_invariant(tiny_states, transform):
     base = inv.run_task_on_states(TASK, tiny_states)
     keys = [k for k in base if not k.startswith("_meta_") and isinstance(base[k], float)]
     inv.assert_invariant(base, inv.run_task_on_states(TASK, St), keys, rtol=1e-5)
+
+
+# --------------------------------------------------------------------------
+# SIZE_INVARIANT declarations, checked against their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.cka import CKATask  # noqa: E402
+
+_NEG_N = {'early_late_cka_debiased': 'early_late_cka', 'min_offdiag_cka_debiased': 'min_offdiag_cka', 'min_adjacent_cka_debiased': 'min_adjacent_cka'}
+
+
+@pytest.fixture(scope="module")
+def null_states(tiny_states):
+    from _family_c import keep_layers, permute_layer_rows
+    L = tiny_states.n_layers
+    return permute_layer_rows(keep_layers(tiny_states, [0, L // 2]), 1, seed=0)
+
+
+@pytest.mark.parametrize("key", sorted(CKATask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_states):
+    """Each declared transform's direct test, plus the known negative: the
+    uniform layer mean under identity blocks, the biased twin under N."""
+    from _family_c import check_size_invariant_entry
+    negatives = {"identity_blocks": "_meta_avg_adjacent_cka"}
+    if key in _NEG_N:
+        negatives["N"] = _NEG_N[key]
+    check_size_invariant_entry(TASK, CKATask, key, tiny_states, tiny_identity_states,
+                               null_states=null_states, negatives=negatives)
+
+
+def test_declarations():
+    assert CKATask.TOKEN_POLICY == "exclude_pos0"
+    assert set(CKATask.SIZE_INVARIANT) <= set(CKATask.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(CKATask.SOURCES)

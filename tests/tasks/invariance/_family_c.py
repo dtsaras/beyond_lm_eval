@@ -81,6 +81,52 @@ def keep_layers(S: "inv.States", layers) -> "inv.States":
     return inv.States(blocks=blocks, final_norm=final, embedding=S.embedding)
 
 
+WIDTH_TRANSFORMS = {
+    "zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+    "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+    "rescale": lambda S: inv.rescale_docs(S, 2.0),
+}
+
+
+def check_size_invariant_entry(task, task_cls, key, states, identity_states,
+                               null_states=None, negatives=None, rtol_width=1e-5,
+                               null_bound=0.03, null_drift=0.1):
+    """Run the direct test for every transform ``task_cls.SIZE_INVARIANT[key]``
+    declares, and its known negative.
+
+    * ``identity_blocks`` -- exact identity blocks inserted (``identity_states``):
+      ``key`` bit-stable (rtol 1e-9); ``negatives["identity_blocks"]`` moves.
+    * ``zero_pad`` / ``isometry`` / ``rescale`` -- ``key`` within ``rtol_width``.
+    * ``N`` -- on a row-permutation null (population value 0), ``key`` stays
+      within ``null_bound`` of 0 at 3 documents (two draws) and at all of them,
+      while ``negatives["N"]`` (the form it replaced) drifts by > ``null_drift``.
+    """
+    transforms, node = task_cls.SIZE_INVARIANT[key]
+    assert node.endswith(f"[{key}]"), node
+    negatives = negatives or {}
+    base = inv.run_task_on_states(task, states)
+    for t in transforms:
+        if t == "identity_blocks":
+            ins = inv.run_task_on_states(task, identity_states)
+            inv.assert_invariant(base, ins, [key], rtol=1e-9)
+            if t in negatives:
+                inv.assert_moves(base, ins, negatives[t], 1e-3)
+        elif t in WIDTH_TRANSFORMS:
+            other = inv.run_task_on_states(task, WIDTH_TRANSFORMS[t](states))
+            inv.assert_invariant(base, other, [key], rtol=rtol_width)
+        elif t == "N":
+            small = [inv.run_task_on_states(task, inv.subsample_docs(null_states, 3, seed=s))
+                     for s in (0, 1)]
+            full = inv.run_task_on_states(task, null_states)
+            for r in small + [full]:
+                assert abs(r[key]) < null_bound, (key, r[key])
+            neg = negatives["N"]
+            drift = np.mean([r[neg] for r in small]) - full[neg]
+            assert drift > null_drift, (neg, drift)
+        else:
+            raise AssertionError(f"no direct test for transform {t!r}")
+
+
 def feature_keys(result):
     """Headline (non-_meta_) numeric scalar keys of a task result."""
     return sorted(k for k, v in result.items() if not k.startswith("_meta_")

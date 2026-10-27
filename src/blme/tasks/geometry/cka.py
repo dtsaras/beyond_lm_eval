@@ -161,6 +161,9 @@ def _max_relative_gram_norm(X: torch.Tensor) -> float:
     return torch.norm(_Xn.t() @ _Xn, p="fro").item()
 
 
+_SI_NODE = "tests/tasks/invariance/test_cka.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_cka")
 class CKATask(DiagnosticTask):
     """Linear CKA (Kornblith et al. 2019, arXiv:1905.00414) between all layers.
@@ -176,6 +179,27 @@ class CKATask(DiagnosticTask):
     (tests/tasks/invariance/test_cka.py).
     """
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:1905.00414",
+        "code": "google-research/google-research@700de9630a39cf1c0ded1ea7d1092ec0f467c7a7"
+                " (representation_similarity/Demo.ipynb)",
+        "llm_precedent": "arXiv:2005.01172 (Wu et al. 2020: linear CKA between "
+                         "layers on token representations)",
+    }
+    HEADLINE_KEYS = (
+        "early_late_cka", "min_offdiag_cka", "min_adjacent_cka",
+        "early_late_cka_debiased", "min_offdiag_cka_debiased",
+        "min_adjacent_cka_debiased",
+    )
+    # Biased keys: depth- and width-free, but carry the d_eff/N floor; the
+    # debiased twins add sample-size invariance.
+    SIZE_INVARIANT = {
+        **{k: (("identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+           for k in ("early_late_cka", "min_offdiag_cka", "min_adjacent_cka")},
+        **{k: (("N", "identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+           for k in ("early_late_cka_debiased", "min_offdiag_cka_debiased",
+                     "min_adjacent_cka_debiased")},
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKA Layer Similarity Analysis...")
