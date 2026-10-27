@@ -89,7 +89,7 @@ def _vary(a, b):
 def _fact_pair_groups(pairs):
     """Union pairs that share a varying word, so entity-swap partners share a
     CV fold (otherwise an entity-keyed probe anti-generalises: held-out AUC
-    below chance). 39 pairs -> 19 groups."""
+    below chance). The 39 bundled pairs form 17 groups."""
     var = [_vary(a, b) for a, b in pairs]
     parent = list(range(len(pairs)))
 
@@ -275,6 +275,17 @@ class ConceptSeparabilityTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "paper_protocol:Zou2023 rep_token=-1"
+    SOURCES = {
+        "paper": "arXiv:2310.01405",
+        "code": "andyzoujm/representation-engineering@5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e",
+        "llm_precedent": "Zou et al. 2023 (the proposing paper is an LLM paper)",
+    }
+    HEADLINE_KEYS = ("lat_test_acc", "lat_layer_frac")
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("residual_scale_gauge", "zero_pad_width"),
+         "tests/tasks/invariance/test_repe_concept_separability.py::"
+         "test_lat_headline_invariant_under_residual_gauge_and_width_padding"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Concept Separability Analysis (RepE)...")

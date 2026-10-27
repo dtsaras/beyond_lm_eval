@@ -32,9 +32,10 @@ def gpt2():
     return model, tok
 
 
-def test_lat_headline_invariant_under_residual_gauge(gpt2):
-    """gpt2 with every residual state x2 (eps rescaled; logits bit-identical):
-    the LAT headline does not move; the legacy LR AUC does."""
+def test_lat_headline_invariant_under_residual_gauge_and_width_padding(gpt2):
+    """Scale: gpt2 with every residual state x2 (eps rescaled; logits
+    bit-identical) leaves the LAT headline bit-identical while the legacy LR
+    AUC moves. Width: 4x function-preserving padding of a Llama model."""
     model, tok = gpt2
     with inv.limit_threads(1):
         ids = tok("The capital of France is Paris.", return_tensors="pt")["input_ids"]
@@ -44,11 +45,7 @@ def test_lat_headline_invariant_under_residual_gauge(gpt2):
     inv.assert_invariant(base, g, HEADLINE, rtol=0.0)
     inv.assert_moves(base, g, "_meta_max_auc", min_rel=1e-3)
 
-
-def test_lat_headline_invariant_under_width_padding():
-    """4x function-preserving width padding of a Llama model."""
-    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
-    model = tiny_llama(len(tok))
-    base = ConceptSeparabilityTask({}).evaluate(model, tok, None)
-    pad = ConceptSeparabilityTask({}).evaluate(zero_pad_llama_width(model), tok, None)
-    inv.assert_invariant(base, pad, HEADLINE + ("_meta_layer_lat_test_acc",), rtol=0.0)
+    small = tiny_llama(len(tok))
+    b = ConceptSeparabilityTask({}).evaluate(small, tok, None)
+    pad = ConceptSeparabilityTask({}).evaluate(zero_pad_llama_width(small), tok, None)
+    inv.assert_invariant(b, pad, HEADLINE + ("_meta_layer_lat_test_acc",), rtol=0.0)
