@@ -282,7 +282,8 @@ class CKATask(DiagnosticTask):
             "mean_offdiag_cka": _stat(off_diag, np.nanmean),
             "std_offdiag_cka": _stat(off_diag, np.nanstd),
             "min_offdiag_cka": _stat(off_diag, np.nanmin),
-            "max_offdiag_cka": _stat(off_diag, np.nanmax),
+            # max_offdiag_cka is not emitted: the most similar pair is an
+            # adjacent one, so it duplicated max_adjacent_cka (65/66 models).
             "early_late_cka": (
                 float(cka_matrix[0, -1]) if n >= 2 else float("nan")
             ),

@@ -51,3 +51,12 @@ def test_position0_and_massive_shares_are_derived(tiny_states, gpt2_states):
     inv.assert_moves(base, sunk, "_meta_incl_pos0_early_late_cka", 1e-3)
     assert base["_meta_rows_policy"] == "exclude_pos0"
     assert base["_meta_rows_n_rows"] == sum(tiny_states.lengths) - tiny_states.n_docs
+
+
+def test_max_offdiag_duplicate_is_not_emitted(tiny_states):
+    """max_offdiag_cka equalled max_adjacent_cka on 65 of 66 study models (the
+    most similar pair is adjacent); the duplicate column is dropped."""
+    r = inv.run_task_on_states(TASK, tiny_states)
+    assert "max_offdiag_cka" not in r
+    off = [k for k in r if "max_offdiag" in k]
+    assert off == [], off
