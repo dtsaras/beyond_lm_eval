@@ -38,3 +38,42 @@ def test_bf16_model_computes_in_fp32(build):
     assert got["_meta_promoted_to_fp32"] is True
     assert {p.dtype for p in bf16.parameters()} == {torch.bfloat16}
     assert not any(p.requires_grad is False for p in bf16.parameters())
+
+
+# tiny gpt2 has 5 blocks; indices are "insert an identity copy after block i".
+DEPTH_LAYOUTS = {"early": [0, 0], "late": [3, 3], "uniform": [0, 1, 2, 3], "end": [4, 4]}
+
+
+@pytest.mark.parametrize("where", sorted(DEPTH_LAYOUTS))
+def test_end_to_end_log_ratio_invariant_under_identity_blocks(where):
+    """log(g_emb / g_final) is bit-identical under identity blocks anywhere,
+    including appended after the last block (its endpoint is the final residual)."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS[where],
+                                        verify_on=token_batches(tok))
+    base, other = _run(model, tok), _run(deeper, tok)
+    inv.assert_invariant(base, other, ["gradient_flow_log_ratio_in_out"], rtol=0.0)
+    assert other["_meta_final_endpoint"] == "final_norm_input"
+
+
+def test_block_input_endpoint_moves_when_a_block_is_appended():
+    """Known negative: the former endpoint (input of the last block) moves."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS["end"])
+    base, other = _run(model, tok), _run(deeper, tok)
+    inv.assert_moves(base, other, "_meta_gradient_flow_log_ratio_block_inputs", 1e-3)
+
+
+def test_end_to_end_log_ratio_invariant_under_residual_rescale():
+    """A common residual-stream rescale (exact for c = 2 with rescaled norm eps)
+    halves every gradient norm and cancels in the ratio."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    scaled = inv.residual_scale_gauge(model, 2.0, rescale_eps=True,
+                                      verify_on=token_batches(tok), atol=0.0)
+    base, other = _run(model, tok), _run(scaled, tok)
+    inv.assert_invariant(base, other, ["gradient_flow_log_ratio_in_out"], rtol=1e-12)
+    assert other["gradient_norm_per_layer"][-1] == pytest.approx(
+        base["gradient_norm_per_layer"][-1] / 2, rel=1e-12)

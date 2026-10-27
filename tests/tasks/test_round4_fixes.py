@@ -95,8 +95,8 @@ def test_gradient_flow_slope_uses_normalised_depth():
     from blme.tasks.dynamics import gradient_flow
 
     src = inspect.getsource(gradient_flow)
-    # Must divide layer indices by (n_layers - 1) before polyfit.
-    assert "n_layers - 1" in src or "n_layers-1" in src
+    # Must divide profile indices by (n_points - 1) before polyfit.
+    assert "n_points - 1" in src or "n_points-1" in src
 
 
 def test_induction_causal_validation_is_raw_accuracy_diff():

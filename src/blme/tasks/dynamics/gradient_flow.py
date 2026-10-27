@@ -17,7 +17,8 @@ expansive/exploding chain a NEGATIVE one: on matched six-layer chains a = 0.5
 gives slope +3.465736 and a = 2 gives -3.465736.
 
 Reported metrics:
-  - **gradient_norm_per_layer**: per-layer Frobenius norm of dL/dh_l.
+  - **gradient_norm_per_layer**: Frobenius norm of dL/dh_l at the input of
+    every block, then at the final residual (the input of the final norm).
   - **gradient_flow_entropy**: Shannon entropy of the normalised per-layer
     norms. High = signal distributed across layers; low = concentrated.
   - **gradient_flow_slope**: linear regression slope of log(norm) vs.
@@ -27,7 +28,8 @@ Reported metrics:
   - **gradient_vanishing_ratio**: fraction of layers where the norm is
     < 10% of the maximum norm. A DISPERSION statistic, direction-free by
     construction (the matched a = 0.5 and a = 2 chains both return 0.333333).
-  - **gradient_flow_log_ratio_in_out**: log(||g_first|| / ||g_last||).
+  - **gradient_flow_log_ratio_in_out**: log(||g_emb|| / ||g_final||), the
+    end-to-end backward gain from the final residual to the embeddings.
     Direction-aware and unit-free -- NEGATIVE means the input-side gradient
     is the smaller one, i.e. vanishing; POSITIVE means exploding.
 
@@ -48,7 +50,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._precision import effective_dtype_meta, fp32_compute
-from ..common import get_layers
+from ..common import get_final_norm, get_layers
 from ..geometry.utils import safe_norm as _safe_norm
 
 logger = logging.getLogger("blme")
@@ -83,7 +85,13 @@ class GradientFlowTask(DiagnosticTask):
         for p in model.parameters():
             p.requires_grad_(False)
 
-        all_norms = []  # list of (n_layers,) arrays
+        # The profile is the input of every block plus the FINAL residual (the
+        # input of the final norm, or the last block's output when there is no
+        # final norm), so its first-to-last ratio is end-to-end.
+        final_norm = get_final_norm(model)
+        n_points = n_layers + 1
+        _endpoint = ["missing"]
+        all_norms = []  # list of (n_points,) arrays
 
         # fp32 arithmetic on a bf16/fp16 model, at every size: bf16 forward and
         # backward double the slope on pythia-160m even with fp32 logits
@@ -113,6 +121,17 @@ class GradientFlowTask(DiagnosticTask):
 
                 handles = [layers[li].register_forward_pre_hook(make_hook(li))
                            for li in range(n_layers)]
+                if final_norm is not None:
+                    handles.append(final_norm.register_forward_pre_hook(
+                        make_hook(n_layers)))
+                    _endpoint[0] = "final_norm_input"
+                else:
+                    def _out_hook(module, args, output):
+                        y = output[0] if isinstance(output, tuple) else output
+                        y.retain_grad()
+                        captured[n_layers] = y
+                    handles.append(layers[-1].register_forward_hook(_out_hook))
+                    _endpoint[0] = "last_block_output"
                 try:
                     out = model(**enc)
                     # Shifted next-token cross-entropy (the training objective),
@@ -134,8 +153,8 @@ class GradientFlowTask(DiagnosticTask):
                     for h in handles:
                         h.remove()
 
-                norms = np.zeros(n_layers, dtype=np.float64)
-                for li in range(n_layers):
+                norms = np.zeros(n_points, dtype=np.float64)
+                for li in range(n_points):
                     if li in captured and captured[li].grad is not None:
                         g = captured[li].grad.detach().float()
                         # Scale-exact norm: `.norm()` underflows long before the data.
@@ -154,39 +173,41 @@ class GradientFlowTask(DiagnosticTask):
         if not all_norms:
             return {"error": "No samples produced gradient norms"}
 
-        mean_norms = np.mean(np.stack(all_norms), axis=0)  # (n_layers,)
+        mean_norms = np.mean(np.stack(all_norms), axis=0)  # (n_points,)
 
-        # Entropy of the normalised norm profile. It is bounded by log(n_layers),
-        # so it is depth-linked; exp(H)/L is emitted as _meta_ only (it moves
+        # Entropy of the normalised norm profile. It is bounded by log(n_points),
+        # so it is depth-linked; exp(H)/n is emitted as _meta_ only (it moves
         # under non-uniform identity-block insertion).
         total = mean_norms.sum()
         if total > 0:
             p = mean_norms / total
             p_pos = p[p > 0]
             flow_entropy = float(-np.sum(p_pos * np.log(p_pos)))
-            flow_entropy_norm = (float(np.exp(flow_entropy) / n_layers)
-                                 if n_layers > 0 else float("nan"))
+            flow_entropy_norm = float(np.exp(flow_entropy) / n_points)
         else:
             flow_entropy = float("nan")
             flow_entropy_norm = float("nan")
 
-        # Slope of log(norm) vs normalised depth i/(n_layers - 1). Exactly-zero
+        # Slope of log(norm) vs normalised depth i/(n_points - 1). Exactly-zero
         # layers are dropped before the log rather than clipped.
         positive = mean_norms > 0
         if positive.sum() >= 2:
-            denom = max(1, n_layers - 1)
-            xs = np.arange(n_layers)[positive] / float(denom)
+            denom = max(1, n_points - 1)
+            xs = np.arange(n_points)[positive] / float(denom)
             ys = np.log(mean_norms[positive])
             slope = float(np.polyfit(xs, ys, 1)[0])
         else:
             slope = float("nan")
 
-        # Direction-aware companion to the vanishing ratio: NEGATIVE = the
-        # input-side gradient is the smaller one = vanishing.
-        if mean_norms[0] > 0 and mean_norms[-1] > 0:
-            log_ratio_in_out = float(np.log(mean_norms[0]) - np.log(mean_norms[-1]))
-        else:
-            log_ratio_in_out = float("nan")
+        # End-to-end backward gain log(g_emb / g_final): NEGATIVE = the
+        # input-side gradient is the smaller one = vanishing. Identity blocks
+        # anywhere and a common residual rescale leave it unchanged.
+        def _log_ratio(a, b):
+            return float(np.log(a) - np.log(b)) if a > 0 and b > 0 else float("nan")
+        log_ratio_in_out = _log_ratio(mean_norms[0], mean_norms[-1])
+        # The former endpoint, the input of the last block, moves when an
+        # identity block is appended.
+        log_ratio_block_inputs = _log_ratio(mean_norms[0], mean_norms[n_layers - 1])
 
         max_norm = mean_norms.max()
         if max_norm > 0:
@@ -201,6 +222,9 @@ class GradientFlowTask(DiagnosticTask):
             "gradient_flow_slope": slope,
             "gradient_vanishing_ratio": vanishing_ratio,
             "gradient_flow_log_ratio_in_out": log_ratio_in_out,
+            "_meta_gradient_flow_log_ratio_block_inputs": log_ratio_block_inputs,
+            "_meta_final_endpoint": _endpoint[0],
+            "_meta_n_profile_points": n_points,
             "gradient_norm_mean": float(mean_norms.mean()),
             "gradient_norm_max": float(mean_norms.max()),
             "gradient_norm_min": float(mean_norms.min()),
