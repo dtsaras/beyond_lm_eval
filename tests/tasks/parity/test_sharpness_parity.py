@@ -49,6 +49,8 @@ from pyhessian import hessian  # noqa: E402
 
 # BLME's ACTUAL kernel helpers — imported, not reimplemented.
 from blme.tasks.dynamics.sharpness import (  # noqa: E402
+    _HessianOperator,
+    _hutchinson_trace,
     _hvp,
     _make_random_vec,
     _flatten_grads,
@@ -106,17 +108,23 @@ def _pyhessian_lambda_max(model, criterion, x, y):
     return float(eigvals[0])
 
 
-def _blme_lambda_max(model, criterion, x, y, n_power_iter=200):
-    """Drive the REAL evaluate() kernel: _power_iteration_top_eigenvalue."""
-    torch.manual_seed(999)
+def _blme_lambda_max(model, criterion, x, y, n_power_iter=200, tol=0.0, seed=999,
+                     status=None):
+    """Drive the REAL evaluate() kernel: _power_iteration_top_eigenvalue.
+
+    tol=0 runs the full budget (convergence of the kernel itself); a positive
+    tol applies PyHessian's stopping rule.
+    """
+    torch.manual_seed(seed)
     params = [p for p in model.parameters() if p.requires_grad]
 
     def compute_loss():
         return criterion(model(x), y)
 
-    v = _make_random_vec(params, rademacher=False)  # Gaussian init, as BLME
+    # PyHessian's own draw: float32 torch.randn(p.size()) per parameter, global RNG.
+    v = [torch.randn(p.size()).to(p.dtype) for p in params]
     return _power_iteration_top_eigenvalue(
-        lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter
+        _HessianOperator(compute_loss, params), v, n_power_iter, status=status, tol=tol
     )
 
 
@@ -142,12 +150,76 @@ def test_pyhessian_matches_exact_lambda_max():
 
 
 def test_blme_matches_pyhessian():
-    """BLME's sharpness == PyHessian's eigenvalues(top_n=1) on same model/loss/data."""
+    """BLME's sharpness == PyHessian's eigenvalues(top_n=1) on same model/loss/data,
+    under the same stopping rule (maxIter 2000, tol 1e-9)."""
     model, criterion, x, y = _build()
     py = _pyhessian_lambda_max(model, criterion, x, y)
-    blme = _blme_lambda_max(model, criterion, x, y)
+    blme = _blme_lambda_max(model, criterion, x, y, n_power_iter=2000, tol=1e-9)
     rel = abs(blme - py) / abs(py)
     assert rel < TOL_REF, f"BLME={blme} PyHessian={py} rel={rel:.3e}"
+
+
+def test_default_loop_matches_pyhessian_defaults_from_the_same_start():
+    """eigenvalues(maxIter=100, tol=1e-3) vs BLME's defaults, same start vector:
+    the same loop up to PyHessian's +1e-6 in its normalisation."""
+    model, criterion, x, y = _build()
+    torch.manual_seed(7)
+    hess = hessian(model, criterion, data=(x, y), cuda=False)
+    py = float(hess.eigenvalues(maxIter=100, tol=1e-3, top_n=1)[0][0])
+    status = {}
+    blme = _blme_lambda_max(model, criterion, x, y, n_power_iter=100, tol=1e-3, seed=7,
+                            status=status)
+    assert abs(blme - py) / abs(py) < TOL_REF, (blme, py)
+    assert status["converged"] and status["n_iter"] < 100
+    assert abs(blme - EXACT_LAMBDA_MAX) / EXACT_LAMBDA_MAX < 1e-2
+
+
+def test_one_hvp_per_iteration():
+    """PyHessian's cost: one HVP per power iteration and per trace probe."""
+    model, criterion, x, y = _build()
+    params = list(model.parameters())
+    H = _HessianOperator(lambda: criterion(model(x), y), params)
+    calls = []
+
+    def counted(v):
+        calls.append(1)
+        return H(v)
+
+    st = {}
+    _power_iteration_top_eigenvalue(counted, _make_random_vec(params, rademacher=False),
+                                    100, status=st, tol=1e-3)
+    assert len(calls) == st["n_iter"]
+    calls.clear()
+    tr = {}
+    samples = _hutchinson_trace(counted, params, n_iter=100, tol=1e-3, status=tr)
+    assert len(calls) == len(samples) == tr["n_iter"]
+
+
+def test_hessian_operator_matches_fresh_graph_hvp():
+    model, criterion, x, y = _build()
+    params = list(model.parameters())
+    H = _HessianOperator(lambda: criterion(model(x), y), params)
+    torch.manual_seed(3)
+    v = _make_random_vec(params, rademacher=False)
+    a = _flatten_grads(H(v))
+    b = _flatten_grads(_hvp(criterion(model(x), y), params, v))
+    assert torch.allclose(a, b, rtol=1e-12, atol=1e-14)
+
+
+def test_hutchinson_matches_pyhessian_trace_on_the_same_probes():
+    """PyHessian trace(maxIter=100, tol=1e-3) and BLME's loop draw the same
+    Rademacher probes from the global RNG and stop at the same probe."""
+    model, criterion, x, y = _build()
+    torch.manual_seed(11)
+    hess = hessian(model, criterion, data=(x, y), cuda=False)
+    torch.manual_seed(11)
+    py = hess.trace(maxIter=100, tol=1e-3)
+    params = list(model.parameters())
+    H = _HessianOperator(lambda: criterion(model(x), y), params)
+    torch.manual_seed(11)
+    blme = _hutchinson_trace(H, params, generator=None, n_iter=100, tol=1e-3)
+    assert len(blme) == len(py)
+    assert np.allclose(blme, py, rtol=1e-12, atol=1e-14)
 
 
 class _Quad(nn.Module):
@@ -175,7 +247,7 @@ def test_signed_eigenvalue_on_negative_dominant_hessian():
     params = [m.theta]
     v = _make_random_vec(params, rademacher=False)
     eig = _power_iteration_top_eigenvalue(
-        lambda vv: _hvp(m.loss(), params, vv), v, 200
+        lambda vv: _hvp(m.loss(), params, vv), v, 200, tol=0.0
     )
     assert eig == pytest.approx(-5.0, abs=1e-9), (
         f"expected signed -5.0 (PyHessian convention), got {eig}"

@@ -33,7 +33,6 @@ References:
 """
 
 import contextlib
-import math
 import logging
 from typing import List, Tuple
 
@@ -93,43 +92,112 @@ def _hvp(loss, params, v_list):
     return [h.detach() for h in hv]
 
 
-def _power_iteration_top_eigenvalue(hvp, v, n_iter: int, status=None) -> float:
-    """Largest-magnitude Hessian eigenvalue via power iteration, returned WITH
-    its sign — the Rayleigh quotient ``v^T H v`` at the converged eigenvector,
-    matching PyHessian's ``eigenvalues(top_n=1)``. Reporting ``||Hv||`` alone
-    (as the old code did) drops the sign and misreports a dominant negative
-    curvature (a saddle) as positive.
+class _HessianOperator:
+    """PyHessian's single-batch operator (hessian.py ``__init__`` and
+    ``utils.hessian_vector_product``): the gradient graph is built once with
+    ``create_graph=True`` and every HVP is one more backward through it."""
 
-    ``hvp(v)`` returns ``H @ v`` as a list of tensors shaped like ``v``.
+    def __init__(self, compute_loss, params):
+        self.params = list(params)
+        self.loss = compute_loss()
+        grads = torch.autograd.grad(self.loss, self.params, create_graph=True)
+        # A gradient that does not depend on the parameters has a zero HVP block.
+        self._live = [i for i, g in enumerate(grads) if g.requires_grad]
+        self.grads = grads
+
+    def __call__(self, v: List[torch.Tensor]) -> List[torch.Tensor]:
+        if not self._live:
+            return [torch.zeros_like(p) for p in self.params]
+        outs = [self.grads[i] for i in self._live]
+        gos = [v[i] for i in self._live]
+        hv = torch.autograd.grad(outs, self.params, grad_outputs=gos,
+                                 retain_graph=True, allow_unused=True)
+        return [torch.zeros_like(p) if h is None else h.detach()
+                for h, p in zip(hv, self.params)]
+
+
+def _dot(a: List[torch.Tensor], b: List[torch.Tensor]) -> float:
+    return float(sum((x * y).sum() for x, y in zip(a, b)).item())
+
+
+def _relative_change(prev: float, cur: float) -> float:
+    """|cur - prev| / |prev|; PyHessian's denominator adds an absolute 1e-6,
+    which makes the stopping rule depend on the Hessian's units (not reproduced)."""
+    if cur == prev:
+        return 0.0
+    return abs(prev - cur) / abs(prev) if prev != 0.0 else float("inf")
+
+
+def _power_iteration_top_eigenvalue(hvp, v, n_iter: int = 100, status=None,
+                                    tol: float = 1e-3) -> float:
+    """Largest-magnitude Hessian eigenvalue, signed, by PyHessian's
+    ``eigenvalues(maxIter=n_iter, tol=tol, top_n=1)`` loop: ONE HVP per
+    iteration, Rayleigh quotient <Hv, v> of the current unit vector, v <- Hv /
+    ||Hv||, stop once the quotient changes by less than ``tol`` (relative) and
+    return the last accepted quotient. ``tol=0`` runs the full budget.
+
+    Two PyHessian details are not reproduced: its normalisation divides by
+    ||v|| + 1e-6 and its stopping test by |lambda| + 1e-6; both are absolute
+    epsilons inside scale-free operations (exact scale-safe norms are used).
+
+    ``status`` receives the iterations used, the last relative change, whether
+    the rule fired, and the residual ||Hv - lambda v|| / |lambda| of the
+    returned pair. A residual below 1 certifies (Weinstein's bound) that the
+    Hessian has an eigenvalue of the reported sign in [lambda - r, lambda + r].
     """
-    flat = _flatten_grads(v)
-    # Scale-exact norms (`.norm()` underflows on tiny Hessians).
-    vn = _safe_norm(flat)
+    vn = _safe_norm(_flatten_grads(v))
     if vn > 0:
         v = [vi / vn for vi in v]
-    # Fixed budget; the last relative change is reported, not used to stop.
-    _tol = 1e-7
-    _prev = None
-    _iters = 0
-    _rel = float("nan")
-    for _ in range(max(1, n_iter)):
+    eigenvalue = None
+    resid = float("nan")
+    rel = float("nan")
+    converged = False
+    n_used = 0
+    for _ in range(max(1, int(n_iter))):
         hv = hvp(v)
+        n_used += 1
+        tmp = _dot(hv, v)
         mag = _safe_norm(_flatten_grads(hv))
+        r = _safe_norm(_flatten_grads([h - tmp * vi for h, vi in zip(hv, v)]))
+        tmp_resid = r / abs(tmp) if tmp != 0.0 else float("inf")
         if mag <= 0:
-            if status is not None:
-                status.update(n_iter=_iters, rel_change=0.0, converged=True)
-            return 0.0
+            eigenvalue, resid, converged = 0.0, 0.0, True
+            break
         v = [h / mag for h in hv]
-        _iters += 1
-        _cur = float(sum((h * vi).sum() for h, vi in zip(hvp(v), v)).item())
-        if _prev is not None and _cur != 0.0:
-            _rel = abs(_cur - _prev) / abs(_cur)
-        _prev = _cur
+        if eigenvalue is None:
+            eigenvalue, resid = tmp, tmp_resid
+            continue
+        rel = _relative_change(eigenvalue, tmp)
+        if rel < tol:
+            converged = True
+            break
+        eigenvalue, resid = tmp, tmp_resid
     if status is not None:
-        status.update(n_iter=_iters, rel_change=_rel,
-                      converged=bool(np.isfinite(_rel) and _rel < _tol))
-    hv = hvp(v)
-    return float(sum((h * vi).sum() for h, vi in zip(hv, v)).item())
+        status.update(n_iter=n_used, rel_change=rel, converged=converged,
+                      residual=resid)
+    return float(eigenvalue)
+
+
+def _hutchinson_trace(hvp, params, generator=None, n_iter: int = 100,
+                      tol: float = 1e-3, status=None) -> List[float]:
+    """Hutchinson trace samples v^T H v by PyHessian's ``trace(maxIter, tol)``
+    loop: Rademacher probes, stop once the running mean changes by less than
+    ``tol`` (relative; PyHessian's +1e-6 in the denominator is not reproduced).
+    Returns the samples; their mean is the estimate."""
+    samples: List[float] = []
+    trace = 0.0
+    converged = False
+    for _ in range(max(1, int(n_iter))):
+        v = _make_random_vec(params, rademacher=True, generator=generator)
+        samples.append(_dot(hvp(v), v))
+        mean = float(np.mean(samples))
+        if _relative_change(trace, mean) < tol:
+            converged = True
+            break
+        trace = mean
+    if status is not None:
+        status.update(n_iter=len(samples), converged=converged)
+    return samples
 
 
 def _sam_sharpness(compute_loss, params, sam_rho: float,
@@ -293,8 +361,12 @@ class LossSharpnessTask(DiagnosticTask):
         logger.info("Running Loss-Landscape Sharpness Analysis...")
 
         param_scope = self.config.get("param_scope", "last_layer")
-        n_hutchinson = self.config.get("n_hutchinson", 5)
-        n_power_iter = self.config.get("n_power_iter", 8)
+        # PyHessian's defaults: at most 100 HVPs per estimator, stopping once the
+        # estimate changes by less than tol = 1e-3 (relative).
+        n_hutchinson = int(self.config.get("n_hutchinson", 100))
+        n_power_iter = int(self.config.get("n_power_iter", 100))
+        hutchinson_tol = float(self.config.get("hutchinson_tol", 1e-3))
+        power_iter_tol = float(self.config.get("power_iter_tol", 1e-3))
         sam_rho = self.config.get("sam_rho", 0.05)
         num_samples = self.config.get("num_samples", 4)
         seed = int(self.config.get("seed", 42))
@@ -370,21 +442,19 @@ class LossSharpnessTask(DiagnosticTask):
                     losses.append(loss)
                 return torch.stack(losses).mean()
 
-            loss = compute_loss()
-            baseline_loss = float(loss.item())
+            # PyHessian's single-batch operator: one gradient graph, reused by
+            # every HVP of both estimators, then released.
+            H = _HessianOperator(compute_loss, params)
+            baseline_loss = float(H.loss.item())
 
-            # 1. Hutchinson trace estimator, seeded on the params' device.
+            # 1. Hutchinson trace, PyHessian trace(maxIter=n_hutchinson,
+            # tol=hutchinson_tol), seeded on the params' device.
             gen = torch.Generator(device=params[0].device)
             gen.manual_seed(seed)
-            trace_estimates = []
-            for _ in range(n_hutchinson):
-                v = _make_random_vec(params, rademacher=True, generator=gen)
-                # Build a fresh graph for each HVP because retain_graph
-                # over many calls leaks memory.
-                loss_fresh = compute_loss()
-                hv = _hvp(loss_fresh, params, v)
-                vhv = sum((h * vi).sum() for h, vi in zip(hv, v)).item()
-                trace_estimates.append(vhv)
+            _tr_status = {}
+            trace_estimates = _hutchinson_trace(H, params, generator=gen,
+                                                n_iter=n_hutchinson, tol=hutchinson_tol,
+                                                status=_tr_status)
             mean_trace = float(np.mean(trace_estimates))
             trace_per_param = mean_trace / max(1, n_params)
             # Monte Carlo uncertainty of the trace, reported as a relative SE.
@@ -393,36 +463,16 @@ class LossSharpnessTask(DiagnosticTask):
             _tr_rel_se = (abs(_tr_se / mean_trace) if mean_trace not in (0.0,)
                           and np.isfinite(_tr_se) else float("nan"))
 
-            # 2. Top-1 eigenvalue via power iteration. Report the SIGNED
-            # largest-magnitude eigenvalue (Rayleigh quotient at the converged
-            # eigenvector), like PyHessian — ||Hv|| alone drops the sign.
-            v = _make_random_vec(params, rademacher=False, generator=gen)
-            # Fresh graph per HVP (retain_graph over many calls leaks memory).
+            # 2. Signed top eigenvalue, PyHessian eigenvalues(maxIter=n_power_iter,
+            # tol=power_iter_tol, top_n=1), from its own seeded start vector so
+            # it does not depend on how many trace probes were drawn.
+            gen_pi = torch.Generator(device=params[0].device)
+            gen_pi.manual_seed(seed + 1)
+            v = _make_random_vec(params, rademacher=False, generator=gen_pi)
             _pi_status = {}
             top_eig = _power_iteration_top_eigenvalue(
-                lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter,
-                status=_pi_status,
-            )
-
-            # Sign check: a second run at 4x the iterations. Power iteration
-            # cannot separate a near-degenerate +/-lambda pair (pythia-70m:
-            # -104737 at 10 iterations, +111530 at 64).
-            _sign_stable = None
-            try:
-                _alt_status = {}
-                _alt = _power_iteration_top_eigenvalue(
-                    lambda vv: _hvp(compute_loss(), params, vv),
-                    _make_random_vec(params, rademacher=False, generator=gen),
-                    max(2, n_power_iter * 4), status=_alt_status,
-                )
-                if math.isfinite(_alt) and math.isfinite(top_eig):
-                    _sign_stable = bool(
-                        (_alt >= 0) == (top_eig >= 0)) if (
-                        _alt != 0.0 and top_eig != 0.0) else True
-                    _pi_status["alt_estimate"] = float(_alt)
-                    _pi_status["alt_n_iter"] = int(max(2, n_power_iter * 4))
-            except Exception:
-                _sign_stable = None
+                H, v, n_power_iter, status=_pi_status, tol=power_iter_tol)
+            del H
 
             # 3. SAM-style sharpness (module-level helper so parity tests
             # drive the exact code evaluate() runs, not a transcription).
@@ -454,13 +504,20 @@ class LossSharpnessTask(DiagnosticTask):
             "baseline_loss": baseline_loss,
             "hutchinson_trace_estimate": mean_trace,
             "_meta_hutchinson_trace_rel_se": _tr_rel_se,
+            "_meta_hutchinson_n_used": int(_tr_status.get("n_iter", 0)),
+            "_meta_hutchinson_converged": bool(_tr_status.get("converged", False)),
             "_meta_power_iter_rel_change": float(_pi_status.get("rel_change", float("nan"))),
             "_meta_power_iter_converged": bool(_pi_status.get("converged", False)),
-            # Derived from the 4x run; None when it could not be made.
-            "_meta_top_eigenvalue_sign_stable": _sign_stable,
-            "_meta_top_eigenvalue_alt_estimate": _pi_status.get("alt_estimate"),
-            "_meta_top_eigenvalue_alt_n_iter": _pi_status.get("alt_n_iter"),
             "_meta_power_iter_n_used": int(_pi_status.get("n_iter", 0)),
+            # Sign check at no extra HVP: the residual of the returned pair. Below
+            # 1, an eigenvalue of the reported sign provably exists within
+            # |lambda| * residual of it; a near-degenerate +/- pair caught
+            # mid-rotation (pythia-70m: -104737 at 10 iterations, +111530 at 64)
+            # shows a residual of order 1.
+            "_meta_top_eigenvalue_residual": float(_pi_status.get("residual", float("nan"))),
+            "_meta_top_eigenvalue_sign_certified": bool(
+                np.isfinite(_pi_status.get("residual", float("nan")))
+                and _pi_status.get("residual") < 1.0),
             "hutchinson_trace_per_param": trace_per_param,
             "top_eigenvalue_estimate": top_eig,
             "sam_sharpness": sam_sharpness,
@@ -468,7 +525,11 @@ class LossSharpnessTask(DiagnosticTask):
             "critical_step_size": critical_step,
             "critical_sharpness": critical_sharpness,
             "sam_rho": sam_rho,
-            "n_hutchinson_samples": n_hutchinson,
-            "n_power_iterations": n_power_iter,
+            "n_hutchinson_samples": int(_tr_status.get("n_iter", 0)),
+            "n_power_iterations": int(_pi_status.get("n_iter", 0)),
+            "_meta_hutchinson_max_iter": n_hutchinson,
+            "_meta_hutchinson_tol": hutchinson_tol,
+            "_meta_power_iter_max_iter": n_power_iter,
+            "_meta_power_iter_tol": power_iter_tol,
             **effective_dtype_meta(_prec),
         }

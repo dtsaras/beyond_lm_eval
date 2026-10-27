@@ -261,14 +261,12 @@ dynamics_stability:
 
 dynamics_sharpness:
   param_scope: last_layer
-  # Raised 5 -> 24 and 8 -> 64 (2026-09-04). At the shipped values the
-  # Hutchinson trace had 86.2% relative standard error and power
-  # iteration was 1.78% low on an analytic MLP with an exact answer.
-  # Both are now reported with their uncertainty/convergence, and the
-  # iteration stops early once the Rayleigh quotient settles, so the
-  # higher cap costs nothing on well-conditioned models.
-  n_hutchinson: 24
-  n_power_iter: 64
+  # PyHessian's loops: at most 100 HVPs per estimator, stopping once the
+  # estimate changes by less than 1e-3 (relative).
+  n_hutchinson: 100
+  hutchinson_tol: 0.001
+  n_power_iter: 100
+  power_iter_tol: 0.001
   sam_rho: 0.05
   num_samples: 4
 
