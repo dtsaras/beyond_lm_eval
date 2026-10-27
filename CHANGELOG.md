@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+- `blme.tasks._tokens`: `select_rows` (token policies `all`, `exclude_pos0`, `last`, `mean`, `mean_excl_pos0` with per-row document and position), `massive_token_share` / `position0_share`, and `hidden_states_for_task`, one cache-or-collect gate with explicit parameters. `collect_hidden_states` gains `per_sample=` (per-document lists that record each row's token position, in memory and under disk offload) and `max_length=`. Defaults are unchanged and no task uses these yet.
+- `blme.tasks._precision.fp32_compute`: computes in fp32 on an fp16/bf16 model and restores every parameter AND buffer to its original dtype, also on error, with no size gate. The promote-and-restore pattern in the tasks today leaves low-precision buffers in fp32 and narrows float64; tasks are not switched yet.
+
 ### Changed
 - **Python ≥ 3.10 is now required.** numpy 2.x and transformers 5.x need it, and the package evaluates PEP 604 annotations (`bool | None`) at import time. The CI matrix is now 3.10–3.12.
 - **scikit-learn is now a core dependency**, because five paper-core tasks need it.
