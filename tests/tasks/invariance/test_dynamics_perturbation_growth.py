@@ -6,7 +6,8 @@ import pytest
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dynamics_fixtures import dataset, inv, tiny_gpt2, tiny_neox, tokenizer  # noqa: E402
+from dynamics_fixtures import (dataset, inv, tiny_gpt2, tiny_neox, token_batches,  # noqa: E402
+                               tokenizer)
 
 from blme.tasks.dynamics.perturbation_growth import PerturbationGrowthTask  # noqa: E402
 
@@ -45,3 +46,41 @@ def test_fp32_model_is_not_promoted():
     out = _run(tiny_gpt2(), tokenizer())
     assert out["_meta_promoted_to_fp32"] is False
     assert out["_meta_compute_dtype"] == "float32"
+
+
+# tiny gpt2 has 5 blocks; indices are "insert an identity copy after block i".
+DEPTH_LAYOUTS = {"early": [0, 0], "late": [3, 3], "uniform": [0, 1, 2, 3], "end": [4]}
+
+
+@pytest.mark.parametrize("where", sorted(DEPTH_LAYOUTS))
+def test_growth_log_ratio_invariant_under_identity_blocks(where):
+    """The end-to-end log ratio is bit-identical under function-preserving
+    identity-block insertion anywhere in the stack."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS[where],
+                                        verify_on=token_batches(tok))
+    base, other = _run(model, tok), _run(deeper, tok)
+    inv.assert_invariant(base, other, ["growth_log_ratio"], rtol=0.0)
+
+
+def test_demoted_forms_move_under_identity_blocks():
+    """Known negatives: the per-block rate falls exactly as 1/L and the
+    normalised-depth slope moves, so neither is a headline."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS["early"])
+    base, other = _run(model, tok), _run(deeper, tok)
+    L0, L1 = base["_meta_n_transitions"], other["_meta_n_transitions"]
+    assert (L0, L1) == (5, 7)
+    assert other["_meta_growth_rate_per_block"] == pytest.approx(
+        base["_meta_growth_rate_per_block"] * L0 / L1, rel=1e-12)
+    inv.assert_moves(base, other, "_meta_growth_rate_per_block", 0.2)
+    inv.assert_moves(base, other, "_meta_growth_slope", 1e-3)
+
+
+def test_headline_keys_are_depth_free():
+    out = _run(tiny_gpt2(), tokenizer())
+    for k in ("growth_slope", "growth_rate_per_block", "initial_divergence"):
+        assert k not in out, k
+        assert f"_meta_{k}" in out, k

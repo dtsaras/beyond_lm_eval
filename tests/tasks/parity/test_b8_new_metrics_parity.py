@@ -200,7 +200,7 @@ class TestPerturbationGrowth:
         out = _growth_profile(clean, pert)
         # (helper computes in float32 -> rel ~1e-6 precision floor)
         assert out["growth_log_ratio"] == pytest.approx(L * np.log(a), rel=1e-5)
-        assert out["growth_slope"] == pytest.approx(L * np.log(a), rel=1e-5)
+        assert out["_meta_growth_slope"] == pytest.approx(L * np.log(a), rel=1e-5)
 
     def test_contracting_stack_negative_slope(self):
         from blme.tasks.dynamics.perturbation_growth import _growth_profile
@@ -210,7 +210,7 @@ class TestPerturbationGrowth:
         clean = [v * (0.5 ** l) for l in range(4)]
         pert = [(v + d) * (0.5 ** l) for l in range(4)]
         out = _growth_profile(clean, pert)
-        assert out["growth_slope"] < 0
+        assert out["_meta_growth_slope"] < 0
 
 
 # ===========================================================================

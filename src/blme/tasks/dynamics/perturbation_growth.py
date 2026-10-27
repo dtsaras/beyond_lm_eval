@@ -15,15 +15,17 @@ relative size ``rel_eps`` (scaled per token to rel_eps * ||h_token||), run
 the clean and perturbed forward passes, and measure the per-layer
 divergence d_l = E_t ||h_l - h'_l||. Reported:
 
+  * ``growth_log_ratio`` (headline): log(d_L / d_0), the end-to-end
+    amplification. Positive = perturbations amplify; negative = contract.
   * ``perturbation_growth_per_layer``: log(d_l / d_0) profile.
-  * ``growth_slope``: least-squares slope of log d_l against NORMALIZED
-    depth in [0, 1] — a quasi-Lyapunov exponent per unit depth. Positive =
-    perturbations amplify (chaotic regime); negative = contract.
-  * ``growth_log_ratio``: log(d_L / d_0).
+  * ``_meta_growth_slope``: least-squares slope of log d_l against
+    normalised depth in [0, 1].
+  * ``_meta_growth_rate_per_block``: growth_log_ratio / L.
+  * ``_meta_initial_divergence``: d_0, set by rel_eps and the embedding scale.
 
 Analytic anchor: for a purely linear layer stack h_{l+1} = a * h_l the
-divergence grows exactly by |a| per layer, so growth_slope = (L-1) * ln|a| /
-(normalized-depth span) and growth_log_ratio = (L-1) * ln|a|.
+divergence grows exactly by |a| per layer, so growth_log_ratio = (L-1) * ln|a|
+and the slope over normalised depth equals it.
 """
 
 import logging
@@ -58,12 +60,16 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
     x = np.arange(L, dtype=np.float64) / max(1, L - 1)
     slope = float(np.polyfit(x, log_d, 1)[0])
     n_transitions = max(1, L - 1)
+    # Only the end-to-end log ratio survives function-preserving identity-block
+    # insertion; the per-block rate is it times 1/L, the slope moves with where
+    # blocks are inserted, and the initial divergence echoes rel_eps
+    # (tests/tasks/invariance/test_dynamics_perturbation_growth.py).
     return {
         "perturbation_growth_per_layer": (log_d - log_d[0]).tolist(),
-        "growth_slope": slope,
         "growth_log_ratio": float(log_d[-1] - log_d[0]),
-        "growth_rate_per_block": float((log_d[-1] - log_d[0]) / n_transitions),
-        "initial_divergence": float(d[0]),
+        "_meta_growth_slope": slope,
+        "_meta_growth_rate_per_block": float((log_d[-1] - log_d[0]) / n_transitions),
+        "_meta_initial_divergence": float(d[0]),
         "_meta_n_transitions": int(n_transitions),
     }
 
