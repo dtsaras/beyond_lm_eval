@@ -52,6 +52,11 @@ def _pinned_env():
     env["MKL_CBWR"] = "COMPATIBLE"
     env["MKL_DYNAMIC"] = "FALSE"
     env["OMP_DYNAMIC"] = "FALSE"
+    # The tokenizers (Rayon) pool starts one thread per CPU in every worker;
+    # with many workers beside a test run that exhausts the container's
+    # threads and shows up as task errors.
+    env["RAYON_NUM_THREADS"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
     env.setdefault("HF_HUB_OFFLINE", "1")
     env.setdefault("HF_DATASETS_OFFLINE", "1")
     env["TRANSFORMERS_VERBOSITY"] = "error"
