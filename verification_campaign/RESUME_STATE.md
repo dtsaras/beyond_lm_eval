@@ -1,3 +1,18 @@
+# RESUME HERE — session 2026-10-28 (supersedes the 2026-10-26 block below)
+
+- **The user's method-fidelity rule** (2026-10-28) resolved the 7 decisions: `DECISIONS_2026-10-26.md`.
+- **Amendment** to decisions 5/6: a trailing-newline sink exists on pythia and TinyLlama; passages are stripped.
+- **Methods dossier for all 51 tasks** is done: `METHODS_DOSSIER_2026-10-28.md`. It holds:
+  - policies P1–P7, applied under the rule;
+  - **4 open user questions, Q1–Q4**;
+  - a per-task change list.
+- **Evidence:** `~/hara-artifacts/blme/dossier_2026-10-28/`; activation bank `~/hara-artifacts/blme/actbank/`.
+- **Baselines:**
+  - study golden pair bit-identical (`7cb9e9b_study_cache_run{A,B}`);
+  - population guards green with a GPU (`~/hara-artifacts/blme/guards/`).
+- **Phase 3 queue:** offload memmap is read-only (`mode="c"` fix); see the dossier for the rest.
+- **Next:** Phase 1 moves → Phase 2 helpers and golden-locked refactor → Phases 3+4 per family (plan Amendment 9).
+
 # RESUME HERE — hardening session 2026-10-26 (pod1, paused by the user)
 
 **Plan (approved):** `~/.claude/plans/i-previously-asked-another-tender-brooks.md`.
