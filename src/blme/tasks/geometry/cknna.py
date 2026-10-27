@@ -296,6 +296,8 @@ def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
     float64}`` under ``pool`` and under ``mean_excl_pos0``, the middle layer's
     token rows of the first ``_SHARE_DOCS`` texts, and the gate info.
     """
+    if include_embedding and getattr(cache, "_embedding_states", None) is None:
+        use_cache = False          # a cache without hs[0] cannot supply the layer set
     per_doc, info = hidden_states_for_task(
         model, tokenizer, dataset, cache, num_samples=num_samples,
         # post-final-norm=False, DELIBERATELY: the released reference stacks
@@ -380,9 +382,11 @@ class CKNNATask(DiagnosticTask):
 
         pool = "mean_excl_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "mean"
         logger.info(f"  Pooling hidden states over {num_samples} texts...")
+        # Every hidden_states entry, the embedding output included, as
+        # extract_features.py:82 stacks them.
         feats, feats_excl, mid_docs, _info = _pooled_layer_features(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            use_cache=use_cache, pool=pool)
+            use_cache=use_cache, pool=pool, include_embedding=True)
 
         if not feats:
             return {"error": "No hidden states available for CKNNA"}
@@ -471,6 +475,7 @@ class CKNNATask(DiagnosticTask):
                 float(cknna_matrix[0, n // 2]) if n >= 3 else float("nan")
             ),
             "_meta_n_layers": int(n),
+            "_meta_includes_embedding_layer": True,
             "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),

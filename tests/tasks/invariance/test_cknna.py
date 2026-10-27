@@ -47,8 +47,8 @@ def _reference_remove_outliers():
 
 
 def _all_entries(S):
-    """The raw HF tuple without the embedding: blocks 0..L-2, then post-norm."""
-    return [S.blocks[i] for i in range(S.n_layers - 1)] + [S.final_norm]
+    """The raw HF tuple: embedding, blocks 0..L-2, then the post-norm entry."""
+    return [S.embedding] + [S.blocks[i] for i in range(S.n_layers - 1)] + [S.final_norm]
 
 
 def test_joint_clamp_matches_the_reference_bit_for_bit():
@@ -78,6 +78,8 @@ def test_points_are_per_text_means_with_one_joint_clamp(tiny_states):
     first, last = _l2_normalize(clamped[:, 0]), _l2_normalize(clamped[:, -1])
     want = _cknna(first, last, topk=5, unbiased=True)
     assert r["_meta_n_points"] == S.n_docs
+    assert r["_meta_n_layers"] == S.n_layers + 1        # embedding included
+    assert r["_meta_includes_embedding_layer"] is True
     assert r["_meta_pooling"] == "mean"
     assert r["_meta_outlier_clamp"] == "joint_over_layers"
     assert r["early_late_cknna"] == pytest.approx(want, rel=1e-6)
