@@ -199,6 +199,10 @@ def _adjusted_linearity(sim: float, n: int, r: int) -> float:
     return float(1.0 - (1.0 - sim) * (n - 1) / dof)
 
 
+_SI_NODE = ("tests/tasks/invariance/test_procrustes_linearity.py::"
+            "test_size_invariant_entry[{}]")
+
+
 @register_task("geometry_procrustes_linearity")
 class ProcrustesLinearityTask(DiagnosticTask):
     """
@@ -230,6 +234,34 @@ class ProcrustesLinearityTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "paper_protocol:Razzhigaev2024 every position, BOS included"
+    SOURCES = {
+        "paper": "arXiv:2405.12250",
+        "code": "AIRI-Institute/LLM-Microscope@b6db939b2696845ce1f88cf69cddc41e808eea17",
+        "llm_precedent": "arXiv:2405.12250 (proposed for LLMs); adjusted R^2: "
+                         "DOI:10.1214/aoms/1177732951 (Wherry 1931)",
+    }
+    HEADLINE_KEYS = tuple(
+        f"procrustes_linearity_{s}" for s in
+        ("mean", "min", "max", "first", "last", "slope", "q25", "q50", "q75")
+    ) + tuple(
+        f"procrustes_linearity_adjusted_{s}" for s in
+        ("mean", "min", "max", "first", "last", "q25", "q50", "q75"))
+    # Raw keys are width- and scale-free but carry the r/(N-1) chance fit; the
+    # adjusted twins add N. Identity blocks add pairs scoring exactly 1, so only
+    # min/first/last survive them.
+    SIZE_INVARIANT = {
+        **{f"procrustes_linearity_{s}": (
+            ("identity_blocks", "zero_pad", "isometry", "rescale"),
+            _SI_NODE.format(f"procrustes_linearity_{s}")) for s in ("min", "first", "last")},
+        **{f"procrustes_linearity_adjusted_{s}": (
+            ("N", "identity_blocks", "zero_pad", "isometry", "rescale"),
+            _SI_NODE.format(f"procrustes_linearity_adjusted_{s}"))
+           for s in ("min", "first", "last")},
+        **{f"procrustes_linearity_adjusted_{s}": (
+            ("N", "zero_pad", "isometry", "rescale"),
+            _SI_NODE.format(f"procrustes_linearity_adjusted_{s}"))
+           for s in ("mean", "max", "q25", "q50", "q75")},
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Procrustes Linearity Analysis...")

@@ -78,3 +78,39 @@ def test_position0_kept_with_the_excluded_value_beside_it(tiny_states):
                                       "_meta_excl_pos0_procrustes_linearity_adjusted_mean"],
                          rtol=1e-9)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
+
+
+# --------------------------------------------------------------------------
+# SIZE_INVARIANT declarations, checked against their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.procrustes_linearity import ProcrustesLinearityTask  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+@pytest.mark.parametrize("key", sorted(ProcrustesLinearityTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_states):
+    """Each declared transform's direct test, in float64 storage (a float32
+    copy of an isometric embedding is numerically full-rank). Known
+    negatives: the adjusted mean under identity blocks, the raw form under N."""
+    from _family_c import check_size_invariant_entry
+    negatives = {"identity_blocks": "procrustes_linearity_adjusted_mean"}
+    if "_adjusted_" in key:
+        negatives["N"] = key.replace("_adjusted_", "_")
+    check_size_invariant_entry(TASK, ProcrustesLinearityTask, key, tiny_states,
+                               tiny_identity_states, null_states=null_states,
+                               negatives=negatives, rtol_width=1e-6, null_bound=0.06,
+                               null_drift=0.2, store_dtype=torch.float64)
+
+
+def test_declarations():
+    P = ProcrustesLinearityTask
+    assert P.TOKEN_POLICY.startswith("paper_protocol:")
+    assert set(P.SIZE_INVARIANT) <= set(P.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(P.SOURCES)
