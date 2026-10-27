@@ -222,6 +222,30 @@ class GenerationDiversityTask(DiagnosticTask):
     and split by nltk.word_tokenize, as Texygen does), so the tokenizer does not
     enter them; the subword-id versions are _meta_."""
 
+    # Statistics of generated continuations; prompt tokens never enter.
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1510.03055; arXiv:1802.01886",
+        "code": "geek-ai/Texygen@3104e22ac75f3cc2070da2bf5e2da6d2bef149ad",
+        "llm_precedent": "Holtzman et al. 2020 (arXiv:1904.09751): Self-BLEU4 of GPT-2 "
+                         "generations",
+    }
+    HEADLINE_KEYS = (
+        "distinct_1", "distinct_2", "distinct_3", "mean_distinct_1", "mean_distinct_2",
+        "mean_distinct_3", "mean_self_bleu", "mean_phrase_repetition_rate",
+        "mean_sampling_entropy_first_quarter", "mean_sampling_entropy_last_quarter",
+        "sampling_entropy_collapse_delta",
+    )
+    # Word units make the n-gram statistics independent of the tokenizer (its
+    # vocabulary) for a fixed text; the collection-size drift of corpus
+    # distinct-n is handled by pinning N = 500 for every model, not normalised.
+    # The phrase-repetition and sampling-entropy keys have no direct test.
+    _TOKENIZER_TEST = ("tests/tasks/invariance/test_dynamics_generation_diversity.py::"
+                       "test_word_unit_metrics_do_not_depend_on_the_tokenizer")
+    SIZE_INVARIANT = {k: (("tokenizer_swap(gpt2, pythia-160m)",), _TOKENIZER_TEST)
+                      for k in ("mean_self_bleu", "distinct_1", "distinct_2", "distinct_3",
+                                "mean_distinct_1", "mean_distinct_2", "mean_distinct_3")}
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
 
