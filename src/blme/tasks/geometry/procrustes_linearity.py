@@ -163,6 +163,14 @@ class ProcrustesLinearityTask(DiagnosticTask):
     linear transform (scores ~0.99), and the profile of this linearity
     across depth is a fingerprint of the architecture / training.
 
+    The fit is the Moore-Penrose least-squares map X^+ Y with numpy's pinv
+    cutoff. The released ``get_est_svd`` inverts every positive singular
+    value; on a numerically rank-deficient cloud that amplifies ~1e-15
+    values, so an exact isometric embedding moved it 0.816 -> 0.694 on gpt2
+    (dossier). That is a numerical artefact, not the paper's least-squares
+    definition (Q2), so the released rule is kept only as ``_meta_``; on real
+    full-rank pairs the two agree exactly.
+
     Outputs (flat floats):
         procrustes_linearity_mean   — mean over adjacent pairs
         procrustes_linearity_min    — least-linear transition
@@ -198,8 +206,8 @@ class ProcrustesLinearityTask(DiagnosticTask):
             return {"error": "Need at least 2 layers for procrustes linearity"}
 
         n_tokens = 0
-        sims = []
-        sims_rank = []
+        sims = []          # headline: rank-aware least-squares fit
+        sims_ref = []      # released get_est_svd rule (unguarded 1/S)
         for a, b in zip(layers[:-1], layers[1:]):
             X = layer_states[a]
             Y = layer_states[b]
@@ -212,42 +220,26 @@ class ProcrustesLinearityTask(DiagnosticTask):
             Y = np.asarray(Y, dtype=np.float64)
             if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:
                 sims.append(float("nan"))
+                sims_ref.append(float("nan"))
                 continue
             n_tokens = max(n_tokens, X.shape[0])
-            sims.append(_procrustes_similarity(X, Y))
-            sims_rank.append(_procrustes_similarity(X, Y, rank_aware=True))
+            sims_ref.append(_procrustes_similarity(X, Y))
+            sims.append(_procrustes_similarity(X, Y, rank_aware=True))
 
         sim = np.asarray(sims, dtype=np.float64)
-        _sr = np.asarray(sims_rank, dtype=np.float64)
+        _sref = np.asarray(sims_ref, dtype=np.float64)
         finite = np.isfinite(sim)
         if not np.any(finite):
             return {"error": "No adjacent layer pair yielded a valid linearity score"}
 
         n_pairs = sim.size
-        # Slope on NORMALIZED depth l/(n_pairs-1) — house convention for
-        # cross-model comparability.
-        if n_pairs >= 2 and finite.sum() >= 2:
-            depth = np.arange(n_pairs, dtype=np.float64) / (n_pairs - 1)
-            slope = float(np.polyfit(depth[finite], sim[finite], 1)[0])
-        else:
-            slope = float("nan")
-
         finite_sim = sim[finite]
         _d_model = int(layer_states[layers[0]].shape[-1]) if n_tokens else 0
         _d_over_n = (float(_d_model) / float(n_tokens)) if n_tokens else float("nan")
 
-        first = sim[0] if np.isfinite(sim[0]) else float("nan")
-        last = sim[-1] if np.isfinite(sim[-1]) else float("nan")
-        return {
-            "procrustes_linearity_mean": float(np.mean(finite_sim)),
-            "procrustes_linearity_min": float(np.min(finite_sim)),
-            "procrustes_linearity_max": float(np.max(finite_sim)),
-            "procrustes_linearity_first": float(first),
-            "procrustes_linearity_last": float(last),
-            "procrustes_linearity_slope": slope,
-            "procrustes_linearity_q25": float(np.percentile(finite_sim, 25)),
-            "procrustes_linearity_q50": float(np.percentile(finite_sim, 50)),
-            "procrustes_linearity_q75": float(np.percentile(finite_sim, 75)),
+        out = _profile_summary(sim, "procrustes_linearity")
+        _ref_fin = _sref[np.isfinite(_sref)]
+        out.update({
             "_meta_n_layers": int(n_layers),
             "_meta_n_pairs": int(n_pairs),
             "_meta_n_tokens": int(n_tokens),
@@ -263,12 +255,41 @@ class ProcrustesLinearityTask(DiagnosticTask):
             # The score moves with N at fixed model, so record the regime.
             "_meta_d_model": int(_d_model),
             "_meta_d_over_n_tokens": float(_d_over_n),
-            # Rank-aware companion (Moore-Penrose cutoff at numpy's pinv
-            # tolerance), correct on genuinely rank-deficient transitions.
-            "procrustes_linearity_rank_aware_mean": (
-                float(np.mean(_sr[np.isfinite(_sr)]))
-                if np.any(np.isfinite(_sr)) else float("nan")),
+            # The released rule, kept for parity: it equals the headline
+            # unless a cloud is numerically rank-deficient (gap reported).
+            "_meta_reference_rule_procrustes_linearity_mean": (
+                float(np.mean(_ref_fin)) if _ref_fin.size else float("nan")),
+            "_meta_reference_rule_procrustes_linearity_min": (
+                float(np.min(_ref_fin)) if _ref_fin.size else float("nan")),
             "_meta_procrustes_rank_aware_gap_max": (
-                float(np.nanmax(np.abs(_sr - sim)))
-                if np.any(np.isfinite(_sr) & finite) else float("nan")),
-        }
+                float(np.nanmax(np.abs(_sref - sim)))
+                if np.any(np.isfinite(_sref) & finite) else float("nan")),
+        })
+        return out
+
+
+def _profile_summary(sim: np.ndarray, prefix: str) -> dict:
+    """mean/min/max/first/last/slope/quartiles over the adjacent-pair profile;
+    the slope is on normalised depth l/(n_pairs-1)."""
+    finite = np.isfinite(sim)
+    if not np.any(finite):
+        return {f"{prefix}_{k}": float("nan") for k in
+                ("mean", "min", "max", "first", "last", "slope", "q25", "q50", "q75")}
+    fs = sim[finite]
+    n_pairs = sim.size
+    if n_pairs >= 2 and finite.sum() >= 2:
+        depth = np.arange(n_pairs, dtype=np.float64) / (n_pairs - 1)
+        slope = float(np.polyfit(depth[finite], sim[finite], 1)[0])
+    else:
+        slope = float("nan")
+    return {
+        f"{prefix}_mean": float(np.mean(fs)),
+        f"{prefix}_min": float(np.min(fs)),
+        f"{prefix}_max": float(np.max(fs)),
+        f"{prefix}_first": float(sim[0]) if np.isfinite(sim[0]) else float("nan"),
+        f"{prefix}_last": float(sim[-1]) if np.isfinite(sim[-1]) else float("nan"),
+        f"{prefix}_slope": slope,
+        f"{prefix}_q25": float(np.percentile(fs, 25)),
+        f"{prefix}_q50": float(np.percentile(fs, 50)),
+        f"{prefix}_q75": float(np.percentile(fs, 75)),
+    }
