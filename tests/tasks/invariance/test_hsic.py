@@ -55,3 +55,17 @@ def test_legacy_cache_trims_only_the_post_norm_entry(attrs):
                else r["adjacent_hsic"]) == L - 2
     assert r["_meta_n_layers"] == L - 1
     assert r["_meta_last_entry_is_block_output"] is False
+
+
+def test_headline_keys_are_bounded_similarities(tiny_states):
+    """On a [X, Y, 3X] stack the manuscript's raw ratio tr(K0 K2)/tr(K0 K0)
+    is exactly 9 -- an unbounded projection coefficient -- so it is _meta_ and
+    every headline key is a similarity in [-1, 1]."""
+    S = tiny_states
+    stack = inv.States(blocks={0: S.blocks[0], 1: S.blocks[1],
+                               2: [3.0 * np.asarray(x, dtype=np.float64) for x in S.blocks[0]]})
+    r = inv.run_task_on_states(TASK, stack)
+    assert r["_meta_hsic_compression_ratio_raw"] == pytest.approx(9.0, rel=1e-6)
+    assert "hsic_compression_ratio_raw" not in r
+    for k in _headline(r):
+        assert -1.0 - 1e-9 <= r[k] <= 1.0 + 1e-9, (k, r[k])

@@ -164,14 +164,15 @@ class HSICDependenceTask(DiagnosticTask):
             "min_adjacent_hsic": float(np.min(adjacent_hsic)),
             "input_to_layer_hsic": input_hsic,
             # nCKA(anchor, L-1) / nCKA(anchor, 1): unbounded ([X, Y, X] gives
-            # 9.40), named for what it is.
-            "hsic_deep_to_shallow_ratio": (
+            # 9.40) and its denominator follows a layer index, so _meta_.
+            "_meta_hsic_deep_to_shallow_ratio": (
                 float(input_hsic[-1] / input_hsic[0])
                 if input_hsic and input_hsic[0] != 0.0 else float("nan")
             ),
             # The manuscript's HSIC(0, L-1)/HSIC(0, 0): a projection
-            # coefficient, not bounded by 1.
-            "hsic_compression_ratio_raw": (
+            # coefficient set by norm growth, unbounded ([X, Y, 3X] gives 9),
+            # so _meta_; its bounded replacement is the nCKA ratio below.
+            "_meta_hsic_compression_ratio_raw": (
                 float(_raw_hsic_first_last / _raw_hsic_first_self)
                 if _raw_hsic_first_self else float("nan")),
             "hsic_compression_ratio": (
