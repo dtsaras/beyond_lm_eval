@@ -5,6 +5,11 @@
 ### Changed
 - **Python ≥ 3.10 is now required.** numpy 2.x and transformers 5.x need it, and the package evaluates PEP 604 annotations (`bool | None`) at import time. The CI matrix is now 3.10–3.12.
 - **scikit-learn is now a core dependency**, because five paper-core tasks need it.
+- **The default corpus changed** (`load_default_corpus`, used when no dataset is passed). Numbers move for runs that relied on it; runs that pass their own dataset are unaffected.
+  - It loads `Salesforce/wikitext` (`wikitext-103-raw-v1`, validation) and keeps passages of at least 64 characters after stripping, returned stripped. The trailing newline of every WikiText row is a massive-activation sink on pythia and TinyLlama.
+  - `diverse=True` is now the default: draws follow one fixed van der Corput order, so every draw is spread across the split and `load_default_corpus(n)` is a prefix of `load_default_corpus(m)` for `n < m`. `diverse=False` gives the split-order prefix.
+  - Requesting more passages than exist (1691) raises `ValueError`, and a dataset that cannot be loaded raises `RuntimeError`. The three hardcoded fallback sentences are gone. `evaluate()` caps its corpus request at the corpus size, because some `num_samples` count vocabulary rows.
+  - New `load_long_documents(n, min_tokens, tokenizer)` returns whole articles from `EleutherAI/wikitext_document_level` in the same nested order.
 
 ### Fixed
 - **bfloat16 storage no longer crashes.** numpy has no bfloat16 dtype, so `.numpy()` raised `TypeError` on bf16 hidden states in three places:

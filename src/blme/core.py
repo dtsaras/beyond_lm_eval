@@ -200,13 +200,22 @@ def evaluate(
         # Load a shared evaluation corpus if none was provided, sized to the
         # largest requested sample count (never below the 200-sample default).
         if dataset is None:
-            from .cache import load_default_corpus
+            from .cache import default_corpus_size, load_default_corpus
             task_sample_counts = [
                 resolved_task_configs[t].get("num_samples")
                 for t in diagnostic_tasks
                 if resolved_task_configs[t].get("num_samples") is not None
             ]
             corpus_size = max([cache_num_samples or 0, 200] + task_sample_counts)
+            # Some `num_samples` count vocabulary rows, not documents
+            # (dynamics_stability 5000, geometry_unembedding 2000), so cap the
+            # request at what the corpus holds instead of raising on it.
+            n_available = default_corpus_size()
+            if corpus_size > n_available:
+                logger.info(
+                    f"Default corpus: {corpus_size} passages requested, "
+                    f"{n_available} available; loading all {n_available}.")
+                corpus_size = n_available
             dataset = load_default_corpus(corpus_size)
 
         # Shared cache: only tasks known to consume cached hidden states or
