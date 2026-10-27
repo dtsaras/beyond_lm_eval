@@ -13,8 +13,8 @@ from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers
 from ._common import find_final_norm, logger
 
-# Random-control draws per layer. The 32-draw median ratio is biased high and
-# drifts with the draw count; the count is disclosed via the config.
+# Random-control directions per layer: differences of the last-token states of
+# unrelated sentence pairs, norm-matched to the concept vector.
 _N_RAND_DRAWS_DEFAULT = 32
 
 # Distinct (positive, negative, neutral) probe triples. The whole set is used
@@ -44,6 +44,77 @@ _FALLBACK_TRIPLES = [
     {"text_pos": "The summary faithfully reflects the source.",
      "text_neg": "The summary distorts the source.",
      "neutral": "Next to the harbour"},
+]
+
+
+# Unrelated sentences for the control: differences of their last-token states
+# are "random text" directions (Turner et al. 2023, App. G) in the span the
+# model uses. Topics are deliberately unrelated to truthfulness.
+_CONTROL_SENTENCES = [
+    "The kettle on the stove began to whistle.",
+    "Seven pelicans glided low over the harbour.",
+    "Her bicycle had a basket full of apples.",
+    "The museum closes early on public holidays.",
+    "A thin layer of frost covered the windshield.",
+    "They painted the fence a pale shade of green.",
+    "The recipe calls for two cups of flour.",
+    "Our flight was delayed by a passing storm.",
+    "The violinist tuned her strings before the concert.",
+    "A family of ducks crossed the quiet road.",
+    "The library added a new wing last spring.",
+    "He planted tulips along the garden path.",
+    "The ferry leaves the island every hour.",
+    "Fresh bread was cooling on the counter.",
+    "The children built a fort out of blankets.",
+    "A lighthouse stood at the end of the pier.",
+    "The committee met on the third floor.",
+    "Rain drummed steadily against the tin roof.",
+    "The marathon route passes through the old town.",
+    "She keeps her notes in a leather folder.",
+    "The orchard produced more pears than usual.",
+    "A small dog slept beneath the wooden bench.",
+    "The printer ran out of paper again.",
+    "They hiked to the summit before sunrise.",
+    "The bakery sells cinnamon rolls on weekends.",
+    "Snow piled up against the cabin door.",
+    "The train station has a large clock tower.",
+    "He repaired the chair with a few nails.",
+    "The pond was home to several green frogs.",
+    "Lanterns hung from the branches of the oak.",
+    "The new bridge spans the river near the mill.",
+    "A warm breeze drifted through the open window.",
+    "The chess club meets every Thursday evening.",
+    "Bright kites filled the sky above the beach.",
+    "The soup simmered slowly for several hours.",
+    "Our neighbour collects antique pocket watches.",
+    "The trail winds through a dense pine forest.",
+    "A stack of old magazines sat by the door.",
+    "The choir rehearsed in the empty church.",
+    "Sunflowers lined the edge of the field.",
+    "The carpenter measured the board twice.",
+    "A heron waited motionless in the shallows.",
+    "The cafe on the corner serves strong coffee.",
+    "They rearranged the furniture in the living room.",
+    "The mountain village has one narrow street.",
+    "His sketchbook was full of bird drawings.",
+    "The harbour lights flickered in the fog.",
+    "A pot of basil grew on the windowsill.",
+    "The students gathered around the telescope.",
+    "Autumn leaves covered the stone steps.",
+    "The bus stops right outside the bakery.",
+    "She folded the map and put it away.",
+    "The canal boats moved slowly past the locks.",
+    "A wooden rowboat drifted near the shore.",
+    "The garage smelled of oil and sawdust.",
+    "Fireflies blinked above the tall grass.",
+    "The market opens before dawn on Saturdays.",
+    "He wrapped the gift in brown paper.",
+    "The castle walls were covered in ivy.",
+    "A cat watched the birds from the porch.",
+    "The pottery class meets in the basement.",
+    "Clouds gathered over the distant hills.",
+    "The tram rattled along the cobbled street.",
+    "Their tent was pitched beside a quiet lake.",
 ]
 
 
@@ -83,13 +154,14 @@ def _capture_last_block(layers, sink):
     return layers[-1].register_forward_hook(_cap)
 
 
-def _extract_task_vectors(model, tokenizer, layers, samples, num_layers, device):
-    """Per-layer mean(h+) - mean(h-) at the last token of each block output.
+def _last_token_block_states(model, tokenizer, layers, texts, num_layers, device):
+    """Per-layer float32 last-token states of each text at the block outputs.
 
-    Returns ``(task_vectors, h_ref)`` where ``h_ref`` is the last captured raw
-    deepest-block output (the provisional linearisation point).
-    post-final-norm: SUBSTITUTED. The vector is injected into the pre-norm
-    residual stream, so the deepest entry must be the raw block output.
+    Returns ``(acts, h_last)``: ``acts[l]`` lists one (d,) tensor per text and
+    ``h_last`` is the last captured raw deepest-block output.
+    post-final-norm: SUBSTITUTED. Vectors built from these states are injected
+    into the pre-norm residual stream, so the deepest entry is the raw block
+    output, not ln_f of it.
     """
     sink = {}
     hook = _capture_last_block(layers, sink) if layers is not None and len(layers) > 0 else None
@@ -102,34 +174,56 @@ def _extract_task_vectors(model, tokenizer, layers, samples, num_layers, device)
             hs[-1] = h
         return hs
 
-    task_vectors = {}
+    acts = {l: [] for l in range(num_layers)}
     try:
         with torch.no_grad():
-            pos_acts = {l: [] for l in range(num_layers)}
-            neg_acts = {l: [] for l in range(num_layers)}
-            for s in samples:
-                ids_pos = tokenizer.encode(s["text_pos"], return_tensors="pt",
-                                           truncation=True, max_length=128).to(device)
-                out_pos = model(ids_pos, output_hidden_states=True)
-                cap_p = dict(sink)
-                ids_neg = tokenizer.encode(s["text_neg"], return_tensors="pt",
-                                           truncation=True, max_length=128).to(device)
-                out_neg = model(ids_neg, output_hidden_states=True)
-                cap_n = dict(sink)
-                hp, hn = _states(out_pos, cap_p), _states(out_neg, cap_n)
+            for text in texts:
+                ids = tokenizer.encode(text, return_tensors="pt",
+                                       truncation=True, max_length=128).to(device)
+                out = model(ids, output_hidden_states=True)
+                hs = _states(out, dict(sink))
                 for l in range(num_layers):
-                    pos_acts[l].append(hp[l + 1][0, -1].cpu().float())
-                    neg_acts[l].append(hn[l + 1][0, -1].cpu().float())
-            for l in range(num_layers):
-                # Means in float64 and the contrast narrowed AFTER the
-                # subtraction: float32 cannot hold a large common offset.
-                mean_pos = torch.stack(pos_acts[l]).double().mean(dim=0)
-                mean_neg = torch.stack(neg_acts[l]).double().mean(dim=0)
-                task_vectors[l] = (mean_pos - mean_neg).to(pos_acts[l][0].dtype)
+                    acts[l].append(hs[l + 1][0, -1].cpu().float())
     finally:
         if hook is not None:
             hook.remove()
-    return task_vectors, sink.get("h")
+    return acts, sink.get("h")
+
+
+def _extract_task_vectors(model, tokenizer, layers, samples, num_layers, device):
+    """Per-layer mean(h+) - mean(h-) at the last token of each block output.
+
+    Returns ``(task_vectors, h_ref)`` where ``h_ref`` is the last captured raw
+    deepest-block output (the provisional linearisation point).
+    """
+    pos_acts, _ = _last_token_block_states(
+        model, tokenizer, layers, [s["text_pos"] for s in samples], num_layers, device)
+    neg_acts, h_ref = _last_token_block_states(
+        model, tokenizer, layers, [s["text_neg"] for s in samples], num_layers, device)
+    task_vectors = {}
+    for l in range(num_layers):
+        # Means in float64 and the contrast narrowed AFTER the subtraction:
+        # float32 cannot hold a large common offset.
+        mean_pos = torch.stack(pos_acts[l]).double().mean(dim=0)
+        mean_neg = torch.stack(neg_acts[l]).double().mean(dim=0)
+        task_vectors[l] = (mean_pos - mean_neg).to(pos_acts[l][0].dtype)
+    return task_vectors, h_ref
+
+
+def _control_differences(model, tokenizer, layers, num_layers, device, n_draws):
+    """Per layer, up to ``n_draws`` differences h(a) - h(b) of the last-token
+    states of unrelated sentence pairs from ``_CONTROL_SENTENCES``.
+
+    A data-matched control lives in the span the model uses, so dead or
+    low-gain coordinates cannot dilute it the way an isotropic draw is diluted
+    (tests/tasks/invariance/test_repe_steering_effectiveness.py).
+    """
+    P = len(_CONTROL_SENTENCES)
+    pairs = [(i, (i + k) % P) for k in range(1, P) for i in range(0, P, 2)][:max(0, n_draws)]
+    acts, _ = _last_token_block_states(
+        model, tokenizer, layers, _CONTROL_SENTENCES, num_layers, device)
+    return {l: [(acts[l][i].double() - acts[l][j].double()) for i, j in pairs]
+            for l in range(num_layers)}
 
 
 def _logit_dir_factory(model):
@@ -200,17 +294,14 @@ def _steering_hook(vec, alpha):
     return hook
 
 
-def _random_controls(tv, l_idx, n_draws, ctrl_seed):
-    """Norm-matched isotropic Gaussian directions, seeded on (seed, layer) only,
-    so every sample at a layer draws the same set."""
-    g = torch.Generator(device="cpu")
-    g.manual_seed(1234 + 7919 * l_idx + 104729 * ctrl_seed)
-    tv_norm = torch.linalg.vector_norm(tv.float().cpu())
+def _matched_controls(diffs, tv):
+    """The control differences rescaled to ||tv|| (zero differences dropped)."""
+    tv_norm = torch.linalg.vector_norm(tv.double().cpu())
     vecs = []
-    for _ in range(n_draws):
-        _rv = torch.randn(tv.shape, generator=g, dtype=torch.float32)
-        _rv = _rv * (tv_norm / torch.linalg.vector_norm(_rv).clamp_min(1e-12))
-        vecs.append(_rv.to(tv.device).to(tv.dtype))
+    for d in diffs:
+        dn = torch.linalg.vector_norm(d)
+        if dn > 0:
+            vecs.append((d * (tv_norm / dn)).to(tv.dtype).to(tv.device))
     return vecs
 
 
@@ -255,7 +346,7 @@ class _Records:
 
 
 def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
-             num_layers, device, steering_alpha, n_rand_draws, ctrl_seed,
+             num_layers, device, steering_alpha, controls,
              make_logit_dir, logit_dir_fn, u_hat):
     """Inject +v, -v and the random draws at every test layer of every neutral
     prompt and record the logit-space effects.
@@ -288,7 +379,7 @@ def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
 
                 for l_idx in test_layers:
                     tv = task_vectors[l_idx].to(device)
-                    rand_vecs = _random_controls(tv, l_idx, n_rand_draws, ctrl_seed)
+                    rand_vecs = _matched_controls(controls[l_idx], tv)
                     runs = [(tv, +1.0, rec.kl_pos, rec.dir_pos, -1),
                             (tv, -1.0, rec.kl_neg, rec.dir_neg, -1)]
                     runs += [(rv, +1.0, None, rec.dir_rand, i) for i, rv in enumerate(rand_vecs)]
@@ -414,8 +505,9 @@ class SteeringEffectivenessTask(DiagnosticTask):
     The vector (last-token mean difference) is added at the last position of a
     neutral prompt at each test layer; the signed change of next-token logits
     along the vector's own logit-space direction is the directional effect, with
-    a sign-reversal control (-v), a norm-matched random control and a
-    data-defined token-anchor effect. KL is sign-blind and is ``_meta_`` only.
+    a sign-reversal control (-v), a norm-matched control built from differences
+    of unrelated sentences (Turner et al. 2023, App. G) and a data-defined
+    token-anchor effect. KL is sign-blind and is ``_meta_`` only.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -463,14 +555,20 @@ class SteeringEffectivenessTask(DiagnosticTask):
         except Exception as e:  # pragma: no cover - defensive
             logger.info(f"steering: could not build logit-space concept direction ({e})")
 
+        controls = _control_differences(model, tokenizer, layers, num_layers,
+                                        device, n_rand_draws)
         rec = _measure(model, tokenizer, layers, samples, task_vectors,
                        _test_layers(num_layers), num_layers, device, steering_alpha,
-                       n_rand_draws, int(self.config.get("seed", 42)),
-                       make_logit_dir, logit_dir_fn, u_hat)
+                       controls, make_logit_dir, logit_dir_fn, u_hat)
         if not rec.kl_pos:
             return {"error": "No steering results computed."}
 
         out = _summarise(rec, self.config.get("steering_threshold", 0.01))
         out["_meta_n_probe_triples"] = int(len(samples))
         out["_meta_probe_set_is_bundled"] = bool(using_fallback)
+        # What the random control actually was, and how many draws it had.
+        n_ctrl = {len(_matched_controls(controls[l], task_vectors[l]))
+                  for l in _test_layers(num_layers)}
+        out["_meta_random_control"] = "text_difference"
+        out["_meta_n_random_draws"] = int(min(n_ctrl)) if n_ctrl else 0
         return out
