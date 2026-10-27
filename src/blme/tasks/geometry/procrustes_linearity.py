@@ -82,7 +82,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 
 logger = logging.getLogger("blme")
 
@@ -156,6 +157,36 @@ def _procrustes_similarity(X, Y, rank_aware: bool = False, return_rank: bool = F
         return sim
 
 
+def _pair_profile(layer_states, layers, reference_rule: bool = True):
+    """Per adjacent pair: rank-aware sim, released-rule sim, adjusted twin,
+    fit rank; plus the largest token count seen."""
+    n_tokens = 0
+    sims, sims_ref, sims_adj, ranks = [], [], [], []
+    for a, b in zip(layers[:-1], layers[1:]):
+        X = layer_states[a]
+        Y = layer_states[b]
+        if isinstance(X, torch.Tensor):
+            # numpy then float64: never narrow a float64 input to float32.
+            X = X.detach().cpu().numpy()
+        if isinstance(Y, torch.Tensor):
+            Y = Y.detach().cpu().numpy()
+        X = np.asarray(X, dtype=np.float64)
+        Y = np.asarray(Y, dtype=np.float64)
+        if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:
+            sims.append(float("nan"))
+            sims_ref.append(float("nan"))
+            sims_adj.append(float("nan"))
+            continue
+        n_tokens = max(n_tokens, X.shape[0])
+        sims_ref.append(_procrustes_similarity(X, Y) if reference_rule else float("nan"))
+        _fit = _procrustes_similarity(X, Y, rank_aware=True, return_rank=True)
+        _s, _r = _fit if isinstance(_fit, tuple) else (_fit, X.shape[0])
+        sims.append(_s)
+        sims_adj.append(_adjusted_linearity(_s, X.shape[0], _r))
+        ranks.append(_r)
+    return sims, sims_ref, sims_adj, ranks, n_tokens
+
+
 def _adjusted_linearity(sim: float, n: int, r: int) -> float:
     """Adjusted R^2 of the fit (Wherry 1931): 1 - (1 - sim)(N - 1)/(N - 1 - r).
 
@@ -198,6 +229,8 @@ class ProcrustesLinearityTask(DiagnosticTask):
         procrustes_linearity_q25/q50/q75 — quartiles over pairs
     """
 
+    TOKEN_POLICY = "paper_protocol:Razzhigaev2024 every position, BOS included"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Procrustes Linearity Analysis...")
 
@@ -209,46 +242,23 @@ class ProcrustesLinearityTask(DiagnosticTask):
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
         # Embedding output first, raw deepest block last: all L transitions.
-        layer_states, _info = hidden_states_for_task(
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
             replace_final_norm=True, layer_idx="all", use_cache=use_cache,
-            include_embedding=True, fallback="private_cache")
+            include_embedding=True, fallback="private_cache", per_sample=True)
 
-        if not layer_states:
+        if not per_doc:
             return {"error": "No hidden states available for procrustes linearity"}
 
-        layers = sorted(layer_states.keys())
+        layers = sorted(per_doc.keys())
         n_layers = len(layers)
         if n_layers < 2:
             return {"error": "Need at least 2 layers for procrustes linearity"}
 
-        n_tokens = 0
-        sims = []          # headline: rank-aware least-squares fit
-        sims_ref = []      # released get_est_svd rule (unguarded 1/S)
-        sims_adj = []      # adjusted-R^2 twin of the headline
-        ranks = []
-        for a, b in zip(layers[:-1], layers[1:]):
-            X = layer_states[a]
-            Y = layer_states[b]
-            if isinstance(X, torch.Tensor):
-                # numpy then float64: never narrow a float64 input to float32.
-                X = X.detach().cpu().numpy()
-            if isinstance(Y, torch.Tensor):
-                Y = Y.detach().cpu().numpy()
-            X = np.asarray(X, dtype=np.float64)
-            Y = np.asarray(Y, dtype=np.float64)
-            if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:
-                sims.append(float("nan"))
-                sims_ref.append(float("nan"))
-                sims_adj.append(float("nan"))
-                continue
-            n_tokens = max(n_tokens, X.shape[0])
-            sims_ref.append(_procrustes_similarity(X, Y))
-            _fit = _procrustes_similarity(X, Y, rank_aware=True, return_rank=True)
-            _s, _r = _fit if isinstance(_fit, tuple) else (_fit, X.shape[0])
-            sims.append(_s)
-            sims_adj.append(_adjusted_linearity(_s, X.shape[0], _r))
-            ranks.append(_r)
+        # TOKEN_POLICY: every position, BOS included, as the released notebook.
+        _policy = "exclude_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "all"
+        layer_states = {li: select_rows(per_doc[li], _policy)[0] for li in layers}
+        sims, sims_ref, sims_adj, ranks, n_tokens = _pair_profile(layer_states, layers)
 
         sim = np.asarray(sims, dtype=np.float64)
         _sref = np.asarray(sims_ref, dtype=np.float64)
@@ -269,6 +279,19 @@ class ProcrustesLinearityTask(DiagnosticTask):
         _adj.pop("procrustes_linearity_adjusted_slope")
         out.update(_adj)
         out["_meta_fit_rank_max"] = int(max(ranks)) if ranks else 0
+        # P2: the paper keeps position 0; the value without it is _meta_.
+        if self.config.get("meta_excl_pos0", True):
+            _ex = {li: select_rows(per_doc[li], "exclude_pos0")[0] for li in layers}
+            _es, _, _ea, _, _ = _pair_profile(_ex, layers, reference_rule=False)
+            _es = np.asarray(_es, dtype=np.float64)
+            _ea = np.asarray(_ea, dtype=np.float64)
+            out["_meta_excl_pos0_procrustes_linearity_mean"] = (
+                float(np.nanmean(_es)) if np.isfinite(_es).any() else float("nan"))
+            out["_meta_excl_pos0_procrustes_linearity_adjusted_mean"] = (
+                float(np.nanmean(_ea)) if np.isfinite(_ea).any() else float("nan"))
+        _mid = per_doc[layers[n_layers // 2]]
+        out["_meta_position0_share"] = position0_share(_mid)
+        out["_meta_massive_token_share"] = massive_token_share(_mid)
         _ref_fin = _sref[np.isfinite(_sref)]
         out.update({
             "_meta_n_layers": int(n_layers),

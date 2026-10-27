@@ -64,3 +64,17 @@ def test_adjusted_twin_removes_the_chance_fit(null_states):
         assert abs(r["procrustes_linearity_adjusted_mean"]) < 0.06
     drift = np.mean([r["procrustes_linearity_mean"] for r in small]) - full["procrustes_linearity_mean"]
     assert drift > 0.2                                        # known negative
+
+
+def test_position0_kept_with_the_excluded_value_beside_it(tiny_states):
+    """The paper keeps every position (BOS included): a synthetic sink moves
+    the headline, while the _meta_ value without position 0 does not."""
+    from _family_c import scale_position0
+    f64 = {"store_dtype": torch.float64}
+    base = inv.run_task_on_states(TASK, tiny_states, **f64)
+    sunk = inv.run_task_on_states(TASK, scale_position0(tiny_states, 1e3), **f64)
+    inv.assert_moves(base, sunk, "procrustes_linearity_mean", 1e-3)
+    inv.assert_invariant(base, sunk, ["_meta_excl_pos0_procrustes_linearity_mean",
+                                      "_meta_excl_pos0_procrustes_linearity_adjusted_mean"],
+                         rtol=1e-9)
+    assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
