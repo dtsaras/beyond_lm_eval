@@ -31,7 +31,7 @@ PROTOCOL: natural documents of >= 4K tokens (whole WikiText-103 articles,
 tokens of each scored in ONE forward pass, a 128-token burn-in prefix dropped,
 and the three parameters fitted on the pooled per-document statistics
 (per-document means as ``*_perdoc``). The concatenated-stream values are
-``*_concat_legacy``.
+``_meta_*_concat_legacy``.
 
 Estimator parity is pinned against ``nolds`` (hurst_rs) and analytic anchors
 (white noise H ~ 0.5; J = 0.5 for iid).
@@ -269,8 +269,9 @@ class FractalLikelihoodTask(DiagnosticTask):
             "hurst_exponent_std": _std("hurst_exponent"),
             "joseph_exponent_std": _std("joseph_exponent"),
             "self_similarity_exponent_std": _std("self_similarity_exponent"),
-            "n_tokens_in_stream": int(sum(d["n_tokens_in_stream"]
-                                          for d in per_doc)),
+            # _meta_: a sample-count echo (n_docs x scored tokens).
+            "_meta_n_tokens_in_stream": int(sum(d["n_tokens_in_stream"]
+                                                for d in per_doc)),
             "_meta_n_documents": len(per_doc),
             "_meta_document_source": source_name,
             "_meta_min_doc_tokens": int(min_doc_tokens),
@@ -281,11 +282,11 @@ class FractalLikelihoodTask(DiagnosticTask):
             "_meta_holder_eps_is_paper_value": bool(eps == PAPER_HOLDER_EPS),
             "_meta_tau_min": int(_TAU_MIN),
         }
-        # Legacy concatenated-stream values.
+        # Legacy concatenated-stream values (a retired protocol): _meta_.
         legacy = _fractal_params(all_nll, eps=eps)
         for k in ("hurst_exponent", "joseph_exponent",
                   "self_similarity_exponent"):
-            results[f"{k}_concat_legacy"] = legacy[k]
+            results[f"_meta_{k}_concat_legacy"] = legacy[k]
         return results
 
 

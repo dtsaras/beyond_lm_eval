@@ -48,3 +48,10 @@ def test_holder_eps_is_the_papers(monkeypatch):
     out, _ = _run(monkeypatch, CFG)
     assert out["_meta_holder_eps"] == 5e-3
     assert out["_meta_holder_eps_is_paper_value"] is True
+
+
+def test_legacy_and_count_keys_are_meta(monkeypatch):
+    out, _ = _run(monkeypatch, CFG)
+    for k in ("n_tokens_in_stream", "hurst_exponent_concat_legacy",
+              "joseph_exponent_concat_legacy", "self_similarity_exponent_concat_legacy"):
+        assert k not in out and f"_meta_{k}" in out, k
