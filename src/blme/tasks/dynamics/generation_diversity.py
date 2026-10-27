@@ -240,11 +240,12 @@ class GenerationDiversityTask(DiagnosticTask):
     # vocabulary) for a fixed text; the collection-size drift of corpus
     # distinct-n is handled by pinning N = 500 for every model, not normalised.
     # The phrase-repetition and sampling-entropy keys have no direct test.
-    _TOKENIZER_TEST = ("tests/tasks/invariance/test_dynamics_generation_diversity.py::"
-                       "test_word_unit_metrics_do_not_depend_on_the_tokenizer")
-    SIZE_INVARIANT = {k: (("tokenizer_swap(gpt2, pythia-160m)",), _TOKENIZER_TEST)
-                      for k in ("mean_self_bleu", "distinct_1", "distinct_2", "distinct_3",
-                                "mean_distinct_1", "mean_distinct_2", "mean_distinct_3")}
+    SIZE_INVARIANT = dict.fromkeys(
+        ("mean_self_bleu", "distinct_1", "distinct_2", "distinct_3",
+         "mean_distinct_1", "mean_distinct_2", "mean_distinct_3"),
+        (("tokenizer_swap(gpt2, pythia-160m)",),
+         "tests/tasks/invariance/test_dynamics_generation_diversity.py::"
+         "test_word_unit_metrics_do_not_depend_on_the_tokenizer"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
