@@ -40,6 +40,31 @@ def test_bf16_model_computes_and_decodes_in_fp32(build):
     assert {p.dtype for p in bf16.parameters()} == {torch.bfloat16}
 
 
+@pytest.mark.parametrize("where", [[0, 0], [4], [0, 1, 2, 3]], ids=["early", "end", "uniform"])
+def test_convexity_gap_invariant_under_identity_blocks(where):
+    """Only the final state is read, so function-preserving identity blocks
+    leave the gap bit-identical."""
+    tok = tokenizer()
+    model = tiny_gpt2()
+    deeper = inv.insert_identity_blocks(model, where, verify_on=token_batches(tok))
+    inv.assert_invariant(_run(model, tok), _run(deeper, tok), ["convexity_gap"], rtol=0.0)
+
+
+def test_convexity_gap_moves_when_depth_changes_the_function():
+    """Control: duplicating a real block (not function-preserving) moves the gap,
+    so the identity-block test has power."""
+    import copy
+    tok = tokenizer()
+    model = tiny_gpt2()
+    other = copy.deepcopy(model)
+    blocks = list(other.transformer.h)
+    other.transformer.h = torch.nn.ModuleList(blocks[:2] + [copy.deepcopy(blocks[1])] + blocks[2:])
+    other.config.n_layer = len(other.transformer.h)
+    for i, b in enumerate(other.transformer.h):
+        b.attn.layer_idx = i
+    inv.assert_moves(_run(model, tok), _run(other, tok), "convexity_gap", 1e-3)
+
+
 def test_contexts_are_cut_by_tokens_not_characters():
     """Two passages sharing their first 128 characters but not their first 128
     tokens must give two different contexts. Pre-fix the 128-character cut made

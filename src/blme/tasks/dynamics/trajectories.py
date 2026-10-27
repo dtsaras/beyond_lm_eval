@@ -61,7 +61,41 @@ class LatentInterpolationTask(DiagnosticTask):
     Interpolates between two hidden states in latent space.
     Measures entropy of decoded predictions along the path (convexity check).
     Uses norm-corrected linear interpolation and slerp for comparison.
+    Contexts are cut at ``max_tokens`` tokens (default 128).
     """
+
+    # Reads one state per context, its last token (the state whose next-token
+    # distribution is the estimand); no token pool is formed.
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1609.04468",
+        "code": "dribnet/plat@0963c75d460c153183c1d414b02d4b5dc0b2208f",
+        "llm_precedent": None,
+    }
+    ADAPTATION_NOTE = (
+        "convexity_gap asks how much more uncertain the model's next-token distribution "
+        "becomes midway between two contexts' final states than at the contexts themselves. "
+        "BLME cuts each context at max_tokens tokens, interpolates the post-final-norm "
+        "last-token states of two passages linearly, rescales each point to the linearly "
+        "interpolated norm, decodes it through the model's own LM head, and reports "
+        "H(alpha=0.5) - mean(H(0), H(1)). The norm correction avoids a mechanical midpoint norm "
+        "collapse, which would raise entropy for geometric reasons alone, and post-norm states "
+        "are used because the head only ever sees post-norm vectors. Slerp (White 2016) was "
+        "the alternative path; with the same norm target it is identical at alpha in "
+        "{0, 0.5, 1}, so it is kept only as a _meta_ comparison. The endpoint entropies are "
+        "the model's own predictive entropy, so the gap contains a capability term at "
+        "coefficient -1, disclosed in _meta_convexity_gap_endpoint_entropy_mean. The forward "
+        "pass and the decode run in fp32 arithmetic."
+    )
+    HEADLINE_KEYS = ("convexity_gap",)
+    SIZE_INVARIANT = {
+        "convexity_gap": (
+            ("insert_identity_blocks",),
+            "tests/tasks/invariance/test_dynamics_interpolation.py::"
+            "test_convexity_gap_invariant_under_identity_blocks",
+        ),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Interpolation...")
         num_pairs = self.config.get("num_pairs", 50)
