@@ -73,6 +73,9 @@ def _normalized_linear_hsic(X: torch.Tensor, Y: torch.Tensor) -> float:
     return _nhsic_from_grams(_centered_linear_gram(X), _centered_linear_gram(Y))
 
 
+_SI_NODE = "tests/tasks/invariance/test_hsic.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_hsic")
 class HSICDependenceTask(DiagnosticTask):
     """
@@ -88,6 +91,24 @@ class HSICDependenceTask(DiagnosticTask):
     tests/tasks/invariance/test_hsic.py).
     """
     TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "DOI:10.1007/11564089_7 (Gretton et al. 2005); arXiv:1905.00414 "
+                 "(Kornblith et al. 2019, the CKA normalisation)",
+        "code": "google-research/google-research@700de9630a39cf1c0ded1ea7d1092ec0f467c7a7"
+                " (representation_similarity/Demo.ipynb)",
+        "llm_precedent": "arXiv:2005.01172 (Wu et al. 2020: linear CKA between "
+                         "layers on token representations)",
+    }
+    HEADLINE_KEYS = ("min_adjacent_hsic", "hsic_compression_ratio",
+                     "min_adjacent_hsic_debiased", "hsic_compression_ratio_debiased")
+    # Biased keys: depth- and width-free, but carry the d_eff/N floor at the
+    # token cap; the debiased twins add sample-size invariance.
+    SIZE_INVARIANT = {
+        **{k: (("identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+           for k in ("min_adjacent_hsic", "hsic_compression_ratio")},
+        **{k: (("N", "identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+           for k in ("min_adjacent_hsic_debiased", "hsic_compression_ratio_debiased")},
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running HSIC Dependence Analysis...")

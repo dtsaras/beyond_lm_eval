@@ -135,3 +135,37 @@ def test_headline_is_width_and_scale_invariant(tiny_states, transform):
           "rescale": lambda S: inv.rescale_docs(S, 2.0)}[transform](tiny_states)
     base = inv.run_task_on_states(TASK, tiny_states)
     inv.assert_invariant(base, inv.run_task_on_states(TASK, St), _headline(base), rtol=1e-6)
+
+
+# --------------------------------------------------------------------------
+# SIZE_INVARIANT declarations, checked against their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.mutual_info import HSICDependenceTask  # noqa: E402
+
+_NEG_N = {'hsic_compression_ratio_debiased': 'hsic_compression_ratio', 'min_adjacent_hsic_debiased': 'min_adjacent_hsic'}
+
+
+@pytest.fixture(scope="module")
+def null_states(tiny_states):
+    from _family_c import keep_layers, permute_layer_rows
+    L = tiny_states.n_layers
+    return permute_layer_rows(keep_layers(tiny_states, [0, L // 2]), 1, seed=0)
+
+
+@pytest.mark.parametrize("key", sorted(HSICDependenceTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_states):
+    """Each declared transform's direct test, plus the known negative: the
+    uniform layer mean under identity blocks, the biased twin under N."""
+    from _family_c import check_size_invariant_entry
+    negatives = {"identity_blocks": "_meta_avg_adjacent_hsic"}
+    if key in _NEG_N:
+        negatives["N"] = _NEG_N[key]
+    check_size_invariant_entry(TASK, HSICDependenceTask, key, tiny_states, tiny_identity_states,
+                               null_states=null_states, negatives=negatives)
+
+
+def test_declarations():
+    assert HSICDependenceTask.TOKEN_POLICY == "exclude_pos0"
+    assert set(HSICDependenceTask.SIZE_INVARIANT) <= set(HSICDependenceTask.HEADLINE_KEYS)
+    assert {"paper", "code", "llm_precedent"} <= set(HSICDependenceTask.SOURCES)
