@@ -81,25 +81,28 @@ class CategoryGeometryTask(DiagnosticTask):
         # Purity
         k = self.config.get("k_purity", 20)
         logger.info(f" Computing Purity (k={k})...")
-        purity_results = self._compute_purity(E, cat_tokens, cat_labels, k=k)
+        # Neighbour searches (purity, analogies) run over emittable rows only:
+        # an unused row is never a word, whatever vector it holds.
+        E_emit = E[:n_emit]
+        purity_results = self._compute_purity(E_emit, cat_tokens, cat_labels, k=k)
         results.update(purity_results)
         
         # Hubness
         logger.info(" Computing Category Hubness...")
-        hub_results = self._compute_hubness(E, tokenizer, cat_tokens)
+        hub_results = self._compute_hubness(E_emit, tokenizer, cat_tokens)
         results.update(hub_results)
         
         # Projection (UMAP/t-SNE)
         projection_method = self.config.get("projection_method", None) # "umap", "tsne", "pca"
         if projection_method:
             logger.info(f" Computing {projection_method.upper()} Projection...")
-            proj_results = self._compute_projection(E, cat_tokens, method=projection_method)
+            proj_results = self._compute_projection(E_emit, cat_tokens, method=projection_method)
             results.update(proj_results)
 
         # Relation Consistency (Singular/Plural, Present/Past)
         logger.info(" Computing Relation Consistency...")
         if hasattr(self, 'relation_pairs') and self.relation_pairs:
-            rel_results = self._compute_relation_consistency(E, self.relation_pairs, tokenizer)
+            rel_results = self._compute_relation_consistency(E_emit, self.relation_pairs, tokenizer)
             results.update(rel_results)
 
         n_mapped = sum(len(tids) for tids in cat_tokens.values())

@@ -49,3 +49,26 @@ def test_comparison_draw_does_not_depend_on_the_vocabulary_size(base, zero_padde
     keys = _headline(base)
     assert any(k.endswith("_inter") for k in keys)
     inv.assert_invariant(base, zero_padded, keys, rtol=1e-6)
+
+
+def test_unused_rows_never_enter_a_neighbour_search(gpt2, base):
+    """Unused rows (ids the tokenizer cannot emit) holding copies of category
+    vectors would be every category token's nearest neighbours; the searches
+    run over emittable rows, so purity, hubness and consistency do not move."""
+    from blme.tasks.geometry.categories import CategoryGeometryTask
+    model, tok = gpt2
+    import json, os, blme
+    cats = json.load(open(os.path.join(os.path.dirname(blme.__file__), "assets",
+                                       "categories.json")))
+    cat_tokens, _ = CategoryGeometryTask()._get_category_tokens(tok, cats)
+    ids = sorted({t for v in cat_tokens.values() for t in v})[:128]
+    padded = inv.pad_vocabulary(model, len(ids), kind="zero")
+    W = padded.get_input_embeddings().weight
+    V = model.get_input_embeddings().weight.shape[0]
+    with torch.no_grad():
+        W[V:] = W[torch.tensor(ids)]
+    r = _run(padded, tok)
+    keys = [k for k in _headline(base) if k.endswith(("_purity", "_hub_skew", "_hub_max",
+                                                      "_consistency"))]
+    assert keys
+    inv.assert_invariant(base, r, keys, rtol=1e-6)
