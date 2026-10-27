@@ -17,6 +17,11 @@ from ._common import find_final_norm, logger
 # unrelated sentence pairs, norm-matched to the concept vector.
 _N_RAND_DRAWS_DEFAULT = 32
 
+# Injected norm as a fraction of the residual norm at the injection point
+# (times ``steering_alpha``). alpha = 1 on the raw vector realised 0.01-0.2 on
+# gpt2 / pythia-160m / pythia-410m, so the size differed by model.
+_REL_NORM_DEFAULT = 0.1
+
 # Distinct (positive, negative, neutral) probe triples. The whole set is used
 # when it is the probe set: any 3 of the 8 swung the headline 12.9x.
 _FALLBACK_TRIPLES = [
@@ -343,19 +348,24 @@ class _Records:
         self.fixed_neg = []
         self.sem_pos = []      # (layer, anchor effect)
         self.sem_neg = []
+        self.rel_norm = []     # realised ||injected|| / ||residual||
+        self.raw_rel_norm = []  # ||v|| / ||residual||: what alpha = 1 on v would inject
 
 
 def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
-             num_layers, device, steering_alpha, controls,
+             num_layers, device, rel_norm, controls,
              make_logit_dir, logit_dir_fn, u_hat):
-    """Inject +v, -v and the random draws at every test layer of every neutral
+    """Inject +v, -v and the control draws at every test layer of every neutral
     prompt and record the logit-space effects.
 
+    The injected vector is v rescaled to ``rel_norm`` times the norm of the
+    residual it is added to (the block output at the prompt's last position),
+    so its size is comparable across models (Turner et al. 2023, App. F).
     Two yardsticks: a per-layer u(tv_l) for the concept-vs-random ratio (both
     arms measured along their own direction) and the fixed final-layer u_hat for
     the sign family (against which a layer can point the wrong way).
-    post-final-norm: SUBSTITUTED. The linearisation point is the raw deepest
-    block output of the prompt being steered, captured by a hook.
+    post-final-norm: SUBSTITUTED. The residual norms and the linearisation
+    point use the raw deepest block output, captured by a hook.
     """
     rec = _Records()
     sink = {}
@@ -366,26 +376,36 @@ def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
                 apos, aneg = _anchor_ids(tokenizer, s)
                 neutral_ids = tokenizer.encode(s["neutral"], return_tensors="pt",
                                                truncation=True, max_length=128).to(device)
-                base_out = model(neutral_ids)
+                base_out = model(neutral_ids, output_hidden_states=True)
                 base_logits = base_out.logits[0, -1]
                 base_probs = F.softmax(base_logits, dim=-1)
+                h_pt = sink.get("h")
+                hs = list(base_out.hidden_states)
+                if h_pt is not None and tuple(h_pt.shape) == tuple(hs[-1].shape):
+                    hs[-1] = h_pt
 
                 # Rebuild the logit-space map at THIS prompt's own final state.
-                h_pt = sink.get("h")
                 if h_pt is not None and make_logit_dir is not None:
                     logit_dir_fn = make_logit_dir(h_pt[0, -1].detach().to(torch.float32))
                     if logit_dir_fn is not None:
                         u_hat = logit_dir_fn(task_vectors[num_layers - 1])
 
                 for l_idx in test_layers:
-                    tv = task_vectors[l_idx].to(device)
+                    tv_raw = task_vectors[l_idx].to(device)
+                    tv_norm = torch.linalg.vector_norm(tv_raw.double())
+                    res_norm = torch.linalg.vector_norm(hs[l_idx + 1][0, -1].double())
+                    if not tv_norm > 0:
+                        continue
+                    tv = (tv_raw.double() * (rel_norm * res_norm / tv_norm)).to(tv_raw.dtype)
+                    rec.rel_norm.append(float(torch.linalg.vector_norm(tv.double()) / res_norm))
+                    rec.raw_rel_norm.append(float(tv_norm / res_norm))
                     rand_vecs = _matched_controls(controls[l_idx], tv)
                     runs = [(tv, +1.0, rec.kl_pos, rec.dir_pos, -1),
                             (tv, -1.0, rec.kl_neg, rec.dir_neg, -1)]
                     runs += [(rv, +1.0, None, rec.dir_rand, i) for i, rv in enumerate(rand_vecs)]
                     for vec, sgn, kl_sink, dir_sink, draw_id in runs:
                         handle = layers[l_idx].register_forward_hook(
-                            _steering_hook(vec, sgn * steering_alpha))
+                            _steering_hook(vec, sgn))
                         try:
                             steered_logits = model(neutral_ids).logits[0, -1]
                             steered_log_probs = F.log_softmax(steered_logits, dim=-1)
@@ -502,8 +522,9 @@ def _summarise(rec, threshold):
 class SteeringEffectivenessTask(DiagnosticTask):
     """Effect of adding the contrastive task vector to the residual stream.
 
-    The vector (last-token mean difference) is added at the last position of a
-    neutral prompt at each test layer; the signed change of next-token logits
+    The vector (last-token mean difference), rescaled to ``steering_rel_norm``
+    times the residual norm at the injection point, is added at the last
+    position of a neutral prompt at each test layer; the signed change of next-token logits
     along the vector's own logit-space direction is the directional effect, with
     a sign-reversal control (-v), a norm-matched control built from differences
     of unrelated sentences (Turner et al. 2023, App. G) and a data-defined
@@ -513,7 +534,9 @@ class SteeringEffectivenessTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Steering Vector Effectiveness...")
         num_samples = self.config.get("num_samples", 3)
-        steering_alpha = self.config.get("steering_alpha", 1.0)
+        steering_alpha = float(self.config.get("steering_alpha", 1.0))
+        rel_norm = steering_alpha * float(self.config.get("steering_rel_norm",
+                                                          _REL_NORM_DEFAULT))
         n_rand_draws = int(self.config.get("n_random_draws", _N_RAND_DRAWS_DEFAULT))
 
         device = next(model.parameters()).device
@@ -527,13 +550,13 @@ class SteeringEffectivenessTask(DiagnosticTask):
         # (tests/tasks/test_steering_fixes.py::test_fp32_compute_at_every_size).
         with fp32_compute(model) as prec:
             out = self._run(model, tokenizer, dataset, layers, num_layers, device,
-                            num_samples, steering_alpha, n_rand_draws)
+                            num_samples, rel_norm, n_rand_draws)
         if "error" not in out:
             out.update(effective_dtype_meta(prec))
         return out
 
     def _run(self, model, tokenizer, dataset, layers, num_layers, device,
-             num_samples, steering_alpha, n_rand_draws):
+             num_samples, rel_norm, n_rand_draws):
         samples, using_fallback, err = _probe_samples(dataset, num_samples)
         if err is not None:
             return err
@@ -558,7 +581,7 @@ class SteeringEffectivenessTask(DiagnosticTask):
         controls = _control_differences(model, tokenizer, layers, num_layers,
                                         device, n_rand_draws)
         rec = _measure(model, tokenizer, layers, samples, task_vectors,
-                       _test_layers(num_layers), num_layers, device, steering_alpha,
+                       _test_layers(num_layers), num_layers, device, rel_norm,
                        controls, make_logit_dir, logit_dir_fn, u_hat)
         if not rec.kl_pos:
             return {"error": "No steering results computed."}
@@ -571,4 +594,9 @@ class SteeringEffectivenessTask(DiagnosticTask):
                   for l in _test_layers(num_layers)}
         out["_meta_random_control"] = "text_difference"
         out["_meta_n_random_draws"] = int(min(n_ctrl)) if n_ctrl else 0
+        # The injected size actually realised, and what the raw vector was.
+        out["_meta_alpha_mode"] = "relative_to_residual_norm"
+        out["_meta_steering_rel_norm"] = float(rel_norm)
+        out["_meta_realized_rel_norm"] = float(np.mean(rec.rel_norm))
+        out["_meta_raw_vector_rel_norm"] = float(np.mean(rec.raw_rel_norm))
         return out

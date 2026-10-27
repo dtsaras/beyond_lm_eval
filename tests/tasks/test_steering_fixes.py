@@ -76,3 +76,28 @@ def test_fp32_compute_at_every_size():
     # The shared model is handed back in bf16.
     assert all(p.dtype == torch.bfloat16 for p in big.parameters()
                if isinstance(p, torch.nn.Parameter))
+
+
+def test_injected_size_is_relative_to_the_residual(monkeypatch):
+    """Doubling the contrast vector (a probe set whose pairs differ twice as
+    much) must not change what is injected: its size is a fixed fraction of the
+    residual norm. With alpha applied to the raw vector it doubled."""
+    from blme.tasks.repe import steering
+    tok = _gpt2_tokenizer()
+    model = _tiny_llama(len(tok))
+    base = SteeringEffectivenessTask(dict(CFG)).evaluate(model, tok, None)
+
+    real = steering._extract_task_vectors
+
+    def doubled(*a, **k):
+        tv, h = real(*a, **k)
+        return {l: 2 * v for l, v in tv.items()}, h
+
+    monkeypatch.setattr(steering, "_extract_task_vectors", doubled)
+    out = SteeringEffectivenessTask(dict(CFG)).evaluate(model, tok, None)
+    for k in DIRECTIONAL + ("steering_concept_over_random",):
+        assert out[k] == base[k], (k, out[k], base[k])
+    assert out["_meta_alpha_mode"] == "relative_to_residual_norm"
+    assert out["_meta_realized_rel_norm"] == pytest.approx(0.1, rel=1e-6)
+    assert out["_meta_raw_vector_rel_norm"] == pytest.approx(
+        2 * base["_meta_raw_vector_rel_norm"], rel=1e-6)
