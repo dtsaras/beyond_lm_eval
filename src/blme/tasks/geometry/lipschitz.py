@@ -186,7 +186,9 @@ class LipschitzContinuityTask(DiagnosticTask):
 
         # Rows under the token policy (the same rows at every layer), and every
         # row for the inclusive provenance value.
-        policy = "exclude_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "all"
+        # The class policy goes to select_rows as is (an unknown name raises),
+        # so a central policy change reaches this task.
+        policy = self.TOKEN_POLICY
         rows, row_meta = {}, None
         for k in layer_indices:
             rows[k], row_meta = select_rows(all_layers[k], policy)
