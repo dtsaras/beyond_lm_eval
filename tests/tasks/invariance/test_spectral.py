@@ -47,3 +47,30 @@ def test_tail_fraction_is_a_meta_config_echo(tiny, base):
     assert "tail_fraction" not in base
     assert base["_meta_tail_fraction"] == 0.2
     assert _run(tiny, tail_fraction=0.3)["_meta_tail_fraction"] == 0.3
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.spectral import WeightSpectralTask  # noqa: E402
+
+
+@pytest.mark.parametrize("key", sorted(WeightSpectralTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, base, padded):
+    """Zero-padding: the declared key does not move; the Hill proxy it
+    replaced does (known negative)."""
+    transforms, node = WeightSpectralTask.SIZE_INVARIANT[key]
+    assert transforms == ("zero_pad",)
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    inv.assert_invariant(base, padded, [key], rtol=1e-9)
+    inv.assert_moves(base, padded, "_meta_avg_alpha", 0.05)
+    inv.assert_moves(base, padded, "_meta_avg_stable_rank_normalized", 0.4)
+
+
+def test_declarations(base):
+    cls = WeightSpectralTask
+    assert cls.TOKEN_POLICY == "not_token_based"
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    assert set(cls.HEADLINE_KEYS) <= set(base)

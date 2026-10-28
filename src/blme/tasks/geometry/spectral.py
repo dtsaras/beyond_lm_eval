@@ -107,6 +107,9 @@ def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 2) -> tuple:
     return best[1], best[2], best[0], best[3]
 
 
+_SI_NODE = "tests/tasks/invariance/test_spectral.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_spectral")
 class WeightSpectralTask(DiagnosticTask):
     """
@@ -128,6 +131,24 @@ class WeightSpectralTask(DiagnosticTask):
       max 2.1e-3). The fixed-tail Hill proxy is ``_meta_avg_alpha`` (and its
       min/max/std/median), kept for continuity.
     """
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2002.06716 (Martin, Peng & Mahoney 2021, Nat. Commun. 12:4122); "
+                 "arXiv:1810.01075 (Martin & Mahoney, HT-SR); stable rank: "
+                 "arXiv:math/0503442",
+        "code": "CalculatedContent/WeightWatcher@a5940f79e9d5bbc37c82360c6f2f8a3aefe6543a "
+                "(weightwatcher.py:2843 evals = sv^2, :5535-5543 alpha_weighted, "
+                "stable_rank; WW_powerlaw.WWFit)",
+        "llm_precedent": "arXiv:2002.06716 (layer alphas of GPT and GPT-2, averaged "
+                         "over the layer weight matrices)",
+    }
+    HEADLINE_KEYS = ("avg_alpha_official", "median_alpha_official", "avg_alpha_hat",
+                     "avg_stable_rank")
+    # Width: zero-padding every block matrix keeps each operator's nonzero
+    # spectrum (the padded zeros are resolved by the rank envelope). Not
+    # depth-invariant (a zero-output block adds matrices to every mean) and not
+    # exactly vocabulary-invariant (the unembedding is one of the matrices).
+    SIZE_INVARIANT = {k: (("zero_pad",), _SI_NODE.format(k)) for k in HEADLINE_KEYS}
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Weight Spectral Analysis...")
 
