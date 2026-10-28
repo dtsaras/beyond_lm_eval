@@ -65,14 +65,18 @@ import logging
 from typing import Optional
 
 import numpy as np
-import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
+                               sequence_clouds)
 from scipy.linalg import cho_factor, solve_triangular
 from scipy.spatial.distance import pdist, squareform
 
 logger = logging.getLogger("blme")
+
+# Rows of the _meta_ token cloud (the previous 100-point draw).
+_TOKEN_CLOUD_POINTS = 100
 
 # Perturbation added to ζ (Bunch et al. 2020, as used by magnipy's
 # ``magnitude_weights``) when the direct solve fails on a singular matrix.
@@ -309,87 +313,65 @@ class MagnitudeTask(DiagnosticTask):
         magnitude_median_scale — the median-heuristic scale t_med itself
     """
 
+    # One point per sequence (Q1): the last content token of each document.
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Metric-Space Magnitude...")
 
-        num_samples = int(self.config.get("num_samples", 100))
+        num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
         n_scales = int(self.config.get("n_scales", 10))
         scale_span = float(self.config.get("scale_span", 10.0))
-        layer_idx = self.config.get("layer_idx", -1)
+        layer_idx = int(self.config.get("layer_idx", -1))
         use_cache = self.config.get("use_cache", True)
         seed = int(self.config.get("subsample_seed", 42))
+        token_points = int(self.config.get("token_cloud_points", _TOKEN_CLOUD_POINTS))
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
-        # --- 1. Fetch a hidden-state point cloud ---------------------------
-        # The point count is part of the estimand, so the shared cache is used
-        # only when it holds exactly num_samples documents (larger or smaller
-        # caches change the cloud), and both routes keep every token.
-        H = None
-        _cached_docs = len(getattr(cache, "_sample_lengths", []) or []) if cache else 0
-        _cache_ok = (cache is not None and cache.is_populated and use_cache
-                     and _cached_docs == int(num_samples))
-        if cache is not None and cache.is_populated and use_cache and not _cache_ok:
-            logger.info(
-                f"  magnitude: shared cache holds {_cached_docs} documents != "
-                f"configured {num_samples}; self-collecting so the point count "
-                f"does not depend on which tasks co-ran.")
-        H = None
-        if _cache_ok:
-            # post-final-norm=False, DELIBERATELY: one configured layer
-            # (default -1, the model's output representation).
-            H = cache.get_hidden_states(layer_idx=layer_idx, per_sample=False,
-                                        replace_final_norm=False)
-            if H is None:
-                # A populated cache without hidden states: self-collect.
-                logger.info(
-                    "  Magnitude: shared cache is populated but carries no "
-                    "hidden states; self-collecting.")
-        _cache_supplied = H is not None
-        if H is None:
-            from .utils import collect_hidden_states
-
-            if dataset is None:
-                dataset = [
-                    {"text": "The quick brown fox jumps over the lazy dog."}
-                    for _ in range(max(num_samples, 50))
-                ]
-            H = collect_hidden_states(
-                model, tokenizer, dataset,
-                num_samples=max(num_samples, 50), layer_idx=layer_idx,
-                replace_final_norm=False,
-                # Every token, matching the cache route.
-                max_tokens_per_doc=None,
-            )
-        # DERIVED from what actually supplied the states, not from the plan.
-        _source = "shared_cache" if (_cache_ok and _cache_supplied) else "self_collected"
-
-        if H is None:
+        # --- 1. One point per sequence (Q1) -----------------------------------
+        # The last content token of each of num_samples documents at one
+        # configured layer (default -1, HF's post-norm output representation):
+        # one embedding per text, as Limbeck et al. score text spaces. The
+        # point count is part of the estimand, so a cache holding fewer
+        # documents is bypassed (test_magnitude_protocol.py).
+        sc = sequence_clouds(
+            model, tokenizer, dataset, cache, n=num_samples, layer=layer_idx,
+            replace_final_norm=False, use_cache=use_cache,
+            token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+            readout=readout_for(self.TOKEN_POLICY))
+        if not sc.last:
             return {"error": "No hidden states available for magnitude"}
-
-        if isinstance(H, torch.Tensor):
-            # float64 on both branches: float32 cannot resolve the separations
-            # of a cloud far from the origin.
-            X = H.detach().double().cpu().numpy()
-        else:
-            X = np.asarray(H, dtype=np.float64)
-
+        key = next(iter(sc.last))
+        # float64: float32 cannot resolve the separations of a cloud far from
+        # the origin.
+        X = sc.last[key].detach().double().cpu().numpy()
         if X.ndim != 2 or X.shape[0] < 2:
             return {"error": "Need at least 2 points for magnitude"}
-
-        # --- 2. Subsample to keep the O(n^3) inverse tractable -------------
-        n_total = X.shape[0]
-        if n_total > num_samples:
-            rng = np.random.default_rng(seed)
-            idx = rng.choice(n_total, num_samples, replace=False)
-            X = X[idx]
-        X = np.asarray(X, dtype=np.float64)
         n = X.shape[0]
 
-        # --- 3-4. Distance matrix + magnitude summary ----------------------
-        D = _pairwise_distance_matrix(X)
-        _out = _magnitude_summary(D, n_scales, scale_span)
+        # --- 2. Distance matrix + magnitude summary ---------------------------
+        _out = _magnitude_summary(_pairwise_distance_matrix(X), n_scales, scale_span)
+        if not isinstance(_out, dict) or "error" in _out:
+            return _out
+
+        # --- 3. The token cloud (_meta_tokens_*): token_cloud_points seeded
+        # rows of the first token_cloud_docs documents, sink policy.
+        if sc.tokens:
+            T = sc.token_rows(key)[0].detach().double().cpu().numpy()
+            if T.shape[0] > token_points:
+                rng = np.random.default_rng(seed)
+                T = T[rng.choice(T.shape[0], token_points, replace=False)]
+            if T.shape[0] >= 2:
+                tok = _magnitude_summary(_pairwise_distance_matrix(T), n_scales, scale_span)
+                _out.update({f"_meta_tokens_{k}": v for k, v in tok.items()
+                             if not k.startswith("_meta_") and k != "error"})
+                _out["_meta_tokens_n_points"] = int(T.shape[0])
+
         # Provenance: route, point count and document count.
-        if isinstance(_out, dict) and "error" not in _out:
-            _out["_meta_magnitude_source"] = _source
-            _out["_meta_magnitude_n_points"] = int(n)
-            _out["_meta_magnitude_n_docs"] = int(_cached_docs) if _cache_ok else int(num_samples)
+        _out["_meta_magnitude_source"] = sc.info.get("source")
+        _out["_meta_magnitude_n_points"] = int(n)
+        _out["_meta_magnitude_n_docs"] = int(n)
+        _out.update(sc.meta())
         return _out

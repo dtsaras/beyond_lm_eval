@@ -416,10 +416,14 @@ geometry_cknna:
   use_cache: true
 
 geometry_magnitude:
-  num_samples: 100
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # 100 token rows of the first 200 documents are the _meta_ token cloud.
+  num_samples: 1000
   n_scales: 10
   scale_span: 10.0
   layer_idx: -1
+  token_cloud_docs: 200
+  token_cloud_points: 100
 
 geometry_procrustes_linearity:
   num_samples: 100
