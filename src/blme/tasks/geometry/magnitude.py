@@ -394,8 +394,21 @@ class MagnitudeTask(DiagnosticTask):
                                     (low/med scale, auc, area, dimension)
     """
 
-    # One point per sequence (Q1): the last content token of each document.
+    # One point per sequence (Q1): the last content token of each document,
+    # as the paper scores one embedding per text.
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:2311.16054",
+        "code": "aidos-lab/magnipy@7d49b90f110db42fe666ada2964fea020d2cb1dd",
+        "llm_precedent": ("Limbeck et al. 2024 arXiv:2311.16054 (text-embedding spaces, "
+                          "one embedding per text, cosine distance)"),
+    }
+    HEADLINE_KEYS = ("magnitude_area_tconv", "magnitude_dimension_tconv")
+    _INV = "tests/tasks/invariance/test_geometry_magnitude.py::"
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+         _INV + "test_headline_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Metric-Space Magnitude...")
