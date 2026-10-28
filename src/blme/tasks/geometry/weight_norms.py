@@ -78,9 +78,40 @@ def _weight_matrix_stats(W):
     return frobs, specs, sranks, sranks_norm, rms_scales
 
 
+_SI_NODE = "tests/tasks/invariance/test_weight_norms.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_weight_norms")
 class WeightNormProfileTask(DiagnosticTask):
     """Per-layer weight matrix norm profiles (Tier 1, weight-only)."""
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:math/0503442 (Rudelson & Vershynin 2007, Remark 1.3: "
+                 "stable rank ||A||_F^2 / ||A||_2^2)",
+        "code": "CalculatedContent/WeightWatcher@a5940f79e9d5bbc37c82360c6f2f8a3aefe6543a "
+                "(stable_rank cross-check, weightwatcher.py:5543)",
+        "llm_precedent": "arXiv:2002.06716 (Martin, Peng & Mahoney 2021: per-layer "
+                         "norms averaged over the non-embedding layers of GPT/GPT-2)",
+    }
+    ADAPTATION_NOTE = (
+        "Each transformer block's weight matrices are summarised by their Frobenius norm, "
+        "largest singular value and stable rank, averaged within the block and then over "
+        "blocks; norm_uniformity is one minus the coefficient of variation of the "
+        "per-block Frobenius norms. Martin, Peng and Mahoney average per-layer norms over "
+        "the non-embedding layers; the per-block profile is added so depth trends are "
+        "visible. Raw norms carry the weight scale, which initialisation conventions set "
+        "and which moves under function-preserving rescalings (Q x c, K / c). Stable rank "
+        "is scale-free per matrix but moves when Q, K and V are fused into one matrix. "
+        "The headline stable rank is the raw value, which zero-padding leaves unchanged; "
+        "divided by min(m, n) it halves under the same padding, so that ratio is kept "
+        "only as a _meta_ fraction of capacity."
+    )
+    HEADLINE_KEYS = ("mean_frobenius_norm", "mean_spectral_norm", "mean_stable_rank",
+                     "norm_uniformity")
+    # Width: zero-padding every block matrix to (2m, 2n) is exact for all four.
+    # Not depth-invariant: a zero-output block adds a matrix to every mean.
+    SIZE_INVARIANT = {k: (("zero_pad",), _SI_NODE.format(k)) for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Per-Layer Weight Norm Analysis...")
