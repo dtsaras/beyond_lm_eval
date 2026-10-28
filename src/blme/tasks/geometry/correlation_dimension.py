@@ -291,8 +291,9 @@ class CorrelationDimensionTask(DiagnosticTask):
             # The percentile-window fit, retained under its own honest name.
             "_meta_correlation_dimension_percentile_window": (
                 float(_pct_slope) if _pct_slope is not None else float("nan")),
-            "correlation_dimension_method": "hidden_state_grassberger_procaccia_scaling_region",
-            "correlation_dimension_point_space": point_space,
+            # P7: constant strings are _meta_ (one value per run configuration).
+            "_meta_correlation_dimension_method": "hidden_state_grassberger_procaccia_fixed_window",
+            "_meta_correlation_dimension_point_space": point_space,
             "_meta_num_points": N,
             # R^2 of the reported (fixed-window) fit.
             "_meta_fit_r_squared": fw_r2,

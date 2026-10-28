@@ -3126,7 +3126,7 @@ def test_geometry_correlation_dimension():
         })
         out = task.evaluate(_StubModel(pts), _StubTok(), ds)
         assert "error" not in out, out
-        assert out["correlation_dimension_method"] == "hidden_state_grassberger_procaccia_scaling_region"
+        assert out["_meta_correlation_dimension_method"] == "hidden_state_grassberger_procaccia_fixed_window"
         return out
 
     def ref_gp_dim(P):
