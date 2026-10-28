@@ -1,74 +1,24 @@
 """
-Zigzag persistence across layers — "Persistent Topological Features in Large
-Language Models" (Gardinazzi, Viswanathan, Panerai, Ansuini, Cazzaniga &
-Biagetti, ICML 2025; arXiv:2410.11042; repo RitAreaSciencePark/ZigZagLLMs).
+Zigzag persistence across layers (Gardinazzi, Viswanathan, Panerai, Ansuini,
+Cazzaniga & Biagetti, ICML 2025; arXiv:2410.11042; RitAreaSciencePark/ZigZagLLMs).
 
-Zigzag persistence tracks homological features (H0 connected components, H1
-loops) across a SEQUENCE of spaces joined by inclusions
+Each layer contributes one point cloud (one point per prompt, rows aligned
+across layers). Per layer a kNN graph is built and filled to its flag complex;
+the zigzag X_1 <- X_1 n X_2 -> X_2 <- ... (``zigzag_DL.py``
+``compute_layers_with_intersection``) is computed with dionysus, and the bars
+are read in layer units (the paper's effective barcode, Eq. 4).
 
-    X_1  <-  (X_1 ∩ X_2)  ->  X_2  <-  (X_2 ∩ X_3)  ->  X_3  ...
+* ``zz_true_*``: the paper's construction. ``_true_zigzag_barcode`` gives a
+  simplex present over layers a..b the interval [a, b + 1), which gives the
+  reference's effective barcode in layer units.
+  ``Z_p(l1, l2)`` is Eq. 7 (with footnote 6: 0 when beta_p(l1) = 0).
+* ``h1_*`` / ``h0_*`` / ``betti1_fraction_layers``: a BLME proxy. Per layer it
+  counts significant loops on the graph-geodesic metric (ripser) and reports
+  contiguous bands of layers that carry one; it does not track identity.
+* ``zz_h1_*``: one adjacent-layer zigzag step over GF(2) on the shared vertex
+  set (``_h1_persisting_edges``); pairwise, so it cannot see a bar's death.
 
-producing a barcode of *when* a feature is born and dies **along the layer
-axis**. Here each X_l is the point cloud of one representation per input at
-transformer layer l; a topological feature that is present only in a
-contiguous band of layers yields a persistence interval spanning exactly that
-band. The paper's headline is that some topological features (notably H1
-loops) *persist* across many layers, and this persistence is informative about
-the representation.
-
-Their exact pipeline (RitAreaSciencePark/ZigZagLLMs @ bcfe0a6):
-  ``src/zigzag/zigzag_DL.py``
-    - ``generate_simplex_tree`` (L139): per layer, a directed kNN graph
-      ``sklearn.neighbors.kneighbors_graph(reps[i], n_neighbors=knn)`` is
-      inserted into a gudhi ``SimplexTree``; ``S.expansion(dim)`` builds the
-      flag (clique) complex; the ``dim``-skeleton simplices are collected with
-      global integer IDs.
-    - ``compute_layers_with_intersection`` (L171): builds the zigzag sequence
-      whose even entries are the per-layer complexes and odd entries are the
-      pairwise *intersections* of adjacent layers.
-    - ``compute_filtration_times`` (L181): for each simplex, the contiguous
-      runs of sequence positions where it is present become its birth/death
-      "times".
-    - ``compute_zigzag_persistence`` (L202): ``dionysus`` (or the FastZigZag
-      ``pyfzz`` in ``run_fast_zigzag.py``) computes the zigzag barcode.
-
-BLME cannot depend on ``dionysus``/``fzz`` (C++ builds that are not repo deps
-and fail against modern Boost). This task therefore computes a **self-contained,
-across-layer topological-persistence summary** using ``ripser`` (already a BLME
-dep). It is a FAITHFUL PROXY, not an exact port of the dionysus barcode:
-
-  * Per layer, significant H0/H1 features are detected with the SAME
-    graph-geodesic construction used by the Betti-curve task (kNN graph ->
-    geodesic distance -> ripser), so a genuine loop present in a layer is
-    counted and Euclidean-scale artefacts are suppressed.
-  * A feature's "zigzag lifetime" is summarised as the *contiguous band of
-    layers* over which it is present. For H1 this reproduces, by construction,
-    the exact dionysus zigzag answer on ground-truth inputs: a loop present
-    only in layers a..b yields one interval of length (b - a + 1) — verified
-    against dionysus in the parity test (a circle placed only in the middle
-    layers -> exactly one H1 interval spanning those layers).
-
-Reported metrics (flat float64):
-  h1_total_layer_persistence   sum over layers of significant-loop presence
-  h1_max_band_length           longest contiguous run of layers with a loop
-  h1_num_bands                 number of maximal contiguous loop bands
-  h1_first_layer / h1_last_layer   band extent (normalized depth in [0,1])
-  h0_mean_components           mean connected-component count across layers
-  h0_persistence_range         (max-min) components across layers
-  betti1_fraction_layers       fraction of layers with >=1 significant loop
-  ... plus _meta_ counts.
-
-References:
-- Gardinazzi et al., "Persistent Topological Features in Large Language
-  Models", ICML 2025, arXiv:2410.11042. Repo RitAreaSciencePark/ZigZagLLMs.
-- Zigzag persistence: Carlsson & de Silva, "Zigzag persistence", Found.
-  Comput. Math. 10(4):367-405, 2010.
-
-
-DISCLOSED DEVIATIONS (audit 2026-07-16): Gardinazzi et al. extract the
-LAST-TOKEN representation per prompt at each layer; BLME mean-pools
-tokens per prompt (consistent with the rest of the topology family).
-This changes the point cloud, not the zigzag construction.
+Zigzag persistence: Carlsson & de Silva, Found. Comput. Math. 10(4), 2010.
 """
 
 import logging
@@ -135,10 +85,8 @@ def _layer_topology(
 
     rows = np.repeat(np.arange(n), k)
     cols = idx[:, 1:].ravel()
-    # Floor zero distances (duplicate points): explicit-zero csr entries are
-    # treated as NO edge by csgraph, inflating beta_0 (same fix as
-    # betti_curve.py; audit 2026-07-16 demonstrated h0=7.0 vs 1.0 on a
-    # corpus with one repeated line).
+    # Floor zero distances (duplicate points): csgraph reads an explicit zero
+    # as "no edge", which would inflate beta_0.
     vals = np.maximum(dists[:, 1:].ravel(), 1e-12)
     graph = csr_matrix((vals, (rows, cols)), shape=(n, n))
     graph = graph.maximum(graph.T)  # symmetrize (mutual + one-directional kNN)
@@ -155,28 +103,9 @@ def _layer_topology(
         return (betti_0, 0)
     geo = np.where(np.isfinite(geo), geo, scale * 2.0)
 
-    # RESCALE TO UNIT SCALE BEFORE ripser.
-    #
-    # ripser casts the distance matrix to float32 internally
-    # (ripser.py:324, `np.array(dm[...], dtype=np.float32)`), so entries above
-    # float32's 3.4e38 overflow to +inf and the filtration silently loses its
-    # top. On a 40-point unit circle -- betti_1 is exactly 1 by construction --
-    # this reads 1 at every scale from 1e-30 through 1e38 and then **0** at
-    # 2.406159650500376e38, collapsing the entire H1 family. With the rescale
-    # it reads 1 at all of them.
-    #
-    # A POWER-OF-TWO rescale, matching `persistence_entropy.py`, and gated to
-    # the out-of-range case. `np.ldexp` only shifts exponents, so it is exact
-    # in binary floating point: `scale` is shifted by the same factor, both
-    # sides of the `(d - b) > persistence_frac * scale` test move together, and
-    # inside 1e-6..1e6 nothing happens at all. This provably cannot move any
-    # shipped number -- unlike dividing by `scale`, which is a real division
-    # and could flip a borderline count.
-    #
-    # `topology_homology` was given a rescale on 2026-09-07 and the sweep
-    # stopped there; this site and `betti_curve.py` were both left behind
-    # (Opus round 9, 2026-09-07). Population of ripser call sites: 5 --
-    # homology, persistence_landscape and persistence_entropy already rescale.
+    # ripser casts the distance matrix to float32: a power-of-two rescale
+    # (exact) keeps out-of-range magnitudes finite, and `scale` moves with it so
+    # the threshold test is unchanged (tests/tasks/test_topology.py).
     _gm = float(np.max(np.abs(geo))) if geo.size else 0.0
     if _gm > 0 and np.isfinite(_gm) and not (1e-6 < _gm < 1e6):
         _e = int(max(-126, min(127, round(math.log2(_gm)))))
@@ -220,22 +149,10 @@ def _contiguous_bands(mask: np.ndarray) -> List[Tuple[int, int]]:
     return bands
 
 
-
-
 # ---------------------------------------------------------------------------
-# Genuine cross-layer H1 feature matching (F2 linear algebra).
-#
-# The band summary below counts, per layer, WHETHER a loop exists, and calls a
-# contiguous run of such layers a "band". That does not track feature IDENTITY:
-# five DIFFERENT loops in five consecutive layers produce exactly the same band
-# as ONE loop that persists for five layers. Those are opposite topological
-# stories and the zigzag barcode of Gardinazzi et al. separates them.
-#
-# No zigzag engine is installable here (dionysus needs boost and fails to
-# build; pyfzz is not on PyPI; gudhi 3.12 exposes no zigzag binding). But the
-# quantity the metric actually needs -- how many H1 classes SURVIVE from one
-# layer to the next -- is computable exactly, without a full barcode, because
-# every layer shares the same vertex set.
+# One adjacent-layer zigzag step over GF(2). The band summary does not track
+# feature identity (five different loops in five layers look like one loop
+# persisting five layers); this step does, on the shared vertex set.
 #
 # For the zigzag step  H1(X_i) --f--> H1(X_i u X_{i+1}) <--g-- H1(X_{i+1}),
 # work in the F2 edge space of the union U:
@@ -410,13 +327,9 @@ def _h1_persisting_edges(e_a, e_b, n: int):
 
         X_i  <--f--  X_i n X_{i+1}  --g-->  X_{i+1}
 
-    so we do the same. (An earlier version of this code used the UNION, which
-    is a different -- and worse -- object: adversarial review 2026-09-03 gave
-    the counterexample of a hexagon 0-5 with centre 6, where layer A carries
-    spokes {6-0,6-1,6-2} and layer B carries {6-3,6-4,6-5}. The hexagon is a
-    nonzero H1 class in BOTH layers, but the flag complex of the union fills
-    it in, so the union construction reports 0 persisting. The intersection
-    construction correctly reports 1.)
+    (the union would fill in classes present in both layers: a hexagon with
+    spokes from a centre to alternate vertices in A and B persists in the
+    intersection zigzag but dies in the union).
 
     For a type-A3 quiver V_A <-f- V_M -g-> V_B, the multiplicity of the
     full-support bar [1,3] -- the classes present in the middle AND surviving
@@ -432,12 +345,9 @@ def _h1_persisting_edges(e_a, e_b, n: int):
     which needs a genuine subspace INTERSECTION, not just ranks -- hence
     _f2_intersect above.
 
-    Returns ``(dim_h1_a, dim_h1_b, n_shared)``. Note the first two are now the
-    layers' own H1 dimensions, so a caller can form the honest
-        died = dim_h1_a - n_shared,  born = dim_h1_b - n_shared
-    (the previous version used rank f and rank g, which silently DROP the
-    ker f / ker g bars: on gpt2 at k=10 that made survival_rate exactly
-    1.0000 at every step -- a constant feature).
+    Returns ``(dim_h1_a, dim_h1_b, n_shared)``, the layers' own H1 dimensions
+    and the shared classes, so died = dim_h1_a - n_shared and
+    born = dim_h1_b - n_shared.
     """
     e_a = list(e_a)
     e_b = list(e_b)
@@ -480,22 +390,13 @@ def _zigzag_summary(
     n_neighbors: int = 5,
     persistence_frac: float = 0.3,
 ) -> Dict[str, float]:
-    """Self-contained across-layer topological-persistence summary.
+    """Band and GF(2) step summaries of per-layer clouds (BLME proxies).
 
-    This is the **verified artifact**. Given per-layer point clouds (same
-    point identities across layers, in depth order), it computes for each
-    layer the significant H0 (components) and H1 (loops) content and
-    summarises how these features persist across the layer axis — the
-    zigzag-persistence quantity of Gardinazzi et al. (2025), realised without
-    a zigzag C++ engine.
-
-    The H1 "layer bands" are a PRESENCE summary, not a barcode: they record
-    the contiguous runs of layers in which SOME loop exists. They do not track
-    feature identity, so N different loops in N consecutive layers give the
-    same band as one loop persisting N layers. The identity-aware quantity is
-    computed separately by ``_h1_persisting_across`` and reported as the
-    ``zz_h1_persisting_*`` family; prefer those for any claim about loops
-    surviving across depth.
+    Given per-layer point clouds (same point identities across layers, in
+    depth order), it counts each layer's significant H0/H1 content and
+    summarises it along depth. The H1 "layer bands" are a PRESENCE summary:
+    contiguous runs of layers in which some loop exists, not feature identity.
+    The identity-aware step quantities come from ``_h1_persisting_edges``.
 
     Args:
         layer_clouds: list (length = n_layers) of ``(N, D)`` arrays, aligned so
@@ -539,13 +440,8 @@ def _zigzag_summary(
         h1_first_layer = 0.0
         h1_last_layer = 0.0
 
-    # ---- Identity-aware cross-layer H1 persistence ----
-    # Unlike the band summary above, this asks whether the SAME loop survives
-    # from layer l to layer l+1, via the rank of the induced map into the union
-    # complex. See _h1_persisting_edges. Ground truth (24-point circle, kNN
-    # k=5): the same circle in both layers gives persisting=1; a different
-    # cycle on the same vertices gives persisting=0 -- while the band summary
-    # reports an identical length-2 band in both cases.
+    # Identity-aware step: does the SAME loop survive from layer l to l+1
+    # (test_same_loop_persists_and_shuffled_loop_does_not).
     n_pts = min((len(c) for c in layer_clouds if c is not None), default=0)
     persist_steps, born_steps, died_steps, dim_a_steps = [], [], [], []
     if n_layers >= 2 and n_pts >= 8:
@@ -557,9 +453,8 @@ def _zigzag_summary(
                 h1_a, h1_b, shared = _h1_persisting_edges(
                     edge_sets[l], edge_sets[l + 1], n_pts)
                 persist_steps.append(shared)
-                # Honest accounting against the layers' OWN H1 dimensions.
-                # Using rank f / rank g here instead would drop the ker f /
-                # ker g bars and pin survival_rate at exactly 1.0.
+                # Against the layers' own H1 dimensions (rank f / rank g would
+                # drop the ker f / ker g bars).
                 born_steps.append(max(0, h1_b - shared))   # new in layer l+1
                 died_steps.append(max(0, h1_a - shared))   # gone after layer l
                 dim_a_steps.append(h1_a)
@@ -568,9 +463,7 @@ def _zigzag_summary(
                         f"{type(exc).__name__}: {exc}")
             persist_steps, born_steps, died_steps, dim_a_steps = [], [], [], []
 
-    # TRUE multi-layer zigzag barcode (dionysus fast_zigzag), which is the
-    # paper's actual construction. The GF(2) pairwise family below is retained
-    # as a fallback for environments where dionysus will not build.
+    # The paper's multi-layer zigzag barcode (dionysus).
     true_zz = {}
     if n_layers >= 2 and n_pts >= 8:
         try:
@@ -585,13 +478,8 @@ def _zigzag_summary(
     def _m(v):
         return float(np.mean(v)) if v else float("nan")
 
-    # Fraction of a layer's loops that survive to the next layer. This is the
-    # quantity the band summary was standing in for.
-    # survival = shared / dim H1(layer l). The RAW counts are the cycle rank of
-    # a kNN flag complex at one scale, which grows with the number of points
-    # (measured on gpt2: 4.0 at num_samples=40 -> 22.1 at 100), so they are not
-    # comparable across models and are demoted to _meta. The RATIO is the
-    # reportable quantity.
+    # survival = shared / dim H1(layer l). Raw counts are a kNN flag complex's
+    # cycle rank, which grows with N, so only ratios are features.
     surv = [sh / dim_a_steps[i] for i, sh in enumerate(persist_steps)
             if i < len(dim_a_steps) and dim_a_steps[i] > 0]
 
@@ -614,62 +502,21 @@ def _zigzag_summary(
         "h1_first_layer": h1_first_layer,
         "h1_last_layer": h1_last_layer,
         "betti1_fraction_layers": betti1_fraction,
-        # A dead H1 family is a REPORTABLE CONDITION, not a value. At the
-        # old `persistence_frac: 0.3` every H1 column was exactly 0.0000
-        # on every model at every N tested -- seven constant feature
-        # columns that looked like measurements.
+        # A dead H1 family is reported as a condition.
         "_meta_h1_family_is_identically_zero": bool(betti1_fraction == 0.0),
-        # ---- identity-aware zigzag quantities (prefer these) ----
         **true_zz,
-        # DEMOTED to _meta_ (2026-09-05), and the reason is NOT what an earlier
-        # version of this comment said.
-        #
-        # It claimed the two keys were BIT-IDENTICAL on real models. That was
-        # measured BEFORE the footnote-6 fix, which made a zero-Betti step
-        # contribute 0 rather than be dropped. They now differ on gpt2:
-        # 0.5916666666666666 (= 71/120, over 10 retained steps) against
-        # 0.5378787878787878 (= 71/132, over all 11), 9.1% apart -- while
-        # remaining identical on distilgpt2 and pythia-70m (red-team review,
-        # 2026-09-05).
-        #
-        # The demotion still stands, on the better ground: `survival_rate`
-        # DROPS zero-Betti steps, which is exactly the biased aggregation
-        # footnote 6 exists to prevent. The identity-aware `zz_true_*` family
-        # counts every step and is the quantity to use.
+        # survival_rate drops zero-Betti steps (the aggregation footnote 6
+        # exists to prevent), so it is _meta_; zz_true_* counts every step.
         "_meta_zz_h1_survival_rate": _m(surv),
-        # Steps where the layer has NO H1 class are dropped, exactly as
-        # survival_rate drops them. The previous `/max(1, dim_a)` turned such a
-        # step into an UNNORMALIZED count, reintroducing the scale dependence
-        # the _meta_ demotion removed: the mean went 12 -> 57 -> 165 -> 385 as N
-        # went 40 -> 400, and it fired on 1 of 11 gpt2 steps at the study config
-        # (13.4% inflation) while survival_rate excluded those same steps --
-        # the two exported metrics disagreed about which steps count.
-        # Turnover as a Jaccard distance on the two layers' H1 classes:
-        #     (born + died) / (dim_a + dim_b - shared) = 1 - shared/union
-        # Bounded in [0, 1] and symmetric in the two layers. Dividing by dim_a
-        # alone is NOT scale-free -- a step from dim_a = 1 to dim_b = 40 yields
-        # 39 -- and the previous `/max(1, dim_a)` was worse still, turning
-        # dim_a = 0 steps into unnormalized counts (mean 12 -> 385 as N went
-        # 40 -> 400). Steps where both layers are trivial are dropped, exactly
-        # as survival_rate drops them, so the two metrics agree on which steps
-        # count.
-        # Turnover as a Jaccard distance on the two layers' H1 classes:
-        #     (born + died) / |union|,   |union| = dim_a + dim_b - shared
-        #                                        = dim_a + born
-        # Bounded in [0, 1] and symmetric in the two layers. Dividing by dim_a
-        # alone is NOT scale-free -- a step from dim_a = 1 to dim_b = 40 gives
-        # 39 -- and the previous `/max(1, dim_a)` was worse, turning dim_a = 0
-        # steps into unnormalized counts (mean 12 -> 385 as N went 40 -> 400).
-        # Steps where both layers are trivial are dropped, exactly as
-        # survival_rate drops them, so the two metrics agree on which steps
-        # count (adversarial review, 2026-09-03).
+        # Turnover: a Jaccard distance on the two layers' H1 classes,
+        # (born + died) / (dim_a + born), bounded in [0, 1]; steps where both
+        # layers are trivial are dropped (test_turnover_rate_is_bounded_and_scale_free).
         "zz_h1_turnover_rate": _m([
             (born_steps[i] + died_steps[i]) / (dim_a_steps[i] + born_steps[i])
             for i in range(min(len(born_steps), len(dim_a_steps)))
             if (dim_a_steps[i] + born_steps[i]) > 0
         ]),
-        # Raw counts are scale-dependent (cycle rank grows with N); kept for
-        # auditing only, excluded from the feature matrix by the _meta prefix.
+        # Raw counts grow with N.
         "_meta_zz_h1_persisting_mean": _m(persist_steps),
         "_meta_zz_h1_born_mean": _m(born_steps),
         "_meta_zz_h1_died_mean": _m(died_steps),
@@ -689,21 +536,9 @@ def _zigzag_summary(
 class ZigzagPersistenceTask(DiagnosticTask):
     """Zigzag persistence of topological features across layers.
 
-    Cross-layer topological persistence after Gardinazzi et al. (ICML 2025,
-    arXiv:2410.11042). The identity-aware ``zz_h1_*`` outputs implement the
-    paper's INTERSECTION zigzag, X_i <- X_i n X_{i+1} -> X_{i+1}, over GF(2)
-    on the shared vertex set; ``_meta_zz_h1_survival_rate`` is the multiplicity of
-    the full-support bar as a fraction of the layer's own H1 dimension.
-    Reported as a RATIO because the raw dimension is the cycle rank of a kNN
-    flag complex and grows with the point count (gpt2: 2.4 -> 65.5 as
-    num_samples goes 40 -> 200, while the ratio holds at 0.59 / 0.54 / 0.59).
-
-    The legacy band statistics below are a proxy. Uses
-    the shared cache's per-layer representations (one mean-pooled point per
-    input, aligned across depth) and summarises how H0/H1 features persist
-    along the layer axis. The H1 layer-band summary is verified against the
-    paper's dionysus zigzag engine on ground-truth constructions (see
-    ``tests/tasks/parity/test_zigzag_parity.py``).
+    One mean-pooled point per input at every block output (the shared cache's
+    per-sample states when available, else a private forward), aligned across
+    depth. See the module docstring for the three output families.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -745,13 +580,7 @@ class ZigzagPersistenceTask(DiagnosticTask):
         is the same input at every layer. Each input contributes ONE mean-
         pooled representation per layer (the reference tracks one point per
         prompt across depth)."""
-        # Preferred path: shared cache, per-sample chunks mean-pooled.
-        # POST-FINAL-NORM: `layer_idx="all"` builds a PER-LAYER PROFILE, and
-        # HF's last entry is `ln_f(b_{L-1})`. One LayerNorm output inside a
-        # profile of block outputs is a category error under either
-        # convention -- the profile's slope, extremes and quantiles all
-        # compare it against entries of a different kind. Repo-wide sweep,
-        # 2026-09-05: 24 of 39 call sites were missing this opt-in.
+        # A profile of block outputs: the deepest entry is the raw last block.
         if cache is not None and getattr(cache, "is_populated", False) and use_cache:
             per_layer_chunks = cache.get_hidden_states(
                 layer_idx="all", num_samples=num_samples, per_sample=True,
@@ -801,13 +630,10 @@ class ZigzagPersistenceTask(DiagnosticTask):
             ]
         samples = list(dataset)[:num_samples]
 
-        # post-final-norm / hook hygiene: a task that fails must leave the model exactly as it found it. A leaked forward hook is paid by every LATER task in the run and pins the last activation tensor alive (discovery-based leak test, 2026-09-05).
+        # The hook is removed in `finally` (tests/tasks/test_forward_hook_leaks.py).
         try:
             layer_reps: Dict[int, List[np.ndarray]] = {l: [] for l in range(n_layers)}
-            # POST-FINAL-NORM, fallback route: `hidden_states[n_layers]` is
-            # `ln_f(b_{L-1})`. The cache route now opts in, so without this the two
-            # routes would compute different estimands -- which is how several of
-            # these defects survived: the tested path and the shipped path differed.
+            # Same estimand as the cache route: the raw last block replaces ln_f.
             _sink = {}
             _hook = layers[-1].register_forward_hook(
                 lambda mod, inp, outp: _sink.__setitem__(
@@ -820,8 +646,6 @@ class ZigzagPersistenceTask(DiagnosticTask):
                     ).to(device)
                     _sink.pop("h", None)
                     out = model(**enc, output_hidden_states=True)
-                    # post-final-norm: SUBSTITUTED -- the deepest sampled layer must be a
-                    # block output like every other entry in this profile.
                     hs = list(out.hidden_states)
                     _h_raw = _sink.get("h")
                     if (_h_raw is not None and len(hs) >= 2
@@ -829,15 +653,8 @@ class ZigzagPersistenceTask(DiagnosticTask):
                         hs[-1] = _h_raw
                     for l_idx in range(n_layers):
                         h = hs[l_idx + 1][0]  # (T, D)
-                        # The trailing .float() DISCARDED the precision the .double() was added to
-                        # gain: promote, average, then narrow back is self-defeating. Removing only
-                        # this cast moved geometry_correlation_dimension from 7.486064047571674 to
-                        # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
-                        # independently reconstructed Grassberger-Procaccia value, and restored a
-                        # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
-                        # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                        # Pooled in float64 and kept there.
                         layer_reps[l_idx].append(h.double().mean(dim=0).cpu().numpy())
-    
         finally:
             _hook.remove()
 
@@ -845,22 +662,10 @@ class ZigzagPersistenceTask(DiagnosticTask):
 
 
 # ---------------------------------------------------------------------------
-# TRUE multi-layer zigzag persistence (dionysus fast_zigzag).
-#
-# The GF(2) machinery above computes, for ONE adjacent pair, the multiplicity of
-# the full-support bar in a 3-term zigzag. That is a real quantity, but it is
-# NOT the paper's metric, and the difference is not a technicality:
-#
-#     Z_p(l1, l2) counts bars with birth <= min(l1,l2) AND death > max(l1,l2)
-#
-# -- bars spanning the WHOLE interval, "and have existed throughout the layers
-# in between". A bar's death index is a global property of the interval
-# decomposition of the ENTIRE layer sequence and cannot be recovered by
-# comparing two layers, so no pairwise construction can compute it.
-#
-# `dionysus==2.1.1` bundles fast_zigzag (Dey-Hou) under BSD-3-Clause and does
-# compute the full barcode. The version pin matters: on glibc 2.34-2.38 an
-# unpinned install falls through to an sdist that fails against Boost 1.74.
+# The paper's multi-layer zigzag barcode (dionysus). Z_p(l1, l2) needs each
+# bar's death, a property of the whole layer sequence that no pairwise step
+# can recover. dionysus==2.1.1: an unpinned install can fall through to an
+# sdist that does not build against Boost 1.74.
 # ---------------------------------------------------------------------------
 
 def _layer_simplices(X: np.ndarray, k: int):
@@ -950,32 +755,15 @@ def _zigzag_paper_metric(layer_clouds, n_neighbors=5, dim=1, max_points=None):
         return sum(1 for b, d in bars if b <= l < d)
 
     def span(l1, l2):
-        """Z_p(l1, l2), normalized by beta_p(l1) -- NOT by the total bar count.
-
-        The denominator matters and getting it wrong is not subtle: the paper's
-        defining identity is Z_p(l, l) = 1, since every bar alive at l trivially
-        spans [l, l]. Dividing by the total bar count instead gave **0.0705**
-        against the authors' own shipped barcode
-        (`llama_3_8b_dim_4_knn_4_last_token.csv`) where the identity requires
-        exactly 1.0 -- off by 14.3x (adversarial review, 2026-09-03).
-        """
+        """Z_p(l1, l2) (Eq. 7), normalised by beta_p(l1), so Z_p(l, l) = 1."""
         lo, hi = min(l1, l2), max(l1, l2)
         denom = _betti(lo)
         if denom == 0:
-            # ZERO, not NaN. The paper's footnote 6 says verbatim
-            # "Z_p(l1, l2) should be 0 by definition" when beta_p(l1) = 0, and
-            # the released `post_process.py:30-32` implements exactly that with
-            # `div(num, 0) = 0`. Returning NaN and DROPPING the step inverted
-            # the summary: on [line, circle, circle] BLME reported adjacent
-            # mean 1.000000 and min 1.000000 where the reference gives 0.500000
-            # and 0.000000, and full-depth NaN where it gives 0.0 (independent
-            # Opus review, 2026-09-05). A layer with no p-cycles has none
-            # surviving -- that is a measurement, not a missing value.
+            # Footnote 6 / post_process.py:30-32: div(num, 0) = 0.
             return 0.0
         return sum(1 for b, d in bars if b <= lo and d > hi) / denom
 
-    # Every step counts now; `span` no longer returns NaN for a zero-Betti
-    # layer, so dropping steps would re-introduce the same bias.
+    # Every step counts (footnote 6).
     adj = [x for x in (span(l, l + 1) for l in range(L - 1)) if not np.isnan(x)]
     return {
         "zz_true_adjacent_mean": float(np.mean(adj)) if adj else float("nan"),
@@ -983,15 +771,4 @@ def _zigzag_paper_metric(layer_clouds, n_neighbors=5, dim=1, max_points=None):
         "zz_true_full_depth": span(0, L - 1),
         "zz_true_n_bars": int(len(bars)),
         "zz_true_mean_bar_len": float(np.mean([d - b for b, d in bars])),
-        # NOTE: a Z_p(l, l) == 1 self-check is TAUTOLOGICAL under this
-        # implementation -- at l1 == l2 the numerator's condition
-        # (birth <= l and death > l) is exactly the definition of beta_p(l),
-        # which is the denominator, so it can never fail and proves nothing
-        # (confirmed against the authors' own shipped barcode; adversarial
-        # review, 2026-09-03). Removed rather than left as false assurance.
-        #
-        # The meaningful check is external: BLME's `_betti`/`span` reproduce the
-        # authors' published beta_1 vector (14176, 15828, ..., 16321) and their
-        # Z_1(l, l+1) row (0.0926, 0.2015, ..., 0.4335) EXACTLY when run on the
-        # barcode CSVs shipped with RitAreaSciencePark/ZigZagLLMs.
     }
