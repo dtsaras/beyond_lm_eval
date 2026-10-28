@@ -4203,9 +4203,9 @@ def test_geometry_spectral():
     analytic_sr = 385.0 / 100.0                             # = 3.85
     analytic_alpha = 1.0 + 2.0 / np.log(10.0 / 9.0)         # = 19.98244...
     assert out_diag["avg_stable_rank"] == pytest.approx(analytic_sr, abs=1e-4)
-    assert out_diag["avg_alpha"] == pytest.approx(analytic_alpha, abs=1e-3)
+    assert out_diag["_meta_avg_alpha"] == pytest.approx(analytic_alpha, abs=1e-3)
     # there is exactly one scanned matrix, so min==max==avg
-    assert out_diag["std_alpha"] == pytest.approx(0.0, abs=1e-6)
+    assert out_diag["_meta_std_alpha"] == pytest.approx(0.0, abs=1e-6)
 
     # =================================================================
     # (B) Independent-SVD parity on a tiny real GPT-2.
@@ -4245,12 +4245,12 @@ def test_geometry_spectral():
                 ref_alphas_nohead.append(alpha)
 
     assert len(ref_alphas) > 1                              # multiple matrices scanned
-    assert out["avg_alpha"] == pytest.approx(float(np.mean(ref_alphas)), abs=1e-4)
+    assert out["_meta_avg_alpha"] == pytest.approx(float(np.mean(ref_alphas)), abs=1e-4)
     assert out["avg_stable_rank"] == pytest.approx(float(np.mean(ref_srs)), abs=1e-3)
-    assert out["std_alpha"] == pytest.approx(float(np.std(ref_alphas)), abs=1e-4)
-    assert out["median_alpha"] == pytest.approx(float(np.median(ref_alphas)), abs=1e-3)
-    assert out["min_alpha"] == pytest.approx(float(np.min(ref_alphas)), abs=1e-4)
-    assert out["max_alpha"] == pytest.approx(float(np.max(ref_alphas)), abs=1e-4)
+    assert out["_meta_std_alpha"] == pytest.approx(float(np.std(ref_alphas)), abs=1e-4)
+    assert out["_meta_median_alpha"] == pytest.approx(float(np.median(ref_alphas)), abs=1e-3)
+    assert out["_meta_min_alpha"] == pytest.approx(float(np.min(ref_alphas)), abs=1e-4)
+    assert out["_meta_max_alpha"] == pytest.approx(float(np.max(ref_alphas)), abs=1e-4)
     if ref_alphas_nohead:
         assert out["_meta_avg_alpha_no_head"] == pytest.approx(
             float(np.mean(ref_alphas_nohead)), abs=1e-4)

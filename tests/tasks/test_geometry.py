@@ -610,7 +610,7 @@ def test_spectral_gpt2_covers_conv1d():
     # attention, c_fc, c_proj in MLP) plus the lm_head nn.Linear. With
     # 2 layers we expect at least 4 Conv1Ds + 1 Linear = 5 matrices → the
     # per-matrix alpha values cannot all be identical.
-    assert results["std_alpha"] > 0.0, (
+    assert results["_meta_std_alpha"] > 0.0, (
         "std_alpha=0 means only a single weight matrix was analysed — "
         "GPT-2 Conv1D projections are being skipped."
     )

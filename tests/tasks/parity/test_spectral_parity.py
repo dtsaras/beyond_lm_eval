@@ -246,7 +246,7 @@ def test_real_task_matches_transcribed_kernel():
     # to the transcribed kernel so the comparison isolates the formula.
     S32 = torch.linalg.svdvals(lin.weight.detach()).numpy()
     expected_alpha = _blme_hill_alpha(S32, tail_fraction=0.2)
-    assert out["avg_alpha"] == pytest.approx(expected_alpha, rel=1e-6), (
+    assert out["_meta_avg_alpha"] == pytest.approx(expected_alpha, rel=1e-6), (
         "real task diverged from the transcribed kernel — update BOTH"
     )
 

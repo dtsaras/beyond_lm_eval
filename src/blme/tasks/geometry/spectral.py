@@ -122,11 +122,11 @@ class WeightSpectralTask(DiagnosticTask):
       ``alpha`` is on a different scale (≈ 2·α_MM − 1), and the ranking is
       not preserved (a fixed top-20% tail never matches the KS-optimal x_min).
 
-      Use ``avg_alpha_official`` for anything that needs to correspond to the
-      published WeightWatcher α — it is the Clauset PL-MLE on the eigenvalues
-      with a KS-optimal x_min and matches live weightwatcher 0.7.7 across all
-      49 gpt2 modules (mean |Δα| 3e-4, max 2.1e-3). ``avg_alpha`` is the
-      fixed-tail Hill proxy, kept for continuity.
+      The headline is ``avg_alpha_official`` (WeightWatcher's alpha): the
+      Clauset PL-MLE on the eigenvalues with a KS-optimal x_min, matching live
+      weightwatcher 0.7.7 across all 49 gpt2 modules (mean |d alpha| 3e-4,
+      max 2.1e-3). The fixed-tail Hill proxy is ``_meta_avg_alpha`` (and its
+      min/max/std/median), kept for continuity.
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Weight Spectral Analysis...")
@@ -278,12 +278,15 @@ class WeightSpectralTask(DiagnosticTask):
         results["_meta_alpha_official_n_svd_zeros"] = int(_svd_zeros_total)
         results["_meta_alpha_official_modules_with_svd_zeros"] = int(
             _svd_modules_affected)
-        results["avg_alpha"] = float(np.mean(alphas)) if alphas else float("nan")
+        # The fixed-tail Hill proxy is _meta_: its tail length counts the
+        # matrix width, so zero-padding a matrix moves it (not WeightWatcher's
+        # alpha, which the headline keys below are).
+        results["_meta_avg_alpha"] = float(np.mean(alphas)) if alphas else float("nan")
         results["avg_stable_rank"] = float(np.mean(stable_ranks)) if stable_ranks else float("nan")
-        results["min_alpha"] = float(np.min(alphas)) if alphas else float("nan")
-        results["max_alpha"] = float(np.max(alphas)) if alphas else float("nan")
-        results["std_alpha"] = float(np.std(alphas)) if alphas else float("nan")
-        results["median_alpha"] = float(np.median(alphas)) if alphas else float("nan")
+        results["_meta_min_alpha"] = float(np.min(alphas)) if alphas else float("nan")
+        results["_meta_max_alpha"] = float(np.max(alphas)) if alphas else float("nan")
+        results["_meta_std_alpha"] = float(np.std(alphas)) if alphas else float("nan")
+        results["_meta_median_alpha"] = float(np.median(alphas)) if alphas else float("nan")
         # Official-style PL-MLE summaries (KS-optimal x_min on eigenvalues).
         results["avg_alpha_official"] = (float(np.mean(alphas_official))
                                          if alphas_official else float("nan"))
