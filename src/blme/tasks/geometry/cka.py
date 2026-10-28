@@ -13,8 +13,8 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import (hidden_states_for_task, massive_token_share,
-                       position0_share, select_rows)
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 
 logger = logging.getLogger("blme")
 
@@ -173,12 +173,13 @@ class CKATask(DiagnosticTask):
     ``ln_f(b_{L-1})``. Biased CKA is the paper's Eq. 3-4; the debiased form
     (official Demo.ipynb) removes the d_eff/N null floor.
 
-    Rows follow ``TOKEN_POLICY``: position 0 is dropped, as Kornblith's own
-    Transformer experiment drops special tokens (App. F.1) -- the sink rows
-    otherwise carry most of the centred SS and pin mid-layer CKA near 1
-    (tests/tasks/invariance/test_cka.py).
+    Rows follow ``TOKEN_POLICY``: position 0 and the massive-activation rows
+    are dropped, with one mask per token from the middle depths shared by
+    every layer. Kornblith's own Transformer experiment drops special tokens
+    (App. F.1); sink rows otherwise carry most of the centred SS and pin
+    mid-layer CKA near 1 (tests/tasks/invariance/test_cka.py).
     """
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:1905.00414",
         "code": "google-research/google-research@700de9630a39cf1c0ded1ea7d1092ec0f467c7a7"
@@ -220,6 +221,11 @@ class CKATask(DiagnosticTask):
 
         layers = sorted(per_doc.keys())
         n_layers = len(layers)
+        # One keep mask per token from the middle depths, used at every layer,
+        # so every pair compares the same rows (tests/tasks/invariance/test_cka.py).
+        _keys = middle_depth_layers({k: per_doc[k] for k in layers})
+        masks, _sink_info = (sink_keep_masks([per_doc[k] for k in _keys])
+                             if _keys else (None, {}))
 
         logger.info("  Centering activations...")
         centered_acts = {}
@@ -227,7 +233,7 @@ class CKATask(DiagnosticTask):
         _n_f64_centered = 0
         _rows_meta = None
         for idx in tqdm(layers, desc="Centering"):
-            X, _rows_meta = select_rows(per_doc[idx], self.TOKEN_POLICY)
+            X, _rows_meta = select_rows(per_doc[idx], self.TOKEN_POLICY, keep=masks)
             X, _f64 = _center_layer(X)
             _n_f64_centered += int(_f64)
             centered_acts[idx] = X
@@ -343,6 +349,7 @@ class CKATask(DiagnosticTask):
             "_meta_incl_pos0_avg_adjacent_cka": _stat(_incl_adj, np.nanmean),
             "_meta_incl_pos0_min_adjacent_cka": _stat(_incl_adj, np.nanmin),
             "_meta_incl_pos0_early_late_cka": float(_incl_el),
+            **sink_meta(_sink_info),
         }
         if _rows_meta is not None:
             results.update(_rows_meta.as_meta())
