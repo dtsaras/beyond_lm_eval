@@ -463,17 +463,13 @@ def _zigzag_summary(
                         f"{type(exc).__name__}: {exc}")
             persist_steps, born_steps, died_steps, dim_a_steps = [], [], [], []
 
-    # The paper's multi-layer zigzag barcode (dionysus).
+    # The paper's multi-layer zigzag barcode (dionysus). No fallback: a
+    # failure here is an error, not a silent switch to the proxies.
     true_zz = {}
     if n_layers >= 2 and n_pts >= 8:
-        try:
-            true_zz = _zigzag_paper_metric(
-                [np.asarray(c, dtype=np.float64)[:n_pts] for c in layer_clouds],
-                n_neighbors=n_neighbors, dim=1, max_points=n_pts)
-        except Exception as exc:
-            logger.info(f"  true zigzag unavailable ({type(exc).__name__}: "
-                        f"{exc}); falling back to the GF(2) pairwise family")
-            true_zz = {}
+        true_zz = _zigzag_paper_metric(
+            [np.asarray(c, dtype=np.float64)[:n_pts] for c in layer_clouds],
+            n_neighbors=n_neighbors, dim=1, max_points=n_pts)
 
     def _m(v):
         return float(np.mean(v)) if v else float("nan")
@@ -714,6 +710,11 @@ class ZigzagPersistenceTask(DiagnosticTask):
 
         if not HAS_RIPSER:
             return {"error": "ripser not installed. Install with: pip install ripser"}
+        dio_version = _dionysus_version()
+        if dio_version is None:
+            return {"error": ("topology_zigzag_persistence needs dionysus, which computes "
+                              "the paper's zigzag barcode (pip install dionysus==2.1.1); "
+                              "there is no fallback construction.")}
 
         num_samples = int(self.config.get("num_samples", 40))
         # k_NN = 4: the paper's figures and shipped barcodes (Fig. 2 caption, Sec. 4.2).
@@ -742,17 +743,24 @@ class ZigzagPersistenceTask(DiagnosticTask):
         summary["_meta_n_points"] = int(n_points)
         summary["_meta_zz_knn"] = int(min(n_neighbors, n_points - 1))
         summary.update(_protocol_meta(info, window))
+        summary["_meta_zz_barcode_engine"] = f"dionysus {dio_version}"
         # The reference's other pooling (use_last_token=False), on the same sites.
         mean_clouds = [np.stack([pooled[r][s] for r in rows]) for s in range(info["n_sites"])]
-        try:
-            mp = _zigzag_paper_metric(mean_clouds, n_neighbors=n_neighbors, dim=1,
-                                      max_points=len(rows))
-        except ImportError:
-            mp = {}
+        mp = _zigzag_paper_metric(mean_clouds, n_neighbors=n_neighbors, dim=1,
+                                  max_points=len(rows))
         for k in ("zz_true_adjacent_mean", "zz_true_mean_bar_len", "zz_true_n_bars"):
             if k in mp:
                 summary[f"_meta_meanpool_{k}"] = mp[k]
         return summary
+
+
+def _dionysus_version():
+    """dionysus's version string, or None when it cannot be imported."""
+    try:
+        import dionysus
+    except ImportError:
+        return None
+    return str(getattr(dionysus, "__version__", "unknown"))
 
 
 def _protocol_meta(info, window):

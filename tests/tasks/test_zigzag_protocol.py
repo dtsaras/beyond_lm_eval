@@ -110,3 +110,23 @@ def test_default_neighbourhood_is_the_papers_k4():
     assert default["_meta_zz_knn"] == 4
     assert default["zz_true_adjacent_mean"] == k4["zz_true_adjacent_mean"]
     assert default["zz_true_n_bars"] != k5["zz_true_n_bars"]
+
+
+def test_missing_dionysus_is_an_error_not_a_fallback(monkeypatch):
+    """The paper's barcode has no substitute: without dionysus the task used to
+    return the GF(2)/band proxies with the zz_true_* keys silently absent."""
+    monkeypatch.setitem(sys.modules, "dionysus", None)       # import raises ImportError
+    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+        fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
+    assert set(res) == {"error"} and "dionysus" in res["error"]
+
+
+def test_a_barcode_failure_propagates(monkeypatch):
+    import blme.tasks.topology.zigzag as zz
+
+    def boom(*a, **k):
+        raise RuntimeError("zigzag engine failed")
+    monkeypatch.setattr(zz, "_true_zigzag_barcode", boom)
+    with pytest.raises(RuntimeError, match="zigzag engine failed"):
+        ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+            fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
