@@ -25,7 +25,7 @@ import warnings
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
-                      role_layers, rows_policy)
+                      role_layers, role_meta, role_names, rows_policy)
 import logging
 logger = logging.getLogger("blme")
 
@@ -103,6 +103,10 @@ class PersistenceEntropyTask(DiagnosticTask):
         layer_reps = {l: list(pts[l]) for l in target_layers}
 
         results = point_meta(pinfo, pts[target_layers[len(target_layers) // 2]])
+        # Depth-role names (first/mid/last); absolute-index names alias
+        # different depths across models and are _meta_.
+        roles = role_names(target_layers)
+        results.update(role_meta(roles, pinfo["n_layers"]))
         for l_idx, points in layer_reps.items():
             # ripser reads float64 pairwise distances (PE is scale-free, so the
             # exact power-of-two shift rips_diagrams may apply cancels).
@@ -129,25 +133,27 @@ class PersistenceEntropyTask(DiagnosticTask):
             else:
                 pe_h0_full = pe_h0
 
-            results[f"layer_{l_idx}_pe_h0"] = pe_h0
-            results[f"layer_{l_idx}_pe_h0_full"] = pe_h0_full
-            results[f"layer_{l_idx}_pe_h1"] = pe_h1
-            results[f"layer_{l_idx}_num_features_h0"] = len(lifespans_h0)
-            results[f"layer_{l_idx}_num_features_h1"] = len(lifespans_h1)
-            # PE / log2(m), in [0, 1]: log2(m) is PE's maximum over m bars. A
-            # BLME normalisation; giotto-tda's normalize=True divides by
-            # log2(total persistence) instead, which depends on the units.
-            results[f"layer_{l_idx}_pe_h0_norm"] = (
-                pe_h0 / float(np.log2(len(lifespans_h0)))
-                if len(lifespans_h0) >= 2 else 0.0
-            )
-            results[f"layer_{l_idx}_pe_h1_norm"] = (
-                pe_h1 / float(np.log2(len(lifespans_h1)))
-                if len(lifespans_h1) >= 2 else 0.0
-            )
+            vals = {
+                "pe_h0": pe_h0,
+                "pe_h0_full": pe_h0_full,
+                "pe_h1": pe_h1,
+                "num_features_h0": len(lifespans_h0),
+                "num_features_h1": len(lifespans_h1),
+                # PE / log2(m), in [0, 1]: log2(m) is PE's maximum over m bars. A
+                # BLME normalisation; giotto-tda's normalize=True divides by
+                # log2(total persistence) instead, which depends on the units.
+                "pe_h0_norm": (pe_h0 / float(np.log2(len(lifespans_h0)))
+                               if len(lifespans_h0) >= 2 else 0.0),
+                "pe_h1_norm": (pe_h1 / float(np.log2(len(lifespans_h1)))
+                               if len(lifespans_h1) >= 2 else 0.0),
+            }
+            for k, v in vals.items():
+                results[f"_meta_layer_{l_idx}_{k}"] = v
+                if l_idx in roles:
+                    results[f"{roles[l_idx]}_layer_{k}"] = v
 
         # Summary: how much does topological entropy change across layers?
-        pe_values = [results[f"layer_{l}_pe_h0"] for l in target_layers]
+        pe_values = [results[f"_meta_layer_{l}_pe_h0"] for l in target_layers]
         if pe_values[0] > 0:
             results["pe_simplification_ratio"] = float(pe_values[-1] / pe_values[0])
         else:
