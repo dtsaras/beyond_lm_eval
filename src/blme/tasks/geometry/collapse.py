@@ -66,6 +66,9 @@ def _rv_profile(clouds, layers):
     return erank, erank_sigma2
 
 
+_SI_NODE = "tests/tasks/invariance/test_collapse.py::test_size_invariant_entry[{}]"
+
+
 @register_task("geometry_collapse")
 class RepresentationCollapseTask(DiagnosticTask):
     """
@@ -80,12 +83,12 @@ class RepresentationCollapseTask(DiagnosticTask):
       * Roy, Vetterli 2007 — "The Effective Rank: A Measure of Effective
         Dimensionality", European Signal Processing Conference. The
         exp(Shannon-entropy-of-normalised-singular-values) erank formula
-        this task reports under ``erank_per_layer``.
+        this task reports under ``_meta_erank_per_layer``.
       * Queipo-de-Llano, Arroyo, Barbero, Dong, Bronstein, LeCun,
         Shwartz-Ziv 2025 —
         "Attention Sinks and Compression Valleys in LLMs are Two Sides
-        of the Same Coin", arXiv:2510.06477. The erank-vs-depth profile
-        is a BLME collapse/valley proxy, not the full paper pipeline.
+        of the Same Coin", arXiv:2510.06477. Their Eq. (1) is
+        ``qdl_entropy_min`` (per sequence, uncentred, every token).
     """
     # Jing / Roy-Vetterli keys (non-LLM spectra of a pooled cloud): position 0
     # and massive rows dropped, else the sink is the "valley" they detect.
@@ -94,6 +97,36 @@ class RepresentationCollapseTask(DiagnosticTask):
     # BOS/first-token row is the cause of the valley (Theorem 1).
     QDL_TOKEN_POLICY = ("paper_protocol:QueipoDeLlano2025 Eq. 1, per sequence, "
                         "uncentred, position 0 included")
+    SOURCES = {
+        "paper": "arXiv:2510.06477 (Queipo-de-Llano et al. 2025, Eq. 1); "
+                 "arXiv:2110.09348 (Jing et al. 2021, Eq. 1); "
+                 "doi:10.5281/zenodo.40328 (Roy & Vetterli 2007, Eq. 1, Def. 1)",
+        "code": "none released for arXiv:2510.06477 (checked 2026-10-28)",
+        "llm_precedent": "arXiv:2510.06477 (per-sequence matrix entropy at every layer, "
+                         "the compression valley); arXiv:2502.02013 (Skean et al. 2025, "
+                         "prompt entropy per layer)",
+    }
+    ADAPTATION_NOTE = (
+        "At each block the Roy-Vetterli effective rank of one centred cloud pooling every "
+        "token of every document is taken, following the covariance construction of Jing "
+        "et al.; collapse_ratio (min/max over blocks) summarises the profile. "
+        "Queipo-de-Llano et al. instead compute, per sequence and without centring, the "
+        "entropy of s_j^2/||X||_F^2 with the BOS/first-token row kept, and that row "
+        "produces the compression valley; qdl_entropy_min reports that valley as the paper "
+        "does. In the pooled cloud the same row carries most of the centred variance at "
+        "middle blocks, so the Roy-Vetterli keys drop position 0 and massive-norm rows "
+        "(Sun et al. 2024) with one mask for all layers, and then measure non-sink "
+        "dimensional spread (gpt2 collapse_ratio 0.398 -> 0.825). On 28 bank models they "
+        "still separate models (between/within-model SD ratio 40 for collapse_ratio, 131 "
+        "for min_erank), so they stay headline. max_drop and the per-layer lists depend on "
+        "how the network is split into blocks and are _meta_. The pooled erank grows with "
+        "the token count up to min(N-1, d), so models are compared at one document count."
+    )
+    HEADLINE_KEYS = ("qdl_entropy_min", "max_erank", "min_erank", "collapse_ratio")
+    # Depth (identity blocks) and width (zero-padding, isometry) plus scale.
+    # Not N: the pooled erank grows with N up to min(N-1, d).
+    SIZE_INVARIANT = {k: (("identity_blocks", "zero_pad", "isometry", "rescale"),
+                          _SI_NODE.format(k)) for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representation Collapse Detection...")

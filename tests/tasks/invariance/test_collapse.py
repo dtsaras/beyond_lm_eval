@@ -161,3 +161,47 @@ def test_depth_dependent_aggregates_are_meta(tiny_states, tiny_identity_states):
                           inv.uniform_layer_mean(ins["_meta_erank_per_layer"])) > 1e-4
     split = inv.run_task_on_states(TASK, _midpoint_states(tiny_states))
     inv.assert_moves(base, split, "_meta_max_drop", 0.2)
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.collapse import RepresentationCollapseTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.mark.parametrize("key", sorted(RepresentationCollapseTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
+    """Each declared transform's direct test, with the known negatives: the
+    uniform layer mean of the profile under identity blocks, the /d_model
+    twin under zero-padding."""
+    transforms, node = RepresentationCollapseTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    base = inv.run_task_on_states(TASK, tiny_states)
+    for t in transforms:
+        if t == "identity_blocks":
+            ins = inv.run_task_on_states(TASK, tiny_identity_states)
+            inv.assert_invariant(base, ins, [key], rtol=1e-9)
+            assert inv.rel_change(inv.uniform_layer_mean(base["_meta_erank_per_layer"]),
+                                  inv.uniform_layer_mean(ins["_meta_erank_per_layer"])) > 1e-4
+        else:
+            other = inv.run_task_on_states(TASK, _WIDTH[t](tiny_states))
+            inv.assert_invariant(base, other, [key], rtol=1e-6)
+            if t == "zero_pad":
+                inv.assert_moves(base, other, "_meta_max_erank_frac", 0.4)
+
+
+def test_declarations(tiny_states):
+    cls = RepresentationCollapseTask
+    assert cls.TOKEN_POLICY == "exclude_sinks"
+    assert cls.QDL_TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    assert 0 < len([s for s in cls.ADAPTATION_NOTE.split(". ") if s]) <= 8
+    r = inv.run_task_on_states(TASK, tiny_states)
+    assert set(cls.HEADLINE_KEYS) <= set(r)
+    assert all(not k.startswith("_meta_") for k in cls.HEADLINE_KEYS)
