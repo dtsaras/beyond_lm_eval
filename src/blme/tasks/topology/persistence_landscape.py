@@ -34,6 +34,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
+from ._points import last_token_points, point_meta, role_layers, rows_policy
 
 logger = logging.getLogger("blme")
 
@@ -252,65 +253,31 @@ def _landscape_stats(landscapes: np.ndarray, dt: float,
 class PersistenceLandscapeTask(DiagnosticTask):
     """Persistence landscapes (Bubenik 2015) at early / mid / late layers."""
 
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistence Landscape Analysis...")
 
         if not HAS_RIPSER:
             return {"error": "ripser not installed. Install with: pip install ripser"}
 
-        num_samples = self.config.get("num_samples", 20)
+        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        num_samples = int(self.config.get("num_samples", 1000))
         n_landscapes = self.config.get("n_landscapes", 5)
         n_points = self.config.get("n_points", 200)
+        use_cache = self.config.get("use_cache", True)
 
         if dataset is None:
-            dataset = [
-                {"text": f"Sample {i} for topological landscape analysis."}
-                for i in range(num_samples)
-            ]
-
-        device = next(model.parameters()).device
-        layers = get_layers(model)
-        if layers is None:
+            dataset = [{"text": f"Sample {i} for topological landscape analysis."}
+                       for i in range(num_samples)]
+        if get_layers(model) is None:
             return {"error": "Could not detect layers"}
-        n_layers = len(layers)
-        # Early, middle and late layers, deduplicated for models with <= 2 layers.
-        target_layers = sorted({0, n_layers // 2, n_layers - 1})
-
-        # Collect mean-pooled per-sentence representations at target layers.
-        layer_reps: Dict[int, List[np.ndarray]] = {l: [] for l in target_layers}
-
-        # post-final-norm: SUBSTITUTED -- the deepest cloud is the raw last block (HF's last entry is
-        # ln_f(block L-1)); the hook is removed in `finally`.
-        _sink = {}
-        _hook = layers[-1].register_forward_hook(
-            lambda mod, inp, outp: _sink.__setitem__(
-                "h", (outp[0] if isinstance(outp, tuple) else outp).detach()))
-        _n_fwd = _n_sub = 0
-        try:
-            with torch.no_grad():
-                for i, s in enumerate(dataset):
-                    if i >= num_samples:
-                        break
-                    text = s["text"] if isinstance(s, dict) else str(s)
-                    enc = tokenizer(text, return_tensors="pt",
-                                    truncation=True, max_length=128).to(device)
-                    _sink.pop("h", None)
-                    out = model(**enc, output_hidden_states=True)
-                    _hs = list(out.hidden_states)
-                    _n_fwd += 1
-                    _h_raw = _sink.get("h")
-                    if (_h_raw is not None
-                            and tuple(_h_raw.shape) == tuple(_hs[-1].shape)):
-                        _hs[-1] = _h_raw
-                        _n_sub += 1
-                    for l_idx in target_layers:
-                        h = _hs[l_idx + 1][0]  # (T, D)
-                        layer_reps[l_idx].append(
-                            # One mean-pooled vector per document, pooled in float64.
-                            h.double().mean(dim=0).cpu().numpy())
-        finally:
-            _hook.remove()
-        _last_is_block = bool(_n_fwd > 0 and _n_sub == _n_fwd)
+        pts, pinfo = last_token_points(
+            model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
+            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache)
+        target_layers = sorted(pts)
+        layer_reps: Dict[int, List[np.ndarray]] = {l: list(pts[l]) for l in target_layers}
+        _last_is_block = bool(pinfo["last_is_block"])
 
         results: Dict[str, object] = {}
 
@@ -369,5 +336,5 @@ class PersistenceLandscapeTask(DiagnosticTask):
 
         if not results:
             return {"error": "No layers produced landscape features"}
-
+        results.update(point_meta(pinfo, pts[target_layers[len(target_layers) // 2]]))
         return results

@@ -152,26 +152,20 @@ geometry_mp_bulk_deviation:
   fixed_gamma: 0.25  # also emit *_g25 variants at a common D/N aspect ratio
 
 # ---- Topology Tasks ----
+# The four point-cloud topology tasks read one point per sequence (its last
+# token, Fay et al. 2025 / Gardinazzi et al. 2025) and use N = 1000 sequences
+# for every model (Q1); at a few dozen points every summary is N-dominated.
 topology_homology:
-  num_samples: 20
+  num_samples: 1000
 
 topology_betti_curve:
-  # 20 mean-pooled points is not a point cloud: persistent homology over 20
-  # samples returns integers driven by sampling noise. Also note that at N=20
-  # the calibrated k = max(5, ceil(log2 N)) collapses to the old fixed 5, so
-  # leaving this at 20 made the k calibration a no-op.
   num_samples: 1000
 
 topology_persistence_entropy:
-  # Raised with topology_betti_curve, which sits four lines above. At 20 points
-  # an iid Gaussian already SATURATES the entropy ceiling for any d_model >= 512
-  # -- pe_h0 was pinned at log2(m) with m = 49 for every model in the zoo, a
-  # 0.70% spread across 66 models. Leaving this at 20 while raising its
-  # neighbour would have been an inconsistency introduced by the same edit.
   num_samples: 1000
 
 topology_persistence_landscape:
-  num_samples: 20
+  num_samples: 1000
   n_landscapes: 5
   n_points: 200
 

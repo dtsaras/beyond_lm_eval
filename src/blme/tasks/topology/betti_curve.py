@@ -27,7 +27,7 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import get_layers
+from ._points import fallback_dataset, last_token_points, point_meta, rows_policy
 import logging
 logger = logging.getLogger("blme")
 
@@ -176,76 +176,34 @@ class BettiCurveTask(DiagnosticTask):
     - β1 at each layer (loops/holes)
     - Rate of topological simplification
     """
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Betti Curve (Topological Complexity Trajectory)...")
-        # The topology-of-representations literature works at ~10^3 points.
-        num_samples = self.config.get("num_samples", 1000)
+        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        num_samples = int(self.config.get("num_samples", 1000))
         n_neighbors = self.config.get("n_neighbors", "auto")
         if n_neighbors != "auto":
             n_neighbors = int(n_neighbors)
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
+        use_cache = self.config.get("use_cache", True)
 
         if not HAS_RIPSER:
             msg = "Ripser library not installed. Install with: pip install ripser"
             logger.info(msg)
             return {"error": msg}
 
-        device = next(model.parameters()).device
-
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    dataset.append({"text": dset[i]["text"]})
-            except Exception as e:
-                logger.info(
-                    f"Warning: could not load lambada_openai ({type(e).__name__}: "
-                    "missing `datasets`, offline, or download error); falling back "
-                    "to default examples."
-                )
-                dataset = [{"text": f"Topological sample {i} for Betti curve calculation."} for i in range(num_samples)]
-        samples = list(dataset)[:num_samples]
-        if len(samples) < 3:
+            dataset = fallback_dataset(num_samples, "Betti curve")
+        pts, pinfo = last_token_points(
+            model, tokenizer, dataset, cache, num_samples=num_samples,
+            layers=lambda L: range(L), policy=rows_policy(self.TOKEN_POLICY),
+            use_cache=use_cache)
+        if not pts or min(len(X) for X in pts.values()) < 3:
             return {"error": "Need at least 3 samples for Betti curve"}
-
-        layers = get_layers(model)
-        num_layers = len(layers)
-
-        # Collect mean-pooled representations at EVERY layer
-        layer_reps = {l: [] for l in range(num_layers)}
-
-        # post-final-norm: SUBSTITUTED -- the deepest cloud is the raw last block (HF's last entry is
-        # ln_f(block L-1)); the hook is removed in `finally`.
-        _sink = {}
-        _hook = layers[-1].register_forward_hook(
-            lambda mod, inp, outp: _sink.__setitem__(
-                "h", (outp[0] if isinstance(outp, tuple) else outp).detach()))
-        _n_fwd = _n_sub = 0
-        try:
-            with torch.no_grad():
-                for s in samples:
-                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-                    _sink.pop("h", None)
-                    out = model(**inputs, output_hidden_states=True)
-                    _hs = list(out.hidden_states)
-                    _n_fwd += 1
-                    _h_raw = _sink.get("h")
-                    if (_h_raw is not None
-                            and tuple(_h_raw.shape) == tuple(_hs[-1].shape)):
-                        _hs[-1] = _h_raw
-                        _n_sub += 1
-
-                    for l_idx in range(num_layers):
-                        hidden = _hs[l_idx + 1][0]
-                        # One mean-pooled vector per document, pooled in float64.
-                        rep = hidden.double().mean(dim=0).cpu().numpy()
-                        layer_reps[l_idx].append(rep)
-        finally:
-            _hook.remove()
-        _last_is_block = bool(_n_fwd > 0 and _n_sub == _n_fwd)
+        num_layers = len(pts)
+        layer_reps = {l: pts[l] for l in range(num_layers)}
+        _last_is_block = bool(pinfo["last_is_block"])
 
         betti_0_curve = []
         betti_1_curve = []
@@ -301,5 +259,5 @@ class BettiCurveTask(DiagnosticTask):
         results["h1_max_persistence_layer_frac"] = (
             float(np.argmax(h1_maxpers_curve)) / float(max(1, num_layers - 1)))
         results["max_betti_1"] = int(np.max(betti_1_curve))
-
+        results.update(point_meta(pinfo, pts[num_layers // 2]))
         return results

@@ -19,7 +19,7 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import get_layers
+from ._points import fallback_dataset, last_token_points, point_meta, role_layers, rows_policy
 import logging
 logger = logging.getLogger("blme")
 
@@ -86,90 +86,29 @@ class PersistentHomologyTask(DiagnosticTask):
     See module docstring for paper references (Zomorodian-Carlsson
     2005, Edelsbrunner-Harer 2008, Naitzat-Zhitnikov-Lim 2020).
     """
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistent Homology (TDA)...")
-        num_samples = self.config.get("num_samples", 20)
+        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        num_samples = int(self.config.get("num_samples", 1000))
+        use_cache = self.config.get("use_cache", True)
 
         if not HAS_RIPSER:
             msg = "Ripser library not installed. Skipping TDA module. Install with: pip install ripser"
             logger.info(msg)
             return {"error": msg}
 
-        device = next(model.parameters()).device
-
         if dataset is None:
-            try:
-                from datasets import load_dataset
-                dset = load_dataset("EleutherAI/lambada_openai", "en", split="test")
-                dataset = []
-                for i in range(min(num_samples, len(dset))):
-                    dataset.append({"text": dset[i]["text"]})
-            except Exception as e:
-                logger.info(
-                    f"Warning: could not load lambada_openai ({type(e).__name__}: "
-                    "missing `datasets`, offline, or download error); falling back "
-                    "to default examples."
-                )
-                dataset = [{"text": f"Random sample {i} for topological analysis of language models."} for i in range(num_samples)]
-        samples = list(dataset)[:num_samples]
-        if len(samples) < 3:
+            dataset = fallback_dataset(num_samples, "Homology")
+        pts, pinfo = last_token_points(
+            model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
+            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache)
+        layer_representations = {l: X for l, X in pts.items()}
+        if not layer_representations or min(len(X) for X in pts.values()) < 3:
             return {"error": "Need at least 3 samples for meaningful topological features"}
 
-        layers = get_layers(model)
-        num_layers = len(layers)
-
-        # Early, middle and late layers, deduplicated for models with <= 2 layers.
-        target_layers = sorted({0, num_layers // 2, num_layers - 1})
-        layer_representations = {l: [] for l in target_layers}
-
-        # post-final-norm: SUBSTITUTED -- the deepest cloud is the raw last block, as in the sibling
-        # topology tasks (HF's last entry is ln_f(block L-1)).
-        _sink = {}
-        _hook = None
-        _n_fwd = _n_sub = 0
-        try:
-            _blocks = layers
-            if _blocks is not None and len(_blocks) > 0:
-                _hook = _blocks[-1].register_forward_hook(
-                    lambda mod, inp, outp: _sink.__setitem__(
-                        "h", (outp[0] if isinstance(outp, tuple)
-                              else outp).detach()))
-        except Exception as e:  # pragma: no cover - defensive
-            logger.info(f"homology: could not hook last block ({e})")
-
-        # The hook is removed in `finally` (tests/tasks/test_forward_hook_leaks.py).
-        try:
-            with torch.no_grad():
-                for s in samples:
-                    if isinstance(s, dict) and "text" in s:
-                        text = s["text"]
-                    else:
-                        text = str(s)
-
-                    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
-                    _sink.pop("h", None)
-                    out = model(**inputs, output_hidden_states=True)
-                    hs = list(out.hidden_states)
-                    _n_fwd += 1
-                    _h_raw = _sink.get("h")
-                    if (_h_raw is not None and len(hs) >= 2
-                            and _h_raw.shape == hs[-1].shape):
-                        hs[-1] = _h_raw
-                        _n_sub += 1
-
-                    # One mean-pooled vector per document, pooled in float64.
-                    for l_idx in target_layers:
-                        hidden = hs[l_idx + 1][0]  # hidden_states[0] is the embedding
-                        sentence_rep = hidden.double().mean(dim=0).cpu().numpy()
-                        layer_representations[l_idx].append(sentence_rep)
-
-        finally:
-            if _hook is not None:
-                _hook.remove()
-
-        results = {}
-        results["_meta_last_entry_is_block_output"] = bool(
-            _n_fwd > 0 and _n_sub == _n_fwd)
+        results = point_meta(pinfo, pts[sorted(pts)[len(pts) // 2]])
         # Depth-role names (first/mid/last); absolute-index names alias
         # different depths across models and are _meta_.
         _role = {}
@@ -235,5 +174,5 @@ class PersistentHomologyTask(DiagnosticTask):
 
         # H1 summaries do not separate models below a few hundred points.
         results["_meta_h1_resolves_between_models"] = bool(
-            len(layer_representations.get(_sorted_targets[0], [])) >= 200)
+            len(layer_representations[_sorted_targets[0]]) >= 200)
         return results
