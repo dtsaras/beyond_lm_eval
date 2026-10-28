@@ -621,9 +621,9 @@ def test_collapse_task_reports_roy_vetterli_convention():
         return float(np.exp(-(q * np.log(q)).sum()))
 
     keys = sorted(acts.keys())
-    assert out["erank_per_layer"] == pytest.approx(
+    assert out["_meta_erank_per_layer"] == pytest.approx(
         [ref(acts[i].numpy(), False) for i in keys], rel=1e-6)
-    assert out["erank_sigma2_per_layer"] == pytest.approx(
+    assert out["_meta_erank_sigma2_per_layer"] == pytest.approx(
         [ref(acts[i].numpy(), True) for i in keys], rel=1e-6)
     # The legacy misnamed key must be gone.
     assert "erank_rawsigma_per_layer" not in out

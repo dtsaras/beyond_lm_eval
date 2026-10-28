@@ -193,17 +193,20 @@ class RepresentationCollapseTask(DiagnosticTask):
                 qdl_argmin / (len(layers) - 1) if qdl_argmin >= 0 and len(layers) > 1
                 else float("nan")),
             "_meta_qdl_n_docs": int(qdl_n_docs),
-            "erank_per_layer": erank_per_layer,
             "max_erank": max_erank,
             "min_erank": min_erank,
             "collapse_ratio": collapse_ratio,
-            "max_drop": max_drop,
+            # Depth-dependent aggregates are _meta_ (P4): splitting a block in
+            # two spreads its drop over two transitions, and the profile's
+            # uniform layer mean / slope / quartiles move under identity blocks.
+            "_meta_erank_per_layer": erank_per_layer,
+            "_meta_max_drop": max_drop,
             # /d_model forms are _meta_: zero-padding leaves erank unchanged
             # while these move by the padding factor.
             "_meta_max_drop_frac": max_drop_frac,
             "_meta_max_erank_frac": max_erank / d_model if d_model else float("nan"),
             "_meta_min_erank_frac": min_erank / d_model if d_model else float("nan"),
-            "erank_sigma2_per_layer": erank_raw_per_layer,
+            "_meta_erank_sigma2_per_layer": erank_raw_per_layer,
             "_meta_erank_per_layer_frac": [
                 (float(v) / d_model if (d_model and np.isfinite(v)) else float("nan"))
                 for v in erank_arr

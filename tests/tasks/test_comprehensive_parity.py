@@ -2990,7 +2990,7 @@ def test_geometry_collapse():
     task = RepresentationCollapseTask(config={"num_samples": 3, "use_cache": False})
     out = task.evaluate(model, tok, dataset, cache=None)
 
-    assert set(["erank_per_layer", "max_erank", "min_erank",
+    assert set(["_meta_erank_per_layer", "max_erank", "min_erank",
                 "collapse_ratio"]).issubset(out.keys())
 
     # Recompute from the SAME activations with an INDEPENDENT implementation.
@@ -3033,12 +3033,12 @@ def test_geometry_collapse():
     ref_sq = [ref_erank(acts[i].numpy(), square=True)
               for i in sorted(acts.keys())]
     # The squared spectrum is exposed under a name that says what it is.
-    assert out["erank_sigma2_per_layer"] == pytest.approx(ref_sq, rel=1e-6)
+    assert out["_meta_erank_sigma2_per_layer"] == pytest.approx(ref_sq, rel=1e-6)
     assert "erank_rawsigma_per_layer" not in out
     # Squaring strictly reduces entropy: sigma^2 erank < Roy-Vetterli erank.
     assert all(sq < rv for sq, rv in zip(ref_sq, ref))
-    assert len(ref) == 2 and len(out["erank_per_layer"]) == 2
-    assert out["erank_per_layer"] == pytest.approx(ref, rel=1e-6)
+    assert len(ref) == 2 and len(out["_meta_erank_per_layer"]) == 2
+    assert out["_meta_erank_per_layer"] == pytest.approx(ref, rel=1e-6)
     # The every-token profile is kept under its own _meta_ name.
     assert out["_meta_erank_per_layer_all_tokens"] == pytest.approx(
         [ref_erank(acts_all[i].numpy()) for i in sorted(acts_all.keys())], rel=1e-6)
@@ -3054,14 +3054,14 @@ def test_geometry_collapse():
     # the whole suite). max_drop = most NEGATIVE adjacent erank change;
     # max_drop_layer = 1-based index of the layer where it lands.
     diffs = np.diff(np.asarray(ref, dtype=np.float64))
-    assert out["max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
+    assert out["_meta_max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
     assert out["_meta_max_drop_layer"] == int(np.argmin(diffs)) + 1
 
     # ---- Determinism: same input twice -> identical output ----------------
     out2 = RepresentationCollapseTask(
         config={"num_samples": 3, "use_cache": False}
     ).evaluate(model, tok, dataset, cache=None)
-    assert out2["erank_per_layer"] == out["erank_per_layer"]
+    assert out2["_meta_erank_per_layer"] == out["_meta_erank_per_layer"]
     assert out2["collapse_ratio"] == out["collapse_ratio"]
 
 # === geometry_correlation_dimension  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===

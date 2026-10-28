@@ -95,7 +95,7 @@ def test_qdl_valley_follows_a_position0_sink(tiny_states):
     assert base["_meta_qdl_entropy_per_layer"][mid] > 10 * r["_meta_qdl_entropy_per_layer"][mid]
 
 
-RV_KEYS = ("max_erank", "min_erank", "collapse_ratio", "max_drop")
+RV_KEYS = ("max_erank", "min_erank", "collapse_ratio", "_meta_max_drop")
 
 
 def _map_blocks(S, fn):
@@ -123,3 +123,41 @@ def test_roy_vetterli_keys_drop_position0_and_massive_rows(tiny_states):
     assert absent["_meta_massive_token_share"] < 0.05
     # The every-token companion still sees the sink (known negative).
     inv.assert_moves(absent, sunk, "_meta_collapse_ratio_all_tokens", 1e-2)
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def _midpoint_states(S):
+    """Each block split in two: the exact midpoint state is inserted between
+    consecutive block outputs (a 2-block re-decomposition of the same map)."""
+    L = S.n_layers
+    blocks, k = {}, 0
+    for li in range(L):
+        blocks[k] = S.blocks[li]
+        k += 1
+        if li < L - 1:
+            blocks[k] = [0.5 * (np.asarray(a, np.float64) + np.asarray(b, np.float64))
+                         for a, b in zip(S.blocks[li], S.blocks[li + 1])]
+            k += 1
+    return inv.States(blocks=blocks, final_norm=S.final_norm, embedding=S.embedding)
+
+
+def test_depth_dependent_aggregates_are_meta(tiny_states, tiny_identity_states):
+    """P4: max_drop moves when a block is split in two, and the profile's
+    uniform layer mean moves under identity blocks, so neither is a headline.
+    The extremes of the profile do not move under identity blocks."""
+    base = inv.run_task_on_states(TASK, tiny_states)
+    assert "max_drop" not in base and "erank_per_layer" not in base
+    assert "erank_sigma2_per_layer" not in base
+    ins = inv.run_task_on_states(TASK, tiny_identity_states)
+    assert len(ins["_meta_erank_per_layer"]) == len(base["_meta_erank_per_layer"]) + 2
+    inv.assert_invariant(base, ins, ["max_erank", "min_erank", "qdl_entropy_min"], rtol=1e-9)
+    assert inv.rel_change(inv.uniform_layer_mean(base["_meta_erank_per_layer"]),
+                          inv.uniform_layer_mean(ins["_meta_erank_per_layer"])) > 1e-4
+    split = inv.run_task_on_states(TASK, _midpoint_states(tiny_states))
+    inv.assert_moves(base, split, "_meta_max_drop", 0.2)
