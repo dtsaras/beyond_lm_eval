@@ -39,3 +39,11 @@ def test_hill_proxy_is_meta_and_moves_under_zero_padding(base, padded):
         assert k not in base and f"_meta_{k}" in base
     inv.assert_invariant(base, padded, ["avg_alpha_official"], rtol=1e-9)
     inv.assert_moves(base, padded, "_meta_avg_alpha", 0.05)
+
+
+def test_tail_fraction_is_a_meta_config_echo(tiny, base):
+    """tail_fraction is the configured constant (0.2 on all 66 study models):
+    it is echoed under _meta_ and equals whatever the config set."""
+    assert "tail_fraction" not in base
+    assert base["_meta_tail_fraction"] == 0.2
+    assert _run(tiny, tail_fraction=0.3)["_meta_tail_fraction"] == 0.3

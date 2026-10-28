@@ -294,7 +294,8 @@ class WeightSpectralTask(DiagnosticTask):
                                             if alphas_official else float("nan"))
         results["avg_alpha_hat"] = (float(np.mean(alpha_hats))
                                     if alpha_hats else float("nan"))
-        results["tail_fraction"] = tail_fraction
+        # A config echo (0.2 on every model): _meta_.
+        results["_meta_tail_fraction"] = tail_fraction
 
         results["_meta_n_modules_scanned"] = int(len(modules_to_scan))
         results["_meta_n_head_modules_tagged"] = int(_n_excluded)
