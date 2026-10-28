@@ -210,6 +210,36 @@ class VendiScoreTask(DiagnosticTask):
 
     # One point per sequence (Q1): the last content token of each document.
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:2210.02410",
+        "code": "vertaix/Vendi-Score@ff1dfdbe6356b98a6087540f215b9a9db6db7c11",
+        "llm_precedent": ("none by name; adjacent: Skean et al. 2025 arXiv:2502.02013 "
+                          "(alpha=1 matrix entropy of the Gram per layer; dataset entropy "
+                          "uses one vector per prompt)"),
+    }
+    ADAPTATION_NOTE = (
+        "The Vendi Score (Friedman & Dieng 2023) is the exponential of the Shannon entropy of "
+        "the eigenvalues of K/n for a unit-diagonal similarity kernel K, the effective number "
+        "of distinct samples. No paper applies it to LLM hidden states, so BLME scores one "
+        "embedding per sample as the paper does: the last content token of each of 1000 "
+        "documents, at every block output, with the released score_X kernel (cosine "
+        "similarity, a row-normalised uncentred linear Gram). With this kernel VS equals exp "
+        "of the alpha=1 matrix entropy that Skean et al. 2025 apply per layer to one vector "
+        "per prompt. An uncentred cosine kernel is dominated by a shared mean direction, so "
+        "the score mixes anisotropy with diversity; VS grows with n up to min(n, d), so n is "
+        "pinned at 1000 for every model. Layer means, slopes and quartiles move when a "
+        "computation is split into more blocks and are _meta_; the token-cloud profile "
+        "(position 0 and massive rows excluded) is _meta_tokens_*."
+    )
+    HEADLINE_KEYS = ("vendi_mean_first_layer", "vendi_mean_mid_layer", "vendi_mean_last_layer",
+                     "vendi_max")
+    _INV = "tests/tasks/invariance/test_geometry_vendi_score.py::"
+    # vendi_mean_mid_layer is an index-selected depth and moves under
+    # identity-block insertion.
+    SIZE_INVARIANT = dict.fromkeys(
+        ("vendi_mean_first_layer", "vendi_mean_last_layer", "vendi_max"),
+        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+         _INV + "test_endpoints_and_max_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Vendi Score Diversity Analysis...")
