@@ -20,7 +20,7 @@ import warnings
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
-                      role_layers, rows_policy)
+                      role_layers, role_meta, role_names, rows_policy)
 import logging
 logger = logging.getLogger("blme")
 
@@ -76,6 +76,19 @@ def _lifespan_summary(dgms) -> dict:
     }
 
 
+_ROLES = ("first", "mid", "last")
+_TWINS = ("mean_persistence_h0", "max_persistence_h0", "mean_persistence_h1")
+_HEADLINES = tuple(
+    [f"{r}_layer_{k}" for r in _ROLES for k in ("mean_persistence_h0", "num_loops_h1")]
+    + [f"{r}_layer_{k}_norm" for r in _ROLES for k in _TWINS])
+_INV = "tests/tasks/invariance/test_topology_homology.py::"
+# The mean-pairwise-distance twins; the raw lifetimes move with any rescale.
+_SIZE_INVARIANT = {
+    f"{r}_layer_{k}_norm": (("embed_isometric", "zero_pad", "rescale"),
+                            _INV + "test_mpd_twins_are_width_and_scale_free")
+    for r in _ROLES for k in _TWINS}
+
+
 @register_task("topology_homology")
 class PersistentHomologyTask(DiagnosticTask):
     """
@@ -88,6 +101,25 @@ class PersistentHomologyTask(DiagnosticTask):
     2005, Edelsbrunner-Harer 2008, Naitzat-Zhitnikov-Lim 2020).
     """
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "doi:10.1007/s00454-004-1146-y (Zomorodian & Carlsson 2005)",
+        "code": "scikit-tda/ripser.py (installed package)",
+        "llm_precedent": ("arXiv:2505.20435 (Fay et al. 2025: Ripser VR barcodes of last-token "
+                          "clouds; mean 0-bar death and 1-bar count as headline summaries)"),
+    }
+    ADAPTATION_NOTE = (
+        "Vietoris-Rips persistence (ripser, dimensions 0 and 1) is computed on one point per "
+        "sequence, its last token, at the first, middle and last block, as Fay et al. (2025) do "
+        "for LLMs, with N = 1000 sequences for every model. ripser reads float64 pairwise "
+        "distances. H0 / H1 lifetimes are summarised by their mean and maximum and the H1 bar "
+        "count. Raw lifetimes are in the representation's units, so each is also divided by the "
+        "cloud's mean pairwise distance (the _norm twins), which removes a global rescale and a "
+        "change of embedding width exactly. The twins still drift with N (about -4.5% per "
+        "doubling for mean H0), so models are compared at the same N. The fine/coarse split at "
+        "half the mean pairwise distance is a BLME construct."
+    )
+    HEADLINE_KEYS = _HEADLINES
+    SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistent Homology (TDA)...")
@@ -112,14 +144,9 @@ class PersistentHomologyTask(DiagnosticTask):
         results = point_meta(pinfo, pts[sorted(pts)[len(pts) // 2]])
         # Depth-role names (first/mid/last); absolute-index names alias
         # different depths across models and are _meta_.
-        _role = {}
         _sorted_targets = sorted(layer_representations.keys())
-        if len(_sorted_targets) == 3:
-            _role = dict(zip(_sorted_targets, ("first", "mid", "last")))
-        elif len(_sorted_targets) == 2:
-            _role = dict(zip(_sorted_targets, ("first", "last")))
-        elif len(_sorted_targets) == 1:
-            _role = {_sorted_targets[0]: "first"}
+        _role = role_names(_sorted_targets)
+        results.update(role_meta(_role, pinfo["n_layers"]))
 
         for l_idx, data_points in layer_representations.items():
             _r = _role.get(l_idx)

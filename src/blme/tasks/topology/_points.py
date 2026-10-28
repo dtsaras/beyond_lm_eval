@@ -39,6 +39,15 @@ def role_names(indices: List[int]) -> Dict[int, str]:
     return dict(zip(indices, names.get(len(indices), ())))
 
 
+def role_meta(roles: Dict[int, str], n_layers: int) -> Dict[str, float]:
+    """``_meta_`` block index and depth fraction l / (L - 1) of each role."""
+    out = {}
+    for l, r in roles.items():
+        out[f"_meta_{r}_layer_index"] = int(l)
+        out[f"_meta_{r}_layer_frac"] = float(l) / float(max(1, n_layers - 1))
+    return out
+
+
 def fallback_dataset(num_samples: int, label: str) -> List[Dict[str, str]]:
     """``dataset=None`` for a direct call: LAMBADA test texts, else bundled
     sentences when ``datasets`` is missing or offline (a run through
