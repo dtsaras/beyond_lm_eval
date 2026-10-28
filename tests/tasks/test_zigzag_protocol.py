@@ -121,6 +121,45 @@ def test_missing_dionysus_is_an_error_not_a_fallback(monkeypatch):
     assert set(res) == {"error"} and "dionysus" in res["error"]
 
 
+def test_reference_sample_size_is_the_default():
+    """Sec. 4.1: 16 subsets of 500 prompts (the study ran one subset of 40)."""
+    from blme.tasks.config_loader import resolve_task_config
+    cfg = resolve_task_config("topology_zigzag_persistence")
+    assert (cfg["subset_size"], cfg["num_subsets"]) == (500, 16)
+    assert cfg["num_samples"] >= 500 * 16
+
+
+def test_draw_subsets_blocks_draws_and_single_pool():
+    from blme.tasks.topology.zigzag import _draw_subsets, _subset_meta
+    blocks = _draw_subsets(40, 10, 4, seed=0)
+    assert [list(b) for b in blocks] == [list(range(i * 10, i * 10 + 10)) for i in range(4)]
+    assert _subset_meta(blocks, 40)["_meta_zz_subsets_disjoint"] is True
+    draws = _draw_subsets(25, 10, 4, seed=0)
+    assert len(draws) == 4 and all(len(set(d)) == 10 and max(d) < 25 for d in draws)
+    meta = _subset_meta(draws, 25)
+    assert meta["_meta_zz_subsets_disjoint"] is False and 0 < meta["_meta_zz_subset_overlap"] < 1
+    assert [list(d) for d in _draw_subsets(7, 10, 4, seed=0)] == [list(range(7))]
+
+
+def test_descriptors_are_means_over_subsets():
+    """Before the fix one subset of every prompt was scored; now each subset is
+    scored and the descriptors are averaged, with the overlap reported."""
+    from blme.tasks.topology.zigzag import _draw_subsets, _zigzag_paper_metric
+    model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
+    cfg = {"num_samples": len(fd.TEXTS), "subset_size": 10, "num_subsets": 3,
+           "n_neighbors": 4, "seed": 7}
+    res = ZigzagPersistenceTask(cfg).evaluate(model, tok, fd.dataset())
+    assert res["_meta_zz_n_subsets"] == 3 and res["_meta_zz_subset_size"] == 10
+    assert res["_meta_zz_pool_size"] == len(fd.TEXTS) and res["_meta_zz_subset_overlap"] > 0
+    clouds, _, _ = _paper_clouds(model, tok, fd.TEXTS, window=512)
+    per = [_zigzag_paper_metric([c[idx] for c in clouds], n_neighbors=4, max_points=10)
+           for idx in _draw_subsets(len(fd.TEXTS), 10, 3, seed=7)]
+    want = float(np.mean([p["zz_true_adjacent_mean"] for p in per]))
+    assert res["zz_true_adjacent_mean"] == pytest.approx(want, rel=0, abs=1e-15)
+    assert res["_meta_zz_true_adjacent_mean_subset_sd"] == pytest.approx(
+        float(np.std([p["zz_true_adjacent_mean"] for p in per])), abs=1e-15)
+
+
 def test_a_barcode_failure_propagates(monkeypatch):
     import blme.tasks.topology.zigzag as zz
 

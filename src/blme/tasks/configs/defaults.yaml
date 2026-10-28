@@ -420,7 +420,13 @@ interpretability_activation_kurtosis:
   use_cache: true
 
 topology_zigzag_persistence:
-  num_samples: 40
+  # Gardinazzi et al. 2025 Sec. 4.1: descriptors are means over 16 subsets of
+  # 500 prompts. num_samples is the pool requested (16 x 500); WikiText-103
+  # validation holds 1,703 passages, so the subsets overlap (reported in
+  # _meta_zz_subset_overlap).
+  num_samples: 8000
+  subset_size: 500
+  num_subsets: 16
   # k_NN = 4, the paper's value (Gardinazzi et al. 2025 Fig. 2, Sec. 4.2).
   n_neighbors: 4
   # 0.3 -> 0.1 (2026-09-05). `persistence_frac` counts an H1 loop only if it

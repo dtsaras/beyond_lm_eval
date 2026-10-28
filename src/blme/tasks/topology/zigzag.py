@@ -463,14 +463,6 @@ def _zigzag_summary(
                         f"{type(exc).__name__}: {exc}")
             persist_steps, born_steps, died_steps, dim_a_steps = [], [], [], []
 
-    # The paper's multi-layer zigzag barcode (dionysus). No fallback: a
-    # failure here is an error, not a silent switch to the proxies.
-    true_zz = {}
-    if n_layers >= 2 and n_pts >= 8:
-        true_zz = _zigzag_paper_metric(
-            [np.asarray(c, dtype=np.float64)[:n_pts] for c in layer_clouds],
-            n_neighbors=n_neighbors, dim=1, max_points=n_pts)
-
     def _m(v):
         return float(np.mean(v)) if v else float("nan")
 
@@ -500,7 +492,6 @@ def _zigzag_summary(
         "betti1_fraction_layers": betti1_fraction,
         # A dead H1 family is reported as a condition.
         "_meta_h1_family_is_identically_zero": bool(betti1_fraction == 0.0),
-        **true_zz,
         # survival_rate drops zero-Betti steps (the aggregation footnote 6
         # exists to prevent), so it is _meta_; zz_true_* counts every step.
         "_meta_zz_h1_survival_rate": _m(surv),
@@ -716,7 +707,12 @@ class ZigzagPersistenceTask(DiagnosticTask):
                               "the paper's zigzag barcode (pip install dionysus==2.1.1); "
                               "there is no fallback construction.")}
 
-        num_samples = int(self.config.get("num_samples", 40))
+        # Sec. 4.1: subsets of 500 prompts, mean over 16 subsets. num_samples is
+        # the pool requested (16 x 500); a smaller pool gives overlapping subsets.
+        num_samples = int(self.config.get("num_samples", 8000))
+        subset_size = int(self.config.get("subset_size", 500))
+        num_subsets = int(self.config.get("num_subsets", 16))
+        seed = int(self.config.get("seed", 42))
         # k_NN = 4: the paper's figures and shipped barcodes (Fig. 2 caption, Sec. 4.2).
         n_neighbors = int(self.config.get("n_neighbors", 4))
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
@@ -728,30 +724,88 @@ class ZigzagPersistenceTask(DiagnosticTask):
         texts = _prompts(dataset, num_samples, tokenizer, window)
         if len(texts) < 3:
             return {"error": "Need at least 3 non-empty prompts for zigzag persistence"}
-        rows = list(range(len(texts)))
+        subsets = _draw_subsets(len(texts), subset_size, num_subsets, seed)
+        first = [int(i) for i in subsets[0]]
         layer_clouds, pooled, info = _paper_clouds(
-            model, tokenizer, texts, window, mean_rows=rows)
+            model, tokenizer, texts, window, mean_rows=set(first))
         if len(layer_clouds) < 2:
             return {"error": "Need at least 2 layers for zigzag persistence"}
-        n_points = min((len(c) for c in layer_clouds), default=0)
+        n_points = len(first)
 
+        # The paper's descriptors per subset, then their mean (and SD) over subsets.
+        per_subset = [
+            _zigzag_paper_metric([c[idx] for c in layer_clouds], n_neighbors=n_neighbors,
+                                 dim=1, max_points=len(idx))
+            for idx in subsets]
+        # The BLME proxy families on the first subset.
         summary = _zigzag_summary(
-            layer_clouds,
+            [c[first] for c in layer_clouds],
             n_neighbors=n_neighbors,
             persistence_frac=persistence_frac,
         )
+        summary.update(_subset_mean(per_subset))
         summary["_meta_n_points"] = int(n_points)
         summary["_meta_zz_knn"] = int(min(n_neighbors, n_points - 1))
+        summary.update(_subset_meta(subsets, len(texts)))
         summary.update(_protocol_meta(info, window))
         summary["_meta_zz_barcode_engine"] = f"dionysus {dio_version}"
-        # The reference's other pooling (use_last_token=False), on the same sites.
-        mean_clouds = [np.stack([pooled[r][s] for r in rows]) for s in range(info["n_sites"])]
+        # The reference's other pooling (use_last_token=False), first subset only.
+        mean_clouds = [np.stack([pooled[r][s] for r in first]) for s in range(info["n_sites"])]
         mp = _zigzag_paper_metric(mean_clouds, n_neighbors=n_neighbors, dim=1,
-                                  max_points=len(rows))
+                                  max_points=len(first))
         for k in ("zz_true_adjacent_mean", "zz_true_mean_bar_len", "zz_true_n_bars"):
             if k in mp:
                 summary[f"_meta_meanpool_{k}"] = mp[k]
         return summary
+
+
+def _draw_subsets(n_pool: int, size: int, n_subsets: int, seed: int) -> List[np.ndarray]:
+    """Row indices of each subset.
+
+    A pool of at least ``n_subsets * size`` prompts is split into consecutive
+    disjoint blocks, as the paper splits its first 8,000 prompts. A smaller pool
+    gives ``n_subsets`` seeded draws without replacement (they overlap; the
+    overlap is reported). A pool no larger than ``size`` is one subset.
+    """
+    size = int(min(size, n_pool))
+    if size <= 0:
+        return []
+    if size == n_pool or n_subsets <= 1:
+        return [np.arange(size)]
+    if n_pool >= size * n_subsets:
+        return [np.arange(s * size, (s + 1) * size) for s in range(n_subsets)]
+    rng = np.random.default_rng(seed)
+    return [np.sort(rng.choice(n_pool, size=size, replace=False)) for _ in range(n_subsets)]
+
+
+def _subset_meta(subsets, n_pool: int) -> Dict[str, object]:
+    sets = [set(int(i) for i in s) for s in subsets]
+    pairs = [(a, b) for i, a in enumerate(sets) for b in sets[i + 1:]]
+    size = len(sets[0]) if sets else 0
+    overlap = (float(np.mean([len(a & b) / size for a, b in pairs])) if pairs and size else 0.0)
+    return {
+        "_meta_zz_pool_size": int(n_pool),
+        "_meta_zz_subset_size": int(size),
+        "_meta_zz_n_subsets": int(len(sets)),
+        "_meta_zz_subset_overlap": overlap,
+        "_meta_zz_subsets_disjoint": bool(overlap == 0.0),
+        "_meta_zz_pool_coverage": (float(len(set().union(*sets)) / n_pool) if n_pool else 0.0),
+    }
+
+
+_SUBSET_SD_KEYS = ("zz_true_adjacent_mean", "zz_true_mean_bar_len")
+
+
+def _subset_mean(per_subset: List[Dict[str, float]]) -> Dict[str, float]:
+    """Mean over subsets of every scalar descriptor; SD of the headline ones."""
+    out: Dict[str, float] = {}
+    keys = sorted({k for d in per_subset for k in d})
+    for k in keys:
+        vals = [float(d[k]) for d in per_subset if k in d]
+        out[k] = float(np.mean(vals)) if vals else float("nan")
+        if k in _SUBSET_SD_KEYS:
+            out[f"_meta_{k}_subset_sd"] = float(np.std(vals)) if vals else float("nan")
+    return out
 
 
 def _dionysus_version():
@@ -857,11 +911,14 @@ def _zigzag_paper_metric(layer_clouds, n_neighbors=5, dim=1, max_points=None):
     reads off.
     """
     dgms, L = _true_zigzag_barcode(layer_clouds, n_neighbors, max_points)
-    if dgms is None or len(dgms) <= dim or L < 2:
+    if dgms is None or L < 2:
         return {}
-    bars = [(float(p.birth), float(p.death)) for p in dgms[dim]]
+    bars = [(float(p.birth), float(p.death)) for p in dgms[dim]] if len(dgms) > dim else []
     if not bars:
-        return {"zz_true_n_bars": 0}
+        # No p-holes in any layer: every Z_p is 0 by footnote 6, so a subset
+        # without bars counts as 0 in the mean over subsets, not as missing.
+        return {"zz_true_adjacent_mean": 0.0, "zz_true_adjacent_min": 0.0,
+                "zz_true_full_depth": 0.0, "zz_true_n_bars": 0}
 
     def _betti(l):
         """beta_p at layer l = bars alive there."""
