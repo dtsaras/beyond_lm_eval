@@ -229,6 +229,9 @@ def _from_forward(model, tokenizer, dataset, *, n, layer, m, replace_final_norm,
                 if enc["input_ids"].shape[1] < 1:
                     continue
                 hook_out.pop("h", None)
+                # post-final-norm: SUBSTITUTED when replace_final_norm (the hooked
+                # raw block output replaces HF's ln_f entry, as the cache does);
+                # otherwise hs[-1] is DELIBERATELY the post-norm output state.
                 hs = list(model(**enc, output_hidden_states=True).hidden_states[1:])
                 if replace_final_norm and "h" in hook_out and \
                         tuple(hook_out["h"].shape) == tuple(hs[-1].shape):
@@ -239,6 +242,8 @@ def _from_forward(model, tokenizer, dataset, *, n, layer, m, replace_final_norm,
                     want = keys if layer == "all" else [_resolve_key(keys, layer)]
                     mid_key = keys[len(keys) // 2]
                     depth = middle_depth_layers({k: None for k in keys})
+                # post-final-norm: the entries read below follow the declaration
+                # above (cache layout: keys 0..L-1 are the block outputs).
                 for k in want:
                     last.setdefault(k, []).append(_store(hs[k][0, -1:]))
                 if n_done < m:

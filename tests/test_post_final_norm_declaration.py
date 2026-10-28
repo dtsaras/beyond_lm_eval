@@ -48,7 +48,10 @@ import pathlib
 import pytest
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "blme"
-COLLECTORS = {"get_hidden_states", "collect_hidden_states"}
+# The shared gates wrap the two collectors and REQUIRE the keyword; tasks that
+# moved onto them are still hidden-state reads that must declare it.
+COLLECTORS = {"get_hidden_states", "collect_hidden_states", "hidden_states_for_task",
+              "sequence_clouds"}
 
 # The two functions that IMPLEMENT the option, plus the cache's own internals.
 IMPLEMENTATION_SITES = {
