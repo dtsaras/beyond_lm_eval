@@ -3091,7 +3091,7 @@ def test_geometry_correlation_dimension():
     # ---- Stub model: sample i -> fixed final-hidden-state point P[i] ----
     class _Out:
         def __init__(self, h):
-            self.hidden_states = [h]
+            self.hidden_states = [h, h]   # (embedding, last), as HF returns
 
     class _Enc(dict):
         def to(self, device):  # BLME calls tokenizer(...).to(device)

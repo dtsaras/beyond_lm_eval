@@ -22,6 +22,9 @@ import numpy as np
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._tokens import select_rows
+from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
+                               sequence_clouds)
 import logging
 logger = logging.getLogger("blme")
 
@@ -127,51 +130,42 @@ def _fixed_window_dimension(distances, n_points: int):
 class CorrelationDimensionTask(DiagnosticTask):
     """
     Computes the Grassberger-Procaccia fractional correlation dimension
-    on the final representation space to evaluate fractal complexity.
+    on the final representation space to evaluate fractal complexity: one
+    point per document (its last content token), Du & Tanaka-Ishii 2025's
+    fixed fit window.
     """
+    # One point per sequence (Q1): the last content token of each document.
+    TOKEN_POLICY = "last_per_sequence"
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Hidden-State Correlation Dimension Analysis...")
-        num_samples = self.config.get("num_samples", 100)
-        max_length = self.config.get("max_length", 128)
+        num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
         num_radii = self.config.get("num_radii", 30)
-        # Use mean-pooled representations by default; set to "last" for
-        # last-token only (original behaviour).
-        pooling = self.config.get("pooling", "mean")
         # Cap total points for pairwise distance computation
         max_points = self.config.get("max_points", 2000)
         seed = int(self.config.get("seed", 42))
+        use_cache = self.config.get("use_cache", True)
+        if self.config.get("pooling", "last") not in ("last", None):
+            logger.info("  correlation_dimension: `pooling` is ignored; the headline is "
+                        "one point per sequence (last content token), the mean-pooled "
+                        "cloud is _meta_.")
 
         if dataset is None:
              from ...cache import load_default_corpus
              dataset = load_default_corpus(num_samples)
 
-        samples = list(dataset)[:num_samples]
-        if not samples:
-             return {"error": "Need at least 1 sample."}
-
-        device = next(model.parameters()).device
-        all_hidden_states = []
-
-        with torch.no_grad():
-            for s in samples:
-                text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=max_length).to(device)
-
-                out = model(**inputs, output_hidden_states=True)
-                # Use all token positions to get more data points
-                # post-final-norm: DELIBERATELY post-norm. This is a SINGLE-LAYER point
-                # cloud of the model's output representation, so there is no profile for
-                # a mixed convention to corrupt; `_meta_correlation_dimension_layer`
-                # records which representation was measured.
-                last_hidden = out.hidden_states[-1][0].detach().cpu()  # (T, D)
-                if pooling == "mean":
-                    # One mean-pooled vector per sample, kept in float64.
-                    all_hidden_states.append(last_hidden.double().mean(dim=0))
-                elif pooling == "all_tokens":
-                    # Each token is a separate data point (many more points)
-                    all_hidden_states.extend(list(last_hidden))
-                else:  # "last"
-                    all_hidden_states.append(last_hidden[-1])
+        # One point per sequence (Q1): the last content token of each of
+        # num_samples whole documents (cache window, no token cap) at HF's
+        # post-norm output representation; a cache holding fewer documents is
+        # bypassed (test_correlation_dimension_protocol.py).
+        sc = sequence_clouds(
+            model, tokenizer, dataset, cache, n=num_samples, layer=-1,
+            replace_final_norm=False, use_cache=use_cache,
+            token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+            readout=readout_for(self.TOKEN_POLICY))
+        if not sc.last:
+            return {"error": "Need at least 1 sample."}
+        key = next(iter(sc.last))
+        all_hidden_states = list(sc.last[key].double())
 
         if len(all_hidden_states) < 20:
              return {"error": "Need at least 20 points for Grassberger-Procaccia correlation dimension."}
@@ -240,12 +234,7 @@ class CorrelationDimensionTask(DiagnosticTask):
             # Otherwise the percentile and plateau fits are NaN; they no longer
             # veto the fixed-window headline.
 
-        if pooling == "all_tokens":
-            point_space = "token_hidden_states"
-        elif pooling == "last":
-            point_space = "last_token_hidden_states"
-        else:
-            point_space = "mean_pooled_hidden_states"
+        point_space = "last_token_hidden_states"
 
         # The scaling-region (plateau) fit on the FULL pair population:
         # radii come from the positive distances, but C(r) counts every pair.
@@ -269,7 +258,25 @@ class CorrelationDimensionTask(DiagnosticTask):
         # D2 = 0 exactly (test_correlation_dimension_atom_e2e.py).
         fw_slope, fw_r2, fw_n, fw_status, fw_dec = _fixed_window_dimension(distances, N)
         _primary = fw_slope
+
+        # The previous point space -- one mean-pooled vector per document --
+        # under the sink policy (position 0 and massive rows dropped), for the
+        # first token_cloud_docs documents: _meta_.
+        _pooled = {}
+        if sc.tokens:
+            P, _ = select_rows(sc.tokens[key], "mean_excl_sinks", keep=sc.keep)
+            if P.shape[0] >= 3:
+                P = P.double()
+                dP = torch.cdist(P, P, p=2, compute_mode="donot_use_mm_for_euclid_dist")
+                iu = torch.triu_indices(P.shape[0], P.shape[0], offset=1)
+                _ps, _pr2, _pn, _pst, _ = _fixed_window_dimension(
+                    dP[iu[0], iu[1]].cpu().numpy(), int(P.shape[0]))
+                _pooled = {"_meta_mean_pooled_correlation_dimension": _ps,
+                           "_meta_mean_pooled_fit_status": _pst,
+                           "_meta_mean_pooled_n_points": int(P.shape[0])}
         return {
+            **_pooled,
+            **sc.meta(),
             "correlation_dimension": _primary,
             "_meta_correlation_dimension_fit_window": "du_tanaka_ishii_2025_appA",
             "_meta_correlation_dimension_fit_status": fw_status,

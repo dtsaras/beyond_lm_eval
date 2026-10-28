@@ -44,11 +44,12 @@ geometry_representation_sensitivity:
   num_samples: 20
 
 geometry_correlation_dimension:
-  num_samples: 100
-  max_length: 128
+  # One point per sequence (last content token of the whole document), N
+  # pinned at 1000 documents; the mean-pooled cloud of the first 200 is _meta_.
+  num_samples: 1000
   num_radii: 30
-  pooling: mean  # "mean", "all_tokens", or "last"
   max_points: 2000
+  token_cloud_docs: 200
 
 geometry_matrix_entropy:
   num_samples: 10

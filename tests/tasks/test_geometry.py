@@ -741,7 +741,7 @@ def test_correlation_dimension_reframes_hidden_state_gp_method():
     # published D2 = 2.05 by -27.7% on a Lorenz attractor.
     assert result["correlation_dimension_method"] == (
         "hidden_state_grassberger_procaccia_scaling_region")
-    assert result["correlation_dimension_point_space"] == "mean_pooled_hidden_states"
+    assert result["correlation_dimension_point_space"] == "last_token_hidden_states"
 
 
 def test_information_geometry(mock_model, mock_tokenizer):

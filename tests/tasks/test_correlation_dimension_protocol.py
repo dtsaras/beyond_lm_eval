@@ -29,23 +29,41 @@ class _Tok:
 
 
 class _CloudModel(torch.nn.Module):
-    """Every row of document i is cloud[i] (float64)."""
+    """Every row of document i is cloud[i] (float64); with ``noise`` every row
+    but the last is replaced by seeded noise of the same scale."""
 
-    def __init__(self, cloud):
+    def __init__(self, cloud, noise=False):
         super().__init__()
         self.cloud = torch.as_tensor(cloud, dtype=torch.float64)
+        self.noise = noise
         self._anchor = torch.nn.Parameter(torch.zeros(1, dtype=torch.float64))
 
     def forward(self, input_ids=None, attention_mask=None, output_hidden_states=True, **kw):
         i = int(input_ids[0, 0])
         T = input_ids.shape[1]
         h = self.cloud[i].reshape(1, 1, -1).expand(1, T, -1).clone()
+        if self.noise:
+            g = torch.Generator().manual_seed(1000 + i)
+            h[0, :-1] = torch.randn(T - 1, h.shape[-1], generator=g, dtype=h.dtype) * self.cloud.std()
         return types.SimpleNamespace(hidden_states=(0.5 * h, h))
 
 
-def _run(cloud, cfg=TASK_CFG):
+def _run(cloud, cfg=TASK_CFG, noise=False):
     data = [{"text": f"doc {i}"} for i in range(cloud.shape[0])]
-    return CorrelationDimensionTask(dict(cfg)).evaluate(_CloudModel(cloud), _Tok(), data)
+    return CorrelationDimensionTask(dict(cfg)).evaluate(_CloudModel(cloud, noise), _Tok(), data)
+
+
+def test_headline_is_one_point_per_sequence():
+    """Q1: D2 of the last content token of each document. Replacing every
+    other row of every document leaves it bit-identical; the mean-pooled
+    cloud (the previous point space, now _meta_) moves."""
+    X = _gauss(2)
+    clean, noisy = _run(X), _run(X, noise=True)
+    assert clean["correlation_dimension"] == noisy["correlation_dimension"]
+    assert np.isfinite(clean["correlation_dimension"])
+    assert clean["_meta_n_points"] == 200 and clean["_meta_num_points"] == 200
+    assert (clean["_meta_mean_pooled_correlation_dimension"]
+            != noisy["_meta_mean_pooled_correlation_dimension"])
 
 
 def _gauss(seed=0, n=200, d=32):
