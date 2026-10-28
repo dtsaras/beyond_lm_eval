@@ -437,6 +437,7 @@ class ModelOutputCache:
         # registry, and `cache.py` defines no task class. The check written
         # to replace a hand-maintained list had a hand-list-shaped hole one
         # indirection further out.
+        from .tasks._tokens import strip_trailing_special
         try:
             self._sample_lengths = []
             with torch.no_grad():
@@ -445,6 +446,7 @@ class ModelOutputCache:
                         text, return_tensors="pt", truncation=True,
                         max_length=CACHE_TOKENIZER_MAX_LENGTH,
                     ).to(device)
+                    inputs, _ = strip_trailing_special(inputs, self.tokenizer)
                     # Skip empty/whitespace docs: a 0-token forward pass crashes
                     # ("cannot reshape tensor of 0 elements"); mirrors the
                     # non-cache path's skip (audit 2026-07-16).

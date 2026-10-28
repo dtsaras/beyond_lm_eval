@@ -82,9 +82,15 @@ import torch
 
 logger = logging.getLogger("blme")
 
-POLICIES = ("all", "exclude_pos0", "last", "mean", "mean_excl_pos0")
-_POOLED = ("mean", "mean_excl_pos0")
+POLICIES = ("all", "exclude_pos0", "exclude_sinks", "last", "mean", "mean_excl_pos0",
+            "mean_excl_sinks")
+_POOLED = ("mean", "mean_excl_pos0", "mean_excl_sinks")
 _EXCL_POS0 = ("exclude_pos0", "mean_excl_pos0")
+# Position 0 plus massive-activation rows (Sun et al. 2024), given as a
+# per-document keep mask from :func:`sink_keep_masks`.
+_EXCL_SINKS = ("exclude_sinks", "mean_excl_sinks")
+MASSIVE_FACTOR = 10.0
+MIDDLE_DEPTHS = (0.1, 0.9)
 
 
 class DocList(list):
@@ -192,6 +198,7 @@ def select_rows(
     policy: str,
     positions: Optional[Sequence[torch.Tensor]] = None,
     doc_ids: Optional[Sequence[int]] = None,
+    keep: Optional[Sequence[torch.Tensor]] = None,
 ) -> Tuple[torch.Tensor, RowMeta]:
     """Apply one token-selection ``policy`` to per-document hidden states.
 
@@ -206,10 +213,18 @@ def select_rows(
             * ``"mean"`` -- one row per document: the mean of its rows.
             * ``"mean_excl_pos0"`` -- one row per document: the mean of its
               rows at position > 0.
+            * ``"exclude_sinks"`` / ``"mean_excl_sinks"`` -- as the two above,
+              but dropping every row that ``keep`` marks False as well:
+              position 0 plus the massive-activation rows found by
+              :func:`sink_keep_masks`. ``keep`` is required, and the same
+              masks should be passed for every layer so that all layers
+              keep the same rows.
         positions: optional per-document int64 positions (default: the
             ``.positions`` of a :class:`DocList`, else ``0..T_i-1``).
         doc_ids: optional document ids to report (default: the ``.doc_ids``
             of a :class:`DocList`, else the list index).
+        keep: per-document boolean masks (True = keep), used by the
+            ``*_sinks`` policies.
 
     Returns:
         ``(rows, meta)``. Unpooled policies return rows in the input dtype in
@@ -223,29 +238,40 @@ def select_rows(
     if policy not in POLICIES:
         raise ValueError(f"unknown token policy {policy!r}; expected one of {POLICIES}")
     chunks, pos, ids = _prepare(per_sample, positions, doc_ids)
+    if policy in _EXCL_SINKS:
+        if keep is None:
+            raise ValueError(f"policy {policy!r} needs keep masks from sink_keep_masks()")
+        if len(keep) != len(chunks):
+            raise ValueError(f"{len(keep)} keep masks for {len(chunks)} documents")
 
     rows: List[torch.Tensor] = []
     doc_col: List[int] = []
     pos_col: List[int] = []
     n_empty = n_pos0_only = n_used = 0
-    for c, p, did in zip(chunks, pos, ids):
+    for i, (c, p, did) in enumerate(zip(chunks, pos, ids)):
         if c.shape[0] == 0:
             n_empty += 1
             continue
         if policy in _EXCL_POS0:
-            keep = p != 0
-            if not bool(keep.any()):
-                n_pos0_only += 1
-                continue
+            mask = p != 0
+        elif policy in _EXCL_SINKS:
+            mask = torch.as_tensor(keep[i], dtype=torch.bool).reshape(-1).cpu()
+            if mask.numel() != c.shape[0]:
+                raise ValueError(f"document {i}: keep mask has {mask.numel()} entries "
+                                 f"for {c.shape[0]} rows")
+            mask = mask & (p != 0)
         else:
-            keep = None
+            mask = None
+        if mask is not None and not bool(mask.any()):
+            n_pos0_only += 1
+            continue
 
         if policy == "all":
             rows.append(c)
             doc_col.extend([did] * c.shape[0])
             pos_col.extend(p.tolist())
-        elif policy == "exclude_pos0":
-            idx = torch.nonzero(keep, as_tuple=False).reshape(-1)
+        elif policy in ("exclude_pos0", "exclude_sinks"):
+            idx = torch.nonzero(mask, as_tuple=False).reshape(-1)
             rows.append(c[idx.to(c.device)])
             doc_col.extend([did] * idx.numel())
             pos_col.extend(p[idx].tolist())
@@ -255,7 +281,7 @@ def select_rows(
             doc_col.append(did)
             pos_col.append(int(p[j]))
         else:
-            sub = c if keep is None else c[torch.nonzero(keep, as_tuple=False).reshape(-1).to(c.device)]
+            sub = c if mask is None else c[torch.nonzero(mask, as_tuple=False).reshape(-1).to(c.device)]
             rows.append(_pool_float64(sub).reshape(1, -1))
             doc_col.append(did)
             pos_col.append(-1)
@@ -338,6 +364,106 @@ def position0_share(
     if not (tot > 0 and math.isfinite(tot)):
         return float("nan")
     return float(ss[P == 0].sum() / tot)
+
+
+# ── Sink masks ───────────────────────────────────────────────────────────
+
+def middle_depth_layers(states_by_layer: Dict[Any, Sequence[torch.Tensor]],
+                        lo: float = MIDDLE_DEPTHS[0], hi: float = MIDDLE_DEPTHS[1]) -> List[Any]:
+    """Keys of the layers whose relative depth lies in ``[lo, hi]``.
+
+    Depth is the key's rank among the sorted keys over the last rank, so it
+    does not depend on whether the dict starts at the embedding or at block 0.
+    With fewer than three layers every key is returned: there is no middle to
+    choose from, and the caller should record which depths it used.
+    """
+    keys = sorted(states_by_layer)
+    if len(keys) < 3:
+        return keys
+    n = len(keys) - 1
+    mid = [k for r, k in enumerate(keys) if lo <= r / n <= hi]
+    return mid or keys
+
+
+def sink_keep_masks(
+    per_sample_by_depth: Sequence[Sequence[torch.Tensor]],
+    factor: float = MASSIVE_FACTOR,
+    positions: Optional[Sequence[torch.Tensor]] = None,
+) -> Tuple[List[torch.Tensor], Dict[str, Any]]:
+    """One keep mask per document: drop position 0 and every massive row.
+
+    A row (token) is massive when, at ANY of the given depths, its L2 norm
+    exceeds ``factor`` times the median norm of the rows at position > 0 at
+    that depth (pooled over documents). Massive activations sit on a few
+    tokens and act as attention-sink biases (Sun et al. 2024); which tokens
+    carry them differs by model family (BOS, the first delimiter, position 1,
+    frequent words), so the rule is set by magnitude, not by position.
+
+    ``per_sample_by_depth`` holds the same documents at each depth, with
+    matching row counts; pass the middle depths (:func:`middle_depth_layers`)
+    -- the final post-norm layer has no massive rows. The SAME masks are then
+    used at every layer, so cross-layer metrics compare the same rows.
+
+    Returns ``(masks, info)``; ``info`` has the number of rows dropped as
+    massive (beyond position 0) and the depths used.
+    """
+    if not per_sample_by_depth:
+        raise ValueError("sink_keep_masks needs at least one depth")
+    first, pos, _ = _prepare(per_sample_by_depth[0], positions)
+    masks = [p != 0 for p in pos]
+    for depth_docs in per_sample_by_depth:
+        chunks, _, _ = _prepare(depth_docs, positions)
+        if [c.shape[0] for c in chunks] != [c.shape[0] for c in first]:
+            raise ValueError("every depth must hold the same documents and rows")
+        norms = [torch.linalg.vector_norm(c.detach().to("cpu", torch.float64), dim=1)
+                 for c in chunks]
+        rest = torch.cat([n[p != 0] for n, p in zip(norms, pos)])
+        if rest.numel() == 0:
+            continue
+        thr = float(factor) * float(rest.median())
+        masks = [m & ~((n > thr) & (p != 0)) for m, n, p in zip(masks, norms, pos)]
+    n_rest = int(sum(int((p != 0).sum()) for p in pos))
+    n_kept = int(sum(int(m.sum()) for m in masks))
+    info = {"n_massive_dropped": n_rest - n_kept, "n_rows_pos_gt0": n_rest,
+            "n_depths": len(per_sample_by_depth), "factor": float(factor)}
+    return masks, info
+
+
+def sink_meta(info: Dict[str, Any], prefix: str = "_meta_sink_") -> Dict[str, Any]:
+    """``_meta_`` keys recording what :func:`sink_keep_masks` dropped."""
+    n = info.get("n_rows_pos_gt0") or 0
+    return {f"{prefix}n_massive_dropped": int(info.get("n_massive_dropped", 0)),
+            f"{prefix}frac_massive_dropped": (float(info["n_massive_dropped"]) / n) if n else float("nan"),
+            f"{prefix}n_depths": int(info.get("n_depths", 0)),
+            f"{prefix}factor": float(info.get("factor", MASSIVE_FACTOR))}
+
+
+def strip_trailing_special(encoding: Dict[str, torch.Tensor], tokenizer) -> Tuple[Dict[str, torch.Tensor], int]:
+    """Drop special tokens a tokenizer APPENDS (EOS, SEP) from a batch-1 encoding.
+
+    Some tokenizers append EOS to every sequence (OLMo-1B), which turns every
+    last-token readout into a read of that special token. In a causal LM no
+    earlier position attends to a trailing token, so removing it leaves every
+    other row bit-identical. A leading BOS is never touched, and a sequence is
+    never emptied. Returns the encoding and the number of tokens removed.
+    """
+    ids = encoding["input_ids"]
+    # Only the tokens a tokenizer appends: EOS / SEP. UNK, PAD and the like
+    # can end real text and are left alone.
+    special = {t for t in (getattr(tokenizer, "eos_token_id", None),
+                           getattr(tokenizer, "sep_token_id", None)) if t is not None}
+    if ids.ndim != 2 or ids.shape[0] != 1 or not special:
+        return encoding, 0
+    row = ids[0].tolist()
+    end = len(row)
+    while end > 1 and row[end - 1] in special:
+        end -= 1
+    n = len(row) - end
+    if n == 0:
+        return encoding, 0
+    out = {k: (v[:, :end] if isinstance(v, torch.Tensor) and v.ndim == 2 and v.shape[1] == len(row) else v)
+           for k, v in encoding.items()}
+    return out, n
 
 
 # ── The cache-or-collect gate ────────────────────────────────────────────

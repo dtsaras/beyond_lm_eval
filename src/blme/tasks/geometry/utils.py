@@ -8,6 +8,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from ..common import get_embeddings
+from .._tokens import strip_trailing_special
 import os
 import tempfile
 import atexit
@@ -421,8 +422,9 @@ def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=
                     text = sample.get("text", "")
                 inputs = tokenizer(text, return_tensors="pt", truncation=True,
                                    max_length=max_length).to(model.device)
+                inputs, _ = strip_trailing_special(inputs, tokenizer)
 
-                # Skip empty / single-token docs: an empty forward pass crashes
+                # Skip empty docs: an empty forward pass crashes
                 # ("cannot reshape tensor of 0 elements").
                 if inputs["input_ids"].shape[1] < 1:
                     continue

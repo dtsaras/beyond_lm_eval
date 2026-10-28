@@ -120,7 +120,8 @@ def test_empty_input_and_errors():
         select_rows(torch.zeros(5, 3), "all")
     with pytest.raises(ValueError):
         select_rows([torch.zeros(2, 3)], "all", positions=[torch.tensor([0])])
-    assert set(POLICIES) == {"all", "exclude_pos0", "last", "mean", "mean_excl_pos0"}
+    assert set(POLICIES) == {"all", "exclude_pos0", "exclude_sinks", "last", "mean",
+                             "mean_excl_pos0", "mean_excl_sinks"}
 
 
 def test_as_meta_reports_counts():
