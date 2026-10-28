@@ -1,22 +1,27 @@
 """
 Zigzag persistence across layers (Gardinazzi, Viswanathan, Panerai, Ansuini,
-Cazzaniga & Biagetti, ICML 2025; arXiv:2410.11042; RitAreaSciencePark/ZigZagLLMs).
+Cazzaniga & Biagetti, ICML 2025; arXiv:2410.11042; ZigZagLLMs@2d10c07).
 
-Each layer contributes one point cloud (one point per prompt, rows aligned
-across layers). Per layer a kNN graph is built and filled to its flag complex;
-the zigzag X_1 <- X_1 n X_2 -> X_2 <- ... (``zigzag_DL.py``
-``compute_layers_with_intersection``) is computed with dionysus, and the bars
-are read in layer units (the paper's effective barcode, Eq. 4).
+Protocol, as the paper and its code run it:
+* one point per prompt: the last token, prompts tokenised without special
+  tokens (extract.py:73, dataset_utils.py:14-22);
+* L + 1 clouds: each block's post-attention normalisation (read as the MLP
+  input) and the final norm (extract.py:56-62, helpers.py:5-38);
+* per cloud a kNN graph (k_NN = 4, self excluded, union-symmetrised) filled to
+  its flag complex; the zigzag X_1 <- X_1 n X_2 -> X_2 <- ...
+  (zigzag_DL.py:137-179) is computed with dionysus and read in layer units:
+  a simplex present over layers a..b gets the interval [a, b + 1), which is
+  the reference's effective barcode (Eq. 4;
+  tests/tasks/parity/test_zigzag_reference_construction.py);
+* 16 subsets of 500 prompts, descriptors averaged over subsets (Sec. 4.1).
 
-* ``zz_true_*``: the paper's construction. ``_true_zigzag_barcode`` gives a
-  simplex present over layers a..b the interval [a, b + 1), which gives the
-  reference's effective barcode in layer units.
-  ``Z_p(l1, l2)`` is Eq. 7 (with footnote 6: 0 when beta_p(l1) = 0).
-* ``h1_*`` / ``h0_*`` / ``betti1_fraction_layers``: a BLME proxy. Per layer it
-  counts significant loops on the graph-geodesic metric (ripser) and reports
-  contiguous bands of layers that carry one; it does not track identity.
-* ``zz_h1_*``: one adjacent-layer zigzag step over GF(2) on the shared vertex
-  set (``_h1_persisting_edges``); pairwise, so it cannot see a bar's death.
+Outputs:
+* ``zz_true_adjacent_mean`` (mean over adjacent layers of Z_1, Eq. 7, with
+  footnote 6) and ``zz_true_mean_bar_len``; the paper's per-layer curves
+  beta_1, Zbar_1 (Eq. 8) and B_1 (Eq. 5) are ``_meta_`` profiles.
+* ``_meta_`` BLME proxies on the first subset: a per-layer loop-band summary
+  (ripser on the graph-geodesic metric; no identity tracking) and a GF(2)
+  adjacent-layer step (``_h1_persisting_edges``; it cannot see a bar's death).
 
 Zigzag persistence: Carlsson & de Silva, Found. Comput. Math. 10(4), 2010.
 """
@@ -622,6 +627,7 @@ def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
         cur["final"] = out[0] if isinstance(out, tuple) else out
 
     last = [[] for _ in range(n_sites)]
+    last_pos = []
     mean = {}
     n_at_window = n_bos = 0
     probe_handles = []
@@ -656,6 +662,7 @@ def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
                 acts = [cur[i] for i in range(len(blocks))] + [cur["final"]]
                 for s, a in enumerate(acts):
                     last[s].append(a[0, T - 1].detach().to("cpu", torch.float64))
+                last_pos.append(T - 1)
                 if r in mean_rows:
                     mean[r] = [a[0].detach().to("cpu", torch.float64).mean(dim=0) for a in acts]
     finally:
@@ -668,6 +675,7 @@ def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
         "sites_are_norm_outputs": bool(all(n is not None for n in norm_src)),
         "n_at_window": int(n_at_window),
         "n_docs_starting_with_bos": int(n_bos),
+        "last_positions": last_pos,
     }
     return clouds, mean, info
 
@@ -695,6 +703,20 @@ class ZigzagPersistenceTask(DiagnosticTask):
     the module docstring for the three output families; the mean over each
     prompt's tokens (the reference's other pooling option) is kept as _meta_.
     """
+
+    TOKEN_POLICY = ("paper_protocol:Gardinazzi2025 last token of each prompt, no special "
+                    "tokens, at the post-attention norms and the final norm")
+    SOURCES = {
+        "paper": "arXiv:2410.11042",
+        "code": "RitAreaSciencePark/ZigZagLLMs@2d10c07999aa7c5c1624ee689a771b60afe43069",
+        "llm_precedent": "arXiv:2410.11042 (proposed for LLMs; Llama 2/3, Mistral, Pythia)",
+    }
+    HEADLINE_KEYS = ("zz_true_adjacent_mean", "zz_true_mean_bar_len")
+    # No scalar survives identity-block insertion: an inserted block adds a
+    # cloud, so a mean over adjacent pairs and a bar length in layer units both
+    # move (tests/tasks/invariance/test_topology_zigzag_persistence.py); the
+    # paper compares models of equal depth only (Sec. 4.1).
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Zigzag Persistence (across-layer topology)...")
@@ -764,6 +786,8 @@ class ZigzagPersistenceTask(DiagnosticTask):
         summary.update(_subset_meta(subsets, len(texts)))
         summary.update(_protocol_meta(info, window))
         summary["_meta_zz_barcode_engine"] = f"dionysus {dio_version}"
+        summary.update(_sink_shares(layer_clouds[len(layer_clouds) // 2],
+                                    info["last_positions"]))
         # The reference's other pooling (use_last_token=False), first subset only.
         mean_clouds = [np.stack([pooled[r][s] for r in first]) for s in range(info["n_sites"])]
         mp = _zigzag_paper_metric(mean_clouds, n_neighbors=n_neighbors, dim=1,
@@ -822,6 +846,15 @@ def _subset_mean(per_subset: List[Dict[str, float]]) -> Dict[str, float]:
         if k in _SUBSET_SD_KEYS:
             out[f"_meta_{k}_subset_sd"] = float(np.std(vals)) if vals else float("nan")
     return out
+
+
+def _sink_shares(cloud: np.ndarray, positions) -> Dict[str, float]:
+    """Massive-row and position-0 shares of one site's last-token cloud."""
+    from .._tokens import massive_token_share, position0_share
+    docs = [torch.from_numpy(cloud[i:i + 1]) for i in range(len(cloud))]
+    pos = [torch.tensor([int(p)]) for p in positions]
+    return {"_meta_massive_token_share": massive_token_share(docs, positions=pos),
+            "_meta_position0_share": position0_share(docs, positions=pos)}
 
 
 def _dionysus_version():
