@@ -65,3 +65,19 @@ def test_headline_is_one_point_per_sequence(states):
     inv.assert_invariant(base, edited, keys, rtol=0.0)
     assert base["_meta_n_points"] == base["_meta_n_points_per_layer"] == len(TEXTS)
     inv.assert_moves(base, edited, "_meta_tokens_vendi_mean_first_layer", min_rel=1e-3)
+
+
+def test_depth_aggregates_are_meta(tiny, states):
+    """P4: identity blocks (exact) after blocks 0 and 1 move the uniform layer
+    mean, the slope and the quartiles, so they are _meta_; the first, last and
+    maximum layer values do not move."""
+    model, tok = tiny
+    base = inv.run_task_on_states(TASK, states)
+    ins = inv.run_task_on_states(TASK, inv.states_from_model(
+        inv.insert_identity_blocks(model, [0, 1]), tok, TEXTS))
+    for key in ("vendi_overall_mean", "vendi_slope", "vendi_q25", "vendi_q50", "vendi_q75"):
+        assert key not in base and "_meta_" + key in base
+    inv.assert_moves(base, ins, "_meta_vendi_overall_mean", min_rel=1e-3)
+    inv.assert_moves(base, ins, "_meta_vendi_slope", min_rel=1e-3)
+    inv.assert_invariant(base, ins, ["vendi_mean_first_layer", "vendi_mean_last_layer",
+                                     "vendi_max"], rtol=0.0)

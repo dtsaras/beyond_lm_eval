@@ -200,13 +200,11 @@ class VendiScoreTask(DiagnosticTask):
 
     Outputs (flat floats):
         vendi_mean_first_layer / _mid_layer / _last_layer
-        vendi_overall_mean       — mean of finite per-layer Vendi Scores
+        vendi_max                — maximum of the per-layer profile
+        _meta_vendi_overall_mean / _slope / _q25 / _q50 / _q75 — layer
+                                   aggregates (move under identity blocks)
         _meta_vendi_normalized_mean — VS/n_points, kept for continuity (not a
                                    width correction).
-        vendi_slope              — OLS slope of per-layer VS on normalized
-                                   depth l/(n_layers-1)
-        vendi_max / vendi_min    — extremes of the per-layer profile
-        vendi_q25 / vendi_q50 / vendi_q75 — quartiles of per-layer VS
         _meta_ counts (n_layers, n_points_per_layer, kernel, ...)
     """
 
@@ -290,18 +288,21 @@ def _profile_summary(per_layer_vs, n_points_per_layer):
         "vendi_mean_first_layer": float(vs_arr[0]),
         "vendi_mean_mid_layer": float(vs_arr[n_layers // 2]),
         "vendi_mean_last_layer": float(vs_arr[-1]),
-        "vendi_overall_mean": float(np.mean(finite_vs)),
+        # P4: uniform means, slopes and quartiles over layers move when identity
+        # blocks are inserted, so they are _meta_ profile summaries
+        # (tests/tasks/invariance/test_geometry_vendi_score.py).
+        "_meta_vendi_overall_mean": float(np.mean(finite_vs)),
         # VS / n_points: kept under its historic name, not a width correction.
         "_meta_vendi_normalized_mean": (
             float(np.mean(finite_norm)) if finite_norm.size else float("nan")),
-        "vendi_slope": slope,
+        "_meta_vendi_slope": slope,
         "vendi_max": float(np.max(finite_vs)),
         # _meta_: the minimum is the last layer on most models, a
         # sometimes-duplicate of vendi_mean_last_layer.
         "_meta_vendi_min": float(np.min(finite_vs)),
         "_meta_vendi_argmin_is_last_layer": bool(
             int(np.argmin(finite_vs)) == len(finite_vs) - 1),
-        "vendi_q25": float(np.percentile(finite_vs, 25)),
-        "vendi_q50": float(np.percentile(finite_vs, 50)),
-        "vendi_q75": float(np.percentile(finite_vs, 75)),
+        "_meta_vendi_q25": float(np.percentile(finite_vs, 25)),
+        "_meta_vendi_q50": float(np.percentile(finite_vs, 50)),
+        "_meta_vendi_q75": float(np.percentile(finite_vs, 75)),
     }
