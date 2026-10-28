@@ -34,7 +34,23 @@ def test_headline_ignores_position0_rows(tiny_states):
     inv.assert_invariant(base, sunk, keys, rtol=1e-6)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
     inv.assert_moves(base, sunk, "_meta_incl_pos0_hsic_compression_ratio", 1e-3)
-    assert base["_meta_rows_policy"] == "exclude_pos0"
+    assert base["_meta_rows_policy"] == "exclude_sinks"
+
+
+@pytest.fixture(scope="module")
+def gpt2_states():
+    return inv.states_from_model(*load("gpt2"), TEXTS[:6])
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2_states, monkeypatch):
+    """A first-period-style sink (row 3 of every document x1000 at block L/2
+    only) moves exclude_pos0's adjacent minimum; exclude_sinks drops that token
+    from every Gram matrix, giving the row-deleted corpus's value bit for bit,
+    and with no massive row it equals exclude_pos0 exactly."""
+    from _sinks import check_state_task
+    from blme.tasks.geometry.mutual_info import HSICDependenceTask
+    check_state_task(TASK, HSICDependenceTask, gpt2_states, monkeypatch, "min_adjacent_hsic",
+                     keys=list(HSICDependenceTask.HEADLINE_KEYS))
 
 
 @pytest.mark.parametrize("attrs", [{}, {"num_hidden_layers": None, "n_layer": None}])
@@ -166,6 +182,6 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_state
 
 
 def test_declarations():
-    assert HSICDependenceTask.TOKEN_POLICY == "exclude_pos0"
+    assert HSICDependenceTask.TOKEN_POLICY == "exclude_sinks"
     assert set(HSICDependenceTask.SIZE_INVARIANT) <= set(HSICDependenceTask.HEADLINE_KEYS)
     assert {"paper", "code", "llm_precedent"} <= set(HSICDependenceTask.SOURCES)
