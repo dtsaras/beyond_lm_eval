@@ -19,7 +19,8 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ._points import fallback_dataset, last_token_points, point_meta, role_layers, rows_policy
+from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
+                      role_layers, rows_policy)
 import logging
 logger = logging.getLogger("blme")
 
@@ -125,24 +126,11 @@ class PersistentHomologyTask(DiagnosticTask):
             data_matrix = np.array(data_points)  # Shape: (num_samples, hidden_dim)
 
             # Duplicate points are quotiented (a repeated point is a zero-length
-            # H0 bar), then the cloud is centred and divided by its max entry so
-            # ripser's float32 neither under- nor overflows; lifetimes are scaled
-            # back afterwards. `data_matrix` itself is kept for the mpd below.
-            _centred = np.asarray(data_matrix, dtype=np.float64)
-            _centred = np.unique(_centred, axis=0)
-            _centred = _centred - _centred.mean(axis=0, keepdims=True)
-            _hg = float(np.max(np.abs(_centred))) if _centred.size else 0.0
-            if np.isfinite(_hg) and _hg > 0:
-                _rips_input = _centred / _hg
-            else:
-                _hg = 1.0
-                _rips_input = _centred
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                dgms = ripser(_rips_input, maxdim=1)['dgms']
-            if _hg != 1.0:
-                dgms = [d * _hg for d in dgms]
+            # H0 bar); ripser reads float64 pairwise distances. `data_matrix`
+            # itself is kept for the mpd below.
+            dgms, _scale = rips_diagrams(
+                np.unique(np.asarray(data_matrix, dtype=np.float64), axis=0))
+            results[f"_meta_layer_{l_idx}_rips_scale"] = _scale
 
             summary = _lifespan_summary(dgms)
             for _k in ("mean_persistence_h0", "max_persistence_h0",

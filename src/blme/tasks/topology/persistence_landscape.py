@@ -34,7 +34,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
-from ._points import last_token_points, point_meta, role_layers, rows_policy
+from ._points import last_token_points, point_meta, rips_diagrams, role_layers, rows_policy
 
 logger = logging.getLogger("blme")
 
@@ -285,21 +285,11 @@ class PersistenceLandscapeTask(DiagnosticTask):
             if len(layer_reps[l_idx]) < 3:
                 continue
             X = np.stack(layer_reps[l_idx])
-            # Centre (VR is translation invariant), then divide by the max
-            # entry when it is out of float32's comfortable range; the
-            # landscape statistics are homogeneous in the metric, so the
-            # degree-1/2/1.5 restores below undo it.
-            X = np.asarray(X, dtype=np.float64)
-            X = X - X.mean(axis=0, keepdims=True)
-            _xmax = float(np.max(np.abs(X))) if X.size else 0.0
-            _resc = 1.0
-            if _xmax > 0 and np.isfinite(_xmax) and not (1e-6 < _xmax < 1e6):
-                X = X / _xmax
-                _resc = _xmax
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                dgms = ripser(X, maxdim=1)["dgms"]
+            # ripser reads float64 pairwise distances, divided by a power of
+            # two when out of float32's range; the diagram is computed in those
+            # units and the degree-1/2/1.5 restores below undo the shift.
+            dgms, _resc = rips_diagrams(X)
+            dgms = [d / _resc for d in dgms]
 
             for dim_idx, dim_label in enumerate(["h0", "h1"]):
                 if dim_idx >= len(dgms):

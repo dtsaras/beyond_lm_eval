@@ -98,6 +98,40 @@ def test_default_is_1000_sequences(task):
     assert resolve_task_config(task)["num_samples"] == 1000
 
 
+def _two_far_clusters():
+    """Two unit-scale clusters 1e6 apart. Centring cannot remove that spread,
+    and ripser's point-cloud path (sklearn's ||x||^2 + ||y||^2 - 2 x.y in
+    float64) then loses ~1e-4 of every within-cluster distance."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from adversarial_fixtures import on_grid_translation
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((40, 3))
+    B0, B, ok = on_grid_translation(rng.standard_normal((40, 3)), 1e6, dtype=np.float64)
+    assert ok
+    return np.vstack([A, B]), A, B0
+
+
+def _h1_lifetimes(X):
+    from ripser import ripser
+    from scipy.spatial.distance import pdist, squareform
+    d = ripser(squareform(pdist(X)), distance_matrix=True, maxdim=1)["dgms"][1]
+    return list(d[:, 1] - d[:, 0])
+
+
+def test_rips_reads_float64_distances():
+    """The H1 bars of two far-apart clusters are those of each cluster; read
+    through float64 pdist they match to ripser's float32 rounding (5e-8),
+    while the point-cloud path was off by ~1e-4."""
+    X, A, B0 = _two_far_clusters()
+    want = _h1_lifetimes(A) + _h1_lifetimes(B0)
+    assert len(want) >= 3
+    S = fd.inv.States(blocks={l: [X[i:i + 1] for i in range(len(X))] for l in range(3)})
+    res = fd.inv.run_task_on_states("topology_homology", S, {"num_samples": len(X)},
+                                    force=True, store_dtype=torch.float64)
+    assert res["first_layer_num_loops_h1"] == len(want)
+    assert res["first_layer_mean_persistence_h1"] == pytest.approx(np.mean(want), rel=1e-6)
+
+
 def test_a_smaller_cache_is_not_silently_accepted(tiny):
     """min_cached_docs: a cache holding fewer documents than requested is
     rejected and the task collects the full N itself."""

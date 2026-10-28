@@ -174,11 +174,13 @@ def point_meta(info: Dict, cloud: np.ndarray) -> Dict[str, object]:
 def rips_diagrams(X: np.ndarray, maxdim: int = 1):
     """ripser on a float64 pairwise-distance matrix (``distance_matrix=True``).
 
-    ripser's own point-cloud path computes distances in float32, which loses
-    the payload of a cloud far from the origin (1e-3 relative error at a +1e6
-    offset); float64 ``pdist`` does not. An out-of-range matrix is shifted by
-    a power of two (exact) before ripser's float32 cast and the diagram is
-    shifted back.
+    ripser's own point-cloud path computes distances from float32 coordinates,
+    which loses fine structure that sits far from the centroid (two clusters a
+    1e6 apart: 3% error on the within-cluster bars); float64 ``pdist`` does
+    not. An out-of-range matrix is shifted by a power of two (exact) before
+    ripser's float32 cast and the diagram is shifted back.
+
+    Returns ``(dgms, scale)``; ``scale`` is the power of two divided out.
     """
     import math
     import warnings
@@ -196,4 +198,4 @@ def rips_diagrams(X: np.ndarray, maxdim: int = 1):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         dgms = ripser(D, distance_matrix=True, maxdim=maxdim)["dgms"]
-    return [np.ldexp(d, e) for d in dgms] if e else list(dgms)
+    return ([np.ldexp(d, e) for d in dgms] if e else list(dgms)), float(np.ldexp(1.0, e))

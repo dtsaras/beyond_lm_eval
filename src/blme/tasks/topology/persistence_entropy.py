@@ -24,7 +24,8 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ._points import fallback_dataset, last_token_points, point_meta, role_layers, rows_policy
+from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
+                      role_layers, rows_policy)
 import logging
 logger = logging.getLogger("blme")
 
@@ -103,24 +104,10 @@ class PersistenceEntropyTask(DiagnosticTask):
 
         results = point_meta(pinfo, pts[target_layers[len(target_layers) // 2]])
         for l_idx, points in layer_reps.items():
-            # Centre (VR is translation invariant), then a power-of-two rescale
-            # (exact) when the magnitude is out of float32's comfortable range,
-            # because ripser computes in float32.
-            if points:
-                _P = np.stack(points).astype(np.float64)
-                _P = _P - _P.mean(axis=0, keepdims=True)
-                _pm = float(np.max(np.abs(_P))) if _P.size else 0.0
-                if _pm > 0 and np.isfinite(_pm) and not (1e-6 < _pm < 1e6):
-                    import math as _math
-                    _e = int(max(-126, min(127, round(_math.log2(_pm)))))
-                    points = list(np.ldexp(_P, -_e))
-                else:
-                    points = list(_P)
-            data = np.array(points)
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                dgms = ripser(data, maxdim=1)['dgms']
+            # ripser reads float64 pairwise distances (PE is scale-free, so the
+            # exact power-of-two shift rips_diagrams may apply cancels).
+            dgms, _scale = rips_diagrams(np.stack(points))
+            results[f"_meta_layer_{l_idx}_rips_scale"] = _scale
 
             # H0 lifespans (excluding infinite-lifespan component)
             lifespans_h0 = [d - b for b, d in dgms[0] if d != np.inf]
