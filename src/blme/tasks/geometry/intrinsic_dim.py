@@ -63,6 +63,10 @@ class IntrinsicDimensionTask(DiagnosticTask):
                 id_trend.append(lid)
             results["lid_trend"] = id_trend
             results.update(_profile_summary(id_trend))
+            # P4: the OLS slope over layers moves when identity blocks are
+            # inserted, so it is a _meta_ profile summary
+            # (tests/tasks/invariance/test_geometry_intrinsic_dim.py).
+            results["_meta_lid_depth_slope"] = results.pop("lid_depth_slope")
 
             # The token cloud (every token of the first token_cloud_docs
             # documents, sinks excluded, 20000-row seeded subsample): _meta_.

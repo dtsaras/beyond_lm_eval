@@ -76,3 +76,15 @@ def test_headline_is_one_point_per_sequence(tiny):
     assert base["_meta_n_points"] == len(TEXTS)
     assert base["_meta_points_readout"] == "last_content_token"
     inv.assert_moves(base, edited, "_meta_tokens_lid_trend", min_rel=1e-3)
+
+
+def test_depth_slope_is_a_meta_profile_summary(tiny):
+    """P4: an identity block (exact) after blocks 0 and 1 moves the OLS slope
+    over layers, so it is _meta_; the endpoints do not move."""
+    model, tok = tiny
+    base = inv.run_task_on_states("geometry_intrinsic_dim", inv.states_from_model(model, tok, TEXTS))
+    ins = inv.run_task_on_states("geometry_intrinsic_dim", inv.states_from_model(
+        inv.insert_identity_blocks(model, [0, 1]), tok, TEXTS))
+    assert "lid_depth_slope" not in base
+    inv.assert_moves(base, ins, "_meta_lid_depth_slope", min_rel=1e-3)
+    inv.assert_invariant(base, ins, ["lid_first_layer", "lid_last_layer"], rtol=0.0)
