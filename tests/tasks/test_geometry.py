@@ -100,7 +100,9 @@ def test_sharpness_top_eigenvalue_is_signed():
     def hvp(v):
         return [diag * v[0]]
 
-    lam = _power_iteration_top_eigenvalue(hvp, [torch.tensor([1.0, 1.0, 1.0])], 100)
+    # tol=0: the full 100-iteration budget (the default applies PyHessian's
+    # 1e-3 stopping rule, which stops short of the 1e-3 absolute check below).
+    lam = _power_iteration_top_eigenvalue(hvp, [torch.tensor([1.0, 1.0, 1.0])], 100, tol=0.0)
     assert abs(lam - (-5.0)) < 1e-3, f"expected signed -5.0 (PyHessian), got {lam}"
 
 
