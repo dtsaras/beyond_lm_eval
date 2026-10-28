@@ -3,7 +3,8 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
-from ._sequence_points import DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, sequence_clouds
+from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
+                               sequence_clouds)
 import logging
 logger = logging.getLogger("blme")
 
@@ -23,6 +24,41 @@ class IntrinsicDimensionTask(DiagnosticTask):
         Data Representations in Deep Neural Networks", NeurIPS 2019,
         arXiv:1905.12784. The per-layer ID profile (on vision CNNs).
     """
+    # Layerwise mode: one point per sequence (Q1). The static mode measures the
+    # input-embedding rows and is not token-based.
+    TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:1803.06992",
+        "code": "AnsuiniAlessio/IntrinsicDimDeep@2c5140009eb3",
+        "llm_precedent": ("Cheng et al. 2024 arXiv:2405.15471 (last token of each sequence, "
+                          "every layer); Valeriani et al. 2023 arXiv:2302.00294 (one point "
+                          "per sequence, TwoNN per layer)"),
+    }
+    ADAPTATION_NOTE = (
+        "TwoNN (Facco et al. 2017) estimates intrinsic dimension from the ratio of each "
+        "point's second- to first-nearest-neighbour distance, fitted through the origin "
+        "with the top 10% of ratios discarded. In layerwise mode BLME applies it to one "
+        "point per sequence at every block output: the last content token of each of 1000 "
+        "documents, the same N for every model, Euclidean distance, as Cheng et al. 2024 do "
+        "with the last token. A token cloud pooled across documents is avoided because 28-83% "
+        "of a token's nearest neighbours lie in its own document; its value is kept as "
+        "_meta_tokens_* with position 0 and massive rows excluded. TwoNN falls as N grows "
+        "(Facco et al. report d against N), so the value is the ID at a fixed 1000-point "
+        "scale. The static mode measures the input-embedding rows, whose count is the "
+        "vocabulary size."
+    )
+    HEADLINE_KEYS = ("intrinsic_dimension", "lid_first_layer", "lid_mid_layer",
+                     "lid_last_layer")
+    _INV = "tests/tasks/invariance/test_geometry_intrinsic_dim.py::"
+    # lid_mid_layer is an index-selected depth and moves under identity-block
+    # insertion; intrinsic_dimension counts vocabulary rows (V-dependent).
+    SIZE_INVARIANT = {
+        "lid_first_layer": (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+                            _INV + "test_endpoints_invariant"),
+        "lid_last_layer": (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+                           _INV + "test_endpoints_invariant"),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Intrinsic Dimension Estimation (Two-NN)...")
 
@@ -46,7 +82,8 @@ class IntrinsicDimensionTask(DiagnosticTask):
             sc = sequence_clouds(
                 model, tokenizer, dataset, cache, n=n_seq, layer="all",
                 replace_final_norm=True, use_cache=use_cache,
-                token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)))
+                token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+                readout=readout_for(self.TOKEN_POLICY))
             if not sc.last:
                 return {"error": "No hidden states available for intrinsic dimension"}
 

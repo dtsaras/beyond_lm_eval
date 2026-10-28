@@ -39,6 +39,20 @@ DEFAULT_N_SEQUENCES = 1000
 DEFAULT_TOKEN_DOCS = 200
 
 
+# TOKEN_POLICY -> the select_rows readout of one point per sequence.
+_READOUTS = {"last_per_sequence": "last"}
+# The policy of the _meta_ token clouds (non-LLM-origin point clouds).
+TOKEN_CLOUD_POLICY = "exclude_sinks"
+
+
+def readout_for(token_policy: str) -> str:
+    """The per-sequence readout a task's ``TOKEN_POLICY`` names."""
+    if token_policy not in _READOUTS:
+        raise ValueError(f"sequence_clouds supports TOKEN_POLICY in {sorted(_READOUTS)}, "
+                         f"got {token_policy!r}")
+    return _READOUTS[token_policy]
+
+
 @dataclass
 class SequenceClouds:
     """What :func:`sequence_clouds` returns.
@@ -61,7 +75,7 @@ class SequenceClouds:
     def n_points(self) -> int:
         return int(next(iter(self.last.values())).shape[0]) if self.last else 0
 
-    def token_rows(self, key, policy: str = "exclude_sinks"):
+    def token_rows(self, key, policy: str = TOKEN_CLOUD_POLICY):
         """``select_rows`` on the token cloud of layer ``key`` under ``policy``."""
         docs = self.tokens[key]
         if policy in ("exclude_sinks", "mean_excl_sinks"):
@@ -133,6 +147,7 @@ def sequence_clouds(
     replace_final_norm: bool,
     use_cache: bool = True,
     token_docs: int = DEFAULT_TOKEN_DOCS,
+    readout: str = "last",
 ) -> SequenceClouds:
     """Last-token rows of ``n`` documents, plus the ``_meta_`` token cloud.
 
@@ -145,6 +160,8 @@ def sequence_clouds(
     documents (``hidden_states_for_task(min_cached_docs=n)``), so the cache
     cap cannot shrink N.
     """
+    if readout != "last":
+        raise ValueError(f"unsupported readout {readout!r}; only 'last' is implemented")
     n = int(n)
     m = max(0, min(int(token_docs), n))
     states, info = hidden_states_for_task(
