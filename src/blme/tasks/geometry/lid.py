@@ -160,19 +160,44 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
 
         LID = -[ (1/k) * sum_i log(r_i / r_k) ]^-1
 
-    NOT the Levina & Bickel (2004) estimator, which normalises by (k-1) and
-    which this docstring previously named. The two differ by exactly the factor
-    k/(k-1): at the shipped k=20 this estimator reads **+5.26%** above the
-    Levina-Bickel (k-1) MLE and **+11.1%** above the (k-2) bias-corrected form.
-    Levina & Bickel remains the origin of the maximum-likelihood derivation and
-    is cited as such, but the implemented formula is Ma et al.'s.
+    not the Levina & Bickel (2004) (k-1) estimator: the two differ by exactly
+    k/(k-1), +5.26% at k=20. Levina & Bickel is the origin of the
+    maximum-likelihood derivation; the implemented formula is Ma et al.'s.
 
-    Outputs the mean, std, min, and max LID across all samples for
-    the specified layer(s).  When ``layerwise=True`` (and cache is
-    available), computes LID at every layer.
+    Points are one per document (the last content token); the mean, std, max
+    and median are over up to 500 query points, at HF's output representation
+    or, with ``layerwise=True``, at every block output.
     """
     # One point per sequence (Q1): the last content token of each document.
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:1801.02613",
+        "code": "xingjunm/lid_adversarial_subspace_detection@29ae6f5d1b376753876c9cb404e7fe297d17a2d4",
+        "llm_precedent": ("Yin, Srinivasa, Chang 2024 arXiv:2402.18048 (one last-token "
+                          "vector per sample, neighbours from the other samples)"),
+    }
+    ADAPTATION_NOTE = (
+        "LID is Ma et al.'s (2018, Eq. 4) maximum-likelihood local intrinsic dimension, "
+        "-k / sum_i log(r_i/r_k) over the k=20 nearest neighbours, derived from Levina & "
+        "Bickel (2004). BLME applies it to one point per sequence, the last content token of "
+        "each of 1000 documents, as Yin et al. (2024) do with one last-token vector per sample "
+        "and neighbours drawn from the other samples. The estimate falls as the reference set "
+        "grows, so N is pinned at 1000 documents for every model rather than set by the "
+        "tokenizer's token count. Exact-duplicate neighbours give a 0.0 estimate that is kept "
+        "in the mean, as in the released mle_batch, which is why the minimum is _meta_. The "
+        "token-cloud value (every token of 200 documents, position 0 and massive rows "
+        "excluded, 20000 rows) is kept as _meta_tokens_*; there 27-83% of nearest "
+        "neighbours lie in the token's own document."
+    )
+    HEADLINE_KEYS = ("lid_mean", "lid_std", "lid_max", "lid_median", "lid_first_layer",
+                     "lid_mid_layer")
+    _INV = "tests/tasks/invariance/test_geometry_lid.py::"
+    # lid_mid_layer is an index-selected depth: it moves under identity-block
+    # insertion (test_mid_layer_moves_under_identity_insertion).
+    SIZE_INVARIANT = dict.fromkeys(
+        ("lid_mean", "lid_std", "lid_max", "lid_median", "lid_first_layer"),
+        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+         _INV + "test_width_scale_and_depth_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Local Intrinsic Dimensionality (LID) Analysis...")
