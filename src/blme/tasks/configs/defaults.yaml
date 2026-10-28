@@ -429,23 +429,9 @@ topology_zigzag_persistence:
   num_subsets: 16
   # k_NN = 4, the paper's value (Gardinazzi et al. 2025 Fig. 2, Sec. 4.2).
   n_neighbors: 4
-  # 0.3 -> 0.1 (2026-09-05). `persistence_frac` counts an H1 loop only if it
-  # persists for more than this fraction of the point cloud's geodesic scale,
-  # and at 0.3 -- 30% of the diameter -- NOTHING in a real hidden-state cloud
-  # qualifies. Swept on gpt2 (independent Opus review, 2026-09-05):
-  #
-  #   persistence_frac  betti1_fraction_layers  h1_num_bands
-  #   0.30 (was)        0.0000 at N = 40/100/200/400   0.00
-  #   0.10              0.6667                          3.00
-  #   0.05              0.9167                          2.00
-  #
-  # So SEVEN shipped feature columns were exactly constant across every model,
-  # and it was the threshold rather than the sample size: raising N from 40 to
-  # 400 changed nothing. 0.1 is a BLME choice, not a reference value -- the
-  # source publishes no threshold -- and the task now warns when the H1 family
-  # comes back identically zero, which is the condition that matters.
+  # Loop-significance threshold of the _meta_ band proxy (a BLME choice; at
+  # 0.3 no loop in a hidden-state cloud qualified). The paper has no threshold.
   persistence_frac: 0.1
-  use_cache: true
 
 interpretability_attention_rollout:
   num_samples: 10

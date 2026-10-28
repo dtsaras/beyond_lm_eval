@@ -733,17 +733,32 @@ class ZigzagPersistenceTask(DiagnosticTask):
         n_points = len(first)
 
         # The paper's descriptors per subset, then their mean (and SD) over subsets.
-        per_subset = [
-            _zigzag_paper_metric([c[idx] for c in layer_clouds], n_neighbors=n_neighbors,
-                                 dim=1, max_points=len(idx))
-            for idx in subsets]
+        per_subset, curves = [], []
+        for idx in subsets:
+            bars, L = _effective_bars([c[idx] for c in layer_clouds], n_neighbors,
+                                      max_points=len(idx))
+            if bars is None:
+                continue
+            per_subset.append(_bar_scalars(bars, L))
+            curves.append(_bar_curves(bars, L))
+        if not per_subset:
+            return {"error": "Need at least 8 prompts per subset for the zigzag barcode"}
         # The BLME proxy families on the first subset.
         summary = _zigzag_summary(
             [c[first] for c in layer_clouds],
             n_neighbors=n_neighbors,
             persistence_frac=persistence_frac,
         )
+        # The proxies, the depth-diluted GF(2) turnover, and the barcode summaries
+        # that are constant (full depth, adjacent min: 0 on every model the dossier
+        # ran) or count N (n_bars) are _meta_.
+        summary = {(k if k.startswith("_meta_") else f"_meta_{k}"): v for k, v in summary.items()}
         summary.update(_subset_mean(per_subset))
+        for k in _DEMOTED_ZZ:
+            if k in summary:
+                summary[f"_meta_{k}"] = summary.pop(k)
+        for k in curves[0]:
+            summary[f"_meta_zz_{k}"] = [float(x) for x in np.mean([c[k] for c in curves], axis=0)]
         summary["_meta_n_points"] = int(n_points)
         summary["_meta_zz_knn"] = int(min(n_neighbors, n_points - 1))
         summary.update(_subset_meta(subsets, len(texts)))
@@ -794,6 +809,7 @@ def _subset_meta(subsets, n_pool: int) -> Dict[str, object]:
 
 
 _SUBSET_SD_KEYS = ("zz_true_adjacent_mean", "zz_true_mean_bar_len")
+_DEMOTED_ZZ = ("zz_true_full_depth", "zz_true_adjacent_min", "zz_true_n_bars")
 
 
 def _subset_mean(per_subset: List[Dict[str, float]]) -> Dict[str, float]:
@@ -902,18 +918,29 @@ def _true_zigzag_barcode(layer_clouds, n_neighbors=5, max_points=None):
 
 
 def _zigzag_paper_metric(layer_clouds, n_neighbors=5, dim=1, max_points=None):
-    """Gardinazzi et al. Z_p: the share of dimension-p bars that span [l1, l2].
+    """Scalar summaries of the paper's inter-layer persistence (Eq. 7).
 
-    Z_p(l1, l2) = #{bars : birth <= min(l1,l2) and death > max(l1,l2)} / #bars_p
-
-    Reported here for ADJACENT pairs (mean and min) and for the whole depth
-    (first layer to last), which is the quantity the paper's layer-band analysis
-    reads off.
+    Z_p(l1, l2) = #{bars : birth <= min(l1,l2) and death > max(l1,l2)} / beta_p(l1),
+    read for adjacent pairs (mean and min) and for the whole depth; plus the
+    bar count and mean bar length in layer units.
     """
+    bars, L = _effective_bars(layer_clouds, n_neighbors, max_points, dim)
+    if bars is None:
+        return {}
+    return _bar_scalars(bars, L)
+
+
+def _effective_bars(layer_clouds, n_neighbors=4, max_points=None, dim=1):
+    """Dimension-``dim`` bars in layer units, ``[(birth, death)]``, and the layer
+    count; ``(None, L)`` when the barcode is not computable (< 2 layers, < 8 points)."""
     dgms, L = _true_zigzag_barcode(layer_clouds, n_neighbors, max_points)
     if dgms is None or L < 2:
-        return {}
+        return None, L
     bars = [(float(p.birth), float(p.death)) for p in dgms[dim]] if len(dgms) > dim else []
+    return bars, L
+
+
+def _bar_scalars(bars, L):
     if not bars:
         # No p-holes in any layer: every Z_p is 0 by footnote 6, so a subset
         # without bars counts as 0 in the mean over subsets, not as missing.
@@ -942,3 +969,52 @@ def _zigzag_paper_metric(layer_clouds, n_neighbors=5, dim=1, max_points=None):
         "zz_true_n_bars": int(len(bars)),
         "zz_true_mean_bar_len": float(np.mean([d - b for b, d in bars])),
     }
+
+
+# The paper's per-layer curves (Sec. 3.3), at the exponents of Fig. 3.
+ZZ_ALPHAS = (-1.0, 0.0, 0.5, 1.0, 2.0)
+
+
+def _alpha_tag(a: float) -> str:
+    return ("m" if a < 0 else "") + f"{abs(a):g}".replace(".", "p")
+
+
+def _layer_weights(n_rows: int, n_cols: int, alpha: float) -> np.ndarray:
+    """|l - l_i|^alpha (Eq. 6); the diagonal is 1e-10 for alpha < 0, as in the
+    reference notebook (plots_main_text.ipynb, weighed_inter_layer_persistance)."""
+    D = np.abs(np.arange(n_rows)[:, None] - np.arange(n_cols)[None, :]).astype(np.float64)
+    with np.errstate(divide="ignore"):
+        W = D ** alpha
+    if alpha < 0:
+        W[D == 0] = 1e-10
+    return W
+
+
+def _bar_curves(bars, L) -> Dict[str, np.ndarray]:
+    """beta_1(l), the inter-layer persistence Zbar_1(l) (Eq. 8) and the births'
+    relative frequency B_1(l) (Eq. 5), per exponent alpha.
+
+    Zbar follows the reference notebook: row l of Z (normalised by beta(l)) is
+    averaged over every layer with weights |l - l_i|^alpha. B is indexed by the
+    BIRTH layer, as Eq. 5 defines it; the notebook's ``pi_hist`` reduces its
+    [death, birth] array over births instead (a death-indexed curve) and drops
+    bars alive at the last layer (Q2: the paper's definition is used).
+    """
+    beta = np.zeros(L)
+    span = np.zeros((L, L))
+    pi = np.zeros((L, L + 1))                     # [birth, death], death <= L
+    for b, d in bars:
+        b, d = int(b), int(min(d, L))
+        beta[b:d] += 1
+        span[b:d, b:d] += 1
+        pi[b, d] += 1
+    Z = np.divide(span, beta[:, None], out=np.zeros_like(span), where=beta[:, None] > 0)
+    out = {"betti1_curve": beta}
+    for a in ZZ_ALPHAS:
+        tag = _alpha_tag(a)
+        W = _layer_weights(L, L, a)
+        out[f"inter_layer_persistence_alpha_{tag}"] = (Z * W).sum(axis=1) / W.sum(axis=1)
+        num = (pi * _layer_weights(L, L + 1, a)).sum(axis=1) / W.sum(axis=1)
+        tot = float(num.sum())
+        out[f"births_rel_freq_alpha_{tag}"] = num / tot if tot > 0 else np.zeros(L)
+    return out

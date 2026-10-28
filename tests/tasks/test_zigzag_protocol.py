@@ -109,7 +109,7 @@ def test_default_neighbourhood_is_the_papers_k4():
     k5 = ZigzagPersistenceTask({**cfg, "n_neighbors": 5}).evaluate(model, tok, fd.dataset())
     assert default["_meta_zz_knn"] == 4
     assert default["zz_true_adjacent_mean"] == k4["zz_true_adjacent_mean"]
-    assert default["zz_true_n_bars"] != k5["zz_true_n_bars"]
+    assert default["_meta_zz_true_n_bars"] != k5["_meta_zz_true_n_bars"]
 
 
 def test_missing_dionysus_is_an_error_not_a_fallback(monkeypatch):
@@ -158,6 +158,60 @@ def test_descriptors_are_means_over_subsets():
     assert res["zz_true_adjacent_mean"] == pytest.approx(want, rel=0, abs=1e-15)
     assert res["_meta_zz_true_adjacent_mean_subset_sd"] == pytest.approx(
         float(np.std([p["zz_true_adjacent_mean"] for p in per])), abs=1e-15)
+
+
+_PROXY_KEYS = ("h1_total_layer_persistence", "h1_loop_layer_sum", "h1_num_bands",
+               "h1_max_band_length", "h1_first_layer", "h1_last_layer",
+               "betti1_fraction_layers", "h0_mean_components", "h0_persistence_range",
+               "h0_first_layer_components", "h0_last_layer_components", "zz_h1_turnover_rate")
+
+
+def test_proxies_and_constant_barcode_summaries_are_meta():
+    """The band/GF(2) proxies have no counterpart in the paper; zz_true_full_depth
+    and _adjacent_min were 0.0 on every model the dossier ran, and n_bars counts
+    N. They were feature columns before the fix."""
+    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+        fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
+    feats = {k for k in res if not k.startswith("_meta_")}
+    assert feats == {"zz_true_adjacent_mean", "zz_true_mean_bar_len"}, feats
+    for k in _PROXY_KEYS + ("zz_true_full_depth", "zz_true_adjacent_min", "zz_true_n_bars"):
+        assert f"_meta_{k}" in res, k
+
+
+def _reference_inter_layer_persistence(bars, n, p):
+    """plots_main_text.ipynb cells 6-7 re-typed on an effective barcode:
+    find_ph_sim / find_betti_layers, row-normalised, |i-j|^p weighted."""
+    betti = np.zeros(n)
+    for b, d in bars:
+        for x in range(int(b), int(d)):
+            betti[x] += 1
+    psim = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            lo, hi = min(i, j), max(i, j)
+            psim[i, j] = sum(1 for b, d in bars if b <= lo and d > hi)
+    lp = np.array([psim[i] / betti[i] if betti[i] else np.zeros(n) for i in range(n)])
+    w = np.array([[1e-10 if (p < 0 and i == j) else abs(i - j) ** p for j in range(n)]
+                  for i in range(n)])
+    return np.sum(lp * w, axis=1) / np.sum(w, axis=1)
+
+
+def test_per_layer_curves_follow_the_reference_notebook():
+    from blme.tasks.topology.zigzag import ZZ_ALPHAS, _alpha_tag, _bar_curves, _effective_bars
+    model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
+    clouds, _, _ = _paper_clouds(model, tok, fd.TEXTS, window=512)
+    bars, L = _effective_bars(clouds, 4)
+    assert bars and L == 4
+    curves = _bar_curves(bars, L)
+    for a in ZZ_ALPHAS:
+        np.testing.assert_allclose(curves[f"inter_layer_persistence_alpha_{_alpha_tag(a)}"],
+                                   _reference_inter_layer_persistence(bars, L, a),
+                                   rtol=1e-12, atol=1e-15)
+        B = curves[f"births_rel_freq_alpha_{_alpha_tag(a)}"]
+        assert B.shape == (L,) and abs(B.sum() - 1.0) < 1e-12
+    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(model, tok, fd.dataset())
+    assert len(res["_meta_zz_betti1_curve"]) == L
+    assert len(res["_meta_zz_inter_layer_persistence_alpha_2"]) == L
 
 
 def test_a_barcode_failure_propagates(monkeypatch):
