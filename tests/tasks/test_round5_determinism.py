@@ -76,8 +76,8 @@ def test_repe_steering_hook_casts_vector_to_hidden_dtype():
     hidden state dtype — without this, fp32 vec added to bf16 hidden
     silently upcasts the residual to fp32, which changes every
     downstream layer's output and biases KL against bf16 models."""
-    from blme.tasks import representation_engineering
-    src = inspect.getsource(representation_engineering)
+    from blme.tasks.repe import steering
+    src = inspect.getsource(steering)
     # Raw ``out_t[:, -1, :] += alpha * vec`` without a dtype cast is the bug.
     # Fix line must have ``.to(out_t.dtype)``.
     assert "(alpha * vec).to(out_t.dtype)" in src, (

@@ -1,49 +1,31 @@
 """
 Tokenizer efficiency metrics — Tier 1 (no model forward pass needed).
 
-Different tokenizers produce different numbers of tokens for the same
-text. Models with efficient tokenizers require fewer forward steps,
-affecting both compute cost and effective context length. These metrics
-capture the tokenizer's intrinsic properties:
+Different tokenizers produce different numbers of tokens for the same text.
+On a fixed corpus:
 
-  - **fertility**: average number of tokens per whitespace-delimited word.
-    Lower = more efficient (each word maps to fewer tokens).
-  - **compression_ratio**: tokens per UTF-8 character. Lower = better
-    compression.
-  - **token_entropy**: Shannon entropy of the token frequency distribution
-    on the evaluation corpus. Higher = more uniform token usage; lower =
-    skewed toward a few dominant tokens.
-  - **vocab_utilization**: fraction of the vocabulary that appears at least
-    once in the evaluation corpus.
+  - **fertility**: tokens per whitespace-delimited word (Rust et al. 2021,
+    after Acs 2019). Lower = each word maps to fewer tokens.
+  - **compression_ratio** (``_meta_``): tokens per Unicode code point
+    (``len(text)``), not per UTF-8 byte.
+  - **token_entropy**: Shannon entropy (nats) of the token unigram
+    distribution on the corpus; a plug-in estimate that grows with corpus size.
+  - **vocab_utilization** (``_meta_``): share of the vocabulary seen at least
+    once.
+
+On a fixed corpus fertility, compression_ratio and total_tokens are one
+degree of freedom (each is total_tokens over a corpus constant), so only
+fertility is a feature. All keys are tokenizer confounds by name in the
+downstream analysis, not structural predictors.
 
 References:
   * Rust, Pfeiffer, Vulić, Ruder, Gurevych 2021 — "How Good is Your
     Tokenizer? On the Monolingual Performance of Multilingual Language
-    Models", ACL 2021, arXiv:2012.15613. Popularizes fertility (introduced by Ács 2019) as a
-    cross-tokenizer comparison metric.
-  * Ali, Fromm, Thellmann et al. 2024 (NAACL Findings 2024) — "Tokenizer Choice For LLM
-    Training: Negligible or Crucial?", arXiv:2310.08754. NOTE: the paper's own
-    finding is that tokenizer choice matters but fertility/parity "are not
-    always predictive of the model's downstream performance" — cited here
-    as the study that MEASURES these statistics at LLM scale, not as
-    evidence they predict capability (mischaracterization fixed, audit
-    2026-07-16).
-  * NOTE (2026-09-05): an independent review measured that **every one of the
-    ten keys this task emits is already excluded** by the analysis pipeline's
-    `is_excluded_predictor` — `TOKENIZER_PROXY_TERMS` catches them by name. So
-    the claim below describes a state that no longer obtains: none of these
-    columns reaches the feature matrix, and `docs/TOP_PREDICTORS.md` §2 needs
-    the same correction. The task remains a useful DIAGNOSTIC of tokenizer
-    confounding; it is not a source of structural predictors.
-
-  * (historical) fertility and vocab_size enter BLME's top-25 partial predictors
-    (`docs/TOP_PREDICTORS.md` §2) as tokenizer-confound signals — +0.71 to
-    +0.77 partial ρ with composite benchmark capability beyond scale.
-    `compression_ratio` and `total_tokens` were also listed there; they are
-    `fertility` rescaled by corpus constants (pearson 1.000000000000 over 9
-    tokenizers, since the corpus is fixed), so they are now `_meta_` and the
-    top-25 entry should count ONE tokenizer-efficiency degree of freedom, not
-    three (red-team review, 2026-09-05).
+    Models", ACL 2021, arXiv:2012.15613 (fertility, after Ács 2019).
+  * Ali, Fromm, Thellmann et al. 2024 (NAACL Findings 2024) — "Tokenizer Choice
+    For LLM Training: Negligible or Crucial?", arXiv:2310.08754: measures these
+    statistics at LLM scale and finds them not always predictive of downstream
+    performance.
 """
 
 import logging
@@ -83,16 +65,48 @@ _EFFICIENCY_CORPUS = [
 
 @register_task("geometry_tokenizer_efficiency")
 class TokenizerEfficiencyTask(DiagnosticTask):
-    """Tokenizer compression and efficiency metrics (Tier 1)."""
+    """Tokenizer compression and efficiency metrics (Tier 1).
+
+    The word unit is a whitespace token (``text.split()``) of the shared
+    WikiText corpus, tokenised in context, not a treebank word tokenised on its
+    own as in Rust et al. 2021 (App. A.3).
+    """
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2012.15613",
+        "code": "",
+        "llm_precedent": ("Dagan et al. 2024 arXiv:2402.01035 (bytes per token, NSL); "
+                          "Zouhar et al. 2023 arXiv:2306.16842 (token entropy); "
+                          "Ali et al. 2024 arXiv:2310.08754"),
+    }
+    ADAPTATION_NOTE = (
+        "Fertility (tokens per word, Rust et al. 2021) is computed with whitespace-delimited "
+        "words of the shared WikiText corpus as the word unit, not the UD treebank words of "
+        "the paper: WikiText-raw already space-separates punctuation (' , ', ' @-@ '), so "
+        "whitespace words approximate treebank tokens on this corpus. The text is tokenised "
+        "in context rather than word by word, because per-word tokenisation changes "
+        "byte-level BPE counts (leading-space variants). On a fixed corpus fertility, "
+        "bytes per token and NSL against a reference tokenizer are one degree of freedom, "
+        "so only fertility is a feature; it is not V-linked mechanically (50,000 unused "
+        "added tokens leave it unchanged). token_entropy is a plug-in estimate that grows "
+        "with corpus size, and the compression ratio counts Unicode code points, not bytes."
+    )
+    HEADLINE_KEYS = ("fertility", "token_entropy", "vocab_size")
+    # token_entropy is also unchanged by unused tokens but grows with corpus
+    # size, so it has no entry; vocab_size is V by definition.
+    SIZE_INVARIANT = {
+        "fertility": (("add_unused_tokens",),
+                      "tests/tasks/invariance/test_geometry_tokenizer_efficiency.py::"
+                      "test_fertility_invariant_under_unused_vocabulary"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Tokenizer Efficiency Analysis...")
 
         num_samples = self.config.get("num_samples", len(_EFFICIENCY_CORPUS))
 
-        # Accept any iterable dataset (audit 2026-07-16: the isinstance-
-        # list gate silently ignored HF Datasets/generators and fell back
-        # to the internal corpus).
+        # Accept any iterable dataset (HF Datasets, generators).
         if dataset is not None and not isinstance(dataset, list):
             try:
                 dataset = list(dataset)
@@ -135,13 +149,8 @@ class TokenizerEfficiencyTask(DiagnosticTask):
         counts = np.array(list(token_counter.values()), dtype=np.float64)
         p = counts / counts.sum()
         token_entropy = float(-np.sum(p * np.log(p)))
-        # `len(tokenizer)`, NOT `tokenizer.vocab_size`.
-        #
-        # `vocab_size` is the BASE vocabulary and excludes added/special
-        # tokens, while the ids actually produced can exceed it -- so both
-        # fractions below could leave [0, 1] and the emitted `vocab_size` would
-        # understate the real symbol set. `len(tokenizer)` is the usable id
-        # count (adversarial review, 2026-09-04).
+        # `len(tokenizer)` counts added/special tokens; `vocab_size` is the
+        # base vocabulary and can be exceeded by the ids actually produced.
         try:
             vocab_size = len(tokenizer)
         except Exception:
@@ -149,13 +158,8 @@ class TokenizerEfficiencyTask(DiagnosticTask):
         if vocab_size <= 0:
             vocab_size = int(getattr(tokenizer, "vocab_size", 2) or 2)
 
-        # Normalise by log(min(T, V)), not log(V).
-        #
-        # An empirical entropy over T observed tokens cannot exceed log(T), so
-        # dividing by log(V) when T < V makes the ceiling unreachable and turns
-        # the "normalised" value into a sample-size readout: at T = 10k and
-        # V = 50k the maximum attainable is log(10k)/log(50k) = 0.851, and the
-        # gap differs by model because V does.
+        # Normalise by log(min(T, V)): an entropy over T tokens cannot exceed
+        # log T, so log V would make the ceiling unreachable when T < V.
         _T = int(total_tokens) if total_tokens else 0
         _ceiling_n = max(2, min(_T, vocab_size)) if _T else max(2, vocab_size)
         max_entropy = np.log(_ceiling_n)
@@ -168,37 +172,14 @@ class TokenizerEfficiencyTask(DiagnosticTask):
         normalised_token_entropy = float(min(1.0, max(0.0, normalised_token_entropy)))
 
         return {
-            # ONE degree of freedom, not four. The corpus is FIXED across
-            # models, so `total_words` and `total_chars` are constants and
-            # `fertility = total_tokens/total_words`,
-            # `compression_ratio = total_tokens/total_chars` are `total_tokens`
-            # divided by those constants. Measured over 9 tokenizers at the
-            # shipped config (red-team review, 2026-09-05):
-            #
-            #   total_words  = 1400  for every model, std EXACTLY 0
-            #   total_chars  = 7192  for every model, std EXACTLY 0
-            #   pearson(fertility, compression_ratio)   = 1.000000000000
-            #   pearson(fertility, total_tokens)        = 1.000000000000
-            #   pearson(normalised_token_entropy,
-            #           token_entropy)                  = 0.9901
-            #
-            # The module docstring above claimed fertility, compression_ratio,
-            # total_tokens AND vocab_size were four separate top-25 partial
-            # predictors at +0.71 to +0.77. Three of those four are the same
-            # number rescaled, and a sparse selection splits one coefficient
-            # across them. `fertility` is kept as THE tokenizer-efficiency
-            # feature -- it is the one the cited literature names -- and the
-            # other two are demoted to provenance.
+            # Fertility is THE efficiency feature (the cited literature's);
+            # compression_ratio and total_tokens are it rescaled by corpus
+            # constants. The normalised entropy tracks token_entropy.
             "fertility": float(fertility),
             "_meta_compression_ratio": float(compression_ratio),
             "token_entropy": float(token_entropy),
             "_meta_normalised_token_entropy": normalised_token_entropy,
-            # `_meta_`: `len(distinct tokens seen) / vocab_size` on a FIXED
-            # corpus, so the numerator is near-constant and the column is
-            # essentially 1/vocab_size -- pearson **+0.9955** with it over
-            # 13 tokenizers (independent Opus review, 2026-09-05).
-            # `vocab_size` is already blocked; this was the same variable
-            # inverted.
+            # distinct/V on a fixed corpus is essentially 1/V.
             "_meta_vocab_utilization": float(vocab_utilization),
             "vocab_size": int(vocab_size),
             "_meta_entropy_ceiling_n": int(_ceiling_n),

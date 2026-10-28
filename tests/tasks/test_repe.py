@@ -91,21 +91,17 @@ def test_concept_separability(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # May error if get_layers returns None for this architecture
     if "error" not in results:
-        assert "layer_separability_auc" in results
-        assert "max_auc" in results
-        assert 0 <= results["max_auc"] <= 1.0
+        assert "_meta_layer_separability_auc" in results
+        assert "_meta_max_auc" in results
+        assert 0 <= results["lat_test_acc"] <= 1.0
+        assert 0 < results["lat_layer_frac"] <= 1.0
 
 
 def test_refusal_direction_architecture_agnostic_output(mock_model, mock_tokenizer):
-    """Historic bug: the task returned a ``per_layer`` dict keyed by
-    absolute layer index (``layer0``, ``layer1``, …). When flattened to
-    a CSV, that produced hundreds of columns whose set varies with
-    model depth — only the shallowest common layer was present for all
-    32 models in the study (1/32 all_filled in aggregated.csv).
-
-    The fix returns scalar summaries at normalised depths
-    (0%, 25%, 50%, 75%, 100%) so every model contributes to the same
-    columns, and ``best_layer_fraction`` for cross-depth comparisons."""
+    """The output carries no per-layer dict keyed by absolute layer index (its
+    columns would vary with depth); on a base model (no chat template) every
+    headline key is NaN with a _meta_ reason, so the column set is the same
+    for every model."""
     from blme.tasks.representation_engineering import RefusalDirectionTask
 
     task = RefusalDirectionTask(config={})
@@ -114,22 +110,11 @@ def test_refusal_direction_architecture_agnostic_output(mock_model, mock_tokeniz
     if "error" in results:
         pytest.skip(f"architecture error: {results['error']}")
 
-    # Top-level result must NOT include the raw per-layer dict — it
-    # pollutes the aggregator.
-    assert "per_layer" not in results, (
-        "per_layer dict must not leak into the top-level return — "
-        "it creates model-depth-dependent columns."
-    )
-    # New architecture-agnostic scalar fields must all be present.
-    for q in ("auc_at_depth_0", "auc_at_depth_25", "auc_at_depth_50",
-              "auc_at_depth_75", "auc_at_depth_100"):
-        assert q in results, f"missing depth-quantile field: {q}"
-
-    # best_layer_fraction must be in [0, 1] — a fraction-of-depth
-    # summary works across models with different layer counts.
-    assert "best_layer_fraction" in results
-    bf = results["best_layer_fraction"]
-    assert 0.0 <= bf <= 1.0
+    assert "per_layer" not in results
+    for k in RefusalDirectionTask.HEADLINE_KEYS:
+        assert k in results, f"missing headline field: {k}"
+    assert "auc_at_depth_100" not in results
+    assert "_meta_refusal_skipped_reason" in results
 
 
 def test_refusal_direction_reports_heldout_separability(mock_model, mock_tokenizer):
@@ -236,12 +221,13 @@ def test_concept_separability_runs_on_default_text_corpus(mock_model, mock_token
     corpus = [{"text": f"Wikipedia sentence number {i}."} for i in range(8)]
     snapshot = copy.deepcopy(corpus)
 
-    task = ConceptSeparabilityTask(config={"num_samples": 4})
+    # 8 bundled pairs form 4 entity groups; the LAT train/val/test split needs 3.
+    task = ConceptSeparabilityTask(config={"num_samples": 8})
     res_text = task.evaluate(mock_model, mock_tokenizer, dataset=corpus)
     assert corpus == snapshot, "task mutated the caller's shared corpus"
     assert isinstance(res_text, dict)
     assert "error" not in res_text, res_text
-    assert "mean_auc" in res_text
+    assert "lat_test_acc" in res_text and "_meta_mean_auc" in res_text
 
     # Bare strings — the other unlabelled shape a caller can pass.
     res_str = task.evaluate(mock_model, mock_tokenizer,
@@ -252,8 +238,9 @@ def test_concept_separability_runs_on_default_text_corpus(mock_model, mock_token
     # the same bundled fact pairs, so all three must produce the same number.
     res_none = task.evaluate(mock_model, mock_tokenizer, dataset=None)
     assert "error" not in res_none, res_none
-    assert res_text["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
-    assert res_str["mean_auc"] == pytest.approx(res_none["mean_auc"], abs=1e-12)
+    for key in ("lat_test_acc", "_meta_mean_auc"):
+        assert res_text[key] == pytest.approx(res_none[key], abs=1e-12)
+        assert res_str[key] == pytest.approx(res_none[key], abs=1e-12)
 
     # And a LABELLED GENERATOR must still work — the case the broken fix was
     # written for, which must not regress while fixing the common path.

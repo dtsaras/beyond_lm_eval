@@ -121,12 +121,13 @@ def test_phd_mean_pooling_returns_float64_document_means(tiny_fp32):
 def test_refusal_direction_reports_missing_sklearn_instead_of_raising(tiny_fp32, monkeypatch):
     """Without scikit-learn the task must return an error, as concept
     separability does, not raise NameError deep inside cross-validation."""
-    import blme.tasks.representation_engineering as repe
-    monkeypatch.setattr(repe, "HAS_SKLEARN", False)
+    import blme.tasks.repe._common as repe_common
+    from blme.tasks.repe import RefusalDirectionTask
+    monkeypatch.setattr(repe_common, "HAS_SKLEARN", False)
     for name in ("LogisticRegression", "StratifiedKFold", "roc_auc_score", "accuracy_score"):
-        monkeypatch.delattr(repe, name, raising=False)
+        monkeypatch.delattr(repe_common, name, raising=False)
     model, tok = tiny_fp32
-    out = repe.RefusalDirectionTask(config={}).evaluate(model, tok, dataset=None)
+    out = RefusalDirectionTask(config={}).evaluate(model, tok, dataset=None)
     assert "error" in out and "scikit-learn" in out["error"]
 
 

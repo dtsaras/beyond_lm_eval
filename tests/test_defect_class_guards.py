@@ -34,11 +34,11 @@ def test_no_token_pooling_in_the_model_dtype():
     """
     # (file, needle) -> why this site is CORRECT in the model dtype
     ALLOW = {
-        ("representation_engineering.py", "mean_pos = A_pos.mean(dim=0)"):
+        ("task_vectors.py", "mean_pos = A_pos.mean(dim=0)"):
             "repe_task_vectors is bit-pinned to the released ClusterMeanRepReader "
             "at max abs error 0.0; promoting here moved it to 1.907e-06 and was "
             "reverted. Only the reported NORM is taken in double.",
-        ("representation_engineering.py", "mean_neg = A_neg.mean(dim=0)"):
+        ("task_vectors.py", "mean_neg = A_neg.mean(dim=0)"):
             "see mean_pos above — same reference-parity constraint.",
     }
     bad = []
@@ -84,7 +84,10 @@ def test_no_absolute_epsilon_floors_on_a_magnitude():
             "log guard on softmax probabilities, not a magnitude",
         ("stability.py", "raw.norm"):
             "`raw` is a fresh torch.randn, O(1) by construction — not data",
-        ("representation_engineering.py", "vector_norm(_rv)"):
+        ("refusal.py", "direction.norm(dim=-1, keepdim=True) + 1e-8"):
+            "the released refusal_direction ablation hook's own normalisation "
+            "(hook_utils.py), kept for parity with select_direction",
+        ("steering.py", "vector_norm(_rv)"):
             "`_rv` is a fresh torch.randn control vector, O(1) by construction",
         ("cknna.py", "clamp_min(1e-12)"):
             "float32-first `_l2_normalize`: unsafe rows are detected per-row "
