@@ -532,13 +532,181 @@ def _zigzag_summary(
     }
 
 
+# ---------------------------------------------------------------------------
+# The paper's point clouds: the last token of each prompt, tokenised without
+# special tokens, at each block's post-attention normalisation and at the final
+# norm (extract.py:56-62,73; helpers.py:5-22; dataset_utils.py:14-22).
+# ---------------------------------------------------------------------------
+_MLP_ATTRS = ("mlp", "feed_forward", "ffn", "block_sparse_moe")
+
+
+def _block_mlp(block):
+    """The block's MLP submodule; its input is the post-attention norm output."""
+    for name in _MLP_ATTRS:
+        mod = getattr(block, name, None)
+        if isinstance(mod, torch.nn.Module):
+            return name, mod
+    return None, None
+
+
+def _first_tensor(args, kwargs):
+    if args and isinstance(args[0], torch.Tensor):
+        return args[0]
+    for v in kwargs.values():
+        if isinstance(v, torch.Tensor):
+            return v
+    return None
+
+
+def _zigzag_window(model, max_length: int) -> int:
+    cfg = getattr(model, "config", None)
+    limit = None
+    for attr in ("max_position_embeddings", "n_positions"):
+        v = getattr(cfg, attr, None) if cfg is not None else None
+        if isinstance(v, int) and v > 0:
+            limit = v
+            break
+    return int(min(max_length, limit)) if limit else int(max_length)
+
+
+def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
+    """Last-token rows at the L post-attention-norm sites and the final norm.
+
+    The norm2 site is read as the input of the block's MLP: that is exactly the
+    ``post_attention_layernorm`` output the reference hooks on Llama / Mistral /
+    Pythia (``ln_2`` on GPT-2, ``pre_feedforward_layernorm`` on Gemma 2/3), and
+    whether it really is a normalisation output is checked on the first forward.
+
+    Args:
+        texts: prompts (stripped, as ``dataset_utils.encode_func`` does).
+        window: tokenisation window (truncation).
+        mean_rows: optional set of row indices for which the mean over all tokens
+            (the reference's ``use_last_token=False`` pooling) is kept as well.
+
+    Returns ``(last, mean, info)``: ``last`` is a list of L+1 ``(N, d)`` float64
+    arrays (sites 0..L-1, then the final norm); ``mean`` maps a row index to its
+    list of L+1 pooled vectors; ``info`` describes what was read.
+    """
+    from ..common import get_final_norm
+    from .._tokens import strip_trailing_special
+
+    blocks = get_layers(model)
+    final_norm = get_final_norm(model)
+    if blocks is None or len(blocks) == 0:
+        raise RuntimeError("zigzag: could not locate the transformer blocks")
+    if final_norm is None:
+        raise RuntimeError("zigzag: could not locate the final normalisation layer")
+    mlps = []
+    for i, b in enumerate(blocks):
+        _, mlp = _block_mlp(b)
+        if mlp is None:
+            raise RuntimeError(f"zigzag: block {i} has no MLP submodule ({_MLP_ATTRS})")
+        mlps.append(mlp)
+    n_sites = len(blocks) + 1
+    device = next(model.parameters()).device
+    mean_rows = set(mean_rows or ())
+
+    cur = {}
+    probe = {}            # first forward only: norm child outputs per block
+    norm_src = [None] * len(blocks)
+    handles = []
+
+    def _pre(i):
+        def fn(mod, args, kwargs):
+            x = _first_tensor(args, kwargs)
+            if x is None:
+                return
+            cur[i] = x
+            outs = probe.get(i)
+            if outs is not None:
+                for name, o in outs.items():
+                    if o is x or (o.data_ptr() == x.data_ptr() and o.shape == x.shape):
+                        norm_src[i] = name
+        return fn
+
+    def _norm_probe(i, name):
+        def fn(mod, args, out):
+            o = out[0] if isinstance(out, tuple) else out
+            if isinstance(o, torch.Tensor) and i in probe:
+                probe[i][name] = o
+        return fn
+
+    def _final(mod, args, out):
+        cur["final"] = out[0] if isinstance(out, tuple) else out
+
+    last = [[] for _ in range(n_sites)]
+    mean = {}
+    n_at_window = n_bos = 0
+    probe_handles = []
+    try:
+        for i, mlp in enumerate(mlps):
+            handles.append(mlp.register_forward_pre_hook(_pre(i), with_kwargs=True))
+            probe[i] = {}
+            for name, child in blocks[i].named_children():
+                if "norm" in type(child).__name__.lower():
+                    probe_handles.append(child.register_forward_hook(_norm_probe(i, name)))
+        handles.append(final_norm.register_forward_hook(_final))
+        bos = getattr(tokenizer, "bos_token_id", None)
+        with torch.no_grad():
+            for r, text in enumerate(texts):
+                enc = tokenizer(text.strip(), add_special_tokens=False, return_tensors="pt",
+                                truncation=True, max_length=window)
+                enc, _ = strip_trailing_special(enc, tokenizer)
+                T = int(enc["input_ids"].shape[1])
+                n_at_window += int(T >= window)
+                n_bos += int(bos is not None and T > 0 and int(enc["input_ids"][0, 0]) == bos)
+                cur.clear()
+                model(**{k: v.to(device) for k, v in enc.items()})
+                if probe:
+                    probe.clear()
+                    for h in probe_handles:
+                        h.remove()
+                    probe_handles = []
+                missing = [i for i in range(len(blocks)) if i not in cur] + (
+                    [] if "final" in cur else ["final"])
+                if missing:
+                    raise RuntimeError(f"zigzag: no activation captured at sites {missing}")
+                acts = [cur[i] for i in range(len(blocks))] + [cur["final"]]
+                for s, a in enumerate(acts):
+                    last[s].append(a[0, T - 1].detach().to("cpu", torch.float64))
+                if r in mean_rows:
+                    mean[r] = [a[0].detach().to("cpu", torch.float64).mean(dim=0) for a in acts]
+    finally:
+        for h in handles + probe_handles:
+            h.remove()
+    clouds = [torch.stack(rows).numpy() if rows else np.empty((0, 0)) for rows in last]
+    info = {
+        "n_sites": n_sites,
+        "site_norm_module": norm_src[0],
+        "sites_are_norm_outputs": bool(all(n is not None for n in norm_src)),
+        "n_at_window": int(n_at_window),
+        "n_docs_starting_with_bos": int(n_bos),
+    }
+    return clouds, mean, info
+
+
+def _prompts(dataset, n: int, tokenizer, window: int):
+    """The first ``n`` non-empty prompts of ``dataset`` (stripped text)."""
+    out = []
+    for s in list(dataset or [])[:n]:
+        text = (s.get("text", "") if isinstance(s, dict) else str(s)).strip()
+        if not text:
+            continue
+        ids = tokenizer(text, add_special_tokens=False, truncation=True,
+                        max_length=window)["input_ids"]
+        if len(ids) >= 1:
+            out.append(text)
+    return out
+
+
 @register_task("topology_zigzag_persistence")
 class ZigzagPersistenceTask(DiagnosticTask):
     """Zigzag persistence of topological features across layers.
 
-    One mean-pooled point per input at every block output (the shared cache's
-    per-sample states when available, else a private forward), aligned across
-    depth. See the module docstring for the three output families.
+    The paper's point clouds (``_paper_clouds``): one last-token point per
+    prompt at each of the L post-attention-norm sites and the final norm. See
+    the module docstring for the three output families; the mean over each
+    prompt's tokens (the reference's other pooling option) is kept as _meta_.
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -550,19 +718,20 @@ class ZigzagPersistenceTask(DiagnosticTask):
         num_samples = int(self.config.get("num_samples", 40))
         n_neighbors = int(self.config.get("n_neighbors", 5))
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
-        use_cache = self.config.get("use_cache", True)
+        window = _zigzag_window(model, int(self.config.get("max_length", 2048)))
 
-        # --- collect one aligned point per input at every layer ---
-        layer_clouds = self._collect_layer_clouds(
-            model, tokenizer, dataset, cache, num_samples, use_cache,
-        )
-        if layer_clouds is None:
-            return {"error": "No hidden states available for zigzag persistence"}
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
+        texts = _prompts(dataset, num_samples, tokenizer, window)
+        if len(texts) < 3:
+            return {"error": "Need at least 3 non-empty prompts for zigzag persistence"}
+        rows = list(range(len(texts)))
+        layer_clouds, pooled, info = _paper_clouds(
+            model, tokenizer, texts, window, mean_rows=rows)
         if len(layer_clouds) < 2:
             return {"error": "Need at least 2 layers for zigzag persistence"}
         n_points = min((len(c) for c in layer_clouds), default=0)
-        if n_points < 3:
-            return {"error": "Need at least 3 aligned points for zigzag persistence"}
 
         summary = _zigzag_summary(
             layer_clouds,
@@ -570,95 +739,29 @@ class ZigzagPersistenceTask(DiagnosticTask):
             persistence_frac=persistence_frac,
         )
         summary["_meta_n_points"] = int(n_points)
+        summary.update(_protocol_meta(info, window))
+        # The reference's other pooling (use_last_token=False), on the same sites.
+        mean_clouds = [np.stack([pooled[r][s] for r in rows]) for s in range(info["n_sites"])]
+        try:
+            mp = _zigzag_paper_metric(mean_clouds, n_neighbors=n_neighbors, dim=1,
+                                      max_points=len(rows))
+        except ImportError:
+            mp = {}
+        for k in ("zz_true_adjacent_mean", "zz_true_mean_bar_len", "zz_true_n_bars"):
+            if k in mp:
+                summary[f"_meta_meanpool_{k}"] = mp[k]
         return summary
 
-    # -- helpers -------------------------------------------------------------
-    def _collect_layer_clouds(
-        self, model, tokenizer, dataset, cache, num_samples, use_cache,
-    ):
-        """Return a list of ``(N, D)`` per-layer point clouds, aligned so row i
-        is the same input at every layer. Each input contributes ONE mean-
-        pooled representation per layer (the reference tracks one point per
-        prompt across depth)."""
-        # A profile of block outputs: the deepest entry is the raw last block.
-        if cache is not None and getattr(cache, "is_populated", False) and use_cache:
-            per_layer_chunks = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples, per_sample=True,
-                replace_final_norm=True,
-            )
-            if per_layer_chunks:
-                return self._pool_chunks(per_layer_chunks)
 
-        # Fallback: private forward pass (mirrors betti_curve / landscape).
-        return self._forward_layer_clouds(
-            model, tokenizer, dataset, num_samples,
-        )
-
-    @staticmethod
-    def _pool_chunks(per_layer_chunks: Dict[int, List]) -> List[np.ndarray]:
-        """Mean-pool each per-sample ``(T_i, D)`` chunk -> one point per input,
-        producing an aligned ``(N, D)`` cloud per layer (depth order)."""
-        layer_keys = sorted(per_layer_chunks.keys())
-        clouds: List[np.ndarray] = []
-        for k in layer_keys:
-            pts = []
-            for chunk in per_layer_chunks[k]:
-                if chunk is None:
-                    continue
-                if isinstance(chunk, torch.Tensor):
-                    chunk = chunk.detach().float().cpu().numpy()
-                chunk = np.asarray(chunk, dtype=np.float64)
-                if chunk.ndim != 2 or chunk.shape[0] == 0:
-                    continue
-                pts.append(chunk.mean(axis=0))
-            clouds.append(np.stack(pts) if pts else np.empty((0, 0)))
-        return clouds
-
-    @staticmethod
-    def _forward_layer_clouds(model, tokenizer, dataset, num_samples):
-        """Private forward pass: mean-pooled per-sample reps at every layer."""
-        device = next(model.parameters()).device
-        layers = get_layers(model)
-        if layers is None:
-            return None
-        n_layers = len(layers)
-
-        if dataset is None:
-            dataset = [
-                {"text": f"Zigzag persistence sample {i} across layers."}
-                for i in range(num_samples)
-            ]
-        samples = list(dataset)[:num_samples]
-
-        # The hook is removed in `finally` (tests/tasks/test_forward_hook_leaks.py).
-        try:
-            layer_reps: Dict[int, List[np.ndarray]] = {l: [] for l in range(n_layers)}
-            # Same estimand as the cache route: the raw last block replaces ln_f.
-            _sink = {}
-            _hook = layers[-1].register_forward_hook(
-                lambda mod, inp, outp: _sink.__setitem__(
-                    "h", (outp[0] if isinstance(outp, tuple) else outp).detach()))
-            with torch.no_grad():
-                for s in samples:
-                    text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                    enc = tokenizer(
-                        text, return_tensors="pt", truncation=True, max_length=512,
-                    ).to(device)
-                    _sink.pop("h", None)
-                    out = model(**enc, output_hidden_states=True)
-                    hs = list(out.hidden_states)
-                    _h_raw = _sink.get("h")
-                    if (_h_raw is not None and len(hs) >= 2
-                            and _h_raw.shape == hs[-1].shape):
-                        hs[-1] = _h_raw
-                    for l_idx in range(n_layers):
-                        h = hs[l_idx + 1][0]  # (T, D)
-                        # Pooled in float64 and kept there.
-                        layer_reps[l_idx].append(h.double().mean(dim=0).cpu().numpy())
-        finally:
-            _hook.remove()
-
-        return [np.stack(layer_reps[l]) for l in range(n_layers)]
+def _protocol_meta(info, window):
+    return {
+        "_meta_zz_n_clouds": int(info["n_sites"]),
+        "_meta_zz_site_norm_module": info["site_norm_module"],
+        "_meta_zz_sites_are_norm_outputs": bool(info["sites_are_norm_outputs"]),
+        "_meta_zz_window": int(window),
+        "_meta_zz_n_at_window": int(info["n_at_window"]),
+        "_meta_zz_n_docs_starting_with_bos": int(info["n_docs_starting_with_bos"]),
+    }
 
 
 # ---------------------------------------------------------------------------
