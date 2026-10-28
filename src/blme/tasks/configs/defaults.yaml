@@ -421,7 +421,8 @@ interpretability_activation_kurtosis:
 
 topology_zigzag_persistence:
   num_samples: 40
-  n_neighbors: 5
+  # k_NN = 4, the paper's value (Gardinazzi et al. 2025 Fig. 2, Sec. 4.2).
+  n_neighbors: 4
   # 0.3 -> 0.1 (2026-09-05). `persistence_frac` counts an H1 loop only if it
   # persists for more than this fraction of the point cloud's geodesic scale,
   # and at 0.3 -- 30% of the diameter -- NOTHING in a real hidden-state cloud

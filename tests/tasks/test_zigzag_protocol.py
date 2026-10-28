@@ -97,3 +97,16 @@ def test_site_check_flags_a_block_whose_mlp_reads_the_raw_residual():
     _, _, info = _paper_clouds(model, fd.tokenizer(), fd.TEXTS[:4], window=2048)
     assert info["sites_are_norm_outputs"] is False
     assert info["site_norm_module"] is None
+
+
+def test_default_neighbourhood_is_the_papers_k4():
+    """k_NN = 4 (Fig. 2, Sec. 4.2); the task shipped k = 5 (the README example)."""
+    from blme.tasks.config_loader import resolve_task_config
+    model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
+    cfg = resolve_task_config("topology_zigzag_persistence", {"num_samples": len(fd.TEXTS)})
+    default = ZigzagPersistenceTask(cfg).evaluate(model, tok, fd.dataset())
+    k4 = ZigzagPersistenceTask({**cfg, "n_neighbors": 4}).evaluate(model, tok, fd.dataset())
+    k5 = ZigzagPersistenceTask({**cfg, "n_neighbors": 5}).evaluate(model, tok, fd.dataset())
+    assert default["_meta_zz_knn"] == 4
+    assert default["zz_true_adjacent_mean"] == k4["zz_true_adjacent_mean"]
+    assert default["zz_true_n_bars"] != k5["zz_true_n_bars"]

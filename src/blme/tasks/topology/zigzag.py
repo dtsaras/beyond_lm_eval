@@ -716,7 +716,8 @@ class ZigzagPersistenceTask(DiagnosticTask):
             return {"error": "ripser not installed. Install with: pip install ripser"}
 
         num_samples = int(self.config.get("num_samples", 40))
-        n_neighbors = int(self.config.get("n_neighbors", 5))
+        # k_NN = 4: the paper's figures and shipped barcodes (Fig. 2 caption, Sec. 4.2).
+        n_neighbors = int(self.config.get("n_neighbors", 4))
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
         window = _zigzag_window(model, int(self.config.get("max_length", 2048)))
 
@@ -739,6 +740,7 @@ class ZigzagPersistenceTask(DiagnosticTask):
             persistence_frac=persistence_frac,
         )
         summary["_meta_n_points"] = int(n_points)
+        summary["_meta_zz_knn"] = int(min(n_neighbors, n_points - 1))
         summary.update(_protocol_meta(info, window))
         # The reference's other pooling (use_last_token=False), on the same sites.
         mean_clouds = [np.stack([pooled[r][s] for r in rows]) for s in range(info["n_sites"])]
