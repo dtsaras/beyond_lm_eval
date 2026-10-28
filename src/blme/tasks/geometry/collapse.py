@@ -52,7 +52,9 @@ class RepresentationCollapseTask(DiagnosticTask):
         layers = sorted(per_doc.keys())
         layer_activations = {li: select_rows(per_doc[li], "all")[0] for li in layers}
 
-        _n_block_layers = collected_layer_count(model)
+        # From the collected depth, not the config: a config without
+        # num_hidden_layers would otherwise trim a hookless profile to 2 layers.
+        _n_block_layers = collected_layer_count(model, n_collected=len(layers))
         erank_per_layer = []
         erank_raw_per_layer = []
         for idx in tqdm(layers, desc="Computing Effective Rank per Layer"):
@@ -128,6 +130,8 @@ class RepresentationCollapseTask(DiagnosticTask):
                 for v in erank_arr
             ],
             "_meta_max_drop_layer": max_drop_layer,
+            # Profile entries the drop scan actually covered.
+            "_meta_max_drop_n_layers": int(len(_prof_for_drop)),
             "_meta_n_failed_layers": n_failed,
             "_meta_last_entry_is_block_output": bool(_last_is_block),
             # On a monotonically increasing profile max_drop is the smallest rise.
