@@ -136,6 +136,34 @@ class CorrelationDimensionTask(DiagnosticTask):
     """
     # One point per sequence (Q1): the last content token of each document.
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "DOI:10.1103/PhysRevLett.50.346",
+        "code": "CSchoel/nolds@f121feebf6b2cbd67a8cb855bd0fe8c39add3ad9",
+        "llm_precedent": ("Du & Tanaka-Ishii 2025 arXiv:2510.21258 (correlation dimension "
+                          "of LLM next-token log-probability vectors; fit window App. A)"),
+    }
+    ADAPTATION_NOTE = (
+        "The correlation dimension D2 (Grassberger & Procaccia 1983) is the small-radius "
+        "slope of log C(r), where C(r) is the fraction of point pairs closer than r. Its LLM "
+        "applications (Du & Tanaka-Ishii 2024/2025) measure the trajectory of next-token "
+        "probability vectors along one long text; BLME instead measures how the model spreads "
+        "documents, with one point per document (the last content token of 1000 whole "
+        "documents at the output representation, Euclidean distance), the per-sequence "
+        "convention of the LLM intrinsic-dimension literature. The fit uses Du & "
+        "Tanaka-Ishii's published window, C in [20/(N(N-1)), 1/N], a function of N alone, so "
+        "the value moves continuously with the data; the plateau search it replaces jumped "
+        "under 1e-3 perturbations. D2 at fixed N converges from below and exceeds the 2 "
+        "log10 N resolution bound for high-dimensional clouds, so N is pinned for every model. "
+        "The mean-pooled document cloud (position 0 and massive rows excluded) is kept as "
+        "_meta_."
+    )
+    HEADLINE_KEYS = ("correlation_dimension",)
+    SIZE_INVARIANT = {
+        "correlation_dimension": (
+            ("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+            "tests/tasks/invariance/test_geometry_correlation_dimension.py::test_headline_invariant"),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Hidden-State Correlation Dimension Analysis...")
         num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
