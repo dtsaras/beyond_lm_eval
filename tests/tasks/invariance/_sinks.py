@@ -99,3 +99,37 @@ def check_state_task(task, task_cls, S, monkeypatch, moving_key, keys=None,
     d_new = abs(new_inj[moving_key] - new[moving_key])
     assert d_new <= max_new_over_old * d_old, (moving_key, d_new, d_old)
     return new, new_inj
+
+
+class massive_row_hook:
+    """Context manager: block ``block``'s output at position ``pos`` (negative
+    counts from the end) of every forward times ``factor`` -- a massive
+    activation at one middle depth, for tasks that run their own forwards.
+
+    The scaling is a multiplication by a constant tensor, so a backward pass
+    through it is exact. In a causal LM the last position (``pos=-1``) is
+    seen by no other token, so every other row stays bit-identical.
+    """
+
+    def __init__(self, model, block: int, pos: int = POS, factor: float = FACTOR):
+        from blme.tasks.common import get_layers
+        self.layer = get_layers(model)[block]
+        self.pos, self.factor, self.handle = pos, float(factor), None
+
+    def _hook(self, module, args, output):
+        import torch
+        h = output[0] if isinstance(output, tuple) else output
+        T = h.shape[1]
+        p = self.pos % T
+        scale = torch.ones(T, dtype=h.dtype, device=h.device)
+        scale[p] = self.factor
+        h = h * scale[None, :, None]
+        return (h,) + tuple(output[1:]) if isinstance(output, tuple) else h
+
+    def __enter__(self):
+        self.handle = self.layer.register_forward_hook(self._hook)
+        return self
+
+    def __exit__(self, *exc):
+        self.handle.remove()
+        return False

@@ -104,13 +104,75 @@ def test_projecting_model_keeps_its_last_block():
     assert len(out["perturbation_growth_per_layer"]) == 4
 
 
-def test_token_mean_excludes_position0():
-    """The divergence token mean drops position 0 (TOKEN_POLICY); the inclusive
-    log ratio is kept as _meta_."""
+def test_token_mean_excludes_sink_rows():
+    """The divergence token mean drops position 0 and the massive rows
+    (TOKEN_POLICY); the inclusive log ratio is kept as _meta_."""
     tok = tokenizer()
     out = _run(tiny_gpt2(), tok)
     n_tokens = sum(len(tok(d["text"])["input_ids"]) for d in dataset()[:CFG["num_samples"]])
-    assert PerturbationGrowthTask.TOKEN_POLICY == "exclude_pos0"
-    assert out["_meta_rows_policy"] == "exclude_pos0"
-    assert out["_meta_rows_n_rows"] == n_tokens - CFG["num_samples"]
+    assert PerturbationGrowthTask.TOKEN_POLICY == "exclude_sinks"
+    assert out["_meta_rows_policy"] == "exclude_sinks"
+    assert out["_meta_rows_n_rows"] == (n_tokens - CFG["num_samples"]
+                                        - out["_meta_sink_n_massive_dropped"])
     assert out["growth_log_ratio"] != out["_meta_growth_log_ratio_incl_pos0"]
+
+
+@pytest.fixture(scope="module")
+def gpt2():
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    try:
+        tok = AutoTokenizer.from_pretrained("gpt2")
+        model = AutoModelForCausalLM.from_pretrained(
+            "gpt2", attn_implementation="eager", dtype=torch.float32).eval()
+    except OSError as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"gpt2 not cached: {e}")
+    return model, tok
+
+
+def _run_policy(model, tok, monkeypatch, policy=None, hook=None):
+    from _sinks import massive_row_hook
+    from blme.tasks.common import get_layers
+    with monkeypatch.context() as m:
+        if policy is not None:
+            m.setattr(PerturbationGrowthTask, "TOKEN_POLICY", policy)
+        if hook is None:
+            return _run(model, tok)
+        with massive_row_hook(model, len(get_layers(model)) // 2, *hook):
+            return _run(model, tok)
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2, monkeypatch):
+    """gpt2 with a first-period-style sink: block L/2's output at position 3 of
+    every passage x1000 (clean and perturbed passes alike). The sink's
+    divergence is x1000 from there on and dominates exclude_pos0's token mean
+    (growth_log_ratio 2.64 -> 6.48); exclude_sinks drops that token at every
+    layer and barely moves (the other tokens attend to it). With no massive
+    row the two policies agree bit for bit."""
+    model, tok = gpt2
+    new, old = _run_policy(model, tok, monkeypatch), _run_policy(model, tok, monkeypatch,
+                                                                  "exclude_pos0")
+    assert new["_meta_sink_n_massive_dropped"] == 0
+    inv.assert_invariant(old, new, ["growth_log_ratio", "perturbation_growth_per_layer"],
+                         rtol=0.0)
+    new_inj = _run_policy(model, tok, monkeypatch, hook=(3, 1000.0))
+    old_inj = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(3, 1000.0))
+    assert new_inj["_meta_sink_n_massive_dropped"] == CFG["num_samples"]
+    assert new_inj["_meta_massive_token_share"] > 0.5 > new["_meta_massive_token_share"]
+    d_old = old_inj["growth_log_ratio"] - old["growth_log_ratio"]
+    d_new = abs(new_inj["growth_log_ratio"] - new["growth_log_ratio"])
+    assert d_old > 1.0, d_old
+    assert d_new < 0.01 * d_old, (d_new, d_old)
+
+
+def test_excluded_sink_content_cannot_reach_the_headline(gpt2, monkeypatch):
+    """At the LAST position no other token sees the sink (causal attention),
+    so exclude_sinks must not depend on its content at all: x1000 and x2000
+    give the same value bit for bit, while exclude_pos0 reads the row."""
+    model, tok = gpt2
+    a = _run_policy(model, tok, monkeypatch, hook=(-1, 1000.0))
+    b = _run_policy(model, tok, monkeypatch, hook=(-1, 2000.0))
+    assert a["_meta_sink_n_massive_dropped"] == CFG["num_samples"]
+    inv.assert_invariant(a, b, ["growth_log_ratio", "perturbation_growth_per_layer"], rtol=0.0)
+    oa = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(-1, 1000.0))
+    ob = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(-1, 2000.0))
+    inv.assert_moves(oa, ob, "growth_log_ratio", 1e-2)
