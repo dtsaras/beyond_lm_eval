@@ -363,7 +363,8 @@ def test_accessor_reproduces_geometry_collapse(tiny, route, monkeypatch):
 
 @pytest.mark.parametrize("route", ROUTES + ["undersized_cache"])
 def test_accessor_reproduces_geometry_isoscore(tiny, route, monkeypatch):
-    import blme.tasks.geometry.isotropy as mod
+    # The task calls the accessor itself, which collects through geometry.utils.
+    import blme.tasks.geometry.utils as mod
     model, tok, docs = tiny
     n = 6
     cfg = {"num_samples": n, "use_cache": route != "use_cache_false"}
