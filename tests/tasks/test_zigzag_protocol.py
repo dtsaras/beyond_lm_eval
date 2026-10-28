@@ -214,6 +214,16 @@ def test_per_layer_curves_follow_the_reference_notebook():
     assert len(res["_meta_zz_inter_layer_persistence_alpha_2"]) == L
 
 
+def test_a_model_without_the_sites_returns_an_error():
+    """An encoder without a final norm has no paper sites: an error result, not
+    an exception (tests/tasks/test_forward_hook_leaks.py runs every task on BERT)."""
+    model = fd.tiny_llama(n_layers=2)
+    model.model.norm = None
+    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+        model, fd.tokenizer(), fd.dataset())
+    assert set(res) == {"error"} and "final normalisation" in res["error"]
+
+
 def test_a_barcode_failure_propagates(monkeypatch):
     import blme.tasks.topology.zigzag as zz
 

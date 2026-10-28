@@ -561,6 +561,10 @@ def _zigzag_window(model, max_length: int) -> int:
     return int(min(max_length, limit)) if limit else int(max_length)
 
 
+class ZigzagSitesUnavailable(RuntimeError):
+    """The model has no block list, final norm or per-block MLP to hook."""
+
+
 def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
     """Last-token rows at the L post-attention-norm sites and the final norm.
 
@@ -585,14 +589,15 @@ def _paper_clouds(model, tokenizer, texts, window: int, mean_rows=None):
     blocks = get_layers(model)
     final_norm = get_final_norm(model)
     if blocks is None or len(blocks) == 0:
-        raise RuntimeError("zigzag: could not locate the transformer blocks")
+        raise ZigzagSitesUnavailable("zigzag: could not locate the transformer blocks")
     if final_norm is None:
-        raise RuntimeError("zigzag: could not locate the final normalisation layer")
+        raise ZigzagSitesUnavailable("zigzag: could not locate the final normalisation layer")
     mlps = []
     for i, b in enumerate(blocks):
         _, mlp = _block_mlp(b)
         if mlp is None:
-            raise RuntimeError(f"zigzag: block {i} has no MLP submodule ({_MLP_ATTRS})")
+            raise ZigzagSitesUnavailable(
+                f"zigzag: block {i} has no MLP submodule ({_MLP_ATTRS})")
         mlps.append(mlp)
     n_sites = len(blocks) + 1
     device = next(model.parameters()).device
@@ -748,8 +753,11 @@ class ZigzagPersistenceTask(DiagnosticTask):
             return {"error": "Need at least 3 non-empty prompts for zigzag persistence"}
         subsets = _draw_subsets(len(texts), subset_size, num_subsets, seed)
         first = [int(i) for i in subsets[0]]
-        layer_clouds, pooled, info = _paper_clouds(
-            model, tokenizer, texts, window, mean_rows=set(first))
+        try:
+            layer_clouds, pooled, info = _paper_clouds(
+                model, tokenizer, texts, window, mean_rows=set(first))
+        except ZigzagSitesUnavailable as e:
+            return {"error": f"{e}: the paper's post-attention-norm sites are undefined here"}
         if len(layer_clouds) < 2:
             return {"error": "Need at least 2 layers for zigzag persistence"}
         n_points = len(first)
