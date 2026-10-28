@@ -49,7 +49,8 @@ import scipy.linalg
 import torch
 
 from ...registry import register_task
-from .utils import collected_layer_count
+from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
+                               sequence_clouds)
 from ...tasks.base import DiagnosticTask
 
 logger = logging.getLogger("blme")
@@ -209,123 +210,98 @@ class VendiScoreTask(DiagnosticTask):
         _meta_ counts (n_layers, n_points_per_layer, kernel, ...)
     """
 
+    # One point per sequence (Q1): the last content token of each document.
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Vendi Score Diversity Analysis...")
 
-        num_samples = int(self.config.get("num_samples", 100))
+        num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
         kernel = str(self.config.get("kernel", "cosine"))
         gamma = self.config.get("gamma", None)
         gamma = float(gamma) if gamma is not None else None
         max_points = int(self.config.get("max_points", 512))
         seed = int(self.config.get("seed", 0))
         use_cache = self.config.get("use_cache", True)
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
-        # --- Collect per-layer (N, D) token clouds ---------------------
-        # The shared cache is used only when it holds at least num_samples
-        # documents: VS depends on N, and the cache is sized by co-runners.
-        _cached_docs = len(getattr(cache, "_sample_lengths", []) or []) if cache else 0
-        _cache_ok = (cache is not None and cache.is_populated and use_cache
-                     and _cached_docs >= int(num_samples))
-        if cache is not None and cache.is_populated and use_cache and not _cache_ok:
-            logger.info(
-                f"  Vendi: shared cache holds {_cached_docs} documents < "
-                f"configured {num_samples}; self-collecting so the score does "
-                f"not depend on which tasks co-ran.")
-        # A populated cache without hidden states falls back to collection
-        # (test_cache_without_hidden_states.py).
-        layer_clouds = None
-        if _cache_ok:
-            layer_clouds = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples, per_sample=False,
-                replace_final_norm=True,
-            )
-            if not layer_clouds:
-                logger.info(
-                    "  Vendi: shared cache is populated but carries no hidden "
-                    "states (attention-only population); self-collecting.")
-
-        if not layer_clouds:
-            from ...cache import ModelOutputCache, load_default_corpus
-
-            if dataset is None:
-                dataset = load_default_corpus(num_samples)
-            local_cache = ModelOutputCache(
-                model, tokenizer, dataset=dataset, num_samples=num_samples,
-            )
-            local_cache.populate(need_hidden=True)
-            layer_clouds = local_cache.get_hidden_states(
-                layer_idx="all", per_sample=False, replace_final_norm=True,
-            )
-
-        if not layer_clouds:
+        # One point per sequence (Q1), as the Vendi Score scores one embedding
+        # per sample: the last content token of each of num_samples documents
+        # at every block output (the deepest one the hooked raw block output).
+        # Every point is scored: VS grows with N, which is pinned. A cache with
+        # fewer documents is bypassed (test_vendi_protocol.py).
+        sc = sequence_clouds(
+            model, tokenizer, dataset, cache, n=num_samples, layer="all",
+            replace_final_norm=True, use_cache=use_cache,
+            token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+            readout=readout_for(self.TOKEN_POLICY))
+        if not sc.last:
             return {"error": "No hidden states available for Vendi Score"}
 
-        layer_keys = sorted(layer_clouds.keys())
-        # No trim: replace_final_norm=True substitutes the hooked raw output of
-        # the last block, so every entry is a block output.
-        n_layers = len(layer_keys)
-
-        per_layer_vs: List[float] = []
-        per_layer_norm: List[float] = []
-        n_points_used = 0
-        for k in layer_keys:
-            arr = _to_numpy(layer_clouds[k])
-            n_here = arr.shape[0] if arr.ndim == 2 else 0
-            n_eff = min(n_here, max_points) if n_here else 0
-            n_points_used = max(n_points_used, n_eff)
-            vs = _layer_vendi(
-                layer_clouds[k], kernel=kernel, gamma=gamma,
-                max_points=max_points, seed=seed,
-            )
-            per_layer_vs.append(vs)
-            # VS / n_points: kept under its historic name, not a width correction.
-            per_layer_norm.append(vs / n_eff if (np.isfinite(vs) and n_eff > 0) else float("nan"))
-
-
-        vs_arr = np.asarray(per_layer_vs, dtype=np.float64)
-        norm_arr = np.asarray(per_layer_norm, dtype=np.float64)
-        finite = np.isfinite(vs_arr)
-
-        if not np.any(finite):
+        layer_keys = sorted(sc.last)
+        n_points = sc.n_points
+        vs = [_vendi_score(_to_numpy(sc.last[k]), kernel=kernel, gamma=gamma) for k in layer_keys]
+        out = _profile_summary(vs, [n_points] * len(vs))
+        if out is None:
             return {"error": "Vendi Score undefined for all layers (degenerate clouds)"}
 
-        v_first = vs_arr[0]
-        v_last = vs_arr[-1]
-        v_mid = vs_arr[n_layers // 2]
+        # The token cloud (every token of the first token_cloud_docs documents,
+        # sink policy, max_points seeded rows per layer): _meta_tokens_*.
+        if sc.tokens:
+            rows = [sc.token_rows(k)[0] for k in layer_keys]
+            tvs = [_layer_vendi(r, kernel=kernel, gamma=gamma, max_points=max_points, seed=seed)
+                   for r in rows]
+            tok = _profile_summary(tvs, [min(int(r.shape[0]), max_points) for r in rows]) or {}
+            out.update({f"_meta_tokens_{k}": v for k, v in tok.items() if not k.startswith("_meta_")})
+            out["_meta_tokens_n_points_per_layer"] = int(max([min(int(r.shape[0]), max_points)
+                                                             for r in rows] or [0]))
 
-        # Slope on NORMALIZED depth l/(n_layers-1) — house convention for
-        # cross-model comparability (matches trajectory_curvature).
-        if n_layers >= 2 and finite.sum() >= 2:
-            depth = np.arange(n_layers, dtype=np.float64) / (n_layers - 1)
-            slope = float(np.polyfit(depth[finite], vs_arr[finite], 1)[0])
-        else:
-            slope = float("nan")
-
-        finite_vs = vs_arr[finite]
-        finite_norm = norm_arr[np.isfinite(norm_arr)]
-
-        return {
-            "vendi_mean_first_layer": float(v_first),
-            "vendi_mean_mid_layer": float(v_mid),
-            "vendi_mean_last_layer": float(v_last),
-            "vendi_overall_mean": float(np.mean(finite_vs)),
-
-            "_meta_vendi_normalized_mean": (
-                float(np.mean(finite_norm)) if finite_norm.size else float("nan")
-            ),
-            "vendi_slope": slope,
-            "vendi_max": float(np.max(finite_vs)),
-            # _meta_: the minimum is the last layer on most models, a
-            # sometimes-duplicate of vendi_mean_last_layer.
-            "_meta_vendi_min": float(np.min(finite_vs)),
-            "_meta_vendi_argmin_is_last_layer": bool(
-                int(np.argmin(finite_vs)) == len(finite_vs) - 1),
-            "vendi_q25": float(np.percentile(finite_vs, 25)),
-            "vendi_q50": float(np.percentile(finite_vs, 50)),
-            "vendi_q75": float(np.percentile(finite_vs, 75)),
-            # Counts are _meta_ so they cannot enter as size proxies.
-            "_meta_n_layers": int(n_layers),
-            "_meta_n_points_per_layer": int(n_points_used),
+        out.update({
+            "_meta_n_layers": int(len(layer_keys)),
+            "_meta_n_points_per_layer": int(n_points),
             "_meta_kernel": kernel,
             "_meta_q": 1,
-        }
+            "_meta_last_entry_is_block_output": bool(sc.info.get("last_is_block", False)),
+        })
+        out.update(sc.meta())
+        return out
+
+
+def _profile_summary(per_layer_vs, n_points_per_layer):
+    """Profile summaries of per-layer Vendi Scores (None if none is finite)."""
+    vs_arr = np.asarray(per_layer_vs, dtype=np.float64)
+    finite = np.isfinite(vs_arr)
+    if not np.any(finite):
+        return None
+    n_layers = len(vs_arr)
+    norm_arr = np.asarray([v / n if (np.isfinite(v) and n > 0) else float("nan")
+                           for v, n in zip(per_layer_vs, n_points_per_layer)], dtype=np.float64)
+    # Slope on normalised depth l/(n_layers-1).
+    if n_layers >= 2 and finite.sum() >= 2:
+        depth = np.arange(n_layers, dtype=np.float64) / (n_layers - 1)
+        slope = float(np.polyfit(depth[finite], vs_arr[finite], 1)[0])
+    else:
+        slope = float("nan")
+    finite_vs = vs_arr[finite]
+    finite_norm = norm_arr[np.isfinite(norm_arr)]
+    return {
+        "vendi_mean_first_layer": float(vs_arr[0]),
+        "vendi_mean_mid_layer": float(vs_arr[n_layers // 2]),
+        "vendi_mean_last_layer": float(vs_arr[-1]),
+        "vendi_overall_mean": float(np.mean(finite_vs)),
+        # VS / n_points: kept under its historic name, not a width correction.
+        "_meta_vendi_normalized_mean": (
+            float(np.mean(finite_norm)) if finite_norm.size else float("nan")),
+        "vendi_slope": slope,
+        "vendi_max": float(np.max(finite_vs)),
+        # _meta_: the minimum is the last layer on most models, a
+        # sometimes-duplicate of vendi_mean_last_layer.
+        "_meta_vendi_min": float(np.min(finite_vs)),
+        "_meta_vendi_argmin_is_last_layer": bool(
+            int(np.argmin(finite_vs)) == len(finite_vs) - 1),
+        "vendi_q25": float(np.percentile(finite_vs, 25)),
+        "vendi_q50": float(np.percentile(finite_vs, 50)),
+        "vendi_q75": float(np.percentile(finite_vs, 75)),
+    }

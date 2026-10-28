@@ -379,11 +379,14 @@ repe_refusal_direction: {}
 
 # ---- Campaign-2 additions (2026-06): new methods, official-code parity-verified ----
 geometry_vendi_score:
-  num_samples: 100
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # the token cloud of the first 200 (512 rows per layer) is _meta_.
+  num_samples: 1000
   kernel: cosine
   gamma: null
   max_points: 512
   seed: 0
+  token_cloud_docs: 200
 
 geometry_phd_dimension:
   num_samples: 100
