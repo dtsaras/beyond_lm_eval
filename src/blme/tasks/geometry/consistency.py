@@ -1,5 +1,8 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._sink_norms import SinkNormCollector
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, sink_keep_masks, sink_meta)
 from ..common import get_embeddings, get_lm_head
 from .utils import collect_prediction_stats, centre_and_rescale
 import torch
@@ -29,6 +32,42 @@ def _get_output_projection_weight(model) -> torch.Tensor:
         return head.weight.detach()
     # Fallback to input embeddings (the old behaviour).
     return get_embeddings(model)
+
+
+def _sink_masks(model, tokenizer, dataset, cache, num_samples, from_cache):
+    """One sink keep mask per prediction-stats document, over all its positions.
+
+    From the shared cache's block outputs when the stats came from it, else
+    from a no-grad pass that tokenises and skips exactly as
+    ``collect_prediction_stats`` (window 512, documents of < 2 tokens
+    skipped). Returns ``(masks, info, middle_layer_docs, source)``.
+    """
+    per_doc = None
+    if from_cache and hasattr(cache, "get_hidden_states"):
+        per_doc, _ = hidden_states_for_task(
+            model, tokenizer, None, cache, num_samples=num_samples,
+            replace_final_norm=True, layer_idx="all", per_sample=True, fallback="none")
+    if per_doc:
+        layers = sorted(per_doc)
+        keys = middle_depth_layers({k: per_doc[k] for k in layers})
+        masks, info = sink_keep_masks([per_doc[k] for k in keys])
+        # get_prediction_stats skips the documents of fewer than 2 tokens.
+        masks = [m for m in masks if m.numel() >= 2]
+        return masks, info, per_doc[layers[len(layers) // 2]], "shared_cache"
+    col = SinkNormCollector()
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        for i, sample in enumerate(dataset):
+            if i >= num_samples:
+                break
+            text = sample if isinstance(sample, str) else sample.get("text", "")
+            inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                               max_length=512).to(device)
+            if inputs["input_ids"].shape[1] < 2:
+                continue
+            col.add(model(**inputs, output_hidden_states=True).hidden_states[1:])
+    masks, info = col.masks()
+    return masks, info, col.mid_docs, "forward_pass"
 
 
 @register_task("geometry_prediction_alignment")
@@ -67,7 +106,7 @@ class PredictionAlignmentTask(DiagnosticTask):
     interpretation for untied-head architectures (Gemma 3/4, etc.). Falls
     back to input embeddings if ``lm_head`` is unavailable.
     """
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "none (BLME construct)",
         "code": "none",
@@ -84,8 +123,9 @@ class PredictionAlignmentTask(DiagnosticTask):
         "target (a capability measure), the raw cosine (reproduced by uniformly "
         "random rows), and logit/tuned-lens divergences (Belrose et al. 2023), which "
         "score distributions rather than geometry. The cosine margin separates "
-        "direction from norm and cancels anisotropy with a matched control. The "
-        "position-0 pair is dropped (its state is the context-free sink), and "
+        "direction from norm and cancels anisotropy with a matched control. Pairs "
+        "whose source is a sink are dropped (position 0, the context-free state, and "
+        "every token whose norm exceeds 10x the median at a middle depth), and "
         "centring and the uniform control use only rows the tokenizer can emit.")
     HEADLINE_KEYS = ("prediction_alignment_mean", "prediction_alignment_std")
     SIZE_INVARIANT = {
@@ -113,8 +153,19 @@ class PredictionAlignmentTask(DiagnosticTask):
                     "  prediction_alignment: shared cache is populated but is "
                     "missing hidden states or labels; self-collecting.")
                 stats = None
+        from_cache = stats is not None
         if stats is None:
             stats, _ = collect_prediction_stats(model, tokenizer, dataset, num_samples=num_samples)
+
+        # One keep mask per document from the middle depths (the final layer
+        # read here has no massive rows); a pair is dropped when its source
+        # position is a sink (tests/tasks/invariance/test_prediction_alignment.py).
+        policy = self.TOKEN_POLICY
+        masks, sink_info, _mid, mask_source = _sink_masks(
+            model, tokenizer, dataset, cache, num_samples, from_cache)
+        if stats["labels"] and len(masks) != len(stats["labels"]):
+            raise RuntimeError(f"prediction_alignment: {len(masks)} sink masks for "
+                               f"{len(stats['labels'])} prediction-stats documents")
 
         # Resolve the projection weight the model actually uses for
         # logits (lm_head.weight). Ignore the cache's ``embeddings``
@@ -147,9 +198,10 @@ class PredictionAlignmentTask(DiagnosticTask):
         _coll_hits, _coll_tot = [0], [0]
         _g = torch.Generator().manual_seed(20260903)
         _n_p0_dropped = [0]
+        _n_massive_pairs = 0
         _vocab = embeddings.shape[0]
 
-        for h, labels in zip(stats["hidden"], stats["labels"]):
+        for d, (h, labels) in enumerate(zip(stats["hidden"], stats["labels"])):
             # Normalize shapes: h → (N, D), labels → (N,). The cache
             # historically stores hidden flattened but labels with a batch
             # dim, so we need to reconcile them before F.embedding.
@@ -158,9 +210,20 @@ class PredictionAlignmentTask(DiagnosticTask):
                 h = h.reshape(-1, D)
             if hasattr(labels, "dim") and labels.dim() >= 2:
                 labels = labels.reshape(-1)
-            # Row r is position r predicting token r+1. The position-0 state
-            # is the context-free sink, so its pair is dropped (TOKEN_POLICY).
-            if self.TOKEN_POLICY == "exclude_pos0" and labels.shape[0] > 0:
+            # Row r is position r predicting token r+1. A pair whose source is
+            # a sink is dropped (TOKEN_POLICY): position 0, the context-free
+            # state, and every massive row.
+            if policy == "exclude_sinks" and labels.shape[0] > 0:
+                keep = masks[d]
+                if keep.numel() != labels.shape[0] + 1:
+                    raise RuntimeError(
+                        f"prediction_alignment: document {d} has {labels.shape[0]} "
+                        f"pairs but a {keep.numel()}-position sink mask")
+                keep = keep[:labels.shape[0]].to(h.device)
+                _n_massive_pairs += int((~keep[1:]).sum())
+                h, labels = h[keep], labels[keep.to(labels.device)]
+                _n_p0_dropped[0] += 1
+            elif policy == "exclude_pos0" and labels.shape[0] > 0:
                 h, labels = h[1:], labels[1:]
                 _n_p0_dropped[0] += 1
             if labels.shape[0] == 0:
@@ -258,6 +321,11 @@ class PredictionAlignmentTask(DiagnosticTask):
             out["_meta_prediction_alignment_residual_collision_frac"] = float(
                 _residual_collisions[0] / _control_positions[0])
         out["_meta_n_position0_pairs_dropped"] = int(_n_p0_dropped[0])
+        out["_meta_n_massive_pairs_dropped"] = int(_n_massive_pairs)
+        out["_meta_sink_mask_source"] = mask_source
+        out.update(sink_meta(sink_info))
+        out["_meta_position0_share"] = position0_share(_mid) if _mid else float("nan")
+        out["_meta_massive_token_share"] = massive_token_share(_mid) if _mid else float("nan")
         out["_meta_n_emittable_rows"] = int(n_emit)
         out["_meta_n_unused_rows"] = n_unused
         if baseline_unif:
