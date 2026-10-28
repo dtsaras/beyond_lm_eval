@@ -139,7 +139,9 @@ def _compute_lid_for_matrix(X, k, max_queries=500, seed: int = 0):
     return {
         "lid_mean": float(np.mean(lid_arr)),
         "lid_std": float(np.std(lid_arr)),
-        "lid_min": float(np.min(lid_arr)),
+        # _meta_ (P7): 0.0 whenever the cloud holds a duplicate row, since an
+        # exact-duplicate query scores 0 (test_lid_protocol.py).
+        "_meta_lid_min": float(np.min(lid_arr)),
         "lid_max": float(np.max(lid_arr)),
         "lid_median": float(np.median(lid_arr)),
         "_meta_num_estimates": len(lid_estimates),

@@ -65,3 +65,15 @@ def test_headline_is_one_point_per_sequence(states, mode):
     inv.assert_invariant(base, edited, keys, rtol=0.0)
     assert base["_meta_n_points"] == len(TEXTS)
     inv.assert_moves(base, edited, "_meta_tokens_lid_mean", min_rel=1e-3)
+
+
+@pytest.mark.parametrize("mode", MODES, ids=["single", "layerwise"])
+def test_lid_min_is_meta(states, mode):
+    """P7: one duplicated document makes the minimum exactly 0 (a duplicate
+    query scores -k/(-inf) = 0, as the released mle_batch does), so lid_min
+    reports duplicate presence, not geometry, and is _meta_."""
+    S = states.select_docs(list(range(len(TEXTS))) + [0])
+    out = inv.run_task_on_states(TASK, S, mode)
+    assert "lid_min" not in out
+    assert out["_meta_lid_min"] == 0.0
+    assert out["_meta_num_zero_estimates"] >= 1
