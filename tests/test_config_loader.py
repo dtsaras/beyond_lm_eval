@@ -38,7 +38,7 @@ def test_resolve_task_config_defaults_only():
     cfg = resolve_task_config("geometry_lid")
     assert isinstance(cfg, dict)
     assert cfg.get("k") == 20
-    assert cfg.get("num_samples") == 50
+    assert cfg.get("num_samples") == 1000   # one point per sequence, N pinned (Q1)
 
 
 def test_resolve_task_config_with_override():
@@ -46,7 +46,7 @@ def test_resolve_task_config_with_override():
     assert cfg["k"] == 10
     assert cfg["extra_param"] is True
     # Original default for num_samples should still be present
-    assert cfg.get("num_samples") == 50
+    assert cfg.get("num_samples") == 1000   # one point per sequence, N pinned (Q1)
 
 
 def test_resolve_task_config_unknown_task():

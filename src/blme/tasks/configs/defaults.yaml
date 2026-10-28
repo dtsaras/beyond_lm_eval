@@ -33,8 +33,12 @@ geometry_collapse:
 
 geometry_lid:
   k: 20
-  num_samples: 50
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # the token cloud of the first 200 (20000 rows) is _meta_.
+  num_samples: 1000
   layerwise: false
+  token_cloud_docs: 200
+  token_cloud_points: 20000
 
 geometry_representation_sensitivity:
   num_samples: 20

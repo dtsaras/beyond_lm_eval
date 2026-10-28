@@ -15,11 +15,15 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_hidden_states
+from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
+                               sequence_clouds)
 import numpy as np
 import torch
 import logging
 logger = logging.getLogger("blme")
+
+# Rows of the _meta_ token cloud (seeded subsample), the same for every model.
+_TOKEN_CLOUD_POINTS = 20000
 
 
 def _lid_mle(distances, k):
@@ -165,72 +169,90 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     the specified layer(s).  When ``layerwise=True`` (and cache is
     available), computes LID at every layer.
     """
+    # One point per sequence (Q1): the last content token of each document.
+    TOKEN_POLICY = "last_per_sequence"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Local Intrinsic Dimensionality (LID) Analysis...")
-        if dataset is None:
-            from ...cache import load_default_corpus
-            dataset = load_default_corpus(50)
-
-        k = self.config.get("k", 20)
-        num_samples = self.config.get("num_samples", 50)
+        k = int(self.config.get("k", 20))
+        num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
         use_cache = self.config.get("use_cache", True)
         layerwise = self.config.get("layerwise", False)
+        token_points = int(self.config.get("token_cloud_points", _TOKEN_CLOUD_POINTS))
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
 
-        # --- Per-layer mode ---
-        if layerwise and cache is not None and cache.is_populated and use_cache:
-            all_layers = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples,
-                replace_final_norm=True)
-            if all_layers:
-                per_layer = {}
-                lid_mean_per_layer = []
-                for li in sorted(all_layers.keys()):
-                    m = _compute_lid_for_matrix(all_layers[li], k)
-                    if m is not None:
-                        per_layer[f"layer_{li}"] = m
-                        lid_mean_per_layer.append(m["lid_mean"])
-                    else:
-                        lid_mean_per_layer.append(float("nan"))
-                last_key = f"layer_{max(all_layers.keys())}"
-                result = dict(per_layer.get(last_key, {}))
-                result["layer_lid_mean"] = lid_mean_per_layer
-                # _meta_: one column per absolute layer index.
-                result["_meta_layer_metrics"] = per_layer
-                # lid_mean already is the deepest layer, so no lid_last_layer.
-                _finite = [v for v in lid_mean_per_layer if np.isfinite(v)]
-                if _finite:
-                    _n = len(lid_mean_per_layer)
-                    result["lid_first_layer"] = float(lid_mean_per_layer[0])
-                    result["lid_mid_layer"] = float(lid_mean_per_layer[_n // 2])
-                # The two modes are different estimands under one key set:
-                # _meta_lid_mode says which one ran.
-                result["_meta_lid_mode"] = "layerwise"
-                if _finite:
-                    _med = float(np.median(_finite))
-                    result["_meta_lid_max_over_median"] = (
-                        float(max(_finite) / _med) if _med > 0 else float("nan"))
-                return result
+        # One point per sequence (Q1): the last content token of each of
+        # num_samples documents, neighbours from the other documents (Yin et
+        # al. 2024). Layerwise: every block output, the deepest the raw block
+        # output; single layer: HF's post-norm output representation. A cache
+        # holding fewer documents is bypassed (test_lid_protocol.py).
+        sc = sequence_clouds(
+            model, tokenizer, dataset, cache, n=num_samples,
+            layer="all" if layerwise else -1, replace_final_norm=bool(layerwise),
+            use_cache=use_cache,
+            token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+            readout=readout_for(self.TOKEN_POLICY))
+        if not sc.last:
+            return {"error": "No hidden states available for LID"}
 
-        # --- Single-layer mode (last layer) ---
-        X = None
-        if cache is not None and cache.is_populated and use_cache:
-            # post-final-norm=False, DELIBERATELY: the single-layer mode reports
-            # the model's output representation; the layerwise mode opts in.
-            X = cache.get_hidden_states(layer_idx=-1, num_samples=num_samples,
-                                        replace_final_norm=False)
-            if X is None:
-                # A populated cache without hidden states: self-collect.
-                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
-        if X is None:
-            # Every token, matching the cache route: the point count is part of
-            # the estimand.
-            X = collect_hidden_states(model, tokenizer, dataset,
-                                      num_samples=num_samples,
-                                      max_tokens_per_doc=None,
-                                      replace_final_norm=False)
+        # The token cloud of the first token_cloud_docs documents (sink policy,
+        # pinned to token_cloud_points rows) is _meta_tokens_*.
+        def token_lid(key):
+            rows = sc.token_rows(key)[0]
+            if rows.shape[0] > token_points:
+                rng = np.random.default_rng(0)
+                rows = rows[np.sort(rng.choice(rows.shape[0], token_points, replace=False))]
+            return _compute_lid_for_matrix(rows, k)
 
-        m = _compute_lid_for_matrix(X, k)
+        if layerwise:
+            per_layer = {}
+            lid_mean_per_layer = []
+            for li in sorted(sc.last):
+                m = _compute_lid_for_matrix(sc.last[li], k)
+                if m is not None:
+                    per_layer[f"layer_{li}"] = m
+                    lid_mean_per_layer.append(m["lid_mean"])
+                else:
+                    lid_mean_per_layer.append(float("nan"))
+            last_key = f"layer_{max(sc.last)}"
+            result = dict(per_layer.get(last_key, {}))
+            result["layer_lid_mean"] = lid_mean_per_layer
+            # _meta_: one column per absolute layer index.
+            result["_meta_layer_metrics"] = per_layer
+            # lid_mean already is the deepest layer, so no lid_last_layer.
+            _finite = [v for v in lid_mean_per_layer if np.isfinite(v)]
+            if _finite:
+                _n = len(lid_mean_per_layer)
+                result["lid_first_layer"] = float(lid_mean_per_layer[0])
+                result["lid_mid_layer"] = float(lid_mean_per_layer[_n // 2])
+            # The two modes are different estimands under one key set:
+            # _meta_lid_mode says which one ran.
+            result["_meta_lid_mode"] = "layerwise"
+            if _finite:
+                _med = float(np.median(_finite))
+                result["_meta_lid_max_over_median"] = (
+                    float(max(_finite) / _med) if _med > 0 else float("nan"))
+            if sc.tokens:
+                tok = [token_lid(li) for li in sorted(sc.last)]
+                prof = [t["lid_mean"] if t else float("nan") for t in tok]
+                result["_meta_tokens_layer_lid_mean"] = prof
+                result.update({f"_meta_tokens_{key}": v for key, v in (tok[-1] or {}).items()
+                               if not key.startswith("_meta_")})
+                result["_meta_tokens_lid_first_layer"] = float(prof[0])
+                result["_meta_tokens_lid_mid_layer"] = float(prof[len(prof) // 2])
+            result.update(sc.meta())
+            return result
+
+        key = next(iter(sc.last))
+        m = _compute_lid_for_matrix(sc.last[key], k)
         if m is None:
             return {"error": f"Too few valid samples for LID with k={k}"}
         m["_meta_lid_mode"] = "single_layer"
+        if sc.tokens:
+            t = token_lid(key)
+            m.update({f"_meta_tokens_{name}": v for name, v in (t or {}).items()
+                      if not name.startswith("_meta_")})
+        m.update(sc.meta())
         return m
