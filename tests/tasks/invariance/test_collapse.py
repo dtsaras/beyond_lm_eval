@@ -93,3 +93,33 @@ def test_qdl_valley_follows_a_position0_sink(tiny_states):
     assert r["qdl_entropy_min"] == r["_meta_qdl_entropy_per_layer"][mid]
     assert r["_meta_qdl_entropy_min_layer_frac"] == pytest.approx(mid / (S.n_layers - 1))
     assert base["_meta_qdl_entropy_per_layer"][mid] > 10 * r["_meta_qdl_entropy_per_layer"][mid]
+
+
+RV_KEYS = ("max_erank", "min_erank", "collapse_ratio", "max_drop")
+
+
+def _map_blocks(S, fn):
+    """``fn`` on every array (blocks, final norm, embedding), in float64."""
+    return S.map(lambda x: fn(np.asarray(x, dtype=np.float64)))
+
+
+def test_roy_vetterli_keys_drop_position0_and_massive_rows(tiny_states):
+    """Sink policy: a 1e3 position-0 row (BOS-style sink) and a 1e3 row at
+    position 3 (first-delimiter-style massive row) in every block leave the
+    Jing / Roy-Vetterli keys exactly where the same documents put them with
+    those rows absent. Before, both rows entered the pooled cloud."""
+    def sink(y):
+        y = y.copy()
+        y[0] *= 1e3
+        y[3] *= 1e3
+        return y
+    sunk = inv.run_task_on_states(TASK, _map_blocks(tiny_states, sink))
+    absent = inv.run_task_on_states(TASK, _map_blocks(tiny_states, lambda y: np.delete(y, 3, 0)))
+    inv.assert_invariant(absent, sunk, list(RV_KEYS), rtol=1e-9)
+    assert sunk["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
+    assert absent["_meta_sink_n_massive_dropped"] == 0
+    assert sunk["_meta_rows_policy"] == "exclude_sinks"
+    assert sunk["_meta_position0_share"] > 0.3 and sunk["_meta_massive_token_share"] > 0.3
+    assert absent["_meta_massive_token_share"] < 0.05
+    # The every-token companion still sees the sink (known negative).
+    inv.assert_moves(absent, sunk, "_meta_collapse_ratio_all_tokens", 1e-2)

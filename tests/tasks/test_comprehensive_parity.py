@@ -2997,8 +2997,15 @@ def test_geometry_collapse():
     # Match the task's layer set: its deepest profile point is the hooked RAW
     # last-block output, since HF's final entry is ln_f(b_{L-1}) -- including
     # it contaminates the profile, and deleting it drops the deepest block.
-    acts = collect_hidden_states(model, tok, dataset, num_samples=3,
-                                 layer_idx="all", replace_final_norm=True)
+    # TOKEN_POLICY exclude_sinks: position 0 and massive rows are dropped. This
+    # random model has no massive row (asserted), so the reference drops row 0
+    # of every document.
+    acts_docs = collect_hidden_states(model, tok, dataset, num_samples=3,
+                                      layer_idx="all", replace_final_norm=True,
+                                      per_sample=True)
+    assert out["_meta_sink_n_massive_dropped"] == 0
+    acts = {li: torch.cat([x[1:] for x in docs]) for li, docs in acts_docs.items()}
+    acts_all = {li: torch.cat(list(docs)) for li, docs in acts_docs.items()}
 
     def _erank_from(sv):
         sv = sv[sv > 0]
@@ -3032,6 +3039,9 @@ def test_geometry_collapse():
     assert all(sq < rv for sq, rv in zip(ref_sq, ref))
     assert len(ref) == 2 and len(out["erank_per_layer"]) == 2
     assert out["erank_per_layer"] == pytest.approx(ref, rel=1e-6)
+    # The every-token profile is kept under its own _meta_ name.
+    assert out["_meta_erank_per_layer_all_tokens"] == pytest.approx(
+        [ref_erank(acts_all[i].numpy()) for i in sorted(acts_all.keys())], rel=1e-6)
 
     # collapse_ratio derived from the independent eranks.
     mx, mn = max(ref), min(ref)

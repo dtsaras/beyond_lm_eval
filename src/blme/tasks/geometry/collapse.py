@@ -1,6 +1,8 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import hidden_states_for_task, select_rows
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       middle_depth_layers, position0_share, select_rows,
+                       sink_keep_masks, sink_meta)
 from .utils import collected_layer_count, effective_rank, safe_svdvals
 import numpy as np
 from tqdm import tqdm
@@ -33,6 +35,37 @@ def _qdl_entropy(Z) -> float:
     return float(-np.sum(p * np.log(p)))
 
 
+def _rv_profile(clouds, layers):
+    """Roy-Vetterli erank (raw sigma) and the sigma^2 twin of each centred cloud."""
+    erank, erank_sigma2 = [], []
+    for idx in tqdm(layers, desc="Computing Effective Rank per Layer"):
+        X = clouds[idx].float().numpy()
+        # Filter NaN/Inf rows (fp16 models may produce extreme values)
+        finite_mask = np.all(np.isfinite(X), axis=1)
+        if not np.all(finite_mask):
+            X = X[finite_mask]
+        if len(X) < 5:
+            # NaN, counted in _meta_n_failed_layers.
+            erank.append(float("nan"))
+            erank_sigma2.append(float("nan"))
+            continue
+        # Centre in float64 (float32 overflows near the top of the range)
+        # and take a max-factored SVD (tests/test_scale_invariance.py).
+        X = np.asarray(X, dtype=np.float64)
+        X = X - np.mean(X, axis=0)
+        try:
+            S = safe_svdvals(X)
+        except Exception:
+            erank.append(float("nan"))
+            erank_sigma2.append(float("nan"))
+            continue
+        # Roy & Vetterli Eq. (1) on RAW singular values; the sigma^2
+        # spectrum is a separate key, not their erank.
+        erank.append(effective_rank(S))
+        erank_sigma2.append(effective_rank(np.asarray(S, dtype=np.float64) ** 2))
+    return erank, erank_sigma2
+
+
 @register_task("geometry_collapse")
 class RepresentationCollapseTask(DiagnosticTask):
     """
@@ -54,6 +87,9 @@ class RepresentationCollapseTask(DiagnosticTask):
         of the Same Coin", arXiv:2510.06477. The erank-vs-depth profile
         is a BLME collapse/valley proxy, not the full paper pipeline.
     """
+    # Jing / Roy-Vetterli keys (non-LLM spectra of a pooled cloud): position 0
+    # and massive rows dropped, else the sink is the "valley" they detect.
+    TOKEN_POLICY = "exclude_sinks"
     # The Queipo-de-Llano family keeps every token, as the paper does: the
     # BOS/first-token row is the cause of the valley (Theorem 1).
     QDL_TOKEN_POLICY = ("paper_protocol:QueipoDeLlano2025 Eq. 1, per sequence, "
@@ -81,37 +117,27 @@ class RepresentationCollapseTask(DiagnosticTask):
         layers = sorted(per_doc.keys())
         layer_activations = {li: select_rows(per_doc[li], "all")[0] for li in layers}
 
+        # Jing / Roy-Vetterli family: TOKEN_POLICY rows, one keep mask per
+        # document from the middle depths, the same rows at every layer.
+        _mid_keys = middle_depth_layers(per_doc)
+        _keep, _sink_info = sink_keep_masks([per_doc[k] for k in _mid_keys])
+        _rows_meta = None
+        layer_activations = {}
+        for li in layers:
+            layer_activations[li], _rows_meta = select_rows(
+                per_doc[li], self.TOKEN_POLICY, keep=_keep)
+
         # From the collected depth, not the config: a config without
         # num_hidden_layers would otherwise trim a hookless profile to 2 layers.
         _n_block_layers = collected_layer_count(model, n_collected=len(layers))
-        erank_per_layer = []
-        erank_raw_per_layer = []
-        for idx in tqdm(layers, desc="Computing Effective Rank per Layer"):
-            X = layer_activations[idx].float().numpy()
-            # Filter NaN/Inf rows (fp16 models may produce extreme values)
-            finite_mask = np.all(np.isfinite(X), axis=1)
-            if not np.all(finite_mask):
-                X = X[finite_mask]
-            if len(X) < 5:
-                # NaN, counted in _meta_n_failed_layers.
-                erank_per_layer.append(float("nan"))
-                erank_raw_per_layer.append(float("nan"))
-                continue
-            # Centre in float64 (float32 overflows near the top of the range)
-            # and take a max-factored SVD (tests/test_scale_invariance.py).
-            X = np.asarray(X, dtype=np.float64)
-            X = X - np.mean(X, axis=0)
-            try:
-                S = safe_svdvals(X)
-            except Exception:
-                erank_per_layer.append(float("nan"))
-                erank_raw_per_layer.append(float("nan"))
-                continue
-            # Roy & Vetterli Eq. (1) on RAW singular values; the sigma^2
-            # spectrum is a separate key, not their erank.
-            erank_per_layer.append(effective_rank(S))
-            erank_raw_per_layer.append(
-                effective_rank(np.asarray(S, dtype=np.float64) ** 2))
+        erank_per_layer, erank_raw_per_layer = _rv_profile(layer_activations, layers)
+        # Every-token profile (the pre-sink-policy values), kept as _meta_.
+        erank_all, _ = _rv_profile(
+            {li: select_rows(per_doc[li], "all")[0] for li in layers}, layers)
+        _all = np.asarray(erank_all, dtype=np.float64)
+        _all_ok = np.isfinite(_all)
+        max_erank_all = float(np.max(_all[_all_ok])) if _all_ok.any() else float("nan")
+        min_erank_all = float(np.min(_all[_all_ok])) if _all_ok.any() else float("nan")
 
         # Detect collapse: ratio of min erank to max erank
         erank_arr = np.array(erank_per_layer, dtype=np.float64)
@@ -140,6 +166,7 @@ class RepresentationCollapseTask(DiagnosticTask):
             max_drop_layer = -1
 
         d_model = int(layer_activations[layers[0]].shape[-1])
+        _mid_docs = per_doc[layers[len(layers) // 2]]
         max_drop_frac = max_drop / d_model if d_model else float("nan")
 
         # Queipo-de-Llano et al. 2025 Eq. (1): per sequence, uncentred, every
@@ -186,6 +213,16 @@ class RepresentationCollapseTask(DiagnosticTask):
             "_meta_max_drop_n_layers": int(len(_prof_for_drop)),
             "_meta_n_failed_layers": n_failed,
             "_meta_last_entry_is_block_output": bool(_last_is_block),
+            # Every-token Roy-Vetterli profile, before the sink policy.
+            "_meta_erank_per_layer_all_tokens": erank_all,
+            "_meta_max_erank_all_tokens": max_erank_all,
+            "_meta_min_erank_all_tokens": min_erank_all,
+            "_meta_collapse_ratio_all_tokens": (
+                min_erank_all / max_erank_all if max_erank_all > 0 else float("nan")),
+            **sink_meta(_sink_info),
+            **(_rows_meta.as_meta() if _rows_meta is not None else {}),
+            "_meta_massive_token_share": massive_token_share(_mid_docs),
+            "_meta_position0_share": position0_share(_mid_docs),
             # On a monotonically increasing profile max_drop is the smallest rise.
             "_meta_max_drop_is_actually_increase": bool(
                 np.isfinite(max_drop) and max_drop > 0),
