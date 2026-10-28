@@ -311,11 +311,12 @@ class SVDIsotropyTask(DiagnosticTask):
         # HF's post-norm last entry is kept (replace_final_norm=False): it is
         # what Ethayarajh's extractor scores as the last layer
         # (contextual/pytorch_pretrained/modeling_gpt2.py:562-565).
+        # Without a usable cache the layers are collected: the schema must not
+        # depend on the route.
         if layerwise:
-            all_layers, _ = hidden_states_for_task(
+            all_layers, _linfo = hidden_states_for_task(
                 model, tokenizer, dataset, cache, num_samples=num_samples,
-                layer_idx="all", use_cache=use_cache, replace_final_norm=False,
-                fallback="none")
+                layer_idx="all", use_cache=use_cache, replace_final_norm=False)
             if all_layers:
                 per_layer = {}
                 erank_per_layer = []
@@ -336,6 +337,8 @@ class SVDIsotropyTask(DiagnosticTask):
                 result["layer_effective_rank"] = erank_per_layer
                 result["layer_participation_ratio"] = pr_per_layer
                 result["layer_metrics"] = per_layer
+                result["_meta_svd_mode"] = "layerwise"
+                result["_meta_svd_source"] = _linfo["source"]
                 return result
 
         # --- Single-layer mode (last layer, original behaviour) ---
@@ -348,4 +351,6 @@ class SVDIsotropyTask(DiagnosticTask):
         m = _svd_metrics_for_layer(X, source_dtype=_src_dt)
         if m is None:
             return {"error": "Too few finite hidden states for SVD"}
+        m["_meta_svd_mode"] = "single_layer"
+        m["_meta_svd_source"] = _info["source"]
         return m
