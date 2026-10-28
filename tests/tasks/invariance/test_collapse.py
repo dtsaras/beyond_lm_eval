@@ -35,3 +35,61 @@ def test_hookless_collection_without_depth_config_keeps_the_profile():
     assert r["_meta_last_entry_is_block_output"] is False
     assert r["_meta_max_drop_layer"] == 4
     assert r["_meta_max_drop_n_layers"] == L - 1
+
+
+def _qdl_reference(docs):
+    """Queipo-de-Llano Eq. (1) written from the paper: uncentred T x d matrix
+    of one sequence, p_j = s_j^2 / ||X||_F^2, H = -sum p log p."""
+    hs = []
+    for X in docs:
+        X = np.asarray(X, dtype=np.float64)
+        s = np.linalg.svd(X, compute_uv=False)
+        p = s ** 2 / np.sum(X * X)
+        p = p[p > 0]
+        hs.append(-np.sum(p * np.log(p)))
+    return float(np.mean(hs))
+
+
+@pytest.fixture(scope="module")
+def tiny():
+    return load("hf-internal-testing/tiny-random-gpt2")
+
+
+@pytest.fixture(scope="module")
+def tiny_states(tiny):
+    return inv.states_from_model(*tiny, TEXTS)
+
+
+def test_qdl_profile_is_eq1_per_sequence_uncentred(tiny_states):
+    """Every profile entry is the per-sequence mean of Eq. (1) on the raw
+    (uncentred, position-0-inclusive) states; the headline is its minimum."""
+    r = inv.run_task_on_states(TASK, tiny_states)
+    prof = r["_meta_qdl_entropy_per_layer"]
+    assert len(prof) == tiny_states.n_layers
+    for li, h in enumerate(prof):
+        want = _qdl_reference([np.asarray(x, dtype=np.float32) for x in tiny_states.blocks[li]])
+        assert h == pytest.approx(want, rel=1e-9, abs=1e-12), li
+    assert r["qdl_entropy_min"] == min(prof)
+    assert r["_meta_qdl_n_docs"] == tiny_states.n_docs
+
+
+def test_qdl_valley_follows_a_position0_sink(tiny_states):
+    """A massive position-0 row at one middle block (the BOS sink of Theorem 1)
+    puts the profile minimum at that block and pushes H towards 0; centring
+    would remove exactly that row's mean contribution, which Eq. (1) keeps."""
+    S = tiny_states
+    mid = S.n_layers // 2
+
+    def sink(x, li):
+        y = np.array(x, dtype=np.float64, copy=True)
+        if li == mid:
+            y[0] *= 1e3
+        return y
+    sunk = inv.States(blocks={li: [sink(x, li) for x in docs] for li, docs in S.blocks.items()},
+                      final_norm=S.final_norm, embedding=S.embedding)
+    base = inv.run_task_on_states(TASK, S)
+    r = inv.run_task_on_states(TASK, sunk)
+    assert r["_meta_qdl_entropy_per_layer"][mid] < 0.05
+    assert r["qdl_entropy_min"] == r["_meta_qdl_entropy_per_layer"][mid]
+    assert r["_meta_qdl_entropy_min_layer_frac"] == pytest.approx(mid / (S.n_layers - 1))
+    assert base["_meta_qdl_entropy_per_layer"][mid] > 10 * r["_meta_qdl_entropy_per_layer"][mid]

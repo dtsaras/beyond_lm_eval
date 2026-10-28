@@ -8,6 +8,31 @@ import logging
 logger = logging.getLogger("blme")
 
 
+def _qdl_entropy(Z) -> float:
+    """Queipo-de-Llano et al. 2025 Eq. (1) for one sequence's (T, d) states.
+
+    H(X) = -sum_j p_j log p_j with p_j = s_j^2 / ||X||_F^2 over the singular
+    values of the UNCENTRED matrix, every row kept (row 0 is the BOS/first
+    token whose massive norm produces the compression valley, Theorem 1).
+    NaN for fewer than two rows or a zero matrix.
+    """
+    X = np.asarray(Z.float().numpy() if hasattr(Z, "numpy") else Z, dtype=np.float64)
+    X = X[np.all(np.isfinite(X), axis=1)]
+    if X.shape[0] < 2:
+        return float("nan")
+    try:
+        S = np.asarray(safe_svdvals(X), dtype=np.float64)
+    except Exception:
+        return float("nan")
+    # p_j is scale-free: divide by s_1 before squaring.
+    if not (S.size and S[0] > 0 and np.isfinite(S[0])):
+        return float("nan")
+    s2 = (S / S[0]) ** 2
+    p = s2 / s2.sum()
+    p = p[p > 0]
+    return float(-np.sum(p * np.log(p)))
+
+
 @register_task("geometry_collapse")
 class RepresentationCollapseTask(DiagnosticTask):
     """
@@ -29,6 +54,10 @@ class RepresentationCollapseTask(DiagnosticTask):
         of the Same Coin", arXiv:2510.06477. The erank-vs-depth profile
         is a BLME collapse/valley proxy, not the full paper pipeline.
     """
+    # The Queipo-de-Llano family keeps every token, as the paper does: the
+    # BOS/first-token row is the cause of the valley (Theorem 1).
+    QDL_TOKEN_POLICY = ("paper_protocol:QueipoDeLlano2025 Eq. 1, per sequence, "
+                        "uncentred, position 0 included")
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representation Collapse Detection...")
@@ -113,7 +142,30 @@ class RepresentationCollapseTask(DiagnosticTask):
         d_model = int(layer_activations[layers[0]].shape[-1])
         max_drop_frac = max_drop / d_model if d_model else float("nan")
 
+        # Queipo-de-Llano et al. 2025 Eq. (1): per sequence, uncentred, every
+        # token (QDL_TOKEN_POLICY), averaged over sequences at each layer; the
+        # compression valley is the profile minimum.
+        _qpol = ("all" if self.QDL_TOKEN_POLICY.startswith("paper_protocol")
+                 else self.QDL_TOKEN_POLICY)
+        qdl_profile, qdl_n_docs = [], 0
+        for idx in layers:
+            rows = [select_rows([Z], _qpol)[0] for Z in per_doc[idx]]
+            hs = [h for h in (_qdl_entropy(Z) for Z in rows) if np.isfinite(h)]
+            qdl_n_docs = max(qdl_n_docs, len(hs))
+            qdl_profile.append(float(np.mean(hs)) if hs else float("nan"))
+        _qdl = np.asarray(qdl_profile, dtype=np.float64)
+        _qdl_ok = np.isfinite(_qdl)
+        qdl_min = float(np.min(_qdl[_qdl_ok])) if _qdl_ok.any() else float("nan")
+        qdl_argmin = int(np.nanargmin(_qdl)) if _qdl_ok.any() else -1
+
         return {
+            # Queipo-de-Llano Eq. (1) valley depth: the headline of this family.
+            "qdl_entropy_min": qdl_min,
+            "_meta_qdl_entropy_per_layer": qdl_profile,
+            "_meta_qdl_entropy_min_layer_frac": (
+                qdl_argmin / (len(layers) - 1) if qdl_argmin >= 0 and len(layers) > 1
+                else float("nan")),
+            "_meta_qdl_n_docs": int(qdl_n_docs),
             "erank_per_layer": erank_per_layer,
             "max_erank": max_erank,
             "min_erank": min_erank,
