@@ -187,7 +187,7 @@ def test_persistence_entropy(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # May error if get_layers returns None for this architecture
     if "error" not in results:
-        assert "pe_simplification_ratio" in results
+        assert "_meta_pe_simplification_ratio" in results
         assert any("pe_h0" in k for k in results.keys())
         for key in list(results):
             if not key.endswith("_pe_h0_norm"):

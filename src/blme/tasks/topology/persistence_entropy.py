@@ -71,6 +71,9 @@ def _persistence_entropy(lifespans):
     return float(-np.sum(p * np.log2(p)))
 
 
+_H0_FAMILY = ("pe_h0", "pe_h0_full", "pe_h0_norm", "num_features_h0")
+
+
 @register_task("topology_persistence_entropy")
 class PersistenceEntropyTask(DiagnosticTask):
     """
@@ -150,13 +153,19 @@ class PersistenceEntropyTask(DiagnosticTask):
             for k, v in vals.items():
                 results[f"_meta_layer_{l_idx}_{k}"] = v
                 if l_idx in roles:
-                    results[f"{roles[l_idx]}_layer_{k}"] = v
+                    # The H0 family is _meta_: raw H0 entropy of N points is
+                    # log2(N - 1) to three digits, and E / log2(n) passes every
+                    # direct test but does not separate models (between/within
+                    # SD 0.5-1.3). H1 entropy and its E / log2(n) twin remain.
+                    pfx = "_meta_" if k in _H0_FAMILY else ""
+                    results[f"{pfx}{roles[l_idx]}_layer_{k}"] = v
 
-        # Summary: how much does topological entropy change across layers?
+        # Summary: how much does H0 entropy change across layers? (_meta_ with
+        # the rest of the H0 family.)
         pe_values = [results[f"_meta_layer_{l}_pe_h0"] for l in target_layers]
         if pe_values[0] > 0:
-            results["pe_simplification_ratio"] = float(pe_values[-1] / pe_values[0])
+            results["_meta_pe_simplification_ratio"] = float(pe_values[-1] / pe_values[0])
         else:
-            results["pe_simplification_ratio"] = 1.0
+            results["_meta_pe_simplification_ratio"] = 1.0
 
         return results
