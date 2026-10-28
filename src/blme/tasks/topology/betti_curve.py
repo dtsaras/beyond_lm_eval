@@ -7,20 +7,14 @@ networks progressively simplify topology: Betti numbers (connected components,
 loops) decrease with depth. The rate of this decrease and the final complexity
 are both informative structural metrics.
 
-Method (2026-06-22 redesign — refined adaptation of Naitzat et al.):
-  Following the paper and its reference code (topnn/topnn_framework), Betti
-  numbers are computed on a **graph-geodesic** distance (kNN graph + shortest
-  paths), NOT raw Euclidean distance, so manifold structure is respected.
-  * beta_0 = number of connected components of the symmetric kNN graph — robust
-    and parameter-light; it recovers the true cluster count (validated: K
-    separated blobs -> beta_0 = K), whereas the previous per-layer
-    median-Euclidean threshold collapsed beta_0 to ~1 regardless of structure.
-  * beta_1 = number of H1 loops with NORMALIZED persistence (death-birth)/
-    geodesic-diameter > ``persistence_frac`` (default 0.3), from ripser on the
-    geodesic distance matrix. Validated: noisy circle -> 1, figure-8 -> 2,
-    high-dim gaussian noise -> 0 (no spurious loops).
-  This is NOT exact parity with the paper's Eirene backend (different homology
-  engine and a single-fixed-scale read); it is a faithful, validated adaptation.
+Method (refined adaptation of Naitzat et al. and topnn/topnn_framework):
+  Betti numbers are computed on the kNN graph, not on raw Euclidean distance.
+  * beta_0 = number of connected components of the symmetric kNN graph.
+  * beta_1 = H1 classes alive at a radius of ``hop_radius`` hops on the
+    unit-edge (hop) metric of each component, read with ripser -- the paper's
+    Eirene read at minrad=1, maxrad=2, numrad=1.
+  The homology engine differs from the paper's Eirene; the construction is
+  validated on the paper's own examples (tests/tasks/test_topology.py).
 
 References:
 - "Topology of Deep Neural Networks" (Naitzat, Zhitnikov & Lim, JMLR 21(184):1-40, 2020, arXiv:2004.06093)
@@ -58,10 +52,10 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
       * ``beta_0`` = number of connected components of the symmetric kNN
         graph (scipy ``connected_components``). Parameter-light and robust;
         recovers the true cluster count.
-      * ``beta_1`` = number of H1 loops whose NORMALIZED persistence
-        ``(death - birth) / geodesic_diameter`` exceeds ``persistence_frac``,
-        from ripser on the geodesic distance matrix (disconnected pairs are
-        capped at twice the finite geodesic diameter).
+      * ``beta_1`` = with ``hop_metric`` (default), the H1 classes alive at
+        ``hop_radius`` hops; otherwise the H1 loops whose NORMALIZED
+        persistence ``(death - birth) / geodesic_diameter`` exceeds
+        ``persistence_frac``.
 
     Args:
         data: (N, D) point cloud.
@@ -84,120 +78,43 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
     X = np.asarray(data, dtype=np.float64)
     X = X[np.all(np.isfinite(X), axis=1)]
 
-    # DUPLICATES ARE QUOTIENTED, because the RELEASED LOADER quotients.
-    #
-    # Round 9 reported that the released loader treats the input as a SET. I
-    # implemented it, two tests failed, and I reverted it on 2026-09-07 with
-    # the condition: "not reinstated until someone runs the released
-    # `topnn_framework` loader and shows what it does." That condition is now
-    # met by READING THE RELEASED SOURCE, not by taking a reviewer on trust --
-    # the caution that was right for `geometry_magnitude`, where live magnipy
-    # turned out to PERTURB rather than de-duplicate.
-    #
-    # topnn_framework/transformers/betti_calc_parallel.py, in `read_csv`:
-    #
-    #     data = np.unique(np.transpose(np.array(data)), axis=0)
-    #
-    # It de-duplicates the POINTS, before `find_neighbors` picks k and builds
-    # the graph. A unit-magnitude 42-point circle and the same circle plus 5
-    # exact copies therefore produce the identical released graph, Betti
-    # (1, 0); BLME turned (1, 0) into (1, 1). The mismatch survived 10/10
-    # jittered-circle cases, all 20 tested row permutations and both coordinate
-    # orders, and it reached a real model: on GPT-2 with 50 rows containing 36
-    # distinct WikiText texts, BLME gave beta_0 = [1,2,2,2,2,2,2,2,2,2,2,1]
-    # where the released loader on the SAME emitted arrays gives twelve 1s
-    # (codex round 12, 2026-09-08).
-    #
-    # This DOES destroy multiplicity that the kNN construction was using as
-    # density -- that observation from the revert was correct. It is not a
-    # reason to keep it: the released reference defines this statistic, and
-    # `test_betti_zero_distance_edges_do_not_inflate_beta0` was encoding BLME's
-    # own choice rather than the reference's. Executed released loader,
-    # independent GF(2) boundary reduction and GUDHI all return beta_0 = 1 on
-    # that fixture, and the test has been updated to the reference's answer.
+    # Duplicate points are quotiented, as the released loader does
+    # (topnn_framework betti_calc_parallel.py read_csv: np.unique(..., axis=0)).
     X = np.unique(X, axis=0)
 
     n = len(X)
     if n < 3:
-        # beta_0 IS THE COMPONENT COUNT OF THE GRAPH, not the point count.
-        #
-        # This returned `n`, so two distinct surviving points reported
-        # beta_0 = 2. The released construction joins them with an edge -- with
-        # k >= 1 every point has a neighbour -- so the graph has ONE component:
-        # beta_0 = n - rank(boundary_1) = 2 - 1 = 1 (+100% error). It became
-        # reachable far more often once duplicate rows were quotiented, and on a
-        # constructed two-block trajectory it reported simplification_ratio 2.0
-        # instead of 1.0 and decay 0.9999999999999998 instead of 0.0
-        # (codex round 13, 2026-09-08).
+        # beta_0 is the component count of the graph: with k >= 1 the
+        # surviving points are joined, so it is 1 (0 for an empty cloud).
         _b0 = 1 if n >= 1 else 0
         return ((_b0, 0, 0.0, 0.0) if return_persistence else (_b0, 0))
 
-    # Neighbourhood size. A FIXED k (was 5) is wrong for two reasons: it does
-    # not scale with N, and it routinely leaves the kNN graph DISCONNECTED --
-    # at which point the geodesic matrix has infinities that get capped at an
-    # arbitrary "twice the finite diameter", and that arbitrary constant then
-    # sets the H1 persistence values the Betti count thresholds on. So beta_1
-    # depended on a fallback constant rather than on the data.
-    #
-    # ``n_neighbors="auto"`` (now the default) starts at max(5, ceil(log2 N))
-    # and grows k until the graph is connected, so the infinity cap never
-    # fires. The cap is retained only as a last resort.
+    # "auto": max(14, ceil(log2 N)); 14 is the paper's calibrated k for its
+    # hollow-torus example (Fig. 3(e)), which reads beta_1 = 2 there.
     if isinstance(n_neighbors, str) and n_neighbors == "auto":
-        # Floor at 14, the paper's own calibrated k. `ceil(log2 N)` gives 10 at
-        # N = 1000, where Naitzat Fig. 3(e)'s hollow torus reads beta_1 = 8
-        # against a published 2; at k = 14 it reads 2 (adversarial review,
-        # 2026-09-03).
         k = int(max(14, math.ceil(math.log2(max(n, 2)))))
     else:
         k = int(n_neighbors)
     k = int(min(k, n - 1))
     tree = cKDTree(X)
-    # Column 0 is usually the point itself, but with exact-duplicate points
-    # the self-entry and the duplicate (both distance 0) may swap columns.
-    # Dropping column 0 is still safe: the surviving zero-distance entry is
-    # either the duplicate edge (kept, floored below) or a harmless (i, i)
-    # self-loop that csgraph ignores.
+    # Column 0 is the point itself (with exact duplicates removed above).
     dists, idx = tree.query(X, k=k + 1)
     dists = np.atleast_2d(dists)
     idx = np.atleast_2d(idx)
 
     rows = np.repeat(np.arange(n), k)
     cols = idx[:, 1:].ravel()
-    # Keep zero-distance edges (duplicate points) as real edges: scipy's csgraph
-    # treats an explicit-zero entry as "no edge", so duplicates would otherwise
-    # be disconnected and inflate beta_0. Floor at a tiny epsilon.
+    # csgraph reads an explicit zero as "no edge", so distances are floored.
     vals = np.maximum(dists[:, 1:].ravel(), 1e-12)
     graph = csr_matrix((vals, (rows, cols)), shape=(n, n))
     graph = graph.maximum(graph.T)  # symmetrize (mutual + one-directional kNN)
 
-    # beta_0 is read from the HONEST kNN graph, before any connectivity repair.
-    # Growing k until the graph connects would merge genuinely separate
-    # clusters: on c well-separated Gaussians at N=100 the k-growing variant
-    # returned beta_0 = 1 for c = 2, 3, 5 and 10 (adversarial review
-    # 2026-09-03). Since the paper's headline is the simplification ratio
-    # beta_0_late / beta_0_early, that bias drives the ratio to 1 and the
-    # slope to 0 -- i.e. it manufactures the paper's claimed effect.
+    # beta_0 is read from the kNN graph as built; no connectivity repair.
     n_components, comp_labels = connected_components(graph, directed=False)
     betti_0 = int(n_components)
 
-    # For the GEODESIC step the graph must still be connected, or the distance
-    # matrix carries infinities that get capped at an arbitrary constant which
-    # then sets the H1 persistences. Bridge components with their
-    # minimum-weight connecting edges instead of inflating k, so beta_0 above
-    # is untouched and the geodesic metric is finite.
-    # H1 is computed PER CONNECTED COMPONENT and combined.
-    #
-    # H_1 of a disjoint union is the direct sum of the components' H_1, so this
-    # is the topologically correct decomposition -- and it removes the need to
-    # connect components at all. Forcing connectivity distorted the geodesic
-    # metric enough to destroy the loops being counted: with c separated noisy
-    # circles (truth beta_1 = c) the bridged single-graph computation returned
-    # beta_1 = 0 for every c >= 2 (adversarial review, 2026-09-03).
-    #
-    # Working inside each component also makes every geodesic finite by
-    # construction, so the old "cap infinities at twice the finite diameter"
-    # fallback -- an arbitrary constant that then set the H1 persistences the
-    # Betti count thresholds on -- is gone entirely.
+    # H1 per connected component (H1 of a disjoint union is the direct sum),
+    # so every geodesic is finite and no infinity cap is needed.
     lifetimes = []
     alive = []
     for comp in range(n_components):
@@ -206,17 +123,9 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
             continue                       # too small to carry a 1-cycle
         sub = graph[idx][:, idx]
         if hop_metric:
-            # UNIT-EDGE (hop) metric, which is what Naitzat et al. actually use:
-            # JMLR Sec. 6.3 -- "Each edge, regardless of its Euclidean length,
-            # has the same length of one when measured in delta_k" -- and their
-            # code confirms it (kneighbors_graph with no mode= is binary, and
-            # Eirene is run at minrad=1, maxrad=2, numrad=1, i.e. a read at two
-            # hops).
-            #
-            # It changes the answer on the paper's OWN example: for the hollow
-            # torus of their Figure 3(e), published beta = (1, 2, 1), the
-            # weighted-geodesic version returns beta_1 = 1 while the hop metric
-            # returns exactly 2 (adversarial review, 2026-09-03).
+            # Unit-edge (hop) metric, as Naitzat et al. use (Sec. 6.3:
+            # "Each edge, regardless of its Euclidean length, has the same
+            # length of one").
             sub = sub.copy()
             sub.data = np.ones_like(sub.data)
         geo_c = shortest_path(sub, method="D", directed=False)
@@ -226,19 +135,8 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
         scale_c = float(finite_c.max())
         if scale_c <= 0:
             continue
-        # POWER-OF-TWO rescale before ripser -- see the long note in
-        # `zigzag.py`. ripser casts the distance matrix to float32
-        # (ripser.py:324), so entries past 3.4e38 overflow to +inf and the
-        # filtration loses its top: a 40-point circle whose betti_1 is 1 by
-        # construction reads 1 from 1e-30 through 1e38 and then 0 at
-        # 2.406159650500376e38.
-        #
-        # Gated to out-of-range magnitudes, which is what keeps the two
-        # branches below consistent. `hop_metric` compares an ABSOLUTE radius
-        # (`b <= hop_radius < d`) against a hop count -- a small integer, always
-        # inside 1e-6..1e6 -- so no rescale ever fires on that path and the
-        # fixed-radius read is untouched. The geodesic path normalises
-        # lifetimes by `scale_c`, which is shifted by the same exact factor.
+        # ripser casts to float32: a power-of-two rescale (exact) keeps
+        # out-of-range magnitudes finite; hop counts are never rescaled.
         _gm = float(np.max(np.abs(geo_c))) if geo_c.size else 0.0
         if _gm > 0 and np.isfinite(_gm) and not (1e-6 < _gm < 1e6):
             _e = int(max(-126, min(127, round(math.log2(_gm)))))
@@ -249,45 +147,17 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
             dgms_c = ripser(geo_c, distance_matrix=True, maxdim=maxdim)["dgms"]
         h1_c = dgms_c[1] if len(dgms_c) > 1 else []
         if hop_metric:
-            # FIXED-RADIUS read, which is what Naitzat et al. do: Eirene is run
-            # at minrad=1, maxrad=2, numrad=1, i.e. beta_p is the number of
-            # classes ALIVE at a radius of `hop_radius` hops -- not a count of
-            # bars that survive a persistence threshold.
-            #
-            # Keeping the persistence threshold on a hop metric was still wrong:
-            # hop diameters are tiny (a handful of hops), so a 0.3-of-diameter
-            # cut removes genuine classes. On the paper's Figure 3(e) hollow
-            # torus (published beta = (1, 2, 1)) the thresholded read returns
-            # beta_1 = 1 while the fixed-radius read can return 2.
-            #
-            # The radius is settled at 2 hops: Eirene's
-            # `minrad=1, maxrad=2, numrad=1` collapses to a SINGLE radius of
-            # r = 2 with no persistence threshold, which is exactly this read
-            # (verified against `topnn/topnn_framework`).
-            #
-            # My earlier note here said "the radius is not settled". That was a
-            # MISDIAGNOSIS: the uncalibrated parameter is **k**, not the radius.
-            # At the paper's own calibrated k = 14 (and k = 20), radius 2
-            # reproduces the published beta_1 = 2 for Naitzat Fig. 3(e)'s hollow
-            # torus at both N = 1000 and N = 2000. At the shipped auto-k = 10
-            # the same torus reads 8 (adversarial review, 2026-09-03).
+            # Fixed-radius read: classes alive at `hop_radius` hops (Eirene at
+            # minrad=1, maxrad=2, numrad=1 in topnn_framework).
             alive.extend(1 for b, d in h1_c
                          if np.isfinite(d) and b <= hop_radius < d)
-        # Normalized by THIS component's geodesic diameter, so a large and a
-        # small copy of the same shape score alike.
+        # Normalised by this component's geodesic diameter.
         lifetimes.extend((d - b) / scale_c for b, d in h1_c if np.isfinite(d))
 
     betti_1 = (int(sum(alive)) if hop_metric
                else sum(1 for lt in lifetimes if lt > persistence_frac))
 
-    # Continuous H1 summaries. The hard count above is ZERO for every real
-    # model tested: on gpt2 the maximum normalized H1 persistence per layer is
-    # 0.106 0.122 0.092 0.106 0.106 0.110 0.140 0.132 0.165 0.164 0.150 0.049
-    # -- never within a factor of two of the 0.3 threshold -- so beta_1, and
-    # therefore max_betti_1 and max_betti_1_layer, are constants across the
-    # whole model zoo (adversarial review 2026-09-03). Those same numbers are
-    # a clear depth profile, so the signal is real and it is the THRESHOLD
-    # that discards it. These threshold-free summaries are the ones to use.
+    # Threshold-free H1 summaries.
     if not return_persistence:
         return betti_0, int(betti_1)
     max_pers = float(max(lifetimes)) if lifetimes else 0.0
@@ -299,7 +169,7 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
 class BettiCurveTask(DiagnosticTask):
     """
     Traces the Betti number trajectory (β0, β1) across all layers of the model.
-    
+
     Following Naitzat et al. (JMLR 2020), tracks how topological complexity
     changes with depth. Reports:
     - β0 at each layer (connected components)
@@ -308,23 +178,20 @@ class BettiCurveTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Betti Curve (Topological Complexity Trajectory)...")
-        # 20 points is not a point cloud: persistent homology on 20 mean-pooled
-        # vectors returns integers driven by sampling noise, and the reported
-        # simplification_ratio was then a ratio of two single-digit counts.
         # The topology-of-representations literature works at ~10^3 points.
         num_samples = self.config.get("num_samples", 1000)
         n_neighbors = self.config.get("n_neighbors", "auto")
         if n_neighbors != "auto":
             n_neighbors = int(n_neighbors)
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
-        
+
         if not HAS_RIPSER:
             msg = "Ripser library not installed. Install with: pip install ripser"
             logger.info(msg)
             return {"error": msg}
-            
+
         device = next(model.parameters()).device
-        
+
         if dataset is None:
             try:
                 from datasets import load_dataset
@@ -342,23 +209,15 @@ class BettiCurveTask(DiagnosticTask):
         samples = list(dataset)[:num_samples]
         if len(samples) < 3:
             return {"error": "Need at least 3 samples for Betti curve"}
-        
+
         layers = get_layers(model)
         num_layers = len(layers)
-        
+
         # Collect mean-pooled representations at EVERY layer
         layer_reps = {l: [] for l in range(num_layers)}
-        
-        # RECOVER THE DEEPEST BLOCK'S RAW OUTPUT with a forward hook.
-        #
-        # THE TENTH instance of this defect, and the last one to be found: HF's
-        # final `hidden_states` entry is `ln_f(b_{L-1})`, so the curve mixed
-        # 11 block outputs with ONE LayerNorm output. On gpt2 the deepest
-        # layer's H1 total persistence read 5.2727 against 27.0000 for the true
-        # block output (+412%), and `h1_max_persistence_layer_frac` FLIPPED
-        # 0.0 -> 1.0 (independent Opus review, 2026-09-05). Model-dependent --
-        # pythia-70m is unaffected -- which is exactly what makes it dangerous
-        # in a cross-model comparison.
+
+        # post-final-norm: SUBSTITUTED -- the deepest cloud is the raw last block (HF's last entry is
+        # ln_f(block L-1)); the hook is removed in `finally`.
         _sink = {}
         _hook = layers[-1].register_forward_hook(
             lambda mod, inp, outp: _sink.__setitem__(
@@ -371,8 +230,6 @@ class BettiCurveTask(DiagnosticTask):
                     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
                     _sink.pop("h", None)
                     out = model(**inputs, output_hidden_states=True)
-                    # post-final-norm: SUBSTITUTED -- the deepest sampled layer must
-                    # be a block output like every other entry in this profile.
                     _hs = list(out.hidden_states)
                     _n_fwd += 1
                     _h_raw = _sink.get("h")
@@ -383,25 +240,18 @@ class BettiCurveTask(DiagnosticTask):
 
                     for l_idx in range(num_layers):
                         hidden = _hs[l_idx + 1][0]
-                        # .float() first: numpy doesn't accept bf16 tensors.
-                        # The trailing .float() DISCARDED the precision the .double() was added to
-                        # gain: promote, average, then narrow back is self-defeating. Removing only
-                        # this cast moved geometry_correlation_dimension from 7.486064047571674 to
-                        # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
-                        # independently reconstructed Grassberger-Procaccia value, and restored a
-                        # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
-                        # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
+                        # One mean-pooled vector per document, pooled in float64.
                         rep = hidden.double().mean(dim=0).cpu().numpy()
                         layer_reps[l_idx].append(rep)
         finally:
             _hook.remove()
         _last_is_block = bool(_n_fwd > 0 and _n_sub == _n_fwd)
-        
+
         betti_0_curve = []
         betti_1_curve = []
         h1_maxpers_curve = []
         h1_totpers_curve = []
-        
+
         for l_idx in range(num_layers):
             data = np.array(layer_reps[l_idx])
             b0, b1, mp, tp = _count_betti(
@@ -413,26 +263,21 @@ class BettiCurveTask(DiagnosticTask):
             betti_1_curve.append(b1)
             h1_maxpers_curve.append(mp)
             h1_totpers_curve.append(tp)
-        
+
         results = {
             "betti_0_curve": betti_0_curve,
             "betti_1_curve": betti_1_curve,
             "betti_0_first": betti_0_curve[0],
             "betti_0_last": betti_0_curve[-1],
         }
-        
+
         # Topological simplification ratio
         if betti_0_curve[0] > 0:
             results["simplification_ratio"] = float(betti_0_curve[-1] / betti_0_curve[0])
         else:
             results["simplification_ratio"] = 1.0
-        
-        # Rate of decay: linear regression slope of β0 vs **normalised
-        # depth** (x in [0, 1]) so the slope is comparable across
-        # models with different layer counts. Using raw layer index
-        # instead makes a 12-layer and 80-layer model's slopes scale
-        # differently — same issue as the fix applied to
-        # dynamics/gradient_flow.
+
+        # Slope of beta_0 against normalised depth x in [0, 1].
         if len(betti_0_curve) > 1:
             denom = max(1, num_layers - 1)
             x = np.arange(num_layers, dtype=np.float64) / float(denom)
@@ -440,26 +285,14 @@ class BettiCurveTask(DiagnosticTask):
             results["betti_0_decay_rate"] = float(slope)
         else:
             results["betti_0_decay_rate"] = 0.0
-            
-        # Max β1 layer (most topological loops)
-        # Absolute layer index leaks depth (and therefore model size) into the
-        # feature matrix; report normalized depth alongside it.
+
+        # Layer with the most loops, absolute and as a depth fraction.
         results["max_betti_1_layer"] = int(np.argmax(betti_1_curve))
         results["max_betti_1_layer_frac"] = (
             float(np.argmax(betti_1_curve)) / float(max(1, num_layers - 1)))
 
-        # Threshold-free H1 summaries: these vary across models and depth
-        # where the thresholded counts above are identically zero.
-        # WHAT `h1_max_persistence` ACTUALLY IS, measured.
-        #
-        # Under the HOP metric every H1 bar has lifetime exactly 1 -- verified
-        # on five clouds carrying 38 to 3,032 bars -- so this summary is
-        # algebraically 1/(hop diameter), and all 36 panel layer values across
-        # four models are exactly 1/integer (independent Opus review,
-        # 2026-09-05). It is a reciprocal DIAMETER, not a persistence spread;
-        # the manuscript presents it as the carrier of the H1 signal, which it
-        # is only in that restricted sense. Recorded here so no reader infers
-        # more from it than the metric can express.
+        # Under the hop metric every H1 bar has lifetime 1, so the normalised
+        # maximum is 1 / (hop diameter): a reciprocal diameter, not a spread.
         results["_meta_last_entry_is_block_output"] = bool(_last_is_block)
         results["h1_max_persistence_curve"] = h1_maxpers_curve
         results["h1_max_persistence"] = float(np.max(h1_maxpers_curve))
@@ -468,5 +301,5 @@ class BettiCurveTask(DiagnosticTask):
         results["h1_max_persistence_layer_frac"] = (
             float(np.argmax(h1_maxpers_curve)) / float(max(1, num_layers - 1)))
         results["max_betti_1"] = int(np.max(betti_1_curve))
-            
+
         return results
