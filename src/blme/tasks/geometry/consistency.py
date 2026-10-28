@@ -43,7 +43,7 @@ def _sink_masks(model, tokenizer, dataset, cache, num_samples, from_cache):
     skipped). Returns ``(masks, info, middle_layer_docs, source)``.
     """
     per_doc = None
-    if from_cache and hasattr(cache, "get_hidden_states"):
+    if from_cache:
         per_doc, _ = hidden_states_for_task(
             model, tokenizer, None, cache, num_samples=num_samples,
             replace_final_norm=True, layer_idx="all", per_sample=True, fallback="none")

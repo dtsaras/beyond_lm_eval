@@ -1,6 +1,6 @@
-"""geometry_prediction_alignment: position-0 pair dropped, centring and the
-uniform control over emittable rows, key hygiene -- real gpt2 weights with
-injected prediction statistics."""
+"""geometry_prediction_alignment: sink pairs (position 0 and massive tokens)
+dropped, centring and the uniform control over emittable rows, key hygiene --
+real gpt2 weights with injected prediction statistics."""
 from __future__ import annotations
 
 import pytest
@@ -12,7 +12,8 @@ TASK = "geometry_prediction_alignment"
 
 
 class _StatsCache:
-    """A populated cache that serves fixed prediction statistics."""
+    """A populated cache that serves fixed prediction statistics and no
+    hidden states (an attention/logits-only population)."""
 
     is_populated = True
 
@@ -21,6 +22,9 @@ class _StatsCache:
 
     def get_prediction_stats(self, num_samples=None):
         return self._stats, None
+
+    def get_hidden_states(self, **kw):
+        return None
 
 
 @pytest.fixture(scope="module")
