@@ -648,11 +648,13 @@ def test_cka(mock_model, mock_tokenizer):
     # with stats of [0..N-1]; the rewrite intentionally drops them.
     assert "cka_matrix" not in results
     assert "layers" not in results
-    # Paper-faithful scalar summaries.
-    for k in ("avg_adjacent_cka", "mean_offdiag_cka", "early_late_cka",
-              "first_middle_cka", "_meta_n_layers"):
+    # Depth-invariant headline keys, their debiased twins, and the uniform
+    # layer summaries as _meta_ profiles (tests/tasks/invariance/test_cka.py).
+    for k in ("early_late_cka", "min_offdiag_cka", "min_adjacent_cka",
+              "early_late_cka_debiased", "_meta_avg_adjacent_cka",
+              "_meta_mean_offdiag_cka", "_meta_first_middle_cka", "_meta_n_layers"):
         assert k in results, f"missing {k}"
-    assert 0 <= results["avg_adjacent_cka"] <= 1.0
+    assert 0 <= results["_meta_avg_adjacent_cka"] <= 1.0
 
 
 def test_collapse(mock_model, mock_tokenizer):
@@ -792,7 +794,8 @@ def test_mutual_info(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "avg_adjacent_hsic" in results
+        assert "min_adjacent_hsic" in results
+        assert "_meta_avg_adjacent_hsic" in results
 
 
 def test_perplexity_rare_freq(mock_model, mock_tokenizer):
@@ -1539,14 +1542,19 @@ def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):
     if "error" in results:
         pytest.skip(f"unsupported architecture: {results['error']}")
 
+    # The dummy tokenizer's 4 x 8 random ids give no next-token class with
+    # min_per_class samples: the CDNV keys are then NaN WITH a reason, and
+    # every other float (the topic proxy included) must be finite.
+    explained = {"nc1_cdnv", "nc1_cdnv_galanti"} if "_meta_nc_reason" in results else set()
     for key, val in results.items():
-        if isinstance(val, float):
+        if isinstance(val, float) and key not in explained:
             assert np.isfinite(val), f"{key} not finite"
     assert any("nc1" in k for k in results), results.keys()
+    assert np.isfinite(results["_meta_topic_nc1_within_class_collapse"])
     r2 = NeuralCollapseTask(config={"num_samples": 4}).evaluate(
         mock_model, mock_tokenizer, dataset=None)
     for key, val in results.items():
-        if isinstance(val, float):
+        if isinstance(val, float) and key not in explained:
             assert val == pytest.approx(r2[key], abs=0.0), f"{key} not deterministic"
 
 

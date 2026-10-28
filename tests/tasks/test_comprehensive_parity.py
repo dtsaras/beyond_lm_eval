@@ -2907,7 +2907,8 @@ def test_geometry_categories():
         assert res_m[f"{c}_purity"] == pytest.approx(ref_pur_m[c], abs=1e-9)
         assert 0.0 < res_m[f"{c}_purity"] < 1.0   # genuinely impure -> non-vacuous
 
-    assert res["n_category_tokens_mapped"] == 16
+    assert res["_meta_n_category_tokens_mapped"] == 16
+    assert "n_category_tokens_mapped" not in res
 
 # === geometry_collapse  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===
 def test_geometry_collapse():
@@ -3818,8 +3819,9 @@ def test_geometry_prediction_alignment():
             ids = tok(sample["text"], return_tensors="pt")["input_ids"]
             hs = model(input_ids=ids, output_hidden_states=True).hidden_states[-1]
             h = hs[0].cpu().numpy()              # (T, D) final hidden states
-            labels = ids[0, 1:].cpu().numpy()    # next tokens y_{t+1}
-            h_pred = h[:-1]                      # h_t aligned to y_{t+1}
+            labels = ids[0, 2:].cpu().numpy()    # next tokens y_{t+1}, t >= 1
+            h_pred = h[1:-1]                     # h_t aligned to y_{t+1}; the
+            # position-0 pair is dropped, as the task's TOKEN_POLICY does
             for i in range(h_pred.shape[0]):
                 cos = sklearn_pw.cosine_similarity(
                     h_pred[i:i + 1], W[labels[i]:labels[i] + 1]
@@ -4039,10 +4041,13 @@ def test_geometry_rsa():
     # with the deepest one recovered by a hook. HF's final entry is
     # ln_f(b_{L-1}), which had made rsa_adjacent_min the final NORM's own
     # transition in 16/16 gpt2 windows.
-    all_layers = collect_hidden_states(model, tok, dataset,
-                                       num_samples=config["num_samples"],
-                                       layer_idx="all",
-                                       replace_final_norm=True)
+    per_doc = collect_hidden_states(model, tok, dataset,
+                                    num_samples=config["num_samples"],
+                                    layer_idx="all",
+                                    replace_final_norm=True, per_sample=True)
+    # The task drops position 0 (TOKEN_POLICY) before selecting rows.
+    from blme.tasks._tokens import select_rows
+    all_layers = {li: select_rows(v, "exclude_pos0")[0] for li, v in per_doc.items()}
     layer_indices = sorted(all_layers.keys())
     n_layers = len(layer_indices)
     assert n_layers >= 2
@@ -4085,12 +4090,12 @@ def test_geometry_rsa():
     ref_min_layer = int(np.argmin(adj))
 
     TOL = 1e-9
-    assert out["rsa_adjacent_mean"] == pytest.approx(ref_adjacent_mean, abs=TOL)
-    assert out["rsa_adjacent_min"] == pytest.approx(ref_adjacent_min, abs=TOL)
-    assert out["rsa_adjacent_std"] == pytest.approx(ref_adjacent_std, abs=TOL)
-    assert out["rsa_early_late"] == pytest.approx(ref_early_late, abs=TOL)
-    assert out["rsa_first_middle"] == pytest.approx(ref_first_mid, abs=TOL)
-    assert out["_meta_rsa_min_continuity_layer"] == ref_min_layer
+    assert out["_meta_rsa_adjacent_mean_euclidean"] == pytest.approx(ref_adjacent_mean, abs=TOL)
+    assert out["_meta_rsa_adjacent_min_euclidean"] == pytest.approx(ref_adjacent_min, abs=TOL)
+    assert out["_meta_rsa_adjacent_std_euclidean"] == pytest.approx(ref_adjacent_std, abs=TOL)
+    assert out["_meta_rsa_early_late_euclidean"] == pytest.approx(ref_early_late, abs=TOL)
+    assert out["_meta_rsa_first_middle_euclidean"] == pytest.approx(ref_first_mid, abs=TOL)
+    assert out["_meta_rsa_min_continuity_layer_euclidean"] == ref_min_layer
 
     # sanity: rsatoolbox euclidean RDM is NOT scipy's pdist euclidean (the
     # reference is an independent transform, only rank-equivalent -> not tautological)

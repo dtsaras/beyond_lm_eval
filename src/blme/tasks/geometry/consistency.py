@@ -67,6 +67,34 @@ class PredictionAlignmentTask(DiagnosticTask):
     interpretation for untied-head architectures (Gemma 3/4, etc.). Falls
     back to input embeddings if ``lm_head`` is unavailable.
     """
+    TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "none (BLME construct)",
+        "code": "none",
+        "llm_precedent": "arXiv:2303.08112 (Belrose et al. 2023, tuned lens: context only)",
+    }
+    ADAPTATION_NOTE = (
+        "The task asks whether the final hidden state points toward the output-"
+        "projection row of the token that actually comes next, beyond what "
+        "anisotropy and token frequency alone produce. It reports the mean per-token "
+        "difference between cos(h_t, w_{x_{t+1}}) and the cosine to the target of "
+        "another position in the same document (a frequency-preserving "
+        "derangement), after centring the output rows, a gauge freedom of the "
+        "softmax. Alternatives considered: the raw logit or log-probability of the "
+        "target (a capability measure), the raw cosine (reproduced by uniformly "
+        "random rows), and logit/tuned-lens divergences (Belrose et al. 2023), which "
+        "score distributions rather than geometry. The cosine margin separates "
+        "direction from norm and cancels anisotropy with a matched control. The "
+        "position-0 pair is dropped (its state is the context-free sink), and "
+        "centring and the uniform control use only rows the tokenizer can emit.")
+    HEADLINE_KEYS = ("prediction_alignment_mean", "prediction_alignment_std")
+    SIZE_INVARIANT = {
+        k: (("V_unused_zero_rows",),
+            "tests/tasks/invariance/test_prediction_alignment.py::"
+            "test_unused_vocabulary_rows_move_nothing")
+        for k in ("prediction_alignment_mean", "prediction_alignment_std")
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Prediction Alignment Analysis...")
         if dataset is None:
@@ -75,22 +103,8 @@ class PredictionAlignmentTask(DiagnosticTask):
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
 
-        # A POPULATED CACHE IS NOT NECESSARILY A COMPLETE ONE.
-        #
-        # `is_populated` says the cache HAS been filled, not that it was filled
-        # with the observations THIS task needs. A cache populated for a
-        # consumer that does not request hidden states returns a stats dict
-        # without the "hidden" key, and the loop below then raised
-        # KeyError('hidden') -- destroying the task rather than degrading it,
-        # and losing the analytic 4/3 simplex result and the real gpt2 /
-        # pythia-70m / distilgpt2 headlines 0.00476083671008902 /
-        # 0.00797083420412881 / 0.003904443819608007 in all three incomplete
-        # cache feature combinations (codex round 13, 2026-09-08).
-        #
-        # This is the same class as geometry_vendi_score, geometry_magnitude,
-        # geometry_isoscore and geometry_svd: accept the cache on CONTENT, not
-        # on a populated flag. Checked by asking for the keys this task
-        # dereferences rather than by trusting the flag.
+        # Accept the cache on content (hidden states and labels), not on the
+        # populated flag (tests/tasks/test_prediction_alignment_storage.py).
         stats = None
         if cache is not None and cache.is_populated and use_cache:
             stats, _ = cache.get_prediction_stats(num_samples=num_samples)
@@ -110,53 +124,29 @@ class PredictionAlignmentTask(DiagnosticTask):
             return {"error": "Could not access output projection"}
 
         embeddings = embeddings.cpu()
-        # CENTRE THE UNEMBEDDING ROWS. Adding one fixed vector v to every row
-        # of W adds h.v to every logit, which cancels exactly in the softmax --
-        # so it is a gauge freedom of the model's function, and no faithful
-        # alignment measure may move under it. Cosine against RAW rows does
-        # move: adding 100*1 to every row (max softmax probability change 0.0)
-        # collapsed both corrected margins from 1.000000 to 0.004987508, and
-        # subtracting a random-row cosine does not remove it because the
-        # control rows carry the same offset (adversarial review, 2026-09-04).
-        # Centring removes exactly that direction and nothing else.
-        # `centre_and_rescale`, not `.float()` then centre.
-        #
-        # The margin is a COSINE, so it is scale-free and the returned exponent
-        # is deliberately ignored. The declared target-minus-control margin on
-        # a centred four-row simplex is exactly 4/3; this returned
-        # 1.3333332538604736 at 1e-30 through 1e25 and **NaN at the finite
-        # scale 2.406159650500376e38** (gpt-5.6-sol round 9, 2026-09-07),
-        # because the float32 cast came before the centring and the
-        # subtraction then overflowed.
-        #
-        # This is the fourth site found with that exact ordering defect on one
-        # day, after `matrix_entropy`, `collapse` and `contextualization`, so
-        # it uses the shared helper rather than a fourth hand-written copy --
-        # see `centre_and_rescale` for why the promote-centre-rescale order is
-        # the only one that satisfies all three failure modes at once.
+        # Only rows the tokenizer can emit enter the centroid and the uniform
+        # control: unused rows past len(tokenizer) are not tokens.
+        from .categories import _n_emittable
+        n_emit = _n_emittable(tokenizer, embeddings.shape[0])
+        _max_label = max((int(y.max()) for y in stats["labels"] if y.numel()), default=-1)
+        n_emit = max(n_emit, _max_label + 1)
+        n_unused = int(embeddings.shape[0] - n_emit)
+        embeddings = embeddings[:n_emit]
+        # Centre the unembedding rows: adding v to every row adds h.v to every
+        # logit, a softmax gauge no alignment measure may see. Promote, centre,
+        # then rescale (`centre_and_rescale`) so no step over/underflows.
         embeddings, _ = centre_and_rescale(embeddings)
         cosine_sims = []
         _residual_collisions = [0]
         _control_positions = [0]
-        # ANISOTROPY BASELINES. A raw cosine to the target row is inflated by
-        # the embedding space's own anisotropy: rows share a dominant
-        # direction, so ANY token scores high. Without a baseline the value is
-        # not evidence of target alignment at all -- measured against uniformly
-        # random vocabulary rows, gpt2's margin is NEGATIVE (-0.0077) and
-        # pythia-70m's is +0.00014, i.e. two models show no measurable target
-        # alignment whatever their raw score (adversarial review, 2026-09-03).
-        #
-        # Two controls:
-        #   freq-matched -- a PERMUTATION of the actual labels, which preserves
-        #     the empirical token-frequency marginal exactly, so the control
-        #     differs from the target only in *which* position each label is
-        #     paired with.
-        #   uniform -- an arbitrary vocabulary row, ignoring frequency.
+        # Anisotropy controls: a frequency-matched one (a derangement of the
+        # document's own labels) and a uniform-row one.
         baseline_freq = []
         baseline_unif = []
         margin_tokens = []
         _coll_hits, _coll_tot = [0], [0]
         _g = torch.Generator().manual_seed(20260903)
+        _n_p0_dropped = [0]
         _vocab = embeddings.shape[0]
 
         for h, labels in zip(stats["hidden"], stats["labels"]):
@@ -168,14 +158,18 @@ class PredictionAlignmentTask(DiagnosticTask):
                 h = h.reshape(-1, D)
             if hasattr(labels, "dim") and labels.dim() >= 2:
                 labels = labels.reshape(-1)
+            # Row r is position r predicting token r+1. The position-0 state
+            # is the context-free sink, so its pair is dropped (TOKEN_POLICY).
+            if self.TOKEN_POLICY == "exclude_pos0" and labels.shape[0] > 0:
+                h, labels = h[1:], labels[1:]
+                _n_p0_dropped[0] += 1
+            if labels.shape[0] == 0:
+                continue
 
             target_embs = F.embedding(labels, embeddings)
             # At this point both should be 2D of shape (N, D).
 
-            # SCALE-EXACT normalisation. `F.normalize` squares before summing,
-            # so it underflows: on a centred simplex the true margin is
-            # 1.3333333 at every scale, but the naive path returned 0.009999999
-            # at 1e-13 (adversarial review round 3, 2026-09-04).
+            # Scale-exact unit rows (F.normalize underflows).
             h_norm = _safe_unit(h.float())
             e_norm = _safe_unit(target_embs.float())
 
@@ -188,67 +182,16 @@ class PredictionAlignmentTask(DiagnosticTask):
             _lab_flat = labels.reshape(-1)
             n_lab = _lab_flat.shape[0]
             if n_lab > 1:
-                # DERANGEMENT, not a plain permutation. A plain shuffle leaves
-                # ~1/e of positions mapped to a token that happens to equal the
-                # true one (measured 2.29% here after accounting for repeats),
-                # and each such collision contributes a TARGET cosine to the
-                # control, biasing the margin down -- by 3.2% on the headline
-                # (+0.011371 emitted against +0.011738 corrected). Rotating by
-                # one guarantees position i never keeps its own label, then a
-                # shuffle is applied on top; any residual collision is a
-                # genuine repeat of the same token, which is not a leak.
-                # SATTOLO's algorithm: a single cycle, hence a genuine
-                # permutation with NO fixed point.
-                #
-                # The previous "derangement" was not a permutation at all:
-                # `torch.where(self_hit, torch.roll(rolled, 1), rolled)` writes
-                # rolled[i-1] into position i while i-1 still holds it, so the
-                # output had a duplicate index and a missing one. Measured on
-                # real data it corrupted 60/100 documents (gpt2) and 61/100
-                # (pythia-70m), which means some positions were scored twice in
-                # the control and others not at all (adversarial review,
-                # 2026-09-04).
-                # THE SATTOLO PERMUTATION SEEDS THE GROUPING BELOW.
-                #
-                # It used to be computed and then never read: the round-2
-                # constructive repair replaced `_idx` with a grouping built
-                # from each label's positions in NATURAL ORDER, which made the
-                # control fully deterministic and tie-broken by numeric token
-                # id. A pure vocabulary RELABELLING -- which leaves every raw
-                # cosine bit-identical -- then moved the headline by 0.34-1.72%
-                # (independent Opus review, 2026-09-04). Shuffling the
-                # positions before grouping removes that dependence, and the
-                # zero-collision guarantee is untouched because the rotation
-                # argument depends only on the GROUP SIZES.
+                # Control: positions shuffled by Sattolo's algorithm (a single
+                # cycle), then grouped by label and rotated by the largest
+                # group's size, so no position keeps its own token whenever
+                # that is arithmetically possible (minimum collisions otherwise).
                 _idx = torch.arange(n_lab)
                 for _i in range(n_lab - 1, 0, -1):
                     _j = int(torch.randint(0, _i, (1,), generator=_g).item())
                     _idx[_i], _idx[_j] = _idx[_j].clone(), _idx[_i].clone()
                 _shuf = _idx.tolist()
 
-                # Index-derangement alone removes only trivially self-paired
-                # positions, not repeats of the SAME TOKEN: residual label
-                # collisions (control token == true token) remained 1.438% on
-                # gpt2. Repair them by swapping with a partner for which the
-                # exchange is collision-free in both directions.
-                # CONSTRUCTIVE repair, not a greedy single-pass swap.
-                #
-                # The greedy pass only fixed a collision when it found one
-                # partner whose exchange was clean in both directions, and gave
-                # up otherwise: on [A,A,B,B] it left 2 of 4 collisions and
-                # emitted 0.500000 where the exact non-target margin is
-                # 1.000000, and on 64 labels split 32/32 it left 30/64 =
-                # 46.875% and emitted 0.531250 (adversarial review,
-                # 2026-09-04).
-                #
-                # Group the positions by label, largest group first, and rotate
-                # the grouped order by the size of the LARGEST group. Every
-                # position then lands on one at least `m` places away in the
-                # grouped order, which is outside its own block, so NO
-                # collision survives whenever the largest label occupies at
-                # most half the positions -- and when it occupies more than
-                # half, some collisions are arithmetically unavoidable and this
-                # attains the minimum possible number of them.
                 _lab_list = _lab_flat.tolist()
                 _by_label = {}
                 for _i in _shuf:                      # randomised order
@@ -270,25 +213,12 @@ class PredictionAlignmentTask(DiagnosticTask):
                     F.embedding(_lab_flat[_rolled], embeddings).float()
                 )).sum(dim=-1)
                 baseline_freq.extend(cos_f.reshape(-1).tolist())
-                # Per-token margin, so the reported std matches the reported
-                # mean. The previous std was the RAW cosine's (0.048174) beside
-                # a mean that is a margin (0.011371), making mean +/- std
-                # incoherent.
-                # Subtract in float64. In float32 the difference of two
-                # cosines of order 5e-2 carries ~6e-9 of rounding, which broke
-                # the exact identity
-                # `mean(margin) == mean(raw) - mean(control)` by 1.07e-9 --
-                # small, but the identity is either exact or it is not.
+                # Per-token margin in float64, so mean(margin) is exactly
+                # mean(raw) - mean(control) and the std matches the mean.
                 margin_tokens.extend(
                     (cos.reshape(-1).double()
                      - cos_f.reshape(-1).double()).tolist())
-                # Collision rate: how often the control token IS the true one.
-                #
-                # This is a CORPUS property, not an estimator property, and it
-                # was measured nowhere. On a corpus of repeated-token documents
-                # it is 100% and `prediction_alignment_mean` collapses to
-                # exactly 0.0 -- a number indistinguishable from "no target
-                # alignment" -- with nothing in the output to say why.
+                # Collision rate: a corpus property (100% on repeated-token text).
                 _coll_hits[0] += int((_lab_flat[_rolled] == _lab_flat).sum())
                 _coll_tot[0] += int(n_lab)
             if _vocab > 0 and n_lab > 0:
@@ -299,15 +229,8 @@ class PredictionAlignmentTask(DiagnosticTask):
 
         _mean = float(np.mean(cosine_sims))
         out = {
-            # DEMOTED. The raw cosine carries essentially no target
-            # information: replacing every target with a UNIFORMLY RANDOM
-            # vocabulary row reproduces the reported value to within 0.1-1.1%
-            # of its entire 1.043 cross-model range. Independently, over 236
-            # gpt2 positions Spearman(cosine over vocab, logit over vocab) is
-            # -0.2246 (min -0.626), the argmax agrees 3.4% of the time, and the
-            # cosine-argmax is the true next token 3.8% of the time against
-            # 30.5% for the logit -- so it is not a "normalized logit" either
-            # (adversarial review, 2026-09-04).
+            # The raw cosine is reproduced by uniformly random rows to within
+            # 0.1-1.1% of its cross-model range: _meta_.
             "_meta_prediction_alignment_raw_mean": _mean,
             "_meta_prediction_alignment_raw_std": float(np.std(cosine_sims)),
         }
@@ -316,33 +239,15 @@ class PredictionAlignmentTask(DiagnosticTask):
         if baseline_freq:
             _bf = float(np.mean(baseline_freq))
             out["_meta_prediction_alignment_freq_baseline"] = _bf
-            # PROMOTED to the headline: the anisotropy-corrected margin is the
-            # only part that carries evidence of target alignment. Emitted
-            # ONCE -- `prediction_alignment_margin` was a bit-identical
-            # duplicate column, which doubles this task's weight in any
-            # regularized regression.
-            # Mean of the PER-TOKEN margins, not (mean raw - mean control).
-            #
-            # The two differ whenever the row sets differ: the control is only
-            # formed for documents with >1 label, so a corpus containing
-            # single-token documents leaves the baseline bit-identical while
-            # the difference-of-means drifts. Counterexample: 50 two-token
-            # documents move the headline +0.01111735 -> +0.01088389 (-2.10%)
-            # with the baseline unchanged. `margin_tokens` is already computed
-            # and is bit-identical on WikiText (adversarial review, 2026-09-04).
+            # Headline: mean of the per-token margins over the matched control.
             out["prediction_alignment_mean"] = (
                 float(np.mean(margin_tokens)) if margin_tokens else _mean - _bf)
             out["prediction_alignment_std"] = (
                 float(np.std(margin_tokens)) if margin_tokens
                 else float(np.std(cosine_sims)))
         if "prediction_alignment_mean" not in out:
-            # No document had >1 label, so no frequency-matched control could
-            # be formed. The key means "cosine MINUS a matched control"; filling
-            # it with the RAW cosine silently changes the estimand under the
-            # same name -- eight one-label documents returned 1.000000 there
-            # with zero controls formed (adversarial review, 2026-09-04). Emit
-            # NaN for the corrected quantity and put the raw cosine under its
-            # own name.
+            # No control could be formed: NaN, with the raw cosine under its
+            # own name (never the raw value under the corrected key).
             out["prediction_alignment_mean"] = float("nan")
             out["prediction_alignment_std"] = float("nan")
             out["prediction_alignment_raw_cosine_mean"] = _mean
@@ -352,8 +257,13 @@ class PredictionAlignmentTask(DiagnosticTask):
         if _control_positions[0]:
             out["_meta_prediction_alignment_residual_collision_frac"] = float(
                 _residual_collisions[0] / _control_positions[0])
+        out["_meta_n_position0_pairs_dropped"] = int(_n_p0_dropped[0])
+        out["_meta_n_emittable_rows"] = int(n_emit)
+        out["_meta_n_unused_rows"] = n_unused
         if baseline_unif:
             _bu = float(np.mean(baseline_unif))
             out["_meta_prediction_alignment_uniform_baseline"] = _bu
-            out["prediction_alignment_margin_uniform"] = _mean - _bu
+            # _meta_: the uniform-row control ignores token frequency, and the
+            # margin over it is far more vocabulary-sensitive than the headline.
+            out["_meta_prediction_alignment_margin_uniform"] = _mean - _bu
         return out

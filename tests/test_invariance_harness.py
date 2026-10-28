@@ -266,16 +266,17 @@ def test_profiles_keep_full_depth():
     L = 6
     S = {li: [rng.standard_normal((40, 8)) + li for _ in range(3)] for li in range(L)}
     hsic = inv.run_task_on_states("geometry_hsic", S)
-    assert len(hsic["adjacent_hsic"]) == L - 1
+    assert len(hsic["_meta_adjacent_hsic"]) == L - 1
     rsa = inv.run_task_on_states("geometry_rsa", S)
     assert rsa["_meta_last_entry_is_block_output"] is True
-    assert rsa["rsa_early_late"] != rsa["rsa_adjacent_mean"]
+    assert rsa["rsa_early_late_corrdist"] != rsa["rsa_adjacent_min_corrdist"]
 
 
-def test_legacy_cache_trim_depends_on_the_stub_config():
-    """Why the stub must report its depth: on a cache without the deepest-block
-    capture, HSIC trims to collected_layer_count(model) -- 2 when the config
-    lacks num_hidden_layers/n_layer."""
+def test_legacy_cache_trim_does_not_depend_on_the_stub_config():
+    """On a cache without the deepest-block capture, HSIC drops exactly the
+    post-norm entry whatever the config says. It used to trim to
+    collected_layer_count(model) -- 2 when the config lacked
+    num_hidden_layers/n_layer (tests/tasks/invariance/test_hsic.py)."""
     from blme.tasks.geometry.mutual_info import HSICDependenceTask
     rng = np.random.default_rng(0)
     L = 6
@@ -287,8 +288,8 @@ def test_legacy_cache_trim_depends_on_the_stub_config():
         cache = inv.InjectedStateCache(S, m, inv.StubTokenizer())
         cache._last_block_raw = None          # a cache built before the hook existed
         r = HSICDependenceTask({"num_samples": 3}).evaluate(m, None, None, cache=cache)
-        lengths[name] = len(r["adjacent_hsic"])
-    assert lengths == {"depth": L - 2, "no depth": 1}
+        lengths[name] = r["_meta_n_layers"] - 1
+    assert lengths == {"depth": L - 2, "no depth": L - 2}
 
 
 @pytest.mark.parametrize("task", ["geometry_correlation_dimension", "topology_homology",

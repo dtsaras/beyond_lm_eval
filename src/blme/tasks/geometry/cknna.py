@@ -43,10 +43,9 @@ Definition (Huh et al. 2024, `metrics.py:cknna`):
     dim=-1)``) and uses ``topk=10`` by default; BLME mirrors both.
 
 BLME wiring:
-    * Tier-2 task — reuses the same per-layer synchronised token cloud as
-      ``geometry_cka`` via ``collect_hidden_states(layer_idx="all")`` (same
-      forward pass, same tokens across layers). Without a populated cache it
-      runs its own collection pass.
+    * Points are texts: each layer of each text is its masked token mean
+      (reference pool='avg'), from the shared cache when it can supply them,
+      else from a pooled forward pass (``_pooled_layer_features``).
     * The verified numeric artifact is the module-level ``_cknna(X, Y,
       topk, unbiased=True)`` helper, which reproduces the reference
       ``cknna`` bit-for-bit (float32, <1e-6). See
@@ -65,7 +64,9 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .utils import collect_hidden_states
+from ...cache import CACHE_TOKENIZER_MAX_LENGTH
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       position0_share, select_rows)
 import math
 
 logger = logging.getLogger("blme")
@@ -75,25 +76,10 @@ logger = logging.getLogger("blme")
 _DEFAULT_TOPK = 10
 
 
-# ESTIMAND: the RELEASED platonic-rep implementation, not the paper's prose.
-#
-# Huh et al.'s Eqs. 16-18 read as "centre the kernels, then weight the products
-# by alpha", while `platonic-rep/metrics.py::cknna` masks the RAW kernels and
-# centres afterwards inside HSIC. The two are not the same operation, and every
-# number the paper reports comes from the released code. BLME therefore targets
-# the released code, and matches it EXACTLY: head-to-head on identical inputs
-# over 16 configurations (n in {40, 64, 200}, k in {5, 10, 39}, unbiased in
-# {True, False}, seeds {0, 7, 1234, 51137}) the worst relative deviation is
-# 0.000e+00 -- bit-identical, including the reviewer's own seed 51137
-# (adversarial review response, 2026-09-04).
-#
-# The argument-order dependence is likewise a property of the reference, not of
-# BLME: at seed 51137 the RELEASED code gives cknna(A,B)=0.030145890 and
-# cknna(B,A)=0.030152554, and BLME reproduces both to 0.000e+00. It arises
-# because `mask_K * mask_L` is a mutual-neighbour indicator that is not
-# symmetric, so `mask * K` is not symmetric either. Rather than silently
-# deviate from the reference by symmetrising, `evaluate` DISCLOSES the size of
-# the effect in `_meta_cknna_order_asymmetry_max`.
+# Estimand: the released platonic-rep ``metrics.cknna`` (masks the raw kernels,
+# centres inside HSIC), matched bit for bit in tests/tasks/parity/
+# test_cknna_parity.py. Its mutual-kNN mask is not order-symmetric; evaluate()
+# discloses the gap in _meta_cknna_order_asymmetry_max instead of symmetrising.
 
 
 def _hsic_unbiased(K: torch.Tensor, L: torch.Tensor) -> torch.Tensor:
@@ -161,48 +147,15 @@ def _cknna(X, Y, topk: int, unbiased: bool = True, distance_agnostic: bool = Fal
     if n <= topk:
         if n <= 2:
             return float("nan")
-        # The paper's k -> n limit, where CKNNA reduces to CKA exactly.
-        #
-        # With unbiased=False the diagonal is NOT masked, so topk = n selects
-        # every column and the neighbour mask is all-ones -- which is precisely
-        # what makes CKNNA collapse to CKA. Clamping to n-1 instead misses that
-        # limit: the official `cknna(topk=n, unbiased=False)` returns 0.5580957
-        # (= exact CKA to rel 1.3e-8) where the n-1 clamp returns 0.5430548, a
-        # 2.69% error -- and it is the paper's ONLY closed-form anchor, i.e.
-        # exactly the check this branch was added to enable (adversarial
-        # review, 2026-09-04).
-        #
-        # With unbiased=True the diagonal is -inf, so k = n would select it and
-        # k = n-1 IS the largest meaningful neighbourhood.
+        # The k -> n limit, where CKNNA reduces to CKA (the paper's closed-form
+        # anchor): biased keeps the diagonal so k = n selects every column;
+        # unbiased masks it, so k = n - 1 is the full neighbourhood.
         topk = (n - 1) if unbiased else n
 
     device = X.device
-    # RESCALE BEFORE THE GRAMS. CKNNA is a RATIO --
-    # sim_kl / sqrt(sim_kk * sim_ll) -- so any positive rescale of X or Y
-    # cancels exactly. The Gram does not: it squares, so at 2^-60 the entries
-    # underflow and the score collapsed from 0.677187975 to 5.616e-19, to 0.0
-    # at 2^-80, and to NaN at 1e20 (adversarial review round 4, 2026-09-04).
-    # Dividing each view by its own largest magnitude only shifts exponents.
-    # Rescale by a POWER OF TWO, but ONLY outside a band where the whole
-    # pipeline is safe. Both halves of that sentence are load-bearing.
-    #
-    # WHY RESCALE AT ALL: the data is squared THREE times downstream -- the
-    # Gram, then HSIC's elementwise product, then `mm(K_tilde, L_tilde)` -- so
-    # an input at 1e-13 reaches 1e-52 and flushes to zero. End to end the score
-    # went 0.677187975 -> 5.616e-19 at 2^-60 and 0.0 at 2^-80 (adversarial
-    # review round 4, 2026-09-04).
-    #
-    # WHY ONLY OUTSIDE A BAND: the released `cknna` divides by
-    # `sqrt(sim_kk*sim_ll) + 1e-6`, an ABSOLUTE epsilon. Rescaling changes the
-    # sims and therefore that term's relative weight, which moves the score in
-    # the 5th decimal -- so an unconditional rescale would trade a bit-exact
-    # match against the reference for robustness nobody needs at ordinary
-    # magnitudes. The band is set by the eighth root of the representable
-    # range, since the data is squared three times: float32's tiny^(1/8) is
-    # about 2e-5, so [1e-4, 1e4] is comfortably inside it.
-    #
-    # WHY A POWER OF TWO: dividing by 2**round(log2(max)) shifts exponents
-    # only, so it introduces no rounding of its own.
+    # Rescale by a power of two (exact) only OUTSIDE [tiny^(1/8), max^(1/8)]:
+    # the data is squared three times downstream, and inside the band the
+    # reference's absolute +1e-6 would make an unconditional rescale non-bit-exact.
     _fi2 = torch.finfo(X.dtype)
     _lo2 = float(_fi2.tiny) ** (1.0 / 8.0) * 4.0
     _hi2 = float(_fi2.max) ** (1.0 / 8.0) / 4.0
@@ -213,11 +166,7 @@ def _cknna(X, Y, topk: int, unbiased: bool = True, distance_agnostic: bool = Fal
         m = float(T.abs().max()) if T.numel() else 0.0
         if not (m > 0) or not math.isfinite(m) or (_lo2 <= m <= _hi2):
             return T
-        # `_p2` clamps the exponent to the dtype's normal range. The inline
-        # `2.0 ** round(log2(m))` this replaces overflowed float32 to inf for
-        # any m >= 2^127.5 = 2.4062e38 -- the top 29% of the range -- so the
-        # divisor became inf and the data became 0 (independent Opus review,
-        # 2026-09-05).
+        # `_p2` clamps the exponent, so m >= 2^127.5 cannot overflow the divisor.
         return _p2(T, m)
 
     X = _pow2_rescale(X)
@@ -260,48 +209,17 @@ def _cknna(X, Y, topk: int, unbiased: bool = True, distance_agnostic: bool = Fal
 
 
 def _remove_outliers(X: torch.Tensor, q: float = 0.95) -> torch.Tensor:
-    """Reference preprocessing: clamp features to +/- the mean per-row
-    ``q``-quantile of |x|.
+    """Reference preprocessing (`metrics.remove_outliers`, exact=False): clamp
+    to +/- the mean over rows of each row's ``q``-quantile of |x|.
 
-    `measure_alignment.py:prepare_features` calls
-    `metrics.remove_outliers(feats, q=0.95)` BEFORE normalising, and BLME
-    skipped it. On gpt2 the omission shifts `mean_offdiag` by 9.8%,
-    `min_offdiag` by 49%, and the final adjacent pair by 2.1x (adversarial
-    review, 2026-09-03).
+    float32 is authoritative wherever it works (bit parity with the reference);
+    double is used only when the float32 bound is already non-finite.
     """
     X = X.float()
     if X.ndim != 2 or X.shape[0] == 0:
         return X
-    # Per-row 95th percentile of |x|, then the mean of those -> one scalar bound.
-    #
-    # float32 FIRST, double only as a fallback when float32 fails.
-    #
-    # Averaging N per-row quantiles each near the top of the float32 range
-    # overflows the accumulator, `bound` becomes inf, the `isfinite` bail-out
-    # below fires, and the clamp is **silently skipped** -- so the
-    # preprocessing this function exists to perform does not happen at all.
-    # Rescaling an all-finite input from 1 to 2.406159650500376e38 moved the
-    # score 0.129549999 -> 0.159972884 (**+23.484%**) against a stable
-    # 0.129550017 (gpt-5.6-sol round 9, 2026-09-07).
-    #
-    # The obvious repair -- accumulate in double always -- is WRONG HERE, and I
-    # shipped it for ten minutes before testing it. Double is more accurate, so
-    # it returns a different float32 bound (1.88215649128 against
-    # 1.88215637207 on an 80x61 Gaussian) and the clamped output stops being
-    # bit-identical to the released `metrics.remove_outliers`. This file's
-    # 240/240 bit-for-bit parity with the reference is the whole basis of its
-    # verdict, and the campaign rule is that the released reference wins.
-    #
-    # So float32 stays authoritative on every input where it works, and double
-    # is consulted ONLY when float32 has already failed -- which is exactly the
-    # regime where there is no reference behaviour to be faithful to, because
-    # the reference overflows there too.
     bound = torch.quantile(X.abs(), q, dim=1).mean()
     if not torch.isfinite(bound):
-        # Narrowing straight back after a double-precision reduction discards
-        # exactly what the promotion bought. Swept as a class: the first AST query
-        # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
-        # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
         bound = torch.quantile(X.abs().double(), q, dim=1).mean()
         if not torch.isfinite(bound):
             # Genuinely unrepresentable in the working dtype: clamp in double.
@@ -310,44 +228,43 @@ def _remove_outliers(X: torch.Tensor, q: float = 0.95) -> torch.Tensor:
                 return X.double().clamp(min=-_b64, max=_b64).to(X.dtype)
     if not torch.isfinite(bound):
         return X
-    # bound == 0 is CLAMPED, not skipped. The released
-    # `metrics.remove_outliers` applies the clamp unconditionally, so a bound
-    # of exactly zero zeroes the features -- which is what an isometrically
-    # zero-padded 80x161 input produces: the official pipeline then has 0
-    # nonzero coordinates and scores 0.000000, while returning X unchanged did
-    # not (adversarial review round 2, 2026-09-04). Only a non-finite bound is
-    # a genuine bail-out.
+    # A zero bound is applied, as the reference does (it zeroes the features).
     return X.clamp(min=-bound, max=bound)
+
+
+def _remove_outliers_joint(F, layers, q: float = 0.95):
+    """``metrics.remove_outliers(exact=False)`` on the stacked (N, L, D)
+    features, as ``measure_alignment.py:103`` applies it: each text's
+    ``q``-quantile of |x| over ALL its layers and dims, averaged over texts,
+    gives ONE bound that clamps every layer.
+
+    Quantiles are taken row by row (the same per-row values as the batched
+    call, without materialising N x L x D), float32 first and double only if
+    the float32 bound is non-finite, as ``_remove_outliers``. Returns
+    ``({layer: clamped (N, D)}, bound)``.
+    """
+    n = int(F[layers[0]].shape[0])
+
+    def _bound(dtype):
+        qs = [torch.quantile(torch.cat([F[li][i].to(dtype) for li in layers]).abs(), q)
+              for i in range(n)]
+        return torch.stack(qs).mean()
+
+    bound = _bound(torch.float32)
+    if not torch.isfinite(bound):
+        bound = _bound(torch.float64)
+        if not torch.isfinite(bound):
+            return {li: F[li].float() for li in layers}, float("nan")
+    out = {li: F[li].float().clamp(min=-bound, max=bound) for li in layers}
+    return out, float(bound)
 
 
 def _l2_normalize(X: torch.Tensor) -> torch.Tensor:
     """Row-wise L2 normalisation, matching the reference preprocessing
     (``measure_alignment.py:compute_score`` -> ``F.normalize(x, p=2, dim=-1)``)."""
     X = X.float()
-    # SCALE-EXACT. `max(norm, eps)` matches `F.normalize`'s FORM, but the norm
-    # itself still squares before summing, so the whole pipeline moved a fresh
-    # score of 0.677187975 to 0.706681363 at 1e-13 (+4.36%), 5.616e-19 at
-    # 2^-60 and 0.000000000 at both 2^-80 and 1e20 (adversarial review round 4,
-    # 2026-09-04). Factoring out each row's largest coordinate first is exact
-    # and reproduces `F.normalize` bit-for-bit on ordinary data.
-    # CONDITIONAL, so released-reference parity is preserved exactly on
-    # ordinary data (`torch.equal` against `F.normalize`) while extreme
-    # magnitudes still normalise correctly -- the same discipline used in
-    # `schatten._normalise_matrix`.
-    # The band must match the SQUARING DEPTH of the pipeline this feeds, not
-    # the single square a norm performs. Downstream the data is squared three
-    # more times (Gram, HSIC product, mm), so a sqrt-based band let 1e-13
-    # through the naive path and the end-to-end score drifted 6.40%
-    # (adversarial review round 4 follow-up, 2026-09-04). Eighth root, same as
-    # `_cknna`'s own band.
-    # PER ROW, not on one global maximum.
-    #
-    # Row normalisation is independent per row, so a single ordinary row must
-    # not decide the path for every other one: rows [3e-13, 4e-13] and [1, 0]
-    # in the same matrix kept the tiny row on the naive norm-plus-epsilon path
-    # and its norm came out 0 (codex round 5, 2026-09-05). The band is still
-    # the eighth root of the representable range, for the squaring depth
-    # downstream; only the DECISION is now per row.
+    # Per row, rows outside the eighth-root band take a scale-exact unit path;
+    # ordinary rows reproduce F.normalize bit for bit (test_cknna_parity.py).
     _fi = torch.finfo(X.dtype)
     _lo = float(_fi.tiny) ** (1.0 / 8.0) * 4.0
     _hi = float(_fi.max) ** (1.0 / 8.0) / 4.0
@@ -360,6 +277,80 @@ def _l2_normalize(X: torch.Tensor) -> torch.Tensor:
     return torch.where(_unsafe, _safe_unit(X), _out)
 
 
+_SHARE_DOCS = 200   # documents of the middle layer kept for the sink diagnostics
+
+
+def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
+                           use_cache, pool, include_embedding=False,
+                           min_cached_docs=None):
+    """One vector per text and layer: the masked mean over its tokens.
+
+    Mirrors platonic-rep ``extract_features.py:81-84`` (pool='avg'): every
+    entry of the raw HF ``hidden_states`` tuple (post-norm last entry kept),
+    averaged over the attention mask of each text. The shared cache supplies
+    the token rows when it can; otherwise one forward pass per text pools on
+    the fly, so no all-layer token cloud is held. Both routes average the same
+    float rows in float64 and agree bit for bit.
+
+    Returns ``(feats, feats_excl_pos0, mid_docs, info)``: ``{layer: (N, D)
+    float64}`` under ``pool`` and under ``mean_excl_pos0``, the middle layer's
+    token rows of the first ``_SHARE_DOCS`` texts, and the gate info.
+    """
+    if include_embedding and getattr(cache, "_embedding_states", None) is None:
+        use_cache = False          # a cache without hs[0] cannot supply the layer set
+    per_doc, info = hidden_states_for_task(
+        model, tokenizer, dataset, cache, num_samples=num_samples,
+        # post-final-norm=False, DELIBERATELY: the released reference stacks
+        # the raw HF tuple, ln_f entry included (extract_features.py:82).
+        replace_final_norm=False, layer_idx="all", use_cache=use_cache,
+        per_sample=True, include_embedding=include_embedding,
+        min_cached_docs=min_cached_docs, fallback="none")
+    if per_doc:
+        layers = sorted(per_doc)
+        feats = {li: select_rows(per_doc[li], pool)[0] for li in layers}
+        excl = {li: select_rows(per_doc[li], "mean_excl_pos0")[0] for li in layers}
+        mid = list(per_doc[layers[len(layers) // 2]])[:_SHARE_DOCS]
+        info = dict(info, includes_embedding=bool(
+            include_embedding and getattr(cache, "_embedding_states", None) is not None))
+        return feats, excl, mid, info
+
+    if dataset is None:
+        raise ValueError("geometry_cknna: no usable cache and no dataset")
+    device = next(model.parameters()).device
+    sums, sums_excl, mid_rows = {}, {}, []
+    first = 0 if include_embedding else 1
+    n_done = 0
+    with torch.no_grad():
+        for sample in dataset:
+            if n_done >= num_samples:
+                break
+            text = sample["text"] if isinstance(sample, dict) else str(sample)
+            inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                               max_length=CACHE_TOKENIZER_MAX_LENGTH).to(device)
+            if inputs["input_ids"].shape[1] < 1:
+                continue
+            out = model(**inputs, output_hidden_states=True)
+            # post-final-norm=False, DELIBERATELY: the raw tuple, as the reference.
+            hs = out.hidden_states[first:]
+            for li, h in enumerate(hs):
+                rows = h[0].detach().to("cpu")
+                if not rows.is_floating_point():
+                    rows = rows.float()
+                docs = [rows]
+                sums.setdefault(li, []).append(select_rows(docs, pool)[0])
+                if rows.shape[0] > 1:
+                    sums_excl.setdefault(li, []).append(
+                        select_rows(docs, "mean_excl_pos0")[0])
+                if li == len(hs) // 2 and n_done < _SHARE_DOCS:
+                    mid_rows.append(rows.float())
+            n_done += 1
+    feats = {li: torch.cat(v, 0) for li, v in sums.items()}
+    excl = {li: torch.cat(v, 0) for li, v in sums_excl.items()}
+    info = dict(info, source="self_collected", fallback="pooled_forward",
+                includes_embedding=bool(first == 0))
+    return feats, excl, mid_rows, info
+
+
 @register_task("geometry_cknna")
 class CKNNATask(DiagnosticTask):
     """
@@ -367,26 +358,38 @@ class CKNNATask(DiagnosticTask):
     Representation Hypothesis", ICML 2024, arXiv:2405.07987) between all
     pairs of transformer layers and summarises the alignment profile.
 
-    CKNNA is the local-neighbourhood analog of ``geometry_cka``: instead of
-    the global CKA it restricts the kernel alignment to the mutual k-nearest
-    neighbour graph, so it measures whether *local* representational geometry
-    (not just global structure) is preserved across layers.
+    Points are TEXTS, not tokens: each layer of each text is its masked mean
+    over all positions, position 0 included, as the reference's pool='avg'
+    (the paper rejects last-token pooling, App. C.2). The within-model layer
+    profile is a BLME use of a cross-model metric.
 
     Config:
-        num_samples: number of documents to collect (default 100).
-        topk:        mutual k-NN neighbours (default 10). num_samples' worth
-                     of tokens must exceed topk.
+        num_samples: number of texts (default 1024, the reference size).
+        topk:        mutual k-NN neighbours (default 10); needs num_samples >= topk.
         unbiased:    unbiased HSIC + self-diagonal masking (default True).
         use_cache:   reuse the shared forward-pass cache (default True).
-
-    Outputs (flat floats): adjacent-layer and global off-diagonal
-    mean/min/max/std of CKNNA, early-vs-late and first-vs-middle values.
     """
+    TOKEN_POLICY = "paper_protocol:Huh2024 per-text masked mean, position 0 included"
+    SOURCES = {
+        "paper": "arXiv:2405.07987",
+        "code": "minyoungg/platonic-rep@dcd76ba3c950c1b197a2ae8b1c6713535c94ecf9",
+        "llm_precedent": "arXiv:2405.07987 App. C.2 (LLM features: per-text average pool)",
+    }
+    HEADLINE_KEYS = (
+        "avg_adjacent_cknna", "min_adjacent_cknna", "max_adjacent_cknna",
+        "std_adjacent_cknna", "mean_offdiag_cknna", "std_offdiag_cknna",
+        "min_offdiag_cknna", "early_late_cknna", "first_middle_cknna",
+    )
+    # Empty: the reference's coordinate-wise outlier clamp is basis-dependent,
+    # so no key is invariant under isometric embedding or zero-padding (dossier:
+    # orth x2 0.711 -> 0.647 on gpt2), and at fixed k the value moves with N.
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running CKNNA (mutual k-NN conditional CKA) Analysis...")
 
-        num_samples = self.config.get("num_samples", 100)
+        # 1024 texts at k=10, the reference sample size (extract_features.py:178).
+        num_samples = int(self.config.get("num_samples", 1024))
         topk = int(self.config.get("topk", _DEFAULT_TOPK))
         unbiased = bool(self.config.get("unbiased", True))
         use_cache = self.config.get("use_cache", True)
@@ -395,69 +398,29 @@ class CKNNATask(DiagnosticTask):
             from ...cache import load_default_corpus
             dataset = load_default_corpus(50)
 
-        logger.info(f"  Collecting hidden states for {num_samples} samples...")
-        # post-final-norm=False, DELIBERATELY: THE RELEASED REFERENCE READS THE
-        # RAW TUPLE.
-        #
-        # `minyoungg/platonic-rep`'s `extract_features.py:82` is
-        #     feats = torch.stack(llm_output["hidden_states"]).permute(1,0,2,3)
-        # -- every entry of the raw HF tuple, `ln_f` included, no hook. (The
-        # `pool == 'last'` branch below stacks the same tuple.)
-        #
-        # The 2026-09-05 sweep hooked this because CKNNA is a per-layer profile
-        # and a profile must be homogeneous. But the THIRD CLAUSE outranks the
-        # first: the released reference wins. This is the SEVENTH task to need
-        # it -- after matrix_entropy, contextualization, coe, schatten,
-        # concept_separability and task_vectors -- and every one was found by
-        # review rather than by the sweep, because the sweep applied a rule
-        # without reading what each reference does. Confirmed by cloning the
-        # repository and reading the line (2026-09-06).
-        #
-        # The hook's measured impact here was only -1.0% to +2.0%: CKNNA's
-        # row-L2 normalisation and outlier clamp largely absorb the LayerNorm,
-        # which is exactly why it went unnoticed.
-        _cknna_status = {"last_is_block": False}
-        layer_activations = None
-        if cache is not None and cache.is_populated and use_cache:
-            layer_activations = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples,
-                replace_final_norm=False,
-            )
-            if layer_activations is None:
-                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
-                # orrectly with NO cache and returned an error with an attention-onl
-                # y one, i.e. it refused rather than self-collecting -- the defect a
-                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
-                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
-                # only sweep reported (2026-09-09).
-                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
-        if layer_activations is None:
-            layer_activations = collect_hidden_states(
-                model, tokenizer, dataset, num_samples=num_samples, layer_idx="all",
-                replace_final_norm=False,
-            )
+        pool = "mean_excl_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "mean"
+        logger.info(f"  Pooling hidden states over {num_samples} texts...")
+        # Every hidden_states entry, the embedding output included, as
+        # extract_features.py:82 stacks them.
+        feats, feats_excl, mid_docs, _info = _pooled_layer_features(
+            model, tokenizer, dataset, cache, num_samples=num_samples,
+            use_cache=use_cache, pool=pool, include_embedding=True,
+            # The cache serves at most cache_num_samples documents; one that
+            # holds fewer than requested is not allowed to shrink N silently.
+            min_cached_docs=num_samples)
 
-        if not layer_activations:
+        if not feats:
             return {"error": "No hidden states available for CKNNA"}
+        if int(next(iter(feats.values())).shape[0]) < num_samples:
+            logger.warning(f"  geometry_cknna: {next(iter(feats.values())).shape[0]} "
+                           f"texts available, {num_samples} requested")
 
-        layers = sorted(layer_activations.keys())
+        layers = sorted(feats.keys())
         n_layers = len(layers)
 
-        # L2-normalise each layer's token cloud once (reference preprocessing).
-        # N is shared across layers (same synchronised tokens), so guard once.
-        n_points = int(layer_activations[layers[0]].shape[0])
-        # `n_points == topk` is the paper's k -> n FULL-NEIGHBOURHOOD limit,
-        # where CKNNA reduces to CKA exactly, and `_cknna` already handles it
-        # (that branch is the only closed-form anchor the paper provides). The
-        # guard here rejected it before the helper ran: n_points = topk = 10
-        # with unbiased=False returned an error where both current and
-        # reference execution give 0.605255 (adversarial review round 2,
-        # 2026-09-04). Only n_points < topk, or a cloud too small to have any
-        # neighbourhood at all, is genuinely unusable.
-        # Unbiased HSIC divides by (m-2) and (m-3), so it is UNDEFINED for
-        # N <= 3. `evaluate` accepted N=3 with topk=2, every pair came out NaN,
-        # and the summary then reported avg_adjacent_cknna = 0.000000000 as if
-        # it were a measurement (adversarial review round 4, 2026-09-04).
+        n_points = int(feats[layers[0]].shape[0])
+        # n_points == topk is the k -> n limit `_cknna` handles; unbiased HSIC
+        # divides by (m-2)(m-3), so it needs at least 4 points.
         _min_n = 4 if unbiased else 3
         if n_points < topk or n_points < _min_n:
             return {
@@ -469,26 +432,15 @@ class CKNNATask(DiagnosticTask):
                 )
             }
 
-        # Cap tokens with a seeded permutation SHARED across layers (same
-        # guard as geometry_hsic; audit 2026-07-16: without it the study
-        # defaults build ~1e4-5e4-point Gram matrices with O(N^3) unbiased
-        # HSIC per layer pair — infeasible/OOM).
-        max_tokens = int(self.config.get("max_cknna_tokens", 2000))
-        shared_perm = None
-        if n_points > max_tokens:
-            rng = torch.Generator(device="cpu")
-            rng.manual_seed(int(self.config.get("seed", 42)))
-            shared_perm = torch.randperm(n_points, generator=rng)[:max_tokens]
-            n_points = max_tokens
+        def _prepare(F):
+            # Reference order: one joint remove_outliers bound -> per-layer
+            # row normalisation (measure_alignment.py:103, compute_score).
+            ls = sorted(F)
+            clamped, bound = _remove_outliers_joint(F, ls)
+            return {li: _l2_normalize(clamped[li]) for li in ls}, bound
 
         logger.info("  Normalising activations...")
-        normed = {}
-        for idx in tqdm(layers, desc="Normalising"):
-            acts = layer_activations[idx]
-            if shared_perm is not None:
-                acts = acts[shared_perm]
-            # Reference order: remove_outliers -> normalize.
-            normed[idx] = _l2_normalize(_remove_outliers(acts.float()))
+        normed, _clamp_bound = _prepare(feats)
 
         logger.info("  Computing CKNNA matrix...")
         cknna_matrix = np.full((n_layers, n_layers), np.nan, dtype=np.float64)
@@ -498,15 +450,21 @@ class CKNNATask(DiagnosticTask):
             for j in range(i, n_layers):
                 Y = normed[layers[j]]
                 val = _cknna(X, Y, topk=topk, unbiased=unbiased)
-                # The reference kernel is not exactly order-symmetric (see the
-                # module note). Measure the gap on the adjacent pairs rather
-                # than assume it away; the headline stays the reference value.
+                # Order gap measured on adjacent pairs; headline = reference.
                 if j == i + 1:
                     _rev = _cknna(Y, X, topk=topk, unbiased=unbiased)
                     if np.isfinite(val) and np.isfinite(_rev):
                         _order_gap = max(_order_gap, abs(val - _rev))
                 cknna_matrix[i, j] = val
                 cknna_matrix[j, i] = val
+
+        # Position-0-excluded pooling (_meta_), endpoint pair only.
+        _excl_el = float("nan")
+        _ends = (layers[0], layers[-1])
+        if (set(feats_excl) == set(layers) and n_layers >= 2
+                and all(feats_excl[li].shape[0] == n_points for li in layers)):
+            _ne, _ = _prepare(feats_excl)
+            _excl_el = _cknna(_ne[_ends[0]], _ne[_ends[1]], topk=topk, unbiased=unbiased)
 
         n = n_layers
         iu = np.triu_indices(n, k=1)
@@ -522,16 +480,7 @@ class CKNNATask(DiagnosticTask):
             return float(fn(arr)) if arr.size else fallback
 
         return {
-            # Adjacent-layer local alignment (headline quantity).
-            #
-            # Fallback NaN, not 0.0, and `nan*` reducers throughout -- the
-            # identical pair of defects was fixed in the CKA sibling on
-            # 2026-09-05 and left here (independent Opus review the same day).
-            # 0.0 is a MEANINGFUL CKNNA value ("these layers share no
-            # neighbours"), so returning it for "there was no adjacent pair to
-            # measure" is a false zero; and a summary that PROPAGATES a NaN
-            # sitting beside one that DROPS it gives two different answers to
-            # "what happened here?" in one result dict.
+            # nan* reducers and NaN fallbacks: 0.0 is a meaningful CKNNA.
             "avg_adjacent_cknna": _stat(adjacent, np.nanmean),
             "min_adjacent_cknna": _stat(adjacent, np.nanmin),
             "max_adjacent_cknna": _stat(adjacent, np.nanmax),
@@ -540,7 +489,8 @@ class CKNNATask(DiagnosticTask):
             "mean_offdiag_cknna": _stat(off_diag, np.nanmean),
             "std_offdiag_cknna": _stat(off_diag, np.nanstd),
             "min_offdiag_cknna": _stat(off_diag, np.nanmin),
-            "max_offdiag_cknna": _stat(off_diag, np.nanmax),
+            # max_offdiag_cknna is not emitted: it equalled max_adjacent_cknna
+            # on 66/66 study models (the most aligned pair is adjacent).
             # Early-vs-late (layer 0 vs layer N-1).
             "early_late_cknna": (
                 float(cknna_matrix[0, -1]) if n >= 2 else float("nan")
@@ -549,15 +499,21 @@ class CKNNATask(DiagnosticTask):
             "first_middle_cknna": (
                 float(cknna_matrix[0, n // 2]) if n >= 3 else float("nan")
             ),
-            # _meta_ prefix => excluded from the analysis feature matrix so
-            # these architecture/sampling counts cannot leak in as size
-            # proxies (Audit-V2).
             "_meta_n_layers": int(n),
-            "_meta_last_entry_is_block_output": bool(
-                _cknna_status.get("last_is_block", False)),
+            "_meta_includes_embedding_layer": bool(_info.get("includes_embedding")),
+            "_meta_last_entry_is_block_output": bool(_info["last_is_block"]),
             "_meta_topk": int(topk),
             "_meta_n_points": int(n_points),
-            # Reference-inherited argument-order dependence, measured over the
-            # adjacent pairs. Disclosed, not concealed; see the module note.
+            "_meta_n_texts_requested": int(num_samples),
+            "_meta_pooling": pool,
+            "_meta_outlier_clamp_n_layers": int(n_layers),
+            "_meta_outlier_clamp_bound": float(_clamp_bound),
+            "_meta_features_source": str(_info.get("source")),
             "_meta_cknna_order_asymmetry_max": float(_order_gap),
+            "_meta_excl_pos0_early_late_cknna": float(_excl_el),
+            # Sink diagnostics on the middle layer's token rows (first texts).
+            "_meta_position0_share": (position0_share(mid_docs) if mid_docs
+                                      else float("nan")),
+            "_meta_massive_token_share": (massive_token_share(mid_docs) if mid_docs
+                                          else float("nan")),
         }

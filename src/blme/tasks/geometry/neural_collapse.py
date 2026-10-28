@@ -19,9 +19,10 @@ class label. Three metrics from the Neural Collapse phenomenon:
     statistic). This is a lightweight ETF-alignment proxy,
     not the full normalized Gram/Frobenius NC2 measure from Papyan et al.
 
-Because BLME is unsupervised, we use a small bundled topic-classification
-dataset. The user can override `dataset` with their own
-`{text, label}` items if they want to compute NC on a different task.
+The task follows the LLM adaptation of Wu & Papyan 2024 (arXiv:2405.17767):
+next-token classes over a corpus, token-level post-norm features, CDNV. The
+Papyan statistics above are computed on the old bundled topic proxy and on a
+user-supplied ``{text, label}`` dataset.
 """
 
 import logging
@@ -94,23 +95,11 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     if K < 2:
         return {"error": "Need at least 2 classes for Neural Collapse"}
     n, d = features.shape
-    # n == K (one example per class) is a DEFINED case, not an error. Sigma_W
-    # is then exactly zero and every NC statistic still has a value: on the
-    # explicit K=3 centres (1,0), (0,1), (-1,-1) the paper formulas give
-    # NC1 = 0.0, equinorm CV = 0.171572875254, ETF deviation = 0.304737854124
-    # and cosine std = 0.333333333333, while BLME returned only an error
-    # (adversarial review round 2, 2026-09-04).
+    # n == K is defined (Sigma_W = 0); only n < K is an error.
     if n < K:
         return {"error": "Need at least K samples"}
 
-    # PROMOTE BEFORE THE MEANS, not after.
-    #
-    # Every NC statistic is defined on CENTRED quantities, so a common offset
-    # must cancel exactly -- but reducing float32 features before promoting
-    # loses it. On a balanced K=3, n=24 fixture, adding the common offset 1.0
-    # (every stored delta exact to +/-2.384185791015625e-07) collapsed
-    # NC1/rank/CV/ETF to 0.0/0/NaN/NaN (codex round 5, 2026-09-05). Same defect
-    # class as the IsoScore translation loss fixed earlier today.
+    # Promote before the means, so a common offset cancels exactly.
     features = np.asarray(features, dtype=np.float64)
     global_mean = features.mean(axis=0)
     class_means = np.zeros((K, d), dtype=np.float64)
@@ -124,21 +113,12 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
         sigma_w += diffs.T @ diffs
     sigma_w /= n
 
-    # Sigma_B: between-class scatter. By construction it has rank
-    # ≤ K−1 (the centred class means span a (K-1)-dim affine subspace
-    # through the origin), so its full-rank inverse is numerically
-    # ill-defined in D ≫ K dimensions.
+    # Sigma_B: between-class scatter, rank <= K-1.
     centered = class_means - global_mean
     sigma_b = (centered.T @ centered) / K
 
-    # NC1: tr(Σ_W · Σ_B⁺) / K, measured in the (K-1)-dim *Σ_B principal
-    # subspace* (Papyan, Han & Donoho 2020 Eq. 3-4 / §2.9, Fig. 6). Naïve
-    # ``np.linalg.pinv(Σ_B, rcond=1e-10)`` keeps any eigenvalue above
-    # the tiny threshold and inverts it — on real LLM hidden states
-    # that promotes near-zero noise eigenvalues to ≈ 1/rcond and makes
-    # NC1 explode (3×10⁷ for pythia-70m in the study). We instead
-    # eigendecompose Σ_B, keep only the top K−1 eigenvalues (the
-    # rest are structural zeros), and rotate Σ_W into that subspace.
+    # NC1: tr(Sigma_W Sigma_B^+) / K in the top-(K-1) Sigma_B eigenspace
+    # (Papyan et al. 2020); a naive pinv inverts noise eigenvalues.
     try:
         eigvals, eigvecs = np.linalg.eigh(sigma_b)
         # eigh returns ascending — take the top K-1.
@@ -149,53 +129,15 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
         lam = eigvals[:k_eff]
         V = eigvecs[:, :k_eff]
 
-        # Drop directions whose Σ_B eigenvalue is below a
-        # relative-tolerance threshold of the top eigenvalue — those
-        # are numerical zeros that leaked through eigh.
+        # Drop numerical-zero eigenvalues that leak through eigh.
         top = lam.max() if lam.size else 0.0
         if top <= 0:
-            # Sigma_B == 0 is DEFINED, not undefined. NC1 is
-            # trace(Sigma_W Sigma_B^+)/K, and the Moore-Penrose inverse of the
-            # zero matrix is the zero matrix, so NC1 = 0 exactly -- which is
-            # what NumPy pinv, Torch pinv and the released covariance algebra
-            # all return for three balanced classes with identical means and
-            # nonzero Sigma_W. Returning NaN discarded a real measurement
-            # (adversarial review round 2, 2026-09-04).
+            # Sigma_B == 0: its pseudo-inverse is 0, so NC1 = 0 (as numpy pinv).
             nc1 = 0.0
             subspace_rank = 0
         else:
-            # Use NUMPY'S PINV RANK TOLERANCE, not a hand-picked 1e-6.
-            # NC1 is trace(Sigma_W Sigma_B^+)/K, and 1e-6 relative deletes
-            # genuine directions: on the balanced analytic fixture with
-            # Sigma_B eigenvalues (1, 5e-7, 0) it returned NC1=0.0/rank=1
-            # where numpy.pinv and torch.pinv both give 0.333333333333 and
-            # the released top-(K-1) SVD algebra gives 0.333333365984
-            # (adversarial review, 2026-09-04).
-            # AMBIENT-d DEPENDENCE, examined 2026-09-07 and kept deliberately.
-            #
-            # A round-9 review reported that appending ONE zero coordinate
-            # (d=47 -> 48) takes NC1 from 0.6666666666666666 to 0.0, since NC1
-            # is invariant under zero-padding. Investigated:
-            #
-            #  * It does NOT reproduce on ordinary data. On a non-degenerate
-            #    balanced K=3, n=20, d=47 fixture, NC1 = 0.0033624825287505047
-            #    is unchanged at d=48/49/52 and across scales 1e-30 .. 1e25.
-            #  * The mechanism is real but measure-zero: `_rcond` scales with
-            #    `max(sigma_b.shape)`, so d=47 -> 48 moves the keep-threshold
-            #    from 1.043610e-14 to 1.065814e-14. Only an eigenvalue inside
-            #    that window -- relative width one eps, 2.2e-16 -- changes its
-            #    keep decision. A fixture has to be engineered onto it.
-            #  * `numpy.linalg.pinv` uses this exact convention
-            #    (`max(M.shape) * eps * largest_singular_value`), and matching
-            #    numpy is why the previous hand-picked 1e-6 was replaced. So
-            #    the alternative is not "be invariant", it is "diverge from the
-            #    reference tolerance in order to be invariant on a set of
-            #    measure zero".
-            #
-            # Left as numpy's. Changing it to depend on the rank-relevant
-            # dimension instead of the ambient one would buy zero-padding
-            # invariance at the cost of the reference convention, which is the
-            # wrong trade under this campaign's own rule.
+            # numpy's pinv rank tolerance (max(shape) * eps * top), the
+            # reference convention (tests/tasks/parity/test_neural_collapse_parity.py).
             _rcond = max(sigma_b.shape) * np.finfo(lam.dtype).eps
             keep = lam > top * _rcond
             lam = lam[keep]
@@ -213,26 +155,14 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     M = class_means - global_mean
     norms = np.linalg.norm(M, axis=1)
     if norms.mean() > 0:
-        # ddof=1, matching the released Papyan notebook's `torch.std`.
-        # `np.std` defaults to ddof=0, which is low by exactly sqrt(K/(K-1)):
-        # the ratio is 1.154701 = sqrt(4/3) on all five K=4 fixtures, and on
-        # gpt2 BLME read 0.155268 against the official 0.173595, -10.56%
-        # (independent Opus review, 2026-09-04).
+        # ddof=1, as the released notebook's `torch.std`.
         nc2_equinorm_cv = float(np.std(norms, ddof=1) / norms.mean())
     else:
         nc2_equinorm_cv = float("nan")
 
     # NC2 — ETF cosine deviation proxy (not full normalized Gram NC2).
     # Pairwise cosine similarities between centered class means.
-    # Exact cosine: an ETF is an ETF at every positive scale alpha, which the
-    # paper states explicitly. The +1e-12 form reported deviation 9.999e-13
-    # for an exact K=3 ETF at alpha=1 but 0.375 at alpha=1e-12 and 0.499999501
-    # at alpha=1e-15, instead of 0 throughout (adversarial review, 2026-09-04).
-    # Scale-exact normalisation (see utils.safe_unit_rows), and an EXACTLY
-    # zero centred class mean stays undefined rather than becoming the zero
-    # vector: with all three class means coincident, dividing by finfo.tiny
-    # reported ETF deviation 0.5 and cosine std 0.0 when every paper cosine is
-    # 0/0 (adversarial review round 2, 2026-09-04).
+    # Scale-exact cosine; an exactly zero centred class mean stays undefined.
     from .utils import safe_unit_rows as _safe_unit_rows
     M_unit = _safe_unit_rows(M.astype(np.float64), eps_zero=False)
     _degenerate_mean = np.ptp(np.abs(M), axis=1) == 0
@@ -246,11 +176,7 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     if len(pair_cos) > 0:
         target = -1.0 / (K - 1)  # ETF target
         nc2_etf_cosine_deviation_proxy = float(np.mean(np.abs(pair_cos - target)))
-        # Papyan et al. report THREE NC2 statistics; this is the third and it
-        # was missing. Std of the pairwise cosines (their Fig. 3) measures
-        # equiangularity independently of the mean deviation above: a set can
-        # sit at the ETF target on average while being highly variable, and
-        # only this statistic sees that.
+        # Std of the pairwise cosines (Papyan Fig. 3): equiangularity spread.
         nc2_cosine_std = float(np.std(pair_cos))
     else:
         nc2_etf_cosine_deviation_proxy = float("nan")
@@ -259,22 +185,8 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     return {
         "nc1_within_class_collapse": nc1,
         "nc1_subspace_rank": int(subspace_rank),
-        # GATED OUT OF THE FEATURE MATRIX (_meta_ prefix).
-        #
-        # All THREE NC2 statistics fail a 200-draw label-permutation test on
-        # every model measured -- 9 tests (3 statistics x 3 models), none below
-        # p = 0.05, best 19/200 = 0.095, and nc2_equinorm_cv on pythia-70m at
-        # 196/200 is in the WRONG DIRECTION. A feature whose observed value
-        # lies inside its own label-permutation null cannot support a claim
-        # about the model: the same value arises from random labels. NC1 by
-        # contrast passes at p = 0/200 on all three and stays in the matrix.
-        #
-        # The formulas are exact (verified 0.0e+00 to 8.5e-14 against Papyan's
-        # own definitions) -- this is a POWER problem, not a correctness one:
-        # 5 classes x 8 sentences at d = 512-1280 cannot resolve NC2. The real
-        # fix is a larger bundle (30-50 sentences per topic), which
-        # `n_sentences_per_topic` now exposes; until the bundle grows these
-        # columns must not enter the analysis (adversarial review, 2026-09-04).
+        # NC2 statistics are _meta_: all three sit inside their own 200-draw
+        # label-permutation null at 8 sentences per class (underpowered).
         "_meta_nc2_equinorm_cv": nc2_equinorm_cv,
         "_meta_nc2_etf_cosine_deviation_proxy": nc2_etf_cosine_deviation_proxy,
         "_meta_nc2_cosine_std": nc2_cosine_std,
@@ -284,84 +196,207 @@ def _neural_collapse_metrics(features: np.ndarray, labels: np.ndarray) -> Dict[s
     }
 
 
+def _cdnv(means: np.ndarray, variances: np.ndarray, dist_exp: float,
+          tile: int = 1024) -> float:
+    """Mean over class pairs c < c' of ((s_c + s_c') / 2) / (||mu_c - mu_c'||^2)^dist_exp.
+
+    ``neural_collapse.measure.variability_cdnv`` with ``kernels.
+    class_dist_norm_vars``: dist_exp = 1 is Galanti et al.'s CDNV; Wu & Papyan
+    (2024, Eq. 4) divide by one more power of the squared distance, which
+    linguistic-collapse/analyze.py calls with dist_exp = 2. Distances come
+    from the float64 Gram, tiled by rows; a pair with zero distance is
+    skipped (the reference would divide by zero).
+    """
+    M = np.asarray(means, dtype=np.float64)
+    v = np.asarray(variances, dtype=np.float64)
+    C = M.shape[0]
+    if C < 2:
+        return float("nan")
+    sq = np.einsum("ij,ij->i", M, M)
+    total, count = 0.0, 0
+    for a in range(0, C, tile):
+        b = min(C, a + tile)
+        d2 = sq[a:b, None] + sq[None, :] - 2.0 * (M[a:b] @ M.T)
+        # Gram form, clamped at 0 against cancellation; upper triangle only.
+        rows = np.arange(a, b)
+        upper = np.arange(C)[None, :] > rows[:, None]
+        d2 = np.where(upper, np.maximum(d2, 0.0), 0.0)
+        num = 0.5 * (v[a:b, None] + v[None, :])
+        ok = upper & (d2 > 0)
+        total += float(np.sum(num[ok] / d2[ok] ** dist_exp))
+        count += int(ok.sum())
+    return total / count if count else float("nan")
+
+
+def _next_token_class_stats(model, tokenizer, texts, min_per_class: int,
+                            max_length: int = 512):
+    """Per next-token class: count, feature mean and mean squared deviation.
+
+    Wu & Papyan (linguistic-collapse lib/collection.py:103-112): features are
+    the post-final-norm hidden states at every position t < T-1 (position 0
+    included), labelled by the token at t+1. Classes with fewer than
+    ``min_per_class`` samples are dropped before the forward pass (a token
+    count needs only the tokenizer), so only kept classes are accumulated.
+    """
+    enc = []
+    counts: Dict[int, int] = defaultdict(int)
+    for t in texts:
+        ids = tokenizer(t, return_tensors="pt", truncation=True,
+                        max_length=max_length)
+        if ids["input_ids"].shape[1] < 2:
+            continue
+        enc.append(ids)
+        for y in ids["input_ids"][0, 1:].tolist():
+            counts[int(y)] += 1
+    keep = sorted(c for c, n in counts.items() if n >= int(min_per_class))
+    index = {c: i for i, c in enumerate(keep)}
+    device = next(model.parameters()).device
+    sums = sumsq = n = None
+    n_tokens = 0
+    with torch.no_grad():
+        for ids in tqdm(enc, desc="Neural collapse (next-token)"):
+            ids = ids.to(device)
+            out = model(**ids, output_hidden_states=True)
+            # post-final-norm: DELIBERATELY post-norm -- the classifier input
+            # (the reference replaces lm_head by Identity, model.py:261-268).
+            h = out.hidden_states[-1][0, :-1].detach().to("cpu", torch.float64).numpy()
+            y = ids["input_ids"][0, 1:].tolist()
+            n_tokens += len(y)
+            sel = [(r, index[c]) for r, c in enumerate(y) if c in index]
+            if not sel:
+                continue
+            if sums is None:
+                sums = np.zeros((len(keep), h.shape[1]), dtype=np.float64)
+                sumsq = np.zeros(len(keep), dtype=np.float64)
+                n = np.zeros(len(keep), dtype=np.int64)
+            rows = np.fromiter((r for r, _ in sel), dtype=np.int64)
+            cls = np.fromiter((c for _, c in sel), dtype=np.int64)
+            np.add.at(sums, cls, h[rows])
+            np.add.at(sumsq, cls, np.einsum("ij,ij->i", h[rows], h[rows]))
+            np.add.at(n, cls, 1)
+    if sums is None:
+        return None
+    means = sums / n[:, None]
+    # Mean squared deviation (the reference's VarNormAccumulator, 1/n_c).
+    variances = np.maximum(sumsq / n - np.einsum("ij,ij->i", means, means), 0.0)
+    return {"means": means, "variances": variances, "counts": n,
+            "n_tokens": n_tokens, "n_docs": len(enc), "n_classes_seen": len(counts)}
+
+
+def _topic_proxy(model, tokenizer, samples):
+    """The previous BLME construct: NC1 of mean-pooled sentences by topic."""
+    device = next(model.parameters()).device
+    feats, labs = [], []
+    with torch.no_grad():
+        for text, label in tqdm(samples, desc="Neural collapse (topic proxy)"):
+            inputs = tokenizer(text, return_tensors="pt",
+                               truncation=True, max_length=128).to(device)
+            if inputs["input_ids"].shape[1] < 1:
+                continue
+            out = model(**inputs, output_hidden_states=True)
+            # post-final-norm: DELIBERATELY post-norm -- neural collapse
+            # concerns the features the LM head reads.
+            h = out.hidden_states[-1][0]  # (T, D) — already normed
+            # Mean in float64, kept in float64 (no narrowing cast).
+            feats.append(h.double().mean(dim=0).cpu().numpy())
+            labs.append(label)
+    if len(feats) < 4:
+        return {"error": "Too few samples for Neural Collapse"}
+    label_to_id: Dict[str, int] = {}
+    labs_int = []
+    for lb in labs:
+        if lb not in label_to_id:
+            label_to_id[lb] = len(label_to_id)
+        labs_int.append(label_to_id[lb])
+    return _neural_collapse_metrics(np.stack(feats, axis=0),
+                                    np.array(labs_int, dtype=np.int64))
+
+
 @register_task("geometry_neural_collapse")
 class NeuralCollapseTask(DiagnosticTask):
-    """Neural Collapse NC1 + NC2 on a small bundled topic dataset."""
+    """Neural collapse of an LM's classifier features (Wu & Papyan 2024).
+
+    Classes are next tokens: every position t < T-1 of every corpus text is a
+    sample, its feature the post-final-norm hidden state and its label the
+    token at t+1 (linguistic-collapse lib/collection.py). NC1 is reported as
+    Wu & Papyan's CDNV (Eq. 4: Galanti's CDNV with one more power of the
+    squared class-mean distance; analyze.py dist_exp=2) and, beside it, the
+    scale-free Galanti CDNV. The previous topic-label construct (5 bundled
+    topics x 8 sentences, Papyan NC1) is kept as ``_meta_topic_*``; a
+    dataset of ``{text, label}`` items still selects that supervised path.
+    """
+    TOKEN_POLICY = ("paper_protocol:WuPapyan2024 every position t < T-1 "
+                    "labelled by token t+1, position 0 included")
+    SOURCES = {
+        "paper": "arXiv:2008.08186 (Papyan et al. 2020, neural collapse)",
+        "code": "rhubarbwu/linguistic-collapse@c782b91b54fce3c0043ada0898d5881ba952ffbb",
+        "llm_precedent": "arXiv:2405.17767 (Wu & Papyan 2024, next-token classes, CDNV)",
+    }
+    ADAPTATION_NOTE = (
+        "Neural collapse was defined for image classifiers; for an LM the "
+        "classifier is the unembedding, so, following Wu & Papyan 2024, every "
+        "corpus position t < T-1 is a sample whose feature is the post-final-norm "
+        "hidden state and whose class is the next token. NC1 is their CDNV "
+        "(Eq. 4, dist_exp 2) with Galanti's scale-free CDNV beside it. The corpus "
+        "is the run's documents (1000 by default, the same N for every model) "
+        "rather than TinyStories, so classes need at least min_per_class samples "
+        "(default 10), a threshold the paper leaves open. The previous construct, "
+        "Papyan NC1 of 40 mean-pooled sentences grouped by 5 topics, answers a "
+        "different question (does the last layer cluster sequences by topic) and "
+        "is kept as _meta_topic_*.")
+    HEADLINE_KEYS = ("nc1_cdnv", "nc1_cdnv_galanti")
+    # nc1_cdnv divides by one more squared distance, so it scales as 1/c^2 with
+    # the feature scale (the final norm's gain); the Galanti twin does not.
+    SIZE_INVARIANT = {
+        "nc1_cdnv_galanti": (
+            ("final_norm_gauge_scalar",),
+            "tests/tasks/invariance/test_neural_collapse.py::"
+            "test_galanti_twin_is_free_of_the_feature_scale"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neural Collapse Analysis...")
 
-        # Allow override; otherwise use bundled topic dataset.
+        # A labelled dataset selects the supervised (Papyan) path.
         if dataset is not None and isinstance(dataset, list) and dataset and (
             isinstance(dataset[0], dict) and {"text", "label"} <= set(dataset[0])
         ):
-            samples = [(d["text"], d["label"]) for d in dataset]
-        else:
-            samples = list(_TOPIC_BUNDLE)
-            # Expose the bundle size. The NC2 statistics are underpowered at
-            # the shipped 8 sentences per topic -- all three sit inside their
-            # own label-permutation null -- and the fix is more sentences per
-            # class, not a different formula. Capping here lets a caller shrink
-            # the bundle for a fast run; growing it requires extending
-            # _TOPIC_BUNDLE itself, and `_meta_n_per_topic` records what was
-            # actually used so an underpowered run is identifiable.
-            _n_per = self.config.get("n_sentences_per_topic")
-            if isinstance(_n_per, int) and _n_per > 0:
-                from collections import defaultdict as _dd
-                _by = _dd(list)
-                for _t, _lab in samples:
-                    _by[_lab].append((_t, _lab))
-                samples = [x for _lab in _by for x in _by[_lab][:_n_per]]
+            return _topic_proxy(model, tokenizer,
+                                [(d["text"], d["label"]) for d in dataset])
 
-        device = next(model.parameters()).device
+        samples = list(_TOPIC_BUNDLE)
+        # Optional cap on sentences per topic; _meta_n_per_topic records it.
+        _n_per = self.config.get("n_sentences_per_topic")
+        if isinstance(_n_per, int) and _n_per > 0:
+            _by = defaultdict(list)
+            for _t, _lab in samples:
+                _by[_lab].append((_t, _lab))
+            samples = [x for _lab in _by for x in _by[_lab][:_n_per]]
+        topic = _topic_proxy(model, tokenizer, samples)
+        out = {f"_meta_topic_{k.replace('_meta_', '')}": v for k, v in topic.items()}
 
-        # Mean-pool the final-layer hidden states for each sample.
-        # ``hidden_states[-1]`` is already post-final_norm in
-        # transformers 5.x, so it already lives in the LM-head input
-        # space — no need to apply ``final_norm`` again.
-        feats = []
-        labs = []
-        with torch.no_grad():
-            for text, label in tqdm(samples, desc="Neural collapse"):
-                inputs = tokenizer(text, return_tensors="pt",
-                                   truncation=True, max_length=128).to(device)
-                if inputs["input_ids"].shape[1] < 1:
-                    continue
-                out = model(**inputs, output_hidden_states=True)
-                # transformers 5.x: ``hidden_states[-1]`` is already
-                # post-final_norm (verified in logit_lens where
-                # ``lm_head(hidden_states[-1]) == outputs.logits``). The
-                # previous code re-applied ``final_norm`` here which
-                # double-normalised the features and gave spuriously
-                # small NC1 for RMSNorm architectures.
-                # post-final-norm: DELIBERATELY post-norm. Neural collapse is a
-                # statement about the FEATURE LAYER FEEDING THE CLASSIFIER, which for
-                # an LM is the post-`ln_f` vector the head reads.
-                h = out.hidden_states[-1][0]  # (T, D) — already normed
-                # Mean-pool, ignoring padding (causal LMs typically don't
-                # have padding here since we tokenize one text at a time).
-                # The trailing .float() DISCARDED the precision the .double() was added to
-                # gain: promote, average, then narrow back is self-defeating. Removing only
-                # this cast moved geometry_correlation_dimension from 7.486064047571674 to
-                # 15.295160200026809 on native Pythia-70m hidden states (+104%), matching an
-                # independently reconstructed Grassberger-Procaccia value, and restored a
-                # lossless translation from 0.0 to 2.3540184486398976 (codex round 15,
-                # 2026-09-09). Swept as a class: 7 sites carried this exact pattern.
-                pooled = h.double().mean(dim=0).cpu().numpy()
-                feats.append(pooled)
-                labs.append(label)
-
-        if len(feats) < 4:
-            return {"error": "Too few samples for Neural Collapse"}
-
-        feats_arr = np.stack(feats, axis=0)
-        # Map string labels to integer ids
-        label_to_id: Dict[str, int] = {}
-        labs_int = []
-        for lb in labs:
-            if lb not in label_to_id:
-                label_to_id[lb] = len(label_to_id)
-            labs_int.append(label_to_id[lb])
-        labs_arr = np.array(labs_int, dtype=np.int64)
-
-        return _neural_collapse_metrics(feats_arr, labs_arr)
+        num_samples = int(self.config.get("num_samples", 1000))
+        min_per_class = int(self.config.get("min_per_class", 10))
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
+        texts = [d["text"] if isinstance(d, dict) else str(d)
+                 for d in list(dataset)[:num_samples]]
+        st = _next_token_class_stats(model, tokenizer, texts, min_per_class)
+        if st is None or len(st["counts"]) < 2:
+            out.update({"nc1_cdnv": float("nan"), "nc1_cdnv_galanti": float("nan"),
+                        "_meta_nc_reason": "fewer than 2 next-token classes "
+                                           f"with >= {min_per_class} samples"})
+            return out
+        out.update({
+            "nc1_cdnv": _cdnv(st["means"], st["variances"], dist_exp=2.0),
+            "nc1_cdnv_galanti": _cdnv(st["means"], st["variances"], dist_exp=1.0),
+            "_meta_nc_n_classes": int(len(st["counts"])),
+            "_meta_nc_n_classes_seen": int(st["n_classes_seen"]),
+            "_meta_nc_n_samples": int(st["counts"].sum()),
+            "_meta_nc_n_tokens": int(st["n_tokens"]),
+            "_meta_nc_n_docs": int(st["n_docs"]),
+            "_meta_nc_min_per_class": min_per_class,
+            "_meta_nc_mean_within_class_variance": float(np.mean(st["variances"])),
+        })
+        return out
