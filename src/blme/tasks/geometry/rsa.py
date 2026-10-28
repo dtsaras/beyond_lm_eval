@@ -18,8 +18,8 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import (hidden_states_for_task, massive_token_share,
-                       position0_share, select_rows)
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 from .utils import as_numpy, collected_layer_count
 import numpy as np
 from scipy.stats import spearmanr
@@ -37,11 +37,13 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     token representations, then computes the Spearman rank correlation between
     RDMs of adjacent layers and between early/late layers.
 
-    Rows follow ``TOKEN_POLICY``: position 0 is dropped (RSA did not originate
-    on LLMs, and sink rows take the largest distances, so they occupy the top
-    ranks of every RDM; tests/tasks/invariance/test_rsa.py).
+    Rows follow ``TOKEN_POLICY``: position 0 and the massive-activation rows
+    are dropped, one mask per token from the middle depths shared by every
+    layer (RSA did not originate on LLMs, and sink rows take the largest
+    distances, so they occupy the top ranks of every RDM;
+    tests/tasks/invariance/test_rsa.py).
     """
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "DOI:10.3389/neuro.06.004.2008",
         "code": "rsagroup/rsatoolbox (parity via tests/tasks/test_comprehensive_parity.py; commit not pinned)",
@@ -50,15 +52,16 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     }
     ADAPTATION_NOTE = (
         "Tokens are the RSA conditions: 200 rows spaced evenly over the corpus "
-        "(position 0 excluded) give one RDM per layer, and RDMs are compared by "
+        "(sink rows excluded) give one RDM per layer, and RDMs are compared by "
         "Spearman rank correlation (Kriegeskorte et al. 2008, Step 4). The "
         "dissimilarity is Kriegeskorte's correlation distance; Abnar et al. 2019, "
         "the LM precedent, use cosine, and the two agree to about 1e-3 on residual "
         "streams. Euclidean RDMs are kept as _meta_ because they mostly encode "
-        "token norm and sink rows. Position 0 is excluded because RSA did not "
-        "originate on LLMs and sink rows occupy the top ranks of every RDM. Only "
-        "the adjacent minimum and the first-last pair are free of the number of "
-        "layers, so the uniform summaries are _meta_.")
+        "token norm and sink rows. Sink rows (position 0, and every token whose "
+        "norm exceeds 10x the median at a middle depth) are excluded at every "
+        "layer because RSA did not originate on LLMs and they occupy the top "
+        "ranks of every RDM. Only the adjacent minimum and the first-last pair "
+        "are free of the number of layers, so the uniform summaries are _meta_.")
     HEADLINE_KEYS = ("rsa_adjacent_min_corrdist", "rsa_early_late_corrdist")
     # Correlation distance centres each row over coordinates, so zero-padding
     # and isometric embedding move it slightly (<= 6e-4 in the dossier); only
@@ -100,9 +103,13 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         if n_layers < 2:
             return {"error": "Need at least 2 layers for RSA"}
 
+        # One keep mask per token from the middle depths, used at every layer,
+        # so every RDM is built on the same tokens (tests/tasks/invariance/test_rsa.py).
+        _keys = middle_depth_layers({k: per_doc[k] for k in layer_indices})
+        masks, _sink_info = sink_keep_masks([per_doc[k] for k in _keys])
         all_layers, _rows_meta = {}, None
         for li in layer_indices:
-            all_layers[li], _rows_meta = select_rows(per_doc[li], self.TOKEN_POLICY)
+            all_layers[li], _rows_meta = select_rows(per_doc[li], self.TOKEN_POLICY, keep=masks)
         min_tokens = min(len(all_layers[li]) for li in layer_indices)
         n_tokens = min(min_tokens, max_tokens_per_layer)
 
@@ -193,6 +200,7 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             # Sink diagnostics on the full (inclusive) middle-layer cloud.
             "_meta_position0_share": position0_share(_mid),
             "_meta_massive_token_share": massive_token_share(_mid),
+            **sink_meta(_sink_info),
         }
         out.update(_rows_meta.as_meta())
         return out

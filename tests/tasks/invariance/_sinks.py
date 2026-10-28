@@ -26,11 +26,22 @@ FACTOR = 1000.0
 POS = 3
 
 
-def inject_massive(S: "inv.States", block: int, pos: int = POS, factor: float = FACTOR):
-    """Row ``pos`` of every document times ``factor`` at block ``block`` only."""
+def inject_massive(S: "inv.States", block: int, pos: int = POS, factor: float = FACTOR,
+                   spike_dim=None):
+    """Row ``pos`` of every document made massive at block ``block`` only.
+
+    By default the row is scaled by ``factor``. With ``spike_dim`` it instead
+    gains ``factor * ||row||`` on that one coordinate -- a massive activation
+    as Sun et al. (2024) observe it (a few fixed feature dimensions), which
+    also turns the row's direction; per-row scale-free metrics (correlation
+    distance) see only that.
+    """
     def edit(x):
         y = np.array(x, dtype=np.float64, copy=True)
-        y[pos] *= factor
+        if spike_dim is None:
+            y[pos] *= factor
+        else:
+            y[pos, spike_dim] += factor * np.linalg.norm(y[pos])
         return y
     blocks = dict(S.blocks)
     blocks[block] = [edit(x) for x in S.blocks[block]]
@@ -52,7 +63,7 @@ def headline(result, keys=None):
 
 
 def check_state_task(task, task_cls, S, monkeypatch, moving_key, keys=None,
-                     config=None, block=None, max_new_over_old=0.1):
+                     config=None, block=None, spike_dim=None, max_new_over_old=0.1):
     """The four claims, through the real ``evaluate()`` on injected states:
 
     1. no massive row: ``exclude_sinks`` == ``exclude_pos0`` bit for bit;
@@ -65,7 +76,8 @@ def check_state_task(task, task_cls, S, monkeypatch, moving_key, keys=None,
     ``block`` (default ``L // 2``) is the middle block injected; it should be
     the layer the task reports ``_meta_massive_token_share`` on.
     """
-    S_inj = inject_massive(S, S.n_layers // 2 if block is None else block)
+    S_inj = inject_massive(S, S.n_layers // 2 if block is None else block,
+                           spike_dim=spike_dim)
 
     def run(states, policy=None):
         with monkeypatch.context() as m:
