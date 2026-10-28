@@ -139,8 +139,11 @@ class WeightNormProfileTask(DiagnosticTask):
             "stable_rank_per_layer": srank_arr.tolist(),
             "mean_frobenius_norm": float(frob_arr.mean()),
             "mean_spectral_norm": float(spec_arr.mean()),
-            "_meta_mean_stable_rank": float(srank_arr.mean()),
-            "mean_stable_rank_normalized": float(
+            # Raw stable rank is the headline: zero-padding a matrix leaves it
+            # unchanged. sr / min(m, n) halves under the same padding (the
+            # operator does not change), so it is a capacity ratio, _meta_.
+            "mean_stable_rank": float(srank_arr.mean()),
+            "_meta_mean_stable_rank_normalized": float(
                 np.nanmean(np.asarray(srank_norm_per_layer, dtype=float))
                 if srank_norm_per_layer else float("nan")),
             # ||W||_F / sqrt(mn) carries the 1/sqrt(fan-in) initialisation

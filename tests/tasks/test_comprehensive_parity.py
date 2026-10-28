@@ -4694,7 +4694,7 @@ def test_geometry_weight_norms():
     )
     assert blme["mean_frobenius_norm"] == pytest.approx(ref_frob.mean(), **TOL)
     assert blme["mean_spectral_norm"] == pytest.approx(ref_spec.mean(), **TOL)
-    assert blme["_meta_mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
+    assert blme["mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
     assert blme["norm_uniformity"] == pytest.approx(ref_uniformity, **TOL)
     assert blme["_meta_n_layers"] == 2
 
@@ -4716,7 +4716,7 @@ def test_geometry_weight_norms():
     for k in (
         "mean_frobenius_norm",
         "mean_spectral_norm",
-        "_meta_mean_stable_rank",
+        "mean_stable_rank",
         "norm_uniformity",
     ):
         assert blme[k] == pytest.approx(blme2[k], abs=1e-12)
