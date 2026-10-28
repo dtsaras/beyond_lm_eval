@@ -16,32 +16,22 @@ parameters of that process:
     over log-spaced window sizes n.
   * Joseph exponent J: sigma_tau ~ tau^J, the std of tau-increments of X.
 
-CAVEAT on the self-similarity (Holder) exponent S: it is NOT identified at our
-sample budget. Switching eps between the paper's 5e-3 and the released
-notebook's own DEFAULT_EPS of 5e-2 gives a cross-model Spearman of 0.143 -- the
-model ORDERING it produces is essentially a function of that free parameter, not
-of the models (adversarial review, 2026-09-03). eps is recorded as
-``_meta_holder_eps`` so the value behind any S is visible. Do not use S as a
-cross-model feature without re-establishing its stability. J is the clean one:
-all confounds null, Spearman 1.000 across tau grids, and 1.6% from the paper's
-Wikipedia value of 0.52.
+CAVEAT on the self-similarity (Holder) exponent S: it is weakly identified at
+small budgets; switching eps between the paper's 5e-3 and the notebook's 5e-2
+reordered models on spliced passages (cross-model Spearman 0.143). The paper's
+5e-3 is the default; eps is recorded as ``_meta_holder_eps``.
 
 Headline finding: language is self-similar and long-range dependent
 (H ~ 0.70), and SMALL cross-model differences in H improve on
 bits-per-byte for predicting downstream performance — which makes H a
 mandatory comparison baseline for capability-prediction studies.
 
-PROTOCOL (2026-09-03): follows the paper. Consecutive corpus rows are joined
-into contiguous documents of >= 4K tokens, the first min(2K, model context)
-tokens of each are scored in ONE forward pass, a 128-token burn-in prefix is
-dropped, and the three parameters are estimated PER DOCUMENT and averaged.
-
-Until 2026-09-03 the per-token NLL streams of ~128-token corpus rows were
-concatenated end-to-end and treated as a single process. That injects a
-discontinuity every ~128 tokens into a statistic whose entire purpose is to
-measure long-range dependence, and plants a periodic artifact at exactly the
-document length. The legacy values are still emitted as ``*_concat_legacy``
-so the size of the change is visible.
+PROTOCOL: natural documents of >= 4K tokens (whole WikiText-103 articles,
+``cache.load_long_documents``), the first min(use_tokens, model context)
+tokens of each scored in ONE forward pass, a 128-token burn-in prefix dropped,
+and the three parameters fitted on the pooled per-document statistics
+(per-document means as ``*_perdoc``). The concatenated-stream values are
+``_meta_*_concat_legacy``.
 
 Estimator parity is pinned against ``nolds`` (hurst_rs) and analytic anchors
 (white noise H ~ 0.5; J = 0.5 for iid).
@@ -53,40 +43,27 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from ...cache import load_long_documents
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 
 logger = logging.getLogger("blme")
 
 
-# Minimum lag/window for every scaling fit.
-#
-# The short-lag end of a log-log scaling fit is dominated by discretisation and
-# tokenizer artifacts rather than by the fractal regime, which is why the
-# pooled path floors its windows at this value. The PER-SERIES estimators below
-# did not get that floor: `_rs_hurst` carried min_window = 8 and both
-# `_joseph_exponent` and `_holder_exponent` started their tau grid at
-# logspace(0, ...) = 1. So `hurst_exponent`, `joseph_exponent` and
-# `self_similarity_exponent` -- all exported keys -- were still fitting the
-# regime the floor exists to exclude (adversarial review, 2026-09-03).
+# Minimum lag/window for every scaling fit (the notebook fits tau >= 25): the
+# short-lag end is dominated by discretisation and tokenizer artifacts.
 _TAU_MIN = 25
+
+# Alabdulmohsin et al. 2024 Sec. 2.2. Two notebook defects are not reproduced
+# (Q2): cell 27 scores log_softmax(logits)[i, ts[i]], the token AT i under the
+# prediction for i+1 (BLME shifts targets by one), and cell 46's
+# get_joseph_exponent never resets its accumulator across scales (BLME does).
+PAPER_HOLDER_EPS = 5e-3
 
 
 def _min_lag(N: int, upper: int) -> int:
-    """The tau floor, backed off CONTINUOUSLY for short streams.
-
-    A log-log scaling fit needs the floor to sit well below `upper`, or there
-    is no range left to fit. The first version of this back-off switched
-    abruptly -- 25 at upper = 26 and 8 at upper = 25 -- which is a CLIFF, not a
-    back-off: per-document Joseph jumped 0.5893 -> 0.4387 between N = 207 and
-    N = 208 on identical fGn(0.7), three times the published cross-model range,
-    and `_rs_hurst` returned NaN for N in exactly [104, 107] because the floor
-    left it too few distinct windows (adversarial review, 2026-09-04).
-
-    Requiring floor <= upper/4 keeps at least a factor-4 span for the fit and
-    makes the floor vary smoothly with N. At the shipped protocol (N = 895) it
-    is 25 for every estimator, so nothing about the shipped numbers changes.
-    """
+    """The tau floor, backed off continuously for short streams: floor <=
+    upper/4 keeps a factor-4 span for the fit with no cliff in N."""
     return int(min(_TAU_MIN, max(2, upper // 4)))
 
 
@@ -200,60 +177,64 @@ def _fractal_params(nll_stream, eps: float = 5e-3) -> dict:
 @register_task("dynamics_fractal")
 class FractalLikelihoodTask(DiagnosticTask):
     """Hurst / Joseph / self-similarity exponents of the model's per-token
-    NLL stream over the evaluation corpus."""
+    NLL stream over natural long documents."""
+
+    # LLM-originated: the paper's stream, every next-token NLL after a 128-token
+    # burn-in (position 0 has no NLL target).
+    TOKEN_POLICY = ("paper_protocol:Alabdulmohsin et al. 2024 (arXiv:2402.01825) "
+                    "Sec. 2.1, notebook burn-in")
+    SOURCES = {
+        "paper": "arXiv:2402.01825",
+        "code": "google-research/google-research@700de9630a39cf1c0ded1ea7d1092ec0f467c7a7"
+                ":fractals_language",
+        "llm_precedent": "Alabdulmohsin et al. 2024 (arXiv:2402.01825) is itself the LLM paper",
+    }
+    HEADLINE_KEYS = (
+        "hurst_exponent", "joseph_exponent", "self_similarity_exponent",
+        "hurst_exponent_perdoc", "joseph_exponent_perdoc", "self_similarity_exponent_perdoc",
+        "hurst_exponent_std", "joseph_exponent_std", "self_similarity_exponent_std",
+    )
+    # None: dimensionless exponents of a token-time process with no mechanical
+    # d / L / V term; the Hurst exponent is size-linked by meaning (it tracks the
+    # model's NLL process). Segment length is pinned (use_tokens) across models.
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Fractal Likelihood Analysis (Hurst)...")
         num_samples = self.config.get("num_samples", 100)
-        # 5e-2 is the released notebook's own DEFAULT_EPS, whose docstring warns
-        # "if eps is too small, probability estimates will be unreliable".
-        # At 5e-3 the counts are single-digit Poisson (one 895-token document
-        # gave 1/4/2/1/0 pairs at tau = 1/4/16/64/256), and the estimate is
-        # noise: S = 0.313 +/- 0.265 against the paper's 0.59 +/- 0.08. At
-        # 5e-2 the same data gives 0.606 +/- 0.124 (adversarial review,
-        # 2026-09-03).
-        eps = float(self.config.get("holder_eps", 5e-2))
-        # ...and a config can still put it back. `beyond_benchmarks`'
-        # `configs/tasks.yaml` set `holder_eps: 0.005`, and user overrides win
-        # in `resolve_task_config`, so the fix above was present and its effect
-        # absent -- the "fix present, effect absent" pattern with the CONFIG as
-        # the vector. End-to-end on gpt2 (red-team review, 2026-09-05),
-        # package default vs study config:
-        #
-        #   self_similarity_exponent (headline, pooled)  0.569557 -> 0.043773  (-92.3%)
-        #   self_similarity_exponent_perdoc             0.667857 -> 0.470090  (-29.6%)
-        #   self_similarity_exponent_std                0.668682 -> 0.057779  (-91.4%)
-        #   hurst_exponent / joseph_exponent            unchanged
-        #
-        # At 0.043773 the pooled estimator sits an order of magnitude below its
-        # own per-document mean and nowhere near the paper's 0.59 +/- 0.08.
-        # `_meta_holder_eps` recorded the value, but a number in a provenance
-        # field is not a warning, so this shipped silently. It no longer does.
-        _eps_ok = eps >= 5e-2
-        if not _eps_ok:
-            logger.warning(
-                f"  dynamics_fractal: holder_eps={eps:g} is below the released "
-                f"notebook's DEFAULT_EPS of 5e-2. The notebook's own docstring "
-                f"warns that probability estimates are unreliable there, and "
-                f"BLME measures the pooled self-similarity exponent collapsing "
-                f"to ~0.04 (vs ~0.57 at 5e-2). `self_similarity_exponent` from "
-                f"this run should NOT be reported.")
-        # Paper protocol (Alabdulmohsin et al. 2024 Sec. 3): documents longer
-        # than 4K tokens, first 2K tokens of each, parameters estimated PER
-        # DOCUMENT and averaged.
+        # The paper's eps (Sec. 2.2: eps = 5e-3, S robust over [1e-3, 1e-2]); the
+        # notebook's DEFAULT_EPS of 5e-2 is labelled there as differing from the
+        # paper (Q2: the paper's definition wins).
+        eps = float(self.config.get("holder_eps", PAPER_HOLDER_EPS))
+        # Paper protocol (Sec. 2.1): documents longer than 4K tokens, first 2K
+        # tokens of each.
         min_doc_tokens = int(self.config.get("min_doc_tokens", 4096))
         use_tokens = int(self.config.get("use_tokens", 2048))
-        # The first tokens of a document have no left context, so their NLL is
-        # a large deterministic transient. Integrated into X_t it is a
-        # near-deterministic ramp, which biases R/S upward (the range R is
-        # inflated) and the Joseph exponent as well. The paper's 4K-token
-        # documents make this a negligible edge effect; at our lengths it is
-        # not, so we drop a fixed prefix.
+        # The first tokens' NLL is a deterministic transient (no left context);
+        # the notebook drops the first 128 scored tokens.
         burn_in = int(self.config.get("burn_in", 128))
 
-        if dataset is None:
-            dataset = [{"text": "The quick brown fox jumps over the lazy dog. " * 8}
-                       for _ in range(20)]
+        # Natural long documents (paper Sec. 2.1: documents > 4K tokens), whole
+        # WikiText-103 articles in a fixed nested order. The shared corpus is
+        # passages, and joining passages from different articles would measure
+        # the splices; documents="dataset" scores each given row as a document.
+        source = self.config.get("documents", "long_documents")
+        doc_split = self.config.get("doc_split", "train")
+        if source == "dataset":
+            if not dataset:
+                return {"error": "documents='dataset' needs a dataset"}
+            texts = [s["text"] if isinstance(s, dict) else str(s)
+                     for s in list(dataset)[:num_samples]]
+            texts = [t for t in texts if t]
+            source_name = "dataset"
+        else:
+            try:
+                docs = load_long_documents(num_samples, min_tokens=min_doc_tokens,
+                                           tokenizer=tokenizer, split=doc_split)
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"dynamics_fractal: long documents unavailable: {e}"}
+            texts = [d["text"] for d in docs]
+            source_name = f"wikitext_document_level:{doc_split}"
 
         device = next(model.parameters()).device
         ctx = (getattr(model.config, "max_position_embeddings", None)
@@ -264,31 +245,6 @@ class FractalLikelihoodTask(DiagnosticTask):
         seg_len = int(min(use_tokens, ctx))
         if seg_len <= burn_in + 128:
             burn_in = max(0, seg_len // 8)
-
-        # ---- Build LONG documents ----
-        # The eval corpus rows are ~128 tokens. Concatenating their NLL streams
-        # end-to-end (the pre-2026-09-03 behaviour) injects a discontinuity
-        # every ~128 tokens into a process whose whole purpose is to measure
-        # long-range dependence, and puts a periodic artifact at exactly the
-        # document length. Here consecutive rows are joined into contiguous
-        # TEXT first, so the model actually attends across the join and the
-        # NLL stream is a single coherent process.
-        texts, buf, buf_tok = [], [], 0
-        for i, sample in enumerate(dataset):
-            if len(texts) >= num_samples:
-                break
-            t = sample["text"] if isinstance(sample, dict) else str(sample)
-            if not t:
-                continue
-            buf.append(t)
-            buf_tok += len(tokenizer(t)["input_ids"])
-            if buf_tok >= min_doc_tokens:
-                texts.append("\n\n".join(buf))
-                buf, buf_tok = [], 0
-        if not texts and buf:
-            # Corpus too short to make even one 4K document: use what we have
-            # rather than returning nothing, and record it.
-            texts.append("\n\n".join(buf))
 
         per_doc, all_nll, per_doc_streams = [], [], []
         with torch.no_grad():
@@ -319,12 +275,8 @@ class FractalLikelihoodTask(DiagnosticTask):
                     if d.get(key) is not None and np.isfinite(d.get(key, np.nan))]
             return float(np.std(vals)) if len(vals) > 1 else float("nan")
 
-        # POOLED estimates are the headline: the authors' released
-        # `get_hurst_exponent` accumulates R/S over all documents per scale and
-        # fits a SINGLE power law, rather than averaging per-document fits.
-        # The difference is real (gpt2 on pg19: 0.6623 pooled vs 0.6206
-        # per-document), so the pooled value is what to compare against the
-        # paper. Per-document means are retained as `*_perdoc`.
+        # Pooled estimates are the headline, as the notebook accumulates the
+        # statistic over documents per scale and fits one power law.
         pooled = _pooled_fractal_params(per_doc_streams, eps=eps)
 
         results = {
@@ -337,41 +289,34 @@ class FractalLikelihoodTask(DiagnosticTask):
             "hurst_exponent_std": _std("hurst_exponent"),
             "joseph_exponent_std": _std("joseph_exponent"),
             "self_similarity_exponent_std": _std("self_similarity_exponent"),
-            "n_tokens_in_stream": int(sum(d["n_tokens_in_stream"]
-                                          for d in per_doc)),
+            # _meta_: a sample-count echo (n_docs x scored tokens).
+            "_meta_n_tokens_in_stream": int(sum(d["n_tokens_in_stream"]
+                                                for d in per_doc)),
             "_meta_n_documents": len(per_doc),
+            "_meta_document_source": source_name,
+            "_meta_min_doc_tokens": int(min_doc_tokens),
             "_meta_segment_len": int(seg_len),
             "_meta_burn_in": int(burn_in),
             "protocol": "per_document_paper_protocol",
             "_meta_holder_eps": float(eps),
-            # A machine-readable form of the warning above, so an analysis can
-            # gate on it rather than reading logs.
-            "_meta_holder_eps_at_or_above_reference": bool(_eps_ok),
+            "_meta_holder_eps_is_paper_value": bool(eps == PAPER_HOLDER_EPS),
             "_meta_tau_min": int(_TAU_MIN),
         }
-        # Legacy concatenated-stream values, kept so the change in the headline
-        # numbers is auditable rather than silent.
+        # Legacy concatenated-stream values (a retired protocol): _meta_.
         legacy = _fractal_params(all_nll, eps=eps)
         for k in ("hurst_exponent", "joseph_exponent",
                   "self_similarity_exponent"):
-            results[f"{k}_concat_legacy"] = legacy[k]
+            results[f"_meta_{k}_concat_legacy"] = legacy[k]
         return results
 
 
 
-def _pooled_fractal_params(streams, eps: float = 5e-2) -> dict:
+def _pooled_fractal_params(streams, eps: float = PAPER_HOLDER_EPS) -> dict:
     """Pooled fractal parameters: accumulate the statistic across documents at
-    each scale, then fit ONE power law.
+    each scale, then fit ONE power law (the notebook's get_hurst_exponent).
 
-    This is what the authors' released `fractal_patterns_in_language.ipynb`
-    does (`get_hurst_exponent` takes the full 2-D document array and averages
-    R/S over documents per scale before fitting). Averaging per-document fits
-    instead is a different estimator, and measurably so: gpt2 on pg19 gives
-    H = 0.6623 pooled vs 0.6206 per-document.
-
-    Each document is normalized to zero mean and unit variance on its OWN
-    increments before integration -- pooling the raw NLL across documents
-    would let cross-document mean shifts masquerade as long-range drift.
+    Each document is standardised on its own increments before integration,
+    so cross-document mean shifts cannot masquerade as long-range drift.
     """
     xs, Xs = [], []
     for z in streams:
@@ -391,13 +336,7 @@ def _pooled_fractal_params(streams, eps: float = 5e-2) -> dict:
     if n_min < 64:
         return nan
 
-    # ---- Hurst: mean R/S over all documents at each window size ----
-    # The R/S window grid must respect the same lower cutoff as the tau grids.
-    # The 2026-09-03 tau_min fix was applied to the Joseph and Holder grids but
-    # NOT here, so it landed on two of the three exponents and left Hurst fitted
-    # over windows starting at 8 (adversarial review, batch B08). The reference
-    # fits over the large-scale regime; small windows are dominated by
-    # short-range structure the exponent is not meant to describe.
+    # ---- Hurst: mean R/S over all documents at each window size (>= tau floor) ----
     w_min = max(8, min(_TAU_MIN, n_min // 8))
     windows = np.unique(np.floor(
         np.logspace(np.log10(w_min), np.log10(max(w_min * 2, n_min // 2)),
@@ -420,12 +359,7 @@ def _pooled_fractal_params(streams, eps: float = 5e-2) -> dict:
     hurst = (float(np.polyfit(log_n, log_rs, 1)[0])
              if len(log_n) >= 3 else float("nan"))
 
-    # ---- Joseph: std of tau-increments, pooled over documents ----
-    # tau grid starts at TAU_MIN, not 1. The released notebook fits over
-    # tau in [25, 300]; including tau = 1..8 puts most of the fitted points in a
-    # regime the reference excludes and biases both exponents. Restricting to
-    # tau >= 25 moves the Joseph exponent 0.5417 -> 0.4972, against the
-    # reference's 0.4945 (adversarial review, 2026-09-03).
+    # ---- Joseph: std of tau-increments, pooled over documents (tau >= floor) ----
     tau_min = max(1, min(_TAU_MIN, n_min // 8))
     taus = np.unique(np.floor(
         np.logspace(np.log10(tau_min), np.log10(max(tau_min + 1, n_min // 4)),

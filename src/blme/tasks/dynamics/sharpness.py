@@ -10,6 +10,9 @@ Loss-landscape sharpness metrics:
     L(theta + rho * g/||g||) - L(theta), measured at the gradient
     direction. Closely related to the operator-norm sharpness used in
     sharpness-aware minimisation.
+  - **Adaptive SAM sharpness** — Kwon et al. 2021 (ASAM), arXiv:2102.11600 —
+    the same with the rho-ball taken in w / |w| coordinates, which makes it
+    invariant to function-preserving rescaling of the weights.
 
 For large LLMs the full-parameter Hessian is too big to handle, so by
 default we restrict the curvature computation to the **final transformer
@@ -32,7 +35,7 @@ References:
     computation problems", J. Comput. Appl. Math. 74, 1996.
 """
 
-import math
+import contextlib
 import logging
 from typing import List, Tuple
 
@@ -42,6 +45,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_layers, get_lm_head
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -91,57 +95,112 @@ def _hvp(loss, params, v_list):
     return [h.detach() for h in hv]
 
 
-def _power_iteration_top_eigenvalue(hvp, v, n_iter: int, status=None) -> float:
-    """Largest-magnitude Hessian eigenvalue via power iteration, returned WITH
-    its sign — the Rayleigh quotient ``v^T H v`` at the converged eigenvector,
-    matching PyHessian's ``eigenvalues(top_n=1)``. Reporting ``||Hv||`` alone
-    (as the old code did) drops the sign and misreports a dominant negative
-    curvature (a saddle) as positive.
+class _HessianOperator:
+    """PyHessian's single-batch operator (hessian.py ``__init__`` and
+    ``utils.hessian_vector_product``): the gradient graph is built once with
+    ``create_graph=True`` and every HVP is one more backward through it."""
 
-    ``hvp(v)`` returns ``H @ v`` as a list of tensors shaped like ``v``.
+    def __init__(self, compute_loss, params):
+        self.params = list(params)
+        self.loss = compute_loss()
+        grads = torch.autograd.grad(self.loss, self.params, create_graph=True)
+        # A gradient that does not depend on the parameters has a zero HVP block.
+        self._live = [i for i, g in enumerate(grads) if g.requires_grad]
+        self.grads = grads
+
+    def __call__(self, v: List[torch.Tensor]) -> List[torch.Tensor]:
+        if not self._live:
+            return [torch.zeros_like(p) for p in self.params]
+        outs = [self.grads[i] for i in self._live]
+        gos = [v[i] for i in self._live]
+        hv = torch.autograd.grad(outs, self.params, grad_outputs=gos,
+                                 retain_graph=True, allow_unused=True)
+        return [torch.zeros_like(p) if h is None else h.detach()
+                for h, p in zip(hv, self.params)]
+
+
+def _dot(a: List[torch.Tensor], b: List[torch.Tensor]) -> float:
+    return float(sum((x * y).sum() for x, y in zip(a, b)).item())
+
+
+def _relative_change(prev: float, cur: float) -> float:
+    """|cur - prev| / |prev|; PyHessian's denominator adds an absolute 1e-6,
+    which makes the stopping rule depend on the Hessian's units (not reproduced)."""
+    if cur == prev:
+        return 0.0
+    return abs(prev - cur) / abs(prev) if prev != 0.0 else float("inf")
+
+
+def _power_iteration_top_eigenvalue(hvp, v, n_iter: int = 100, status=None,
+                                    tol: float = 1e-3) -> float:
+    """Largest-magnitude Hessian eigenvalue, signed, by PyHessian's
+    ``eigenvalues(maxIter=n_iter, tol=tol, top_n=1)`` loop: ONE HVP per
+    iteration, Rayleigh quotient <Hv, v> of the current unit vector, v <- Hv /
+    ||Hv||, stop once the quotient changes by less than ``tol`` (relative) and
+    return the last accepted quotient. ``tol=0`` runs the full budget.
+
+    Two PyHessian details are not reproduced: its normalisation divides by
+    ||v|| + 1e-6 and its stopping test by |lambda| + 1e-6; both are absolute
+    epsilons inside scale-free operations (exact scale-safe norms are used).
+
+    ``status`` receives the iterations used, the last relative change, whether
+    the rule fired, and the residual ||Hv - lambda v|| / |lambda| of the
+    returned pair. A residual below 1 certifies (Weinstein's bound) that the
+    Hessian has an eigenvalue of the reported sign in [lambda - r, lambda + r].
     """
-    flat = _flatten_grads(v)
-    # Scale-exact throughout: `.norm()` squares first. On the end-to-end
-    # cross-entropy anchor every Hessian entry was the representable
-    # 1.0000000787060493e-23 with a true top eigenvalue of
-    # 2.0000001574120985e-23, yet the HVP norm underflowed to 0.0 and the
-    # headline collapsed (adversarial review round 3, 2026-09-04).
-    vn = _safe_norm(flat)
+    vn = _safe_norm(_flatten_grads(v))
     if vn > 0:
         v = [vi / vn for vi in v]
-    # CONVERGENCE IS MEASURED AND REPORTED, never used to stop early.
-    #
-    # The shipped 8 iterations returned 2.019681747104697 against an exact
-    # 2.056211316963325 on the analytic MLP (-1.78%), so the count was raised
-    # to 64 (adversarial review round 2, 2026-09-04). It is NOT an early-exit
-    # criterion: a start vector that lies near a NON-dominant eigenvector makes
-    # the Rayleigh quotient look stationary while the dominant component is
-    # still growing -- diag(2, 1) started at [1e-6, 1] sits at lambda = 1 for
-    # several iterations before turning toward the true 2. Any local test is
-    # fooled there, so the loop always runs its full budget and the last
-    # relative change is emitted as a diagnostic instead.
-    _tol = 1e-7
-    _prev = None
-    _iters = 0
-    _rel = float("nan")
-    for _ in range(max(1, n_iter)):
+    eigenvalue = None
+    resid = float("nan")
+    rel = float("nan")
+    converged = False
+    n_used = 0
+    for _ in range(max(1, int(n_iter))):
         hv = hvp(v)
+        n_used += 1
+        tmp = _dot(hv, v)
         mag = _safe_norm(_flatten_grads(hv))
+        r = _safe_norm(_flatten_grads([h - tmp * vi for h, vi in zip(hv, v)]))
+        tmp_resid = r / abs(tmp) if tmp != 0.0 else float("inf")
         if mag <= 0:
-            if status is not None:
-                status.update(n_iter=_iters, rel_change=0.0, converged=True)
-            return 0.0
+            eigenvalue, resid, converged = 0.0, 0.0, True
+            break
         v = [h / mag for h in hv]
-        _iters += 1
-        _cur = float(sum((h * vi).sum() for h, vi in zip(hvp(v), v)).item())
-        if _prev is not None and _cur != 0.0:
-            _rel = abs(_cur - _prev) / abs(_cur)
-        _prev = _cur
+        if eigenvalue is None:
+            eigenvalue, resid = tmp, tmp_resid
+            continue
+        rel = _relative_change(eigenvalue, tmp)
+        if rel < tol:
+            converged = True
+            break
+        eigenvalue, resid = tmp, tmp_resid
     if status is not None:
-        status.update(n_iter=_iters, rel_change=_rel,
-                      converged=bool(np.isfinite(_rel) and _rel < _tol))
-    hv = hvp(v)
-    return float(sum((h * vi).sum() for h, vi in zip(hv, v)).item())
+        status.update(n_iter=n_used, rel_change=rel, converged=converged,
+                      residual=resid)
+    return float(eigenvalue)
+
+
+def _hutchinson_trace(hvp, params, generator=None, n_iter: int = 100,
+                      tol: float = 1e-3, status=None) -> List[float]:
+    """Hutchinson trace samples v^T H v by PyHessian's ``trace(maxIter, tol)``
+    loop: Rademacher probes, stop once the running mean changes by less than
+    ``tol`` (relative; PyHessian's +1e-6 in the denominator is not reproduced).
+    Returns the samples; their mean is the estimate."""
+    samples: List[float] = []
+    trace = 0.0
+    converged = False
+    for _ in range(max(1, int(n_iter))):
+        v = _make_random_vec(params, rademacher=True, generator=generator)
+        samples.append(_dot(hvp(v), v))
+        mean = float(np.mean(samples))
+        if _relative_change(trace, mean) < tol:
+            converged = True
+            break
+        trace = mean
+    if status is not None:
+        status.update(n_iter=len(samples), converged=converged)
+    return samples
 
 
 def _sam_sharpness(compute_loss, params, sam_rho: float,
@@ -157,17 +216,10 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
     loss_for_grad = compute_loss()
     grads = torch.autograd.grad(loss_for_grad, params, create_graph=False)
     grad_flat = _flatten_grads(list(grads))
-    # Two nonzero gradients of -5.000000097707407e-25 produced norm 0.0 and
-    # SAM NaN under the naive form; max-coordinate-first gives the exact
-    # 7.071067629665599e-25 (adversarial review round 3, 2026-09-04).
     grad_norm = _safe_norm(grad_flat)
 
     if grad_norm > 0:
-        # try/finally: an exception raised by `compute_loss` used to leave the
-        # model PERTURBED. Injecting a loss failure left a scalar parameter at
-        # 1.1 instead of 1.0 -- absolute corruption 0.1 that then silently
-        # poisoned every later task in the run (adversarial review round 2,
-        # 2026-09-04).
+        # try/finally: a failing loss must not leave the model perturbed.
         with torch.no_grad():
             saved = [p.detach().clone() for p in params]
             try:
@@ -179,6 +231,39 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
                     p.copy_(s)
         return perturbed_loss - baseline_loss, perturbed_loss, grad_norm
     return float("nan"), float("nan"), grad_norm
+
+
+def _asam_sharpness(compute_loss, params, rho: float,
+                    baseline_loss: float) -> Tuple[float, float, float]:
+    """Adaptive sharpness (Kwon et al. 2021, ASAM, arXiv:2102.11600) with the
+    element-wise operator T_w = |w|: ``L(w + eps*) - L(w)`` with
+    ``eps* = rho * T_w^2 g / ||T_w g||_2``, i.e. a rho-ball in the coordinates
+    w / |w|. Any function-preserving element-wise rescale w -> a w leaves T_w g
+    unchanged and scales eps* with w, so the perturbed function, and the value,
+    are unchanged (plain SAM's fixed-radius ball is not; Dinh et al. 2017).
+
+    T_w = |w| on every parameter, biases included, and no +eta: the released
+    ASAM code adds eta = 0.01 to |w| of weights only, which breaks the exact
+    invariance this twin exists for. Parameters are restored exactly.
+    Returns ``(sharpness, perturbed_loss, ||T_w g||)``; NaNs when T_w g = 0.
+    """
+    loss = compute_loss()
+    grads = torch.autograd.grad(loss, params, create_graph=False)
+    tw = [p.detach().abs() for p in params]
+    twg = [t * g.detach() for t, g in zip(tw, grads)]
+    norm = _safe_norm(_flatten_grads(twg))
+    if not norm > 0:
+        return float("nan"), float("nan"), norm
+    with torch.no_grad():
+        saved = [p.detach().clone() for p in params]
+        try:
+            for p, t, tg in zip(params, tw, twg):
+                p.add_(t * tg * (rho / norm))
+            perturbed = float(compute_loss().item())
+        finally:
+            for p, s_ in zip(params, saved):
+                p.copy_(s_)
+    return perturbed - baseline_loss, perturbed, norm
 
 
 def _critical_step_size(compute_loss, params, grads, grad_norm: float,
@@ -209,30 +294,13 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
         return float("nan"), float("nan")
     gvecs = [g.detach() for g in grads]
 
-    # eta0 must be large enough that theta - eta*g is REPRESENTABLE.
-    #
-    # In bf16 the 1e-6 default is BELOW parameter resolution (bf16 eps
-    # 7.81e-03, so `p - 1e-6*g` returns exactly `p`): every probe returned the
-    # unperturbed loss, and critical_step_size / critical_sharpness were NaN on
-    # EVERY model in the study -- which core.py forces to bf16 precisely
-    # because this task needs eager attention.
-    #
-    # The CALLER additionally promotes the whole model to float32 for this
-    # measurement when it is stored in bf16/fp16. That matters beyond
-    # representability: lambda_c is dtype-BIASED by +13.8% (gpt2 bf16) to
-    # +34.7% (fp16), and an ablation isolates the bias to bf16 ARITHMETIC
-    # rather than weight rounding -- pythia-160m in bf16 gives loss 2.328 /
-    # ||g|| 171 against fp32 1.652 / 18.90, while bf16-ROUNDED weights
-    # evaluated in fp32 math give 1.654 / 20.34. Without the promotion,
-    # `dtype="auto"` would split the zoo by checkpoint storage format rather
-    # than by any property of the model (adversarial review, 2026-09-03).
+    # eta0 is raised until theta - eta*g is representable in the parameters'
+    # dtype (in bf16, 1e-6 * g rounds away and every probe returns the baseline).
     try:
         _eps = float(torch.finfo(params[0].dtype).eps)
         _pnorm = _safe_norm(torch.cat([p_.detach().float().reshape(-1)
                                        for p_ in params]))
-        # Exact guards: these are physical magnitudes, and clamping them at an
-        # absolute 1e-12 makes the floor depend on the units the weights happen
-        # to be in. A zero gradient norm means there is no step to take at all.
+        # Exact guards on physical magnitudes, no absolute floor.
         if not (grad_norm > 0.0):
             return float("nan"), float("nan")
         _min_eta = 8.0 * _eps * _pnorm / grad_norm
@@ -244,9 +312,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
     saved = [p.detach().clone() for p in params]
 
     def probe(eta: float) -> float:
-        # Same try/finally reason as _sam_sharpness: a loss failure mid-probe
-        # left the model stepped (0.9 instead of 1.0 on the injected-exception
-        # anchor) rather than restored.
+        # try/finally: a failing loss must not leave the model stepped.
         with torch.no_grad():
             try:
                 for p_, g_ in zip(params, gvecs):
@@ -257,16 +323,9 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                     p_.copy_(s_)
         return val
 
-    # STRICT inequality, per Kalra & Barkeshli Definition 2.1: a step is
-    # unstable when the loss INCREASES, so equality is stable. With `>=`, the
-    # exactly-flat case was classified unstable and the search converged to
-    # eta = 0.9999999999995453 / lambda_c = 2.0000000000009095 on
-    # D(eta) = -eta(eta-1)^2(4-eta), whose first strict increase is elsewhere
-    # (adversarial review, 2026-09-04).
-    #
-    # Doubling phase: find the first unstable eta. If already unstable at
-    # eta0, HALVE downward first (Kalra et al. search in both directions;
-    # audit 2026-07-16) so extremely sharp scopes still resolve eta*.
+    # A step is unstable when the loss strictly INCREASES (Kalra Def. 2.1).
+    # Doubling phase: find the first unstable eta; if eta0 is already unstable,
+    # halve downward first so very sharp scopes still resolve eta*.
     eta = eta0
     if probe(eta) > baseline_loss:
         hi0 = eta
@@ -274,12 +333,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
             eta /= 2.0
             if eta < 1e-30:
                 return float("nan"), float("nan")
-            # `<=`, not `<`. Kalra Def. 2.1 calls a step unstable when the
-            # loss INCREASES, so equality is STABLE -- and the upward branch
-            # already uses `> baseline`. The asymmetry made the downward search
-            # return NaN on a loss that is exactly flat for eta <= 1e-9, where
-            # eta* = 1e-9 and the mirrored upward case returns 0.000996
-            # (independent Opus review, 2026-09-04).
+            # Equality is stable, mirroring the upward branch's `> baseline`.
             if probe(eta) <= baseline_loss:
                 lo, hi = eta, eta * 2.0
                 for _ in range(bisect_iters):
@@ -288,12 +342,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
                         hi = mid
                     else:
                         lo = mid
-                # Bracket MIDPOINT, exactly as the upward branch does. The
-                # downward branch used to return `lo`, which is the last
-                # KNOWN-STABLE point rather than Kalra's approximation of the
-                # critical step: on the lambda = 100 quadratic with 6
-                # bisections it reported 101.135802 where the midpoint gives
-                # 100.515337 (adversarial review, 2026-09-04).
+                # Bracket midpoint, as the upward branch returns.
                 eta_star = 0.5 * (lo + hi)
                 return float(eta_star), float(2.0 / eta_star)
         return float("nan"), float("nan")
@@ -306,11 +355,7 @@ def _critical_step_size(compute_loss, params, grads, grad_norm: float,
             break
         lo = eta
     if hi is None:
-        # Never became unstable within the search range. Returning the cap
-        # (eta0 * 2^max_doublings, a CONSTANT) polluted cross-model
-        # regressions with an indistinguishable sentinel (audit 2026-07-16:
-        # random-init gpt2 returned exactly 1073.74). NaN is honest: eta*
-        # exceeds the search range.
+        # eta* is beyond the search range: NaN, not the cap as a sentinel.
         return float("nan"), float("nan")
 
     # Bisection between last stable (lo) and first unstable (hi).
@@ -348,13 +393,45 @@ def _make_random_vec(params, rademacher: bool = True,
 class LossSharpnessTask(DiagnosticTask):
     """Loss-landscape sharpness via Hessian + SAM metrics."""
 
+    # The loss averages every next-token position, as any LM loss; no token pool.
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1912.07145; arXiv:2010.01412; arXiv:2102.11600",
+        "code": "amirgholami/PyHessian@de8cf239ace21c7754ee599255897ebf3eed19cb; "
+                "google-research/sam@dae9904c4cf3a57a304f7b04cecffe371679c702",
+        "llm_precedent": "Kalra et al. 2026 (arXiv:2601.16979): critical sharpness of "
+                         "LLMs up to 7B",
+    }
+    HEADLINE_KEYS = (
+        "baseline_loss", "hutchinson_trace_estimate", "hutchinson_trace_per_param",
+        "top_eigenvalue_estimate", "sam_sharpness", "sam_perturbed_loss",
+        "critical_step_size", "critical_sharpness", "asam_sharpness",
+    )
+    # Only adaptive SAM survives a function-preserving rescale; the trace, the
+    # top eigenvalue, plain SAM and the critical step move under it, and the
+    # baseline loss is size-linked by meaning.
+    SIZE_INVARIANT = {
+        "asam_sharpness": (
+            ("residual_scale_gauge(rescale_eps=True)",),
+            "tests/tasks/invariance/test_dynamics_sharpness.py::"
+            "test_asam_is_invariant_under_a_function_preserving_rescale",
+        ),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Loss-Landscape Sharpness Analysis...")
 
         param_scope = self.config.get("param_scope", "last_layer")
-        n_hutchinson = self.config.get("n_hutchinson", 5)
-        n_power_iter = self.config.get("n_power_iter", 8)
+        # PyHessian's defaults: at most 100 HVPs per estimator, stopping once the
+        # estimate changes by less than tol = 1e-3 (relative).
+        n_hutchinson = int(self.config.get("n_hutchinson", 100))
+        n_power_iter = int(self.config.get("n_power_iter", 100))
+        hutchinson_tol = float(self.config.get("hutchinson_tol", 1e-3))
+        power_iter_tol = float(self.config.get("power_iter_tol", 1e-3))
         sam_rho = self.config.get("sam_rho", 0.05)
+        # The adaptive twin uses the same radius by default, so it differs from
+        # sam_sharpness only by the T_w = |w| normaliser.
+        asam_rho = float(self.config.get("asam_rho", sam_rho))
         num_samples = self.config.get("num_samples", 4)
         seed = int(self.config.get("seed", 42))
 
@@ -397,66 +474,23 @@ class LossSharpnessTask(DiagnosticTask):
         if not encs:
             return {"error": "No valid encodings"}
 
-        # The forward pass needs requires_grad=True; ensure model is in
-        # eval mode but parameters can compute gradients.
-        # THE try MUST OPEN BEFORE THE FIRST MUTATION.
-        #
-        # `model.eval()`, the `requires_grad_` rewrite and the float32 promotion
-        # below all mutate the CALLER'S model, and the `finally` that restores
-        # them used to begin only after all three had run. An exception in that
-        # window — an OOM during the promotion is the realistic one — left the
-        # model in eval mode, with `requires_grad=False` on every parameter
-        # except the last block, and in float32; `core.py:439` then continued
-        # the run with that same object, so every later task in the sweep
-        # measured a mutated model (Opus round 11, 2026-09-08).
-        #
-        # This file already fixed exactly this class once, at
-        # `_sam_sharpness` (see its comment: an exception left a parameter at
-        # 1.1 instead of 1.0 and "silently poisoned every later task in the
-        # run"). The inner perturbation was wrapped; the outer setup was not.
-        #
-        # The restore variables are initialised to inert values first so the
-        # `finally` can never reference an unbound name when the failure
-        # happens early.
+        # The try opens before the first mutation of the caller's model (eval
+        # mode, requires_grad, dtype), so every exit path restores all three.
         was_training = model.training
         orig_grad_state = {}
-        _saved_param_dtypes = []
-        _promoted = False
+        _stack = contextlib.ExitStack()
         try:
             model.eval()
-            # Save original requires_grad state so we can restore it — other
-            # tasks or user code may depend on the model's grad configuration.
             orig_grad_state = {p: p.requires_grad for p in model.parameters()}
             for p in model.parameters():
                 p.requires_grad_(False)
             for p in params:
                 p.requires_grad_(True)
 
-            # Promote to float32 for EVERY measurement, not only the critical step.
-            #
-            # Curvature is a second-order quantity, so storage precision biases all
-            # four probes, not just the one that takes an explicit step. Measured on
-            # cached tiny-random-gpt2: bf16 power iteration gave 2.4375 against
-            # 3.109532833 in fp32, and evaluating the SAME bf16-rounded weights in
-            # fp32 arithmetic gave 3.111037254 -- isolating a ~21% error to the
-            # ARITHMETIC rather than to the weights (adversarial review,
-            # 2026-09-04). Without this, trace/eigenvalue/SAM split the zoo by
-            # checkpoint storage format rather than by model.
-            #
-            # Parameters ONLY. `model.float()` then `model.to(dtype)` is not a round
-            # trip -- it downcasts buffers that were deliberately float32 (on
-            # pythia-160m it turned `rotary_emb.inv_freq` float32 -> bfloat16, rel
-            # 3.65e-03, and PERSISTED into every later task in the run).
-            _model_dtype = next(model.parameters()).dtype
-            _promoted = _model_dtype in (torch.bfloat16, torch.float16)
-            _saved_param_dtypes = []
-            if _promoted:
-                logger.info(f"  sharpness: promoting model {_model_dtype} -> "
-                            f"float32 for all curvature probes")
-                _saved_param_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
-                with torch.no_grad():
-                    for p_ in model.parameters():
-                        p_.data = p_.data.float()
+            # Every probe runs in fp32 arithmetic on a bf16/fp16 model, parameters
+            # AND buffers: bf16 arithmetic biases curvature (~21% on
+            # tiny-random-gpt2's top eigenvalue). Restored on every exit path.
+            _prec = _stack.enter_context(fp32_compute(model))
             # Build a fresh computational graph and compute the per-batch loss.
             def compute_loss():
                 losses = []
@@ -472,81 +506,37 @@ class LossSharpnessTask(DiagnosticTask):
                     losses.append(loss)
                 return torch.stack(losses).mean()
 
-            loss = compute_loss()
-            baseline_loss = float(loss.item())
+            # PyHessian's single-batch operator: one gradient graph, reused by
+            # every HVP of both estimators, then released.
+            H = _HessianOperator(compute_loss, params)
+            baseline_loss = float(H.loss.item())
 
-            # 1. Hutchinson trace estimator
-            # Seeded generator on the params' device: Hutchinson and
-            # power-iteration probes are otherwise irreproducible run to run.
+            # 1. Hutchinson trace, PyHessian trace(maxIter=n_hutchinson,
+            # tol=hutchinson_tol), seeded on the params' device.
             gen = torch.Generator(device=params[0].device)
             gen.manual_seed(seed)
-            trace_estimates = []
-            for _ in range(n_hutchinson):
-                v = _make_random_vec(params, rademacher=True, generator=gen)
-                # Build a fresh graph for each HVP because retain_graph
-                # over many calls leaks memory.
-                loss_fresh = compute_loss()
-                hv = _hvp(loss_fresh, params, v)
-                vhv = sum((h * vi).sum() for h, vi in zip(hv, v)).item()
-                trace_estimates.append(vhv)
+            _tr_status = {}
+            trace_estimates = _hutchinson_trace(H, params, generator=gen,
+                                                n_iter=n_hutchinson, tol=hutchinson_tol,
+                                                status=_tr_status)
             mean_trace = float(np.mean(trace_estimates))
             trace_per_param = mean_trace / max(1, n_params)
-            # UNCERTAINTY, reported. Hutchinson is a Monte Carlo estimator and
-            # the shipped 5 probes are few: on the exact-trace MLP the 5-probe
-            # mean was 4.464863030275032 against an exact 5.0693436557608935
-            # (-11.92%) at a relative standard error of 86.16% (adversarial
-            # review round 2, 2026-09-04). A reader cannot judge the number
-            # without this.
+            # Monte Carlo uncertainty of the trace, reported as a relative SE.
             _tr_sd = float(np.std(trace_estimates, ddof=1)) if len(trace_estimates) > 1 else float("nan")
             _tr_se = _tr_sd / np.sqrt(len(trace_estimates)) if len(trace_estimates) > 1 else float("nan")
             _tr_rel_se = (abs(_tr_se / mean_trace) if mean_trace not in (0.0,)
                           and np.isfinite(_tr_se) else float("nan"))
 
-            # 2. Top-1 eigenvalue via power iteration. Report the SIGNED
-            # largest-magnitude eigenvalue (Rayleigh quotient at the converged
-            # eigenvector), like PyHessian — ||Hv|| alone drops the sign.
-            v = _make_random_vec(params, rademacher=False, generator=gen)
-            # Fresh graph per HVP (retain_graph over many calls leaks memory).
+            # 2. Signed top eigenvalue, PyHessian eigenvalues(maxIter=n_power_iter,
+            # tol=power_iter_tol, top_n=1), from its own seeded start vector so
+            # it does not depend on how many trace probes were drawn.
+            gen_pi = torch.Generator(device=params[0].device)
+            gen_pi.manual_seed(seed + 1)
+            v = _make_random_vec(params, rademacher=False, generator=gen_pi)
             _pi_status = {}
             top_eig = _power_iteration_top_eigenvalue(
-                lambda vv: _hvp(compute_loss(), params, vv), v, n_power_iter,
-                status=_pi_status,
-            )
-
-            # SIGN STABILITY, MEASURED — because the reported sign can be an
-            # artefact of the iteration count.
-            #
-            # Power iteration cannot separate a near-degenerate +/-lambda pair:
-            # on pythia-70m the SAME model reports **-104737 at 10 iterations
-            # and +111530 at 64**, on 3/3 seeds, with |lambda| ~ 1.24e5 and a
-            # zero-crossing near iteration 37 (Opus round 11, 2026-09-08).
-            #
-            # `_meta_power_iter_converged` cannot warn about it: it was False on
-            # 5/5 real models, and True in 0/120 runs where the answer was exact
-            # to 4.3e-07 — a flag that is false when the answer is right and
-            # silent when it is wrong is worse than absent, because it invites
-            # the reader to trust it.
-            #
-            # So the flag is DERIVED from a second run at a different iteration
-            # count rather than asserted from an internal convergence test. If
-            # the two disagree in sign, the sign is not a property of the model
-            # and the caller is told so. Costs one extra power iteration.
-            _sign_stable = None
-            try:
-                _alt_status = {}
-                _alt = _power_iteration_top_eigenvalue(
-                    lambda vv: _hvp(compute_loss(), params, vv),
-                    _make_random_vec(params, rademacher=False, generator=gen),
-                    max(2, n_power_iter * 4), status=_alt_status,
-                )
-                if math.isfinite(_alt) and math.isfinite(top_eig):
-                    _sign_stable = bool(
-                        (_alt >= 0) == (top_eig >= 0)) if (
-                        _alt != 0.0 and top_eig != 0.0) else True
-                    _pi_status["alt_estimate"] = float(_alt)
-                    _pi_status["alt_n_iter"] = int(max(2, n_power_iter * 4))
-            except Exception:
-                _sign_stable = None
+                H, v, n_power_iter, status=_pi_status, tol=power_iter_tol)
+            del H
 
             # 3. SAM-style sharpness (module-level helper so parity tests
             # drive the exact code evaluate() runs, not a transcription).
@@ -554,17 +544,14 @@ class LossSharpnessTask(DiagnosticTask):
                 compute_loss, params, sam_rho, baseline_loss
             )
 
-            # 4. Critical sharpness (B8): largest stable descent step along
-            # the normalized gradient; lambda_c = 2/eta* (edge of stability).
-            # Measure in float32. bf16 cannot represent the probe step, and
-            # its ARITHMETIC biases lambda_c by 14-35% in a way that tracks the
-            # checkpoint's storage format rather than the model. Promote the
-            # WHOLE model, not just the differentiated parameters: promoting
-            # params alone leaves buffers in the original dtype and the forward
-            # pass raises on mixed dtypes.
-            # The model is already in float32 here (hoisted above), so
-            # `baseline_loss` was itself measured in float32 and needs no
-            # separate re-measurement.
+            # 3b. Adaptive (scale-invariant) SAM on the same scope: the
+            # normalised version of sam_sharpness
+            # (tests/tasks/invariance/test_dynamics_sharpness.py).
+            asam_sharpness, asam_perturbed, _ = _asam_sharpness(
+                compute_loss, params, asam_rho, baseline_loss)
+
+            # 4. Critical sharpness: largest stable descent step along the
+            # gradient; lambda_c = 2/eta* (edge of stability).
             loss_for_cs = compute_loss()
             grads_cs = torch.autograd.grad(loss_for_cs, params,
                                            create_graph=False)
@@ -574,12 +561,7 @@ class LossSharpnessTask(DiagnosticTask):
             )
 
         finally:
-            # Restore parameters to their ORIGINAL dtypes individually.
-            # Buffers were never touched, so they keep the checkpoint's dtype.
-            if _promoted:
-                with torch.no_grad():
-                    for p_, dt in _saved_param_dtypes:
-                        p_.data = p_.data.to(dt)
+            _stack.close()
             # Restore original requires_grad state and training mode.
             for p, grad_flag in orig_grad_state.items():
                 p.requires_grad_(grad_flag)
@@ -592,21 +574,35 @@ class LossSharpnessTask(DiagnosticTask):
             "baseline_loss": baseline_loss,
             "hutchinson_trace_estimate": mean_trace,
             "_meta_hutchinson_trace_rel_se": _tr_rel_se,
+            "_meta_hutchinson_n_used": int(_tr_status.get("n_iter", 0)),
+            "_meta_hutchinson_converged": bool(_tr_status.get("converged", False)),
             "_meta_power_iter_rel_change": float(_pi_status.get("rel_change", float("nan"))),
             "_meta_power_iter_converged": bool(_pi_status.get("converged", False)),
-            # DERIVED from a second run at 4x the iteration count -- see the
-            # note at the call site. None when the second run could not be made.
-            "_meta_top_eigenvalue_sign_stable": _sign_stable,
-            "_meta_top_eigenvalue_alt_estimate": _pi_status.get("alt_estimate"),
-            "_meta_top_eigenvalue_alt_n_iter": _pi_status.get("alt_n_iter"),
             "_meta_power_iter_n_used": int(_pi_status.get("n_iter", 0)),
+            # Sign check at no extra HVP: the residual of the returned pair. Below
+            # 1, an eigenvalue of the reported sign provably exists within
+            # |lambda| * residual of it; a near-degenerate +/- pair caught
+            # mid-rotation (pythia-70m: -104737 at 10 iterations, +111530 at 64)
+            # shows a residual of order 1.
+            "_meta_top_eigenvalue_residual": float(_pi_status.get("residual", float("nan"))),
+            "_meta_top_eigenvalue_sign_certified": bool(
+                np.isfinite(_pi_status.get("residual", float("nan")))
+                and _pi_status.get("residual") < 1.0),
             "hutchinson_trace_per_param": trace_per_param,
             "top_eigenvalue_estimate": top_eig,
             "sam_sharpness": sam_sharpness,
             "sam_perturbed_loss": perturbed_loss,
+            "asam_sharpness": asam_sharpness,
+            "_meta_asam_perturbed_loss": asam_perturbed,
+            "_meta_asam_rho": asam_rho,
             "critical_step_size": critical_step,
             "critical_sharpness": critical_sharpness,
             "sam_rho": sam_rho,
-            "n_hutchinson_samples": n_hutchinson,
-            "n_power_iterations": n_power_iter,
+            "n_hutchinson_samples": int(_tr_status.get("n_iter", 0)),
+            "n_power_iterations": int(_pi_status.get("n_iter", 0)),
+            "_meta_hutchinson_max_iter": n_hutchinson,
+            "_meta_hutchinson_tol": hutchinson_tol,
+            "_meta_power_iter_max_iter": n_power_iter,
+            "_meta_power_iter_tol": power_iter_tol,
+            **effective_dtype_meta(_prec),
         }

@@ -14,9 +14,11 @@ def test_interpolation_does_not_hang_on_unusable_samples():
     import torch
     from blme.tasks.dynamics.trajectories import LatentInterpolationTask
 
-    class _M:
-        def parameters(self):
-            return iter([torch.zeros(1)])
+    class _M(torch.nn.Module):
+        # A module (the task computes under fp32_compute), never called.
+        def __init__(self):
+            super().__init__()
+            self.w = torch.nn.Parameter(torch.zeros(1))
 
     # rows match neither str / 'text' / 'input_ids' -> every pair is unusable
     dataset = [{"tokens": [1, 2]}, {"tokens": [3, 4]}, {"tokens": [5, 6]}]
@@ -99,7 +101,7 @@ def test_chain_of_embedding(mock_model, mock_tokenizer):
     layers of a single forward pass (Wang et al., ICLR 2025)."""
     from blme.tasks.dynamics.coe import ChainOfEmbeddingTask
 
-    task = ChainOfEmbeddingTask(config={"num_samples": 2})
+    task = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
@@ -161,7 +163,7 @@ def test_gradient_flow_uses_cross_entropy_loss():
     )
     # Entropy must be finite (slope computation used to explode when
     # ``np.log`` was applied to an identically-zero layer norm).
-    assert np.isfinite(out["gradient_flow_entropy"])
+    assert np.isfinite(out["_meta_gradient_flow_entropy"])
 
 
 def test_chain_of_embedding_emits_paper_scores():
@@ -198,7 +200,7 @@ def test_chain_of_embedding_emits_paper_scores():
             ids = torch.randint(0, 200, (1, 10))
             return ids if return_tensors == "pt" else ids[0].tolist()
 
-    res = ChainOfEmbeddingTask(config={"num_samples": 2}).evaluate(
+    res = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8}).evaluate(
         model, Tok(), dataset=[{"text": f"s{i}"} for i in range(2)],
     )
     assert "error" not in res
@@ -253,7 +255,7 @@ def test_chain_of_embedding_is_layerwise(mock_model, mock_tokenizer):
     independent of ``generation_steps``."""
     from blme.tasks.dynamics.coe import ChainOfEmbeddingTask
 
-    task = ChainOfEmbeddingTask(config={"num_samples": 2})
+    task = ChainOfEmbeddingTask(config={"num_samples": 2, "max_new_tokens": 8})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "error" not in results

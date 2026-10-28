@@ -260,14 +260,12 @@ dynamics_stability:
 
 dynamics_sharpness:
   param_scope: last_layer
-  # Raised 5 -> 24 and 8 -> 64 (2026-09-04). At the shipped values the
-  # Hutchinson trace had 86.2% relative standard error and power
-  # iteration was 1.78% low on an analytic MLP with an exact answer.
-  # Both are now reported with their uncertainty/convergence, and the
-  # iteration stops early once the Rayleigh quotient settles, so the
-  # higher cap costs nothing on well-conditioned models.
-  n_hutchinson: 24
-  n_power_iter: 64
+  # PyHessian's loops: at most 100 HVPs per estimator, stopping once the
+  # estimate changes by less than 1e-3 (relative).
+  n_hutchinson: 100
+  hutchinson_tol: 0.001
+  n_power_iter: 100
+  power_iter_tol: 0.001
   sam_rho: 0.05
   num_samples: 4
 
@@ -287,7 +285,9 @@ dynamics_interpolation:
 
 dynamics_coe:
   num_samples: 5
-  token_position: last
+  # Greedy generation, then the mean over the output tokens' emitting states
+  # (Wang et al. 2025 Sec. 2.1); 128 is the release's setting for base models.
+  max_new_tokens: 128
 
 dynamics_generation_diversity:
   # SEED PINNED (2026-09-04). This task SAMPLES, and with no seed three runs of
@@ -302,10 +302,11 @@ dynamics_generation_diversity:
   # distribution and so decides what this task measures. 0 = no top-k
   # filtering (adversarial review round 2, 2026-09-04).
   top_k: 0
-  n_samples_per_prompt: 6
+  # Texygen's collection size: 500 completions over the 8 bundled prompts
+  # (63 x 4 + 62 x 4); Self-BLEU scores the first 500.
+  n_completions: 500
   temperature: 0.8
   max_new_tokens: 32
-  num_prompts: 6
 
 # ---- Consistency Tasks ----
 consistency_contrastive:
@@ -455,19 +456,20 @@ geometry_effective_depth:
   max_length: 512
 
 dynamics_fractal:
-  # num_samples counts DOCUMENTS built by joining corpus rows to >= 4K tokens,
-  # not corpus rows, so this consumes many more rows than the number here.
+  # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
+  # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).
   num_samples: 100
+  documents: long_documents
+  doc_split: train
+  min_doc_tokens: 4096
   # Pinned across models. seg_len = min(use_tokens, model context) otherwise
   # gives 1024-context models ~895 usable tokens and >=2048-context models
   # ~1919, and the Joseph exponent moves +0.021 across that split -- a
   # context-window confound correlated with model recency.
   use_tokens: 1024
-  # The authors' released notebook uses DEFAULT_EPS = 5e-2 and warns that a
-  # too-small eps makes the probability estimates unreliable. At 5e-3 the
-  # per-tau counts are single-digit and the Holder exponent is noise
-  # (0.31 +/- 0.27 against the paper's 0.59 +/- 0.08).
-  holder_eps: 0.05
+  # The paper's eps (Sec. 2.2); the notebook's DEFAULT_EPS of 5e-2 is labelled
+  # there as differing from the paper.
+  holder_eps: 0.005
 
 dynamics_perturbation_growth:
   num_samples: 10

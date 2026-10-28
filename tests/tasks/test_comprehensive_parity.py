@@ -2366,8 +2366,11 @@ def test_dynamics_gradient_flow():
             captured[li] = x
         return hook
 
+    # Every block input, then the final residual (the input of ln_f).
     handles = [layers[li].register_forward_pre_hook(make_hook(li))
                for li in range(n_layers)]
+    handles.append(model.transformer.ln_f.register_forward_pre_hook(make_hook(n_layers)))
+    n_points = n_layers + 1
     try:
         out = model(**enc)
     finally:
@@ -2378,9 +2381,10 @@ def test_dynamics_gradient_flow():
     loss = F.cross_entropy(
         shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
     )
-    grads = torch.autograd.grad(loss, [captured[li] for li in range(n_layers)])
+    grads = torch.autograd.grad(loss, [captured[li] for li in range(n_points)])
+    # Position 0 is excluded from the token pool of each norm (TOKEN_POLICY).
     ref_norms = np.array(
-        [float(g.detach().double().norm().item()) for g in grads],
+        [float(g.detach().double()[0, 1:].norm().item()) for g in grads],
         dtype=np.float64,
     )
     assert np.all(ref_norms > 0)
@@ -2389,10 +2393,10 @@ def test_dynamics_gradient_flow():
     pref = ref_norms / ref_norms.sum()
     pref_pos = pref[pref > 0]
     ref_entropy = float(-np.sum(pref_pos * np.log(pref_pos)))
-    denom = max(1, n_layers - 1)
+    denom = max(1, n_points - 1)
     pos = ref_norms > 0
     ref_slope = float(
-        np.polyfit(np.arange(n_layers)[pos] / float(denom),
+        np.polyfit(np.arange(n_points)[pos] / float(denom),
                    np.log(ref_norms[pos]), 1)[0]
     )
     ref_vanishing = float(np.mean(ref_norms < 0.1 * ref_norms.max()))
@@ -2414,13 +2418,13 @@ def test_dynamics_gradient_flow():
     blme_norms = np.array(res["gradient_norm_per_layer"], dtype=np.float64)
 
     # ---- NUMERIC PARITY: per-layer Frobenius norms (float32 backbone) ----
-    assert blme_norms.shape == (n_layers,)
+    assert blme_norms.shape == (n_points,)
     assert blme_norms == pytest.approx(ref_norms, rel=1e-5, abs=1e-6)
 
     # derived scalars match the INDEPENDENT reference values
-    assert res["gradient_flow_entropy"] == pytest.approx(ref_entropy, rel=1e-5, abs=1e-6)
-    assert res["gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
-    assert res["gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
+    assert res["_meta_gradient_flow_entropy"] == pytest.approx(ref_entropy, rel=1e-5, abs=1e-6)
+    assert res["_meta_gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
+    assert res["_meta_gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
     assert res["loss"] == "cross_entropy"
     assert res["_meta_n_layers"] == n_layers
 

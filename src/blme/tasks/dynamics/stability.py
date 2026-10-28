@@ -1,10 +1,10 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings
+from ..geometry.utils import safe_unit_rows
 import torch
 import numpy as np
 from tqdm import tqdm
-import os
 from transformers import AutoModelForCausalLM
 import logging
 logger = logging.getLogger("blme")
@@ -19,30 +19,64 @@ class NeighborhoodStabilityTask(DiagnosticTask):
 
     This is a BLME embedding-graph diagnostic, not a Lyapunov exponent or
     Jacobian spectral-norm calculation.
+
+    k = 50, not Wendlandt et al.'s 10: their k suits word2vec-sized
+    vocabularies compared across training runs; at the same number of query
+    rows k = 10 roughly triples the standard error (gpt2, 500 queries: SEM
+    0.0049 at k = 10 vs 0.0018 at k = 50), and no precedent fixes k for a
+    noise-perturbation comparison. The value is a Jaccard, J = o / (2k - o) of
+    the overlap o, a monotone transform of their percent overlap o / k.
     """
+
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1804.09692",
+        "code": None,
+        "llm_precedent": None,
+    }
+    ADAPTATION_NOTE = (
+        "Wendlandt et al. define stability as the overlap of a word's ten nearest cosine "
+        "neighbours across independently trained embedding spaces. Released LLMs have no "
+        "sibling training runs, so BLME instead perturbs each input-embedding row by a seeded "
+        "isotropic direction of 1% of its norm and reports the mean Jaccard of the k = 50 "
+        "nearest-neighbour sets before and after, over sampled rows the tokenizer can emit. "
+        "This measures how much margin separates a token's neighbourhood boundary from its "
+        "runners-up, a local robustness property of the embedding graph. Alternatives were "
+        "base-vs-instruct embeddings (paired models only) and per-coordinate noise (whose "
+        "realised size grows as sqrt(d)); fixed-norm noise realises the requested 1% at every "
+        "width. Two mechanical size dependences remain: an isometric re-embedding into 2x/4x "
+        "width raises the value (0.950 -> 0.963 -> 0.973), and it depends on how many emittable "
+        "rows form the neighbourhoods."
+    )
+    HEADLINE_KEYS = ("stability_mean", "stability_std")
+    # Only the vocabulary-padding test passes (rows past the tokenizer are
+    # excluded); the width dependence (isometric re-embedding raises the value)
+    # has no structural inverse, so no width-free twin is declared.
+    SIZE_INVARIANT = dict.fromkeys(
+        ("stability_mean", "stability_std"),
+        (("pad_vocabulary(zero, small_random)",),
+         "tests/tasks/invariance/test_dynamics_stability.py::"
+         "test_rows_past_the_tokenizer_do_not_enter"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Neighborhood Stability Analysis...")
         k = self.config.get("k", 50)
         n_sample = self.config.get("num_samples", 5000)
         ref_path = self.config.get("reference_model_path", None)
-        
+
         device = next(model.parameters()).device
         E1 = get_embeddings(model)
         if E1 is None: return {"error": "E1 not found"}
         E1 = E1.to(device)
-        
+
         if ref_path:
             stability_mode = "reference_model"
             logger.info(f"Loading reference model from {ref_path}...")
-            # This is heavy. Optimally we just load embeddings if possible.
-            # But assume we load model for compatibility.
-            # Warning: Memory usage.
+            # The whole reference model is loaded on CPU for its embeddings.
             try:
                 ref_model = AutoModelForCausalLM.from_pretrained(ref_path, trust_remote_code=True).to('cpu') # Keep on CPU first
                 E2 = get_embeddings(ref_model)
                 if E2 is None: return {"error": "E2 not found"}
-                # Move E2 to device only if needed, or keep both on CPU if VRAM tight
-                # For safety, let's do calculation on CPU if ref provided, or E2 to device
                 E2 = E2.to(device)
                 del ref_model
                 torch.cuda.empty_cache()
@@ -59,63 +93,17 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             generator = torch.Generator(device=E1.device)
             generator.manual_seed(seed)
             E1_float = E1.float()
-            # SCALE-EXACT row norms. `E1_float.norm(dim=1).clamp_min(1e-10)`
-            # had both of this campaign's most repeated numeric defects at
-            # once, in a file whose own comment 30 lines below condemns the
-            # first of them:
-            #
-            #  1. an ABSOLUTE epsilon (1e-10) inside a scale-free operation;
-            #  2. `.norm()` SQUARES before summing, so it overflows to inf (and
-            #     underflows to 0) long before the data does.
-            #
-            # Together they broke the defining axiom. With `noise_std = 0` the
-            # two embeddings are identical, so self-stability must be exactly
-            # 1.0 -- but at scale 1e25 the row norm overflowed to inf, `noise`
-            # became `inf * 0 = NaN`, and the task returned **0.048611111111**
-            # (gpt-5.6-sol round 9, 2026-09-07). The same overflow moved the
-            # ordinary mean to 0.031756902891 / 0.042763078846 / 0.044048734770
-            # at 1e-30 / 1e-13 / 1e25 against 0.966494845361.
-            #
-            # Factoring out the largest per-row magnitude first only shifts
-            # exponents, so ||x|| = rmax * ||x / rmax|| is exact, and every
-            # coordinate is inside [-1, 1] before anything is squared. A row
-            # that is exactly zero gets scale 0 and therefore no noise, which
-            # is what "1% of this row" means for a zero row.
-            # IN DOUBLE. Factoring the row max out fixed the underflow end, but
-            # the PRODUCT `_rmax * ||row/_rmax||` still overflows float32 at the
-            # top: at scale 2.406159650500376e38 the row max is representable
-            # while the true row norm (~3x it) is not, so `row_scale` became inf
-            # and `noise = raw * inf * 0` became NaN -- breaking the
-            # `noise_std = 0` self-identity axiom, which returned 0.867291334397
-            # instead of exactly 1.0 (gpt-6-astra round 10, 2026-09-07).
-            #
-            # My round-9 ladder stopped at 1e25 and the axiom holds at every rung
-            # through 1e38; only the very top exposes it. Testing "extreme
-            # scales" is not the same as testing the LAST representable one.
-            #
-            # Double has the range for the product, and the noise is cast back
-            # to the working dtype after the multiply, so nothing downstream
-            # changes dtype.
+            # Scale-exact row norms: the row max is factored out and the product
+            # taken in double, so noise_std = 0 gives self-stability exactly 1.0
+            # at every scale up to float32's max.
             _E64 = E1_float.double()
             _rmax = _E64.abs().amax(dim=1, keepdim=True)
             _tiny = torch.finfo(_E64.dtype).tiny
             row_scale = _rmax * (
                 _E64 / _rmax.clamp_min(_tiny)).norm(dim=1, keepdim=True)
-            # Normalize the noise DIRECTION before scaling, so the realized
-            # perturbation is exactly `noise_std` relative to each row.
-            #
-            # Multiplying an isotropic `randn` elementwise by the row norm makes
-            # ||noise_row|| ~ sqrt(d) * noise_std * ||E_row||, i.e. the realized
-            # perturbation is 0.01*sqrt(d), NOT the documented 1%: measured
-            # 0.2261 / 0.2770 / 0.3199 / 0.3577 / 0.4525 at d = 512 / 768 /
-            # 1024 / 1280 / 2048, matching 0.01*sqrt(d) to four decimals. So
-            # the perturbation size was a deterministic function of d_model,
-            # and spearman(as-implemented ranking, equal-perturbation ranking)
-            # was **+0.500** -- half the cross-model ordering this metric
-            # produced was that artifact (adversarial review, 2026-09-03).
-            #
-            # The sibling `perturbation_growth.py` already normalizes the
-            # direction; this brings the two into agreement.
+            # The noise DIRECTION is normalised before scaling, so the realised
+            # perturbation is exactly noise_std of each row at every width (an
+            # elementwise randn would realise noise_std * sqrt(d)).
             raw = torch.randn(
                 E1_float.shape,
                 device=E1.device,
@@ -125,69 +113,36 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             raw = raw / raw.norm(dim=1, keepdim=True).clamp_min(1e-12)
             noise = (raw.double() * row_scale * noise_std).to(E1_float.dtype)
             E2 = E1_float + noise
-            
+
         # Compute Stability
         E1_np = E1.float().cpu().numpy()
         E2_np = E2.float().cpu().numpy()
-        
-        n_vocab = len(E1_np)
-        if len(E2_np) != n_vocab:
+
+        # Only rows the tokenizer can emit (ids < len(tokenizer)) are queries or
+        # neighbours: embedding matrices are padded past the tokenizer (pythia
+        # 27 rows, Qwen3 267), and such rows are not tokens.
+        n_rows_total = len(E1_np)
+        n_tok = len(tokenizer) if hasattr(tokenizer, "__len__") else None
+        n_vocab = min(n_rows_total, n_tok) if n_tok else n_rows_total
+        E1_np = E1_np[:n_vocab]
+        if len(E2_np) < n_vocab:
             return {"error": f"Vocab mismatch: {n_vocab} vs {len(E2_np)}"}
-            
-        # `safe_unit_rows`, not `norm + 1e-10`. An ABSOLUTE epsilon inside a
-        # scale-free row normalisation is this campaign's most repeated numeric
-        # defect: it hard-codes a magnitude into an operation that has none, and
-        # the norm underflows before the data does. `safe_unit_rows` factors out
-        # the largest per-row magnitude first, which only shifts exponents and
-        # is therefore exact.
-        from ..geometry.utils import safe_unit_rows
+        E2_np = E2_np[:n_vocab]
+
         E1_norm = safe_unit_rows(E1_np)
         E2_norm = safe_unit_rows(E2_np)
-        
-        # Local generator — np.random.seed(42) mutated GLOBAL numpy RNG
-        # state, an order-dependence hazard for co-resident tasks (audit
-        # 2026-07-16). Row sampling now also honors the config seed.
-        # SAMPLE SIZE IS THE WHOLE STORY HERE, so it is measured and reported
-        # rather than assumed. The study runs `num_samples: 100` against a
-        # package default of 5000, and at 100 rows the estimator does not
-        # resolve the models it is asked to rank. Ten seeds, gpt2 vs distilgpt2
-        # (red-team review, 2026-09-05):
-        #
-        #   gpt2        mean 0.950968  sd 0.003644  range 0.012055
-        #   distilgpt2  mean 0.957275  sd 0.002970  range 0.009665
-        #   cross-model mean difference                    0.006307
-        #
-        # The within-model seed RANGE exceeds the between-model difference, the
-        # ordering FLIPS at 1 of the 10 seeds (seed 13: -0.000641), and the
-        # study's seed 42 happens to give the second-largest gap of the ten.
-        # fp32 -> bf16 moves distilgpt2 a further -0.0019, a quarter of the gap.
-        #
-        # The ESTIMATOR is sound -- the direction-normalisation fix is correct
-        # and the realized perturbation is exactly `noise_std` at every width --
-        # so this is a `confounds` matter, not a fidelity one. What the harness
-        # can do is stop hiding it: the standard error of the mean over the
-        # sampled rows is emitted, so a caller can see whether a difference it
-        # is about to report is inside its own noise.
+
+        # Local, seeded row sampler (no global RNG). The SEM of the mean over
+        # sampled rows is emitted: at 100 rows the seed range exceeds the
+        # gpt2-vs-distilgpt2 difference.
         rng = np.random.default_rng(int(self.config.get("seed", 42)))
         sample_idx = rng.choice(n_vocab, min(n_sample, n_vocab), replace=False)
 
         jaccards = []
 
         for idx in tqdm(sample_idx, desc="Stability Jaccard"):
-            # DIRECT chord distances with a STABLE tie rule, for both models.
-            #
-            # Two defects in the previous `argsort(E_norm @ E_norm[idx])`:
-            #  1. cancellation -- unit rows make every dot product sit near 1,
-            #     so the separating quantity is the difference of two ~1.0 sums
-            #     (confirmed in `hubness.py` 2026-09-07; this site found by
-            #     sweeping the class).
-            #  2. `np.argsort` defaults to quicksort, which is UNSTABLE, so
-            #     tied neighbours were ordered arbitrarily.
-            # Both defects bias this metric in the SAME direction: they perturb
-            # the two neighbour sets independently, which can only shrink their
-            # intersection. A spurious ranking difference is indistinguishable
-            # from genuine representational drift, so the error manufactures
-            # apparent INSTABILITY -- it cannot manufacture stability.
+            # Direct chord distances (no near-1 dot-product cancellation) with a
+            # stable index tie-break, for both embeddings.
             def _knn(E):
                 d2 = ((E - E[idx]) ** 2).sum(axis=1)
                 d2[idx] = np.inf
@@ -195,10 +150,10 @@ class NeighborhoodStabilityTask(DiagnosticTask):
 
             nn1 = _knn(E1_norm)
             nn2 = _knn(E2_norm)
-            
+
             jaccard = len(nn1 & nn2) / len(nn1 | nn2)
             jaccards.append(jaccard)
-            
+
         _n = len(jaccards)
         _sem = float(np.std(jaccards) / np.sqrt(_n)) if _n > 1 else float("nan")
         if np.isfinite(_sem) and _sem > 0.002:
@@ -212,9 +167,10 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             "diagnostic_semantics": "embedding_neighborhood_jaccard_stability",
             "stability_mean": float(np.mean(jaccards)),
             "stability_std": float(np.std(jaccards)),
-            # The quantity a caller needs to decide whether a between-model
-            # difference is real. sd/sqrt(n), not sd: the headline is a MEAN.
             "_meta_stability_sem": _sem,
             "_meta_stability_n_rows": int(_n),
+            "_meta_n_rows_emittable": int(n_vocab),
+            "_meta_n_rows_excluded": int(n_rows_total - n_vocab),
+            "_meta_k": int(k),
             "stability_mode": stability_mode,
         }

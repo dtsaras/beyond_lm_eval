@@ -24,6 +24,7 @@ For each prompt, generate N completions (with temperature > 0) and measure:
 """
 
 import logging
+import re
 from collections import Counter
 from typing import Dict, List, Optional
 
@@ -72,13 +73,9 @@ def _distinct_n_corpus(completions: List[List[int]], n: int) -> float:
         --------------------------------------------------------
                  total tokens generated in the collection
 
-    This is one ratio for the collection, NOT the mean of per-completion
-    ratios. The two are very different when a model is degenerate: ten
-    duplicate [1, 2] completions give 0.100000 here and 1.000000 as a
-    per-completion mean, because each completion is internally diverse while
-    the collection contains only two distinct types (adversarial review,
-    2026-09-04). `mean_distinct_n` is retained under its own name as the
-    per-completion statistic.
+    One ratio for the collection, not the mean of per-completion ratios (ten
+    duplicate [1, 2] completions give 0.1 here and 1.0 as a per-completion
+    mean); `mean_distinct_n` is the per-completion statistic.
     """
     types = set()
     total_tokens = 0
@@ -89,6 +86,24 @@ def _distinct_n_corpus(completions: List[List[int]], n: int) -> float:
     if total_tokens == 0:
         return float("nan")
     return len(types) / total_tokens
+
+
+def _word_tokenize(text: str):
+    """Texygen's unit: ``nltk.word_tokenize`` (SelfBleu.py:38, :52).
+
+    Returns ``(words, tokenizer_name)``. Without NLTK's punkt_tab data the
+    Treebank tokenizer runs on the whole string (``preserve_line=True``), which
+    differs only in not splitting sentence-internal periods; without NLTK a
+    regex word/punctuation split is used. The name actually used is reported.
+    """
+    try:
+        import nltk
+    except ImportError:
+        return re.findall(r"\w+|[^\w\s]", text), "regex_word_punct"
+    try:
+        return nltk.word_tokenize(text), "nltk_word_tokenize"
+    except LookupError:
+        return nltk.word_tokenize(text, preserve_line=True), "nltk_treebank_no_punkt"
 
 
 def _trim_completion(tokens: List[int], eos_token_id: Optional[int],
@@ -136,6 +151,32 @@ def _self_bleu_single(hypothesis: List[int], references: List[List[int]],
     ))
 
 
+# Texygen reports Self-BLEU at n-gram orders 2-5 (docs/evaluation.md, the
+# paper's result tables); its SelfBleu class defaults to 3. BLME emits all four
+# and keeps order 4 as mean_self_bleu (also Holtzman et al. 2020's Self-BLEU4).
+SELF_BLEU_ORDERS = (2, 3, 4, 5)
+SELF_BLEU_HEADLINE_ORDER = 4
+
+
+def _self_bleu_orders(hypothesis: List, references: List[List],
+                      orders=SELF_BLEU_ORDERS) -> Dict[int, float]:
+    """Self-BLEU of one hypothesis at several orders in one NLTK pass: the
+    modified precisions p_1..p_max are shared, so this equals one
+    ``sentence_bleu`` call per order (uniform weights, method1)."""
+    if not references or len(hypothesis) < 1:
+        return {n: 0.0 for n in orders}
+    try:
+        from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+    except ImportError:
+        return {n: _self_bleu_single_fallback(hypothesis, references, n) for n in orders}
+    weights = [tuple(1.0 / n for _ in range(n)) for n in orders]
+    vals = sentence_bleu(references, hypothesis, weights,
+                         smoothing_function=SmoothingFunction().method1)
+    if not isinstance(vals, list):
+        vals = [vals] * len(orders)
+    return {n: float(v) for n, v in zip(orders, vals)}
+
+
 def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]],
                                max_n: int = 4) -> float:
     """NLTK-free fallback for Self-BLEU (used only when nltk is unavailable).
@@ -157,27 +198,15 @@ def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]
     for n in range(1, max_n + 1):
         hyp_ng = Counter(tuple(hypothesis[i:i + n]) for i in range(len(hypothesis) - n + 1))
         p = _ngram_overlap(ref_pool[n - 1], hyp_ng, n)
-        # NLTK method1 smoothing: 0.1 / denominator for zero counts (audit
-        # 2026-07-16: the old hard 1e-9 gave 0.004 where NLTK gives 0.33 —
-        # reintroducing the hard-zero understatement this fallback exists
-        # to avoid).
+        # NLTK method1 smoothing: 0.1 / denominator for zero counts.
         denom = max(1, sum(hyp_ng.values()))
         if p <= 0 and n == 1:
-            # NLTK/Texygen short-circuit to 0 when there is NO unigram match at
-            # all -- method-1 smoothing is applied to the HIGHER-order zeros,
-            # not to a hypothesis that shares no token with any reference.
-            # Smoothing it anyway returned 0.0451801 for [7,8,9,10] against
-            # [1,2,3,4] where the reference gives 0.0 (adversarial review round
-            # 2, 2026-09-04).
+            # NLTK short-circuits to 0 when there is no unigram match at all.
             return 0.0
         precisions.append(p if p > 0 else 0.1 / denom)
     log_avg = np.mean([np.log(p) for p in precisions])
-    # BREVITY PENALTY -- BLEU is not a bare precision geometric mean.
-    # Without it a short hypothesis that is a prefix of a long reference
-    # scores a perfect 1.0: [1,2,3,4] against [1,2,3,4,5,6,7,8] returned
-    # 1.000000 where Texygen/NLTK give 0.367879, a factor of 2.718
-    # (adversarial review, 2026-09-04). NLTK's convention: r is the closest
-    # reference length, ties going to the shorter.
+    # Brevity penalty, NLTK convention: r is the closest reference length,
+    # ties going to the shorter.
     c = len(hypothesis)
     r = min((len(ref) for ref in references),
             key=lambda rl: (abs(rl - c), rl))
@@ -189,16 +218,44 @@ def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]
 class GenerationDiversityTask(DiagnosticTask):
     """Distinct-n, Self-BLEU, and entropy collapse over generated tokens.
 
-    PROTOCOL NOTE (audit 2026-07-16): Self-BLEU is computed over model
-    SUBWORD TOKEN IDS; Texygen computes it over nltk.word_tokenize word
-    n-grams. The kernel is parity-verified, but absolute Self-BLEU values
-    are not comparable across models with different tokenizers — interpret
-    within-model or across models sharing a tokenizer."""
+    Self-BLEU and distinct-n are computed over WORDS (each completion decoded
+    and split by nltk.word_tokenize, as Texygen does), so the tokenizer does not
+    enter them; the subword-id versions are _meta_."""
+
+    # Statistics of generated continuations; prompt tokens never enter.
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:1510.03055; arXiv:1802.01886",
+        "code": "geek-ai/Texygen@3104e22ac75f3cc2070da2bf5e2da6d2bef149ad",
+        "llm_precedent": "Holtzman et al. 2020 (arXiv:1904.09751): Self-BLEU4 of GPT-2 "
+                         "generations",
+    }
+    HEADLINE_KEYS = (
+        "distinct_1", "distinct_2", "distinct_3", "mean_distinct_1", "mean_distinct_2",
+        "mean_distinct_3", "mean_self_bleu", "mean_phrase_repetition_rate",
+        "mean_sampling_entropy_first_quarter", "mean_sampling_entropy_last_quarter",
+        "sampling_entropy_collapse_delta",
+    )
+    # Word units make the n-gram statistics independent of the tokenizer (its
+    # vocabulary) for a fixed text; the collection-size drift of corpus
+    # distinct-n is handled by pinning N = 500 for every model, not normalised.
+    # The phrase-repetition and sampling-entropy keys have no direct test.
+    SIZE_INVARIANT = dict.fromkeys(
+        ("mean_self_bleu", "distinct_1", "distinct_2", "distinct_3",
+         "mean_distinct_1", "mean_distinct_2", "mean_distinct_3"),
+        (("tokenizer_swap(gpt2, pythia-160m)",),
+         "tests/tasks/invariance/test_dynamics_generation_diversity.py::"
+         "test_word_unit_metrics_do_not_depend_on_the_tokenizer"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
 
-        n_samples = self.config.get("n_samples_per_prompt", 6)
+        # Collection size: Texygen scores 500 sentences (SelfBleu sample_size), so
+        # n_completions (default 500) is split as evenly as possible over the
+        # prompts. An explicit n_samples_per_prompt overrides the split.
+        n_completions = int(self.config.get("n_completions", 500))
+        n_per_prompt = self.config.get("n_samples_per_prompt", None)
+        self_bleu_sample_size = int(self.config.get("self_bleu_sample_size", 500))
         temperature = self.config.get("temperature", 0.8)
         max_new_tokens = self.config.get("max_new_tokens", 32)
         num_prompts = self.config.get("num_prompts", len(_DIVERSITY_PROMPTS))
@@ -214,13 +271,21 @@ class GenerationDiversityTask(DiagnosticTask):
         else:
             prompts = _DIVERSITY_PROMPTS[:num_prompts]
 
+        if n_per_prompt is not None:
+            counts = [int(n_per_prompt)] * len(prompts)
+        else:
+            q, r = divmod(n_completions, max(1, len(prompts)))
+            counts = [q + (i < r) for i in range(len(prompts))]
+
         device = next(model.parameters()).device
 
         all_distinct1 = []
         all_distinct2 = []
         all_distinct3 = []
-        all_self_bleu = []
         all_completions = []
+        all_words = []
+        units_used = set()
+        sub_distinct = {1: [], 2: [], 3: []}
         _n_ok_prompts = [0]
         _n_failed_prompts = [0]
         all_entropy_first_q = []
@@ -231,12 +296,12 @@ class GenerationDiversityTask(DiagnosticTask):
 
         with torch.no_grad():
             if seed is not None:
-                # transformers' generate() has no per-call generator kwarg;
-                # seed the global RNG once BEFORE the loop (audit 2026-07-16:
-                # the old per-prompt reseed replayed the identical RNG stream
-                # for every prompt, correlating completions across prompts).
+                # generate() takes no generator: seed the global RNG once,
+                # before the loop (a per-prompt reseed correlates prompts).
                 torch.manual_seed(int(seed))
-            for prompt in prompts:
+            for prompt, n_samples in zip(prompts, counts):
+                if n_samples < 1:
+                    continue
                 enc = tokenizer(prompt, return_tensors="pt").to(device)
                 prompt_len = enc["input_ids"].shape[1]
 
@@ -247,12 +312,8 @@ class GenerationDiversityTask(DiagnosticTask):
                         "do_sample": True,
                         "temperature": temperature,
                         "top_p": 1.0,
-                        # PINNED. `generate()` falls back to the model's
-                        # generation config, and transformers 5.2.0 silently
-                        # supplies top_k=50 -- an unrecorded truncation of the
-                        # sampling distribution that decides what "diversity"
-                        # even means here, and that can change between library
-                        # versions (adversarial review round 2, 2026-09-04).
+                        # Pinned: generate() would otherwise take top_k=50 from
+                        # the model's generation config.
                         "top_k": int(self.config.get("top_k", 0)) or 0,
                         "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
                         "output_scores": True,
@@ -275,18 +336,31 @@ class GenerationDiversityTask(DiagnosticTask):
                     for row in gen_ids
                 ]
 
-                # Distinct-n per completion, averaged
+                # Word units (Texygen): decode, then nltk.word_tokenize. A
+                # tokenizer without decode() leaves the ids as the units.
+                _dec = getattr(tokenizer, "decode", None)
+                words = []
                 for comp in completions:
+                    if callable(_dec):
+                        w, unit_name = _word_tokenize(_dec(comp, skip_special_tokens=True))
+                    else:
+                        w, unit_name = list(comp), "token_ids"
+                    words.append(w)
+                    units_used.add(unit_name)
+                all_words.extend(words)
+
+                # Distinct-n per completion, averaged
+                for comp in words:
                     all_distinct1.append(_distinct_n(comp, 1))
                     all_distinct2.append(_distinct_n(comp, 2))
                     all_distinct3.append(_distinct_n(comp, 3))
+                for comp in completions:
+                    sub_distinct[1].append(_distinct_n(comp, 1))
+                    sub_distinct[2].append(_distinct_n(comp, 2))
+                    sub_distinct[3].append(_distinct_n(comp, 3))
 
-                # Self-BLEU is deferred to the whole collection (below):
-                # Texygen scores each generated sentence against every OTHER
-                # sentence in the document, not only its five siblings from
-                # the same prompt. Restricting to siblings understated the
-                # current GPT-2 value at 0.046494 against 0.065155 under the
-                # released aggregation (adversarial review, 2026-09-04).
+                # Self-BLEU is computed over the whole collection below, as
+                # Texygen scores each sentence against every other one.
                 all_completions.extend(completions)
 
                 # Sequence-level repetition: per completion, fraction of
@@ -321,17 +395,8 @@ class GenerationDiversityTask(DiagnosticTask):
                     scores_stack = torch.stack(outputs.scores, dim=1).float()  # (N, L, V)
                     log_probs = F.log_softmax(scores_stack, dim=-1)
                     probs = log_probs.exp()
-                    # torch.special.entr(p) = -p*log(p) with entr(0) := 0.
-                    #
-                    # The naive -(probs * log_probs).sum() is NaN here, always.
-                    # generate() returns PROCESSED scores, so the sampling
-                    # logits-processors have already set masked positions to
-                    # -inf: 9.6M of 9.65M entries on gpt2. exp(-inf) is 0 and
-                    # 0 * -inf is NaN, which poisons every token's entropy.
-                    # The result was not an empty list but a list OF NaNs, so
-                    # the `if ... else nan` guard below could not catch it and
-                    # all three entropy metrics were NaN for all 66 models.
-                    # entr() takes the p -> 0 limit correctly (2026-08-26).
+                    # entr(p) = -p log p with entr(0) = 0: processed scores hold
+                    # -inf entries, where -(p * log p) would be NaN.
                     per_token_H = torch.special.entr(probs).sum(dim=-1)  # (N, L)
                     for row_idx, comp in enumerate(completions):
                         valid_len = len(comp)
@@ -348,52 +413,56 @@ class GenerationDiversityTask(DiagnosticTask):
             return {"error": "No completions generated"}
 
         # Texygen aggregation: every completion against every other one.
-        for i, comp in enumerate(all_completions):
-            refs = [c for j, c in enumerate(all_completions) if j != i]
-            if refs:
-                all_self_bleu.append(_self_bleu_single(comp, refs))
+        def _self_bleu_means(units, orders=SELF_BLEU_ORDERS):
+            vals = {n: [] for n in orders}
+            for i, comp in enumerate(units):
+                refs = [c for j, c in enumerate(units) if j != i]
+                if refs:
+                    for n, v in _self_bleu_orders(comp, refs, orders).items():
+                        vals[n].append(v)
+            return {n: float(np.mean(v)) if v else float("nan") for n, v in vals.items()}
+        # Texygen's get_bleu_fast scores the first sample_size (500) sentences.
+        self_bleu = _self_bleu_means(all_words[:self_bleu_sample_size])
+        mean_self_bleu = self_bleu[SELF_BLEU_HEADLINE_ORDER]
 
         return {
-            # Li et al.'s own collection-level ratio (see _distinct_n_corpus).
-            "distinct_1": _distinct_n_corpus(all_completions, 1),
-            "distinct_2": _distinct_n_corpus(all_completions, 2),
-            "distinct_3": _distinct_n_corpus(all_completions, 3),
+            # Li et al.'s own collection-level ratio (see _distinct_n_corpus),
+            # over words.
+            "distinct_1": _distinct_n_corpus(all_words, 1),
+            "distinct_2": _distinct_n_corpus(all_words, 2),
+            "distinct_3": _distinct_n_corpus(all_words, 3),
             "mean_distinct_1": float(np.mean(all_distinct1)),
             "mean_distinct_2": float(np.mean(all_distinct2)),
             "mean_distinct_3": float(np.mean(all_distinct3)),
-            "mean_self_bleu": float(np.mean(all_self_bleu)),
-            # _meta_: `mean_distinct_1 + mean_token_repetition_rate == 1` to
-            # 1.1e-16 on every model -- the repetition rate is 1 minus the
-            # distinct-unigram rate BY DEFINITION. Emitting both puts one degree
-            # of freedom in the feature matrix twice (adversarial review,
-            # 2026-09-03).
+            "mean_self_bleu": mean_self_bleu,
+            # The unit actually used, and the subword-id forms (tokenizer-
+            # dependent: the same 48 strings span Self-BLEU 0.084-0.161).
+            "_meta_diversity_unit": "+".join(sorted(units_used)),
+            "_meta_distinct_1_subword": _distinct_n_corpus(all_completions, 1),
+            "_meta_distinct_2_subword": _distinct_n_corpus(all_completions, 2),
+            "_meta_distinct_3_subword": _distinct_n_corpus(all_completions, 3),
+            "_meta_mean_distinct_1_subword": float(np.mean(sub_distinct[1])),
+            "_meta_mean_distinct_2_subword": float(np.mean(sub_distinct[2])),
+            "_meta_mean_distinct_3_subword": float(np.mean(sub_distinct[3])),
+            "_meta_mean_self_bleu_subword": _self_bleu_means(
+                all_completions[:self_bleu_sample_size],
+                (SELF_BLEU_HEADLINE_ORDER,))[SELF_BLEU_HEADLINE_ORDER],
+            "_meta_self_bleu_n_scored": min(len(all_words), self_bleu_sample_size),
+            "_meta_self_bleu_gram": SELF_BLEU_HEADLINE_ORDER,
+            **{f"_meta_self_bleu_{n}": v for n, v in self_bleu.items()
+               if n != SELF_BLEU_HEADLINE_ORDER},
+            # _meta_: equals 1 - _meta_mean_distinct_1_subword by definition.
             "_meta_mean_token_repetition_rate": float(np.mean(all_token_rep_rate)) if all_token_rep_rate else float("nan"),
             "mean_phrase_repetition_rate": float(np.mean(all_phrase_rep_rate)) if all_phrase_rep_rate else float("nan"),
-            # NAMED for what they measure. These are the entropy of the
-            # STALE-NUMBER CORRECTION (2026-09-04): every figure in the note
-            # below was measured when `generate()` silently applied top_k=50.
-            # `top_k` is now PINNED TO 0, so the support is the FULL vocabulary
-            # -- measured 50257/50257 on gpt2, not 50 -- and the log(50) = 3.91
-            # cap no longer exists. The entropy is still the SAMPLING
-            # distribution's (temperature 0.8 is still applied), not the
-            # model's own, so the naming point stands; the magnitudes do not.
-            #
-            # SAMPLING distribution actually used for generation (top-50,
-            # T = 0.8), not the model's own next-token distribution: 99.90% of
-            # the vocabulary is -inf and the support is exactly 50, so the value
-            # is 2.21 nats where the model's own entropy is 4.37, the range is
-            # compressed 2.7-3.7x, and it is capped at log(50) = 3.91
-            # (adversarial review, 2026-09-03). Reading these as "the model's
-            # entropy" would be wrong.
+            # Entropy of the SAMPLING distribution (temperature applied, full
+            # vocabulary since top_k is pinned to 0), not the model's own.
             "mean_sampling_entropy_first_quarter": float(np.mean(all_entropy_first_q)) if all_entropy_first_q else float("nan"),
             "mean_sampling_entropy_last_quarter": float(np.mean(all_entropy_last_q)) if all_entropy_last_q else float("nan"),
             "sampling_entropy_collapse_delta": float(np.mean(all_entropy_delta)) if all_entropy_delta else float("nan"),
-            # ACTUAL, not requested. A prompt whose generate() raised was
-            # skipped while the output still reported the full requested
-            # counts, so a run with one failure of two prompts still claimed
-            # 2 prompts x 2 samples (adversarial review round 2, 2026-09-04).
+            # Counts actually generated, not requested.
             "n_prompts": int(_n_ok_prompts[0]),
-            "n_samples_per_prompt": n_samples,
+            "n_samples_per_prompt": (int(n_per_prompt) if n_per_prompt is not None
+                                     else max(counts) if counts else 0),
             "_meta_n_prompts_requested": len(prompts),
             "_meta_n_prompts_failed": int(_n_failed_prompts[0]),
             "_meta_n_completions": len(all_completions),
