@@ -3,7 +3,7 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
-from .utils import collect_hidden_states
+from .._tokens import hidden_states_for_task
 import logging
 logger = logging.getLogger("blme")
 
@@ -39,21 +39,12 @@ class IntrinsicDimensionTask(DiagnosticTask):
             logger.info("  Collecting hidden states...")
             # Block outputs 0..L-1: the deepest entry is the hooked raw block
             # output, not HF's ln_f(block L-1) (replace_final_norm=True).
-            _id_status = {}
-            if cache is not None and cache.is_populated and use_cache:
-                layer_activations = cache.get_hidden_states(
-                    layer_idx="all",
-                    num_samples=self.config.get("num_samples", 100),
-                    replace_final_norm=True,
-                )
-                _id_status["last_is_block"] = bool(
-                    getattr(cache, "_last_block_substituted", False))
-            else:
-                layer_activations = collect_hidden_states(
-                    model, tokenizer, dataset,
-                    num_samples=self.config.get("num_samples", 100),
-                    layer_idx="all", replace_final_norm=True,
-                    status=_id_status)
+            # A populated cache without hidden states falls back to collection
+            # (test_intrinsic_dim_protocol.py::test_cache_without_hidden_states).
+            layer_activations, _id_status = hidden_states_for_task(
+                model, tokenizer, dataset, cache,
+                num_samples=self.config.get("num_samples", 100),
+                replace_final_norm=True, layer_idx="all", use_cache=use_cache)
 
             results = {}
             sorted_layers = sorted(layer_activations.keys())
@@ -91,6 +82,9 @@ class IntrinsicDimensionTask(DiagnosticTask):
             # True only if the deepest entry really is the raw block output.
             results["_meta_last_entry_is_block_output"] = bool(
                 _id_status.get("last_is_block", False))
+            # Which route supplied the states, and why the cache was not used.
+            results["_meta_hidden_states_source"] = _id_status.get("source")
+            results["_meta_cache_rejected"] = _id_status.get("cache_rejected")
             return results
 
         else:
