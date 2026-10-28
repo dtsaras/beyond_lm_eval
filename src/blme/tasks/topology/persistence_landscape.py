@@ -34,7 +34,8 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
-from ._points import last_token_points, point_meta, rips_diagrams, role_layers, rows_policy
+from ._points import (last_token_points, point_meta, rips_diagrams, role_layers, role_meta,
+                      role_names, rows_policy)
 
 logger = logging.getLogger("blme")
 
@@ -280,6 +281,10 @@ class PersistenceLandscapeTask(DiagnosticTask):
         _last_is_block = bool(pinfo["last_is_block"])
 
         results: Dict[str, object] = {}
+        # Depth-role names (first/mid/last); absolute-index names alias
+        # different depths across models and are _meta_.
+        roles = role_names(target_layers)
+        results.update(role_meta(roles, pinfo["n_layers"]))
 
         for l_idx in target_layers:
             if len(layer_reps[l_idx]) < 3:
@@ -308,14 +313,18 @@ class PersistenceLandscapeTask(DiagnosticTask):
                 # Undo the pre-rescale: a max is degree 1 in the metric, an
                 # integral degree 2, an L2 norm degree 3/2.
                 _m1, _m2, _m32 = _resc, _resc ** 2, _resc ** 1.5
-                results[f"{prefix}_mean_landscape_integral"] = (
-                    stats["mean_landscape_integral"] * _m2)
-                results[f"{prefix}_landscape_max_1"] = (
-                    stats["landscape_maxes"][0] * _m1 if stats["landscape_maxes"] else 0.0)
-                results[f"{prefix}_landscape_norm_1"] = (
-                    stats["landscape_norms"][0] * _m32 if stats["landscape_norms"] else 0.0)
-                results[f"{prefix}_landscape_integrals"] = [
-                    v * _m2 for v in stats["landscape_integrals"]]
+                vals = {
+                    "mean_landscape_integral": stats["mean_landscape_integral"] * _m2,
+                    "landscape_max_1": (stats["landscape_maxes"][0] * _m1
+                                        if stats["landscape_maxes"] else 0.0),
+                    "landscape_norm_1": (stats["landscape_norms"][0] * _m32
+                                         if stats["landscape_norms"] else 0.0),
+                    "landscape_integrals": [v * _m2 for v in stats["landscape_integrals"]],
+                }
+                for k, v in vals.items():
+                    results[f"_meta_{prefix}_{k}"] = v
+                    if l_idx in roles:
+                        results[f"{roles[l_idx]}_layer_{dim_label}_{k}"] = v
                 # Status keys carry the _meta_ prefix at the START of the name
                 # (they were layer_<l>_<dim>_meta_*, which a reader testing
                 # startswith("_meta_") took for features).

@@ -56,6 +56,14 @@ def test_landscape_status_keys_start_with_meta(states):
                 assert f"_meta_layer_{l}_{dim}_{k}" in res, (l, dim, k)
 
 
+def test_landscape_keys_are_named_by_depth_role(states):
+    res = _run("topology_persistence_landscape", states)
+    assert not [k for k in _features(res) if ABS.search(k)]
+    for r in ("first", "mid", "last"):
+        assert f"{r}_layer_h1_mean_landscape_integral" in res
+    assert res["_meta_last_layer_frac"] == 1.0
+
+
 def test_persistence_entropy_h0_family_is_meta(states):
     """Raw H0 entropy of N points is log2(N - 1) to three digits; E / log2(n)
     passes every direct test but does not separate models (dossier: between/
