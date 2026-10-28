@@ -75,3 +75,19 @@ def test_headline_is_one_point_per_sequence(states):
     moved = [k for k in base if k.startswith("_meta_tokens_magnitude")
              and inv.rel_change(base[k], edited[k]) > 1e-3]
     assert moved
+
+
+def test_headline_is_the_magnipy_protocol_and_scale_free(states):
+    """Rule 1: the headline is Limbeck et al.'s MagArea / t_conv on cosine
+    distances (magnipy defaults). A x10 rescale of every state leaves it
+    unchanged; the former Euclidean median-window area (now _meta_) moves as
+    1/s."""
+    base = inv.run_task_on_states(TASK, states)
+    big = inv.run_task_on_states(TASK, inv.rescale_docs(states, 10.0))
+    assert base["_meta_magnitude_tconv_status"] == "ok"
+    for legacy in ("magnitude_low_scale", "magnitude_med_scale", "magnitude_auc",
+                   "magnitude_area", "magnitude_dimension", "magnitude_median_scale"):
+        assert legacy not in base and "_meta_" + legacy in base
+    inv.assert_invariant(base, big, ["magnitude_area_tconv", "magnitude_dimension_tconv"],
+                         rtol=1e-6)
+    inv.assert_moves(base, big, "_meta_magnitude_area", min_rel=0.5)

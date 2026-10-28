@@ -71,7 +71,8 @@ from ...tasks.base import DiagnosticTask
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 from scipy.linalg import cho_factor, solve_triangular
-from scipy.spatial.distance import pdist, squareform
+from scipy.optimize import toms748
+from scipy.spatial.distance import cdist, pdist, squareform
 
 logger = logging.getLogger("blme")
 
@@ -203,6 +204,88 @@ def _magnitude_dimension(ts: np.ndarray, mags: np.ndarray) -> float:
     return float(np.max(slopes))
 
 
+# magnipy defaults (Magnipy.__init__ @7d49b90): 30 evenly spaced scales on
+# [0, t_conv], t_conv where the magnitude reaches 95% of the cardinality.
+_N_TS = 30
+_TARGET_PROP = 0.95
+
+
+def _cosine_distance_matrix(X: np.ndarray) -> np.ndarray:
+    """Cosine distance 1 - cos(x_i, x_j) (scipy ``cdist``, as magnipy's
+    ``distances_scipy``), the paper's choice for text (App. B.1); exact zero
+    diagonal."""
+    D = cdist(np.asarray(X, dtype=np.float64), np.asarray(X, dtype=np.float64), metric="cosine")
+    np.fill_diagonal(D, 0.0)
+    return D
+
+
+def _mag_at(D: np.ndarray, t: float) -> float:
+    """|tX| with magnipy's one-point property at t = 0."""
+    return 1.0 if t == 0 else _magnitude(D, float(t))
+
+
+def _convergence_scale(D: np.ndarray, target_prop: float = _TARGET_PROP,
+                       guess: float = 10.0) -> float:
+    """magnipy ``guess_convergence_scale``: the t at which |tX| = target_prop * n.
+
+    Same bracket (lower 0, guess 10, x10 until the target is passed) and the
+    same root finder (``toms748``, rtol 1e-5, maxiter 100). NaN if no bracket.
+    """
+    n = D.shape[0]
+    target = target_prop * n
+    if n < 2 or target <= 1.0:
+        return float("nan")
+
+    def f(t):
+        return _mag_at(D, t) - target
+
+    lower, f_guess = 0.0, f(guess)
+    while f_guess < 0:
+        lower, guess = guess, guess * 10.0
+        if not np.isfinite(guess) or guess > 1e300:
+            return float("nan")
+        f_guess = f(guess)
+    try:
+        return float(toms748(f, lower, guess, maxiter=100, rtol=1e-05))
+    except (ValueError, RuntimeError):
+        return float("nan")
+
+
+def _magnipy_protocol(D: np.ndarray, n_ts: int = _N_TS,
+                      target_prop: float = _TARGET_PROP) -> dict:
+    """Limbeck et al. 2024 / magnipy defaults on one distance matrix.
+
+    ``magnitude_area_tconv`` = MagArea over [0, t_conv] divided by t_conv
+    (magnipy ``mag_area(scale=True)``, the Diversipy default), i.e. the mean
+    magnitude over the evaluation interval. Because Mag_{sX}(t) = Mag_X(st)
+    and t_conv(sX) = t_conv(X)/s it is exactly invariant to a global rescale.
+    ``magnitude_dimension_tconv`` = max of the secant magnitude-dimension
+    profile on the same scales (magnipy ``get_magnitude_dimension``).
+    """
+    n = D.shape[0]
+    t_conv = _convergence_scale(D, target_prop)
+    if not (np.isfinite(t_conv) and t_conv > 0):
+        return {"magnitude_area_tconv": float("nan"), "magnitude_dimension_tconv": float("nan"),
+                "_meta_magnitude_t_conv": float("nan"), "_meta_magnitude_area_raw": float("nan"),
+                "_meta_magnitude_tconv_status": "no_convergence_scale"}
+    ts = np.linspace(0.0, t_conv, n_ts)
+    mags = np.array([_mag_at(D, t) for t in ts], dtype=np.float64)
+    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+    area = float(_trapz(np.abs(mags), ts))
+    # Secant slopes of log|tX| vs log t over the positive scales; the
+    # one-point property prepends a 0 to the profile.
+    slopes = np.diff(np.log(mags[1:])) / np.diff(np.log(ts[1:]))
+    dim = float(np.max(np.insert(slopes, 0, 0.0))) if slopes.size else float("nan")
+    # Derived: solves outside [1, n] are kept, as magnipy keeps them, and counted.
+    n_bad = int(np.sum(~((mags >= 1.0 - 1e-6) & (mags <= n + 1e-6))))
+    return {"magnitude_area_tconv": area / float(ts[-1]),
+            "magnitude_dimension_tconv": dim,
+            "_meta_magnitude_t_conv": float(t_conv),
+            "_meta_magnitude_area_raw": area,
+            "_meta_magnitude_tconv_n_out_of_range": n_bad,
+            "_meta_magnitude_tconv_status": "ok"}
+
+
 def _magnitude_summary(D: np.ndarray, n_scales: int, scale_span: float) -> dict:
     """Magnitude-function summary metrics for one distance matrix ``D``.
 
@@ -303,14 +386,12 @@ class MagnitudeTask(DiagnosticTask):
     """Metric-space magnitude of the hidden-state cloud (Limbeck et al.,
     NeurIPS 2024, arXiv:2311.16054; repo aidos-lab/magnipy).
 
-    Outputs (flat float64):
-        magnitude_low_scale    — |tX| at the smallest sampled scale
-        magnitude_med_scale    — |tX| at the median-heuristic scale
-        magnitude_high_scale   — |tX| at the largest sampled scale
-        magnitude_ratio        — |tX|_high / n  (fraction of points resolved)
-        magnitude_auc          — area under log|tX| vs log t (trapezoid)
-        magnitude_dimension    — max slope of log|tX| vs log t (Meckes 2015)
-        magnitude_median_scale — the median-heuristic scale t_med itself
+    Outputs (flat float64), cosine distance, scales on [0, t_conv]:
+        magnitude_area_tconv      — MagArea / t_conv: mean |tX| over [0, t_conv]
+        magnitude_dimension_tconv — max of the magnitude-dimension profile
+        _meta_magnitude_t_conv    — the convergence scale (|tX| = 0.95 n)
+        _meta_magnitude_*         — the Euclidean median-heuristic ladder
+                                    (low/med scale, auc, area, dimension)
     """
 
     # One point per sequence (Q1): the last content token of each document.
@@ -351,10 +432,21 @@ class MagnitudeTask(DiagnosticTask):
             return {"error": "Need at least 2 points for magnitude"}
         n = X.shape[0]
 
-        # --- 2. Distance matrix + magnitude summary ---------------------------
-        _out = _magnitude_summary(_pairwise_distance_matrix(X), n_scales, scale_span)
-        if not isinstance(_out, dict) or "error" in _out:
-            return _out
+        # --- 2. Limbeck et al. / magnipy protocol (rule 1) --------------------
+        # Cosine distance (the paper's choice for text), scales on [0, t_conv],
+        # headline MagArea/t_conv (test_magnitude_protocol.py: scale-free and
+        # equal to live magnipy).
+        _out = _magnipy_protocol(_cosine_distance_matrix(X))
+        _out["_meta_magnitude_distance"] = "cosine"
+
+        # The previous Euclidean median-heuristic ladder is not a paper quantity
+        # and is not scale-free: _meta_.
+        legacy = _magnitude_summary(_pairwise_distance_matrix(X), n_scales, scale_span)
+        if isinstance(legacy, dict) and "error" not in legacy:
+            _out.update({(k if k.startswith("_meta_") else f"_meta_{k}"): v
+                         for k, v in legacy.items()})
+        else:
+            _out["_meta_magnitude_legacy_error"] = (legacy or {}).get("error")
 
         # --- 3. The token cloud (_meta_tokens_*): token_cloud_points seeded
         # rows of the first token_cloud_docs documents, sink policy.
@@ -367,6 +459,9 @@ class MagnitudeTask(DiagnosticTask):
                 tok = _magnitude_summary(_pairwise_distance_matrix(T), n_scales, scale_span)
                 _out.update({f"_meta_tokens_{k}": v for k, v in tok.items()
                              if not k.startswith("_meta_") and k != "error"})
+                tok = _magnipy_protocol(_cosine_distance_matrix(T))
+                _out.update({f"_meta_tokens_{k}": v for k, v in tok.items()
+                             if not k.startswith("_meta_")})
                 _out["_meta_tokens_n_points"] = int(T.shape[0])
 
         # Provenance: route, point count and document count.
