@@ -71,6 +71,58 @@ def _gp_correlation_dimension(distances, num_radii=30, rvals=None):
     return float(slope), float(r_squared), "ok"
 
 
+# Du & Tanaka-Ishii 2025 (arXiv:2510.21258), App. A: fit log C(r) vs log r over
+# C in [20 / (N (N - 1)), eta / N] with eta = 1 -- "clip the left tail below ten
+# counts and discard the upper half".
+_DTI_LOW_PAIRS = 10          # unordered pairs, i.e. 20 / (N (N - 1)) in C
+_DTI_ETA = 1.0
+
+
+def _fixed_window_dimension(distances, n_points: int):
+    """D2 as the OLS slope of log C vs log r over a FIXED published C window.
+
+    The empirical correlation integral at the k-th smallest pair distance is
+    C = k / M (M = N (N - 1) / 2 pairs, coincident pairs included). The window
+    keeps the ranks with C in [20 / (N (N - 1)), eta / N], i.e. k from 10 to
+    eta (N - 1) / 2, and fits every positive distance in it. The window is a
+    function of N alone, so the estimate moves continuously with the data
+    (test_correlation_dimension_protocol.py), unlike a searched plateau.
+
+    Returns ``(slope, r_squared, n_fit, status, decades)``; status ``"ok"``,
+    ``"insufficient"`` (< 3 positive distances in the window, or one distinct
+    distance) or ``"atomic"`` (the window lies entirely in coincident pairs: C
+    has a floor, D2 = 0). ``decades`` is the window's span in log10 r: a
+    regular lattice sampled below its spacing has a near-zero span and no
+    meaningful slope.
+    """
+    d = np.sort(np.asarray(distances, dtype=np.float64).ravel())
+    M = d.size
+    N = int(n_points)
+    if M < 3 or N < 3:
+        return float("nan"), float("nan"), 0, "insufficient", 0.0
+    k = np.arange(1, M + 1, dtype=np.float64)
+    lo = 20.0 / (N * (N - 1.0))
+    hi = _DTI_ETA / N
+    C = k / M
+    in_window = (C >= lo * (1 - 1e-12)) & (C <= hi * (1 + 1e-12))
+    sel = in_window & (d > 0)
+    n_fit = int(sel.sum())
+    if n_fit < 3:
+        if in_window.any() and not sel.any():
+            return 0.0, float("nan"), 0, "atomic", 0.0
+        return float("nan"), float("nan"), n_fit, "insufficient", 0.0
+    x, y = np.log(d[sel]), np.log(C[sel])
+    decades = float(np.ptp(x)) / np.log(10.0)
+    if decades <= 0.0:
+        return float("nan"), float("nan"), n_fit, "insufficient", 0.0
+    coef = np.polyfit(x, y, 1)
+    pred = np.polyval(coef, x)
+    ss_res = float(np.sum((y - pred) ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return float(coef[0]), float(r2), n_fit, "ok", decades
+
+
 @register_task("geometry_correlation_dimension")
 class CorrelationDimensionTask(DiagnosticTask):
     """
@@ -147,8 +199,8 @@ class CorrelationDimensionTask(DiagnosticTask):
         distances = dist_matrix[tri_indices[0], tri_indices[1]].double().cpu().numpy()
 
         # 2-3. Grassberger-Procaccia: correlation integral C(r) -> log-log
-        # slope. C(r) counts coincident pairs (they set its floor c0); one
-        # radius setting reaches every plateau call.
+        # slope. C(r) counts coincident pairs (they set its floor c0). The
+        # percentile and plateau fits below are _meta_ diagnostics.
         _plateau_radii = int(self.config.get("plateau_num_radii", 60))
         _atom_frac = float(np.count_nonzero(distances <= 0.0) / max(1, distances.size))
         _fallback_reason = None
@@ -185,8 +237,8 @@ class CorrelationDimensionTask(DiagnosticTask):
                 # Atomic measure: C(r) has a constant floor, D2 = 0.
                 slope, r_squared = 0.0, float("nan")
                 _fallback_reason = "atomic"
-            else:
-                return {"error": "Failed to compute correlation integral across scales."}
+            # Otherwise the percentile and plateau fits are NaN; they no longer
+            # veto the fixed-window headline.
 
         if pooling == "all_tokens":
             point_space = "token_hidden_states"
@@ -202,20 +254,28 @@ class CorrelationDimensionTask(DiagnosticTask):
             _cr_input, num_radii=_plateau_radii)
         _cr_n_pairs = int(np.asarray(_cr_input).size)
 
-        # The headline is the scaling-region fit: the 5th-95th percentile
-        # window sits in the saturation region of C(r).
-        _primary = (float(sr_slope)
+        # The plateau search (now _meta_): an argmin over windows, so the value
+        # jumps between windows under perturbations far below bf16 resolution.
+        _plateau = (float(sr_slope)
                     if (sr_slope is not None and sr_status == "ok")
                     else float("nan"))
-
-        # Atomic measure with no fit -> D2 = 0 exactly
-        # (test_correlation_dimension_atom_e2e.py).
         if (_atom_frac > 0.0
                 and (sr_slope is None or sr_status != "ok"
-                     or not np.isfinite(_primary))):
-            _primary = 0.0
+                     or not np.isfinite(_plateau))):
+            _plateau = 0.0
+
+        # The headline: Du & Tanaka-Ishii 2025's fixed C window, continuous in
+        # the data. An atomic measure (the window inside coincident pairs) has
+        # D2 = 0 exactly (test_correlation_dimension_atom_e2e.py).
+        fw_slope, fw_r2, fw_n, fw_status, fw_dec = _fixed_window_dimension(distances, N)
+        _primary = fw_slope
         return {
             "correlation_dimension": _primary,
+            "_meta_correlation_dimension_fit_window": "du_tanaka_ishii_2025_appA",
+            "_meta_correlation_dimension_fit_status": fw_status,
+            "_meta_correlation_dimension_fit_n_points": int(fw_n),
+            "_meta_correlation_dimension_fit_decades": float(fw_dec),
+            "_meta_correlation_dimension_plateau": _plateau,
             # Derived: the pair population of the headline C(r) (all pairs).
             "_meta_correlation_integral_n_pairs": _cr_n_pairs,
             "_meta_coincident_pair_fraction": float(_atom_frac),
@@ -227,10 +287,8 @@ class CorrelationDimensionTask(DiagnosticTask):
             "correlation_dimension_method": "hidden_state_grassberger_procaccia_scaling_region",
             "correlation_dimension_point_space": point_space,
             "_meta_num_points": N,
-            # R^2 of the reported fit (a _meta_ duplicate of the scaling R^2).
-            "_meta_fit_r_squared": (float(sr_r2) if (sr_r2 is not None
-                                                     and np.isfinite(sr_r2))
-                                    else float("nan")),
+            # R^2 of the reported (fixed-window) fit.
+            "_meta_fit_r_squared": fw_r2,
             "_meta_fit_r_squared_percentile_window": (
                 float(_pct_r2) if _pct_r2 is not None else float("nan")),
             # The scaling-region value, NaN when its span is below the floor.
@@ -248,7 +306,8 @@ class CorrelationDimensionTask(DiagnosticTask):
             "_meta_correlation_dimension_under_resolved": bool(
                 sr_slope is not None and np.isfinite(sr_slope)
                 and float(sr_slope) > 2.0 * np.log10(max(N, 10))),
-            "correlation_dimension_scaling_r2": (
+            # R^2 of the plateau fit: _meta_ with the plateau it describes.
+            "_meta_correlation_dimension_scaling_r2": (
                 float(sr_r2) if sr_r2 is not None else float("nan")),
             "_meta_correlation_dimension_scaling_status": sr_status,
             "_meta_correlation_dimension_zero_pair_frac": _atom_frac,
