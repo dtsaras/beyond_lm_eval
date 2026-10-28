@@ -95,7 +95,10 @@ geometry_unembedding:
 
 geometry_intrinsic_dim:
   layerwise: false
-  num_samples: 100
+  # Layerwise mode: one point per sequence (last content token), N pinned at
+  # 1000 documents for every model; the token cloud of the first 200 is _meta_.
+  num_samples: 1000
+  token_cloud_docs: 200
 
 geometry_hsic:
   num_samples: 100

@@ -1,9 +1,15 @@
 """geometry_intrinsic_dim: cache gate and the one-point-per-sequence protocol."""
+import sys
+from pathlib import Path
+
+import numpy as np
 import pytest
 import torch
 
 transformers = pytest.importorskip("transformers")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import invariance as inv  # noqa: E402
 from blme.cache import ModelOutputCache  # noqa: E402
 from blme.tasks.geometry.intrinsic_dim import IntrinsicDimensionTask  # noqa: E402
 
@@ -41,5 +47,32 @@ def test_cache_without_hidden_states(tiny):
     out = IntrinsicDimensionTask({"layerwise": True, "num_samples": len(data)}).evaluate(
         model, tok, data, cache=cache)
     assert "error" not in out and "lid_first_layer" in out
-    assert out["_meta_hidden_states_source"] == "self_collected"
+    assert out["_meta_points_source"] == "self_collected"
     assert out["_meta_cache_rejected"] == "no_hidden_states"
+
+
+def _replace_all_but_last(S, seed=0):
+    """Every row of every document except its last, replaced by noise."""
+    rng = np.random.default_rng(seed)
+
+    def edit(x):
+        y = np.array(x, dtype=np.float64, copy=True)
+        y[:-1] = rng.standard_normal(y[:-1].shape) * np.abs(y).max()
+        return y
+    return inv.States(blocks={k: [edit(x) for x in v] for k, v in S.blocks.items()},
+                      final_norm=None if S.final_norm is None else [edit(x) for x in S.final_norm])
+
+
+def test_headline_is_one_point_per_sequence(tiny):
+    """Q1: the profile is TwoNN on the last content token of each document.
+    Rewriting every other row leaves it bit-identical (the token cloud moves),
+    and the point count is the document count."""
+    model, tok = tiny
+    S = inv.states_from_model(model, tok, TEXTS)
+    base = inv.run_task_on_states("geometry_intrinsic_dim", S)
+    edited = inv.run_task_on_states("geometry_intrinsic_dim", _replace_all_but_last(S))
+    keys = ["lid_first_layer", "lid_mid_layer", "lid_last_layer", "lid_trend"]
+    inv.assert_invariant(base, edited, keys, rtol=0.0)
+    assert base["_meta_n_points"] == len(TEXTS)
+    assert base["_meta_points_readout"] == "last_content_token"
+    inv.assert_moves(base, edited, "_meta_tokens_lid_trend", min_rel=1e-3)

@@ -3,7 +3,7 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
-from .._tokens import hidden_states_for_task
+from ._sequence_points import DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, sequence_clouds
 import logging
 logger = logging.getLogger("blme")
 
@@ -35,56 +35,53 @@ class IntrinsicDimensionTask(DiagnosticTask):
             if dataset is None:
                 dataset = [{"text": "The quick brown fox jumps over the lazy dog."} for _ in range(50)]
             use_cache = self.config.get("use_cache", True)
+            n_seq = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
+            seed = int(self.config.get("subsample_seed", 42))
 
             logger.info("  Collecting hidden states...")
-            # Block outputs 0..L-1: the deepest entry is the hooked raw block
-            # output, not HF's ln_f(block L-1) (replace_final_norm=True).
-            # A populated cache without hidden states falls back to collection
-            # (test_intrinsic_dim_protocol.py::test_cache_without_hidden_states).
-            layer_activations, _id_status = hidden_states_for_task(
-                model, tokenizer, dataset, cache,
-                num_samples=self.config.get("num_samples", 100),
-                replace_final_norm=True, layer_idx="all", use_cache=use_cache)
+            # One point per sequence (Q1): the last content token of each of
+            # n_seq documents, at every block output (the deepest one the
+            # hooked raw block output). A cache holding fewer documents, or no
+            # hidden states, is bypassed (test_intrinsic_dim_protocol.py).
+            sc = sequence_clouds(
+                model, tokenizer, dataset, cache, n=n_seq, layer="all",
+                replace_final_norm=True, use_cache=use_cache,
+                token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)))
+            if not sc.last:
+                return {"error": "No hidden states available for intrinsic dimension"}
 
-            results = {}
-            sorted_layers = sorted(layer_activations.keys())
+            sorted_layers = sorted(sc.last)
             id_trend = []
-
+            results = {}
             for layer_idx in tqdm(sorted_layers, desc="Computing Layer IDs"):
                 # float64: _compute_id rescales by a power of two and compares
                 # radii exactly (test_intrinsic_dim_translation_invariance.py).
-                X = layer_activations[layer_idx].double().numpy()
-                if len(X) > 20000:
-                    rng = np.random.default_rng(
-                        int(self.config.get("subsample_seed", 42))
-                    )
-                    indices = rng.choice(len(X), 20000, replace=False)
-                    X = X[indices]
-
-                lid_result = self._compute_id(X)
-                lid = lid_result["intrinsic_dimension"]
+                lid = self._compute_id(sc.last[layer_idx].double().numpy())["intrinsic_dimension"]
                 # Absolute-index names are _meta_: one index is a different
                 # depth on models of different size.
                 results[f"_meta_lid_layer_{layer_idx}"] = lid
                 id_trend.append(lid)
-
             results["lid_trend"] = id_trend
-            # Depth-aligned scalars: one name, one depth role on every model.
-            if id_trend:
-                _n = len(id_trend)
-                results["lid_first_layer"] = float(id_trend[0])
-                results["lid_mid_layer"] = float(id_trend[_n // 2])
-                results["lid_last_layer"] = float(id_trend[-1])
-                results["lid_depth_slope"] = (
-                    float(np.polyfit(np.linspace(0.0, 1.0, _n),
-                                     np.asarray(id_trend, dtype=float), 1)[0])
-                    if _n > 1 and np.all(np.isfinite(id_trend)) else float("nan"))
-            # True only if the deepest entry really is the raw block output.
-            results["_meta_last_entry_is_block_output"] = bool(
-                _id_status.get("last_is_block", False))
-            # Which route supplied the states, and why the cache was not used.
-            results["_meta_hidden_states_source"] = _id_status.get("source")
-            results["_meta_cache_rejected"] = _id_status.get("cache_rejected")
+            results.update(_profile_summary(id_trend))
+
+            # The token cloud (every token of the first token_cloud_docs
+            # documents, sinks excluded, 20000-row seeded subsample): _meta_.
+            if sc.tokens:
+                tok_trend = []
+                for layer_idx in sorted_layers:
+                    X = sc.token_rows(layer_idx)[0].double().numpy()
+                    if len(X) > 20000:
+                        rng = np.random.default_rng(seed)
+                        X = X[rng.choice(len(X), 20000, replace=False)]
+                    tok_trend.append(self._compute_id(X)["intrinsic_dimension"])
+                results["_meta_tokens_lid_trend"] = tok_trend
+                results.update({f"_meta_tokens_{k}": v
+                                for k, v in _profile_summary(tok_trend).items()})
+
+            results["_meta_last_entry_is_block_output"] = bool(sc.info.get("last_is_block", False))
+            # Why the cache was not used (the route is _meta_points_source).
+            results["_meta_cache_rejected"] = sc.info.get("cache_rejected")
+            results.update(sc.meta())
             return results
 
         else:
@@ -172,6 +169,21 @@ class IntrinsicDimensionTask(DiagnosticTask):
             "_meta_sample_size": N,
             "_meta_n_nonfinite_rows": _n_nonfinite,
         }
+
+
+def _profile_summary(trend):
+    """first / mid / last entries and the OLS slope on relative depth."""
+    if not trend:
+        return {}
+    n = len(trend)
+    return {
+        "lid_first_layer": float(trend[0]),
+        "lid_mid_layer": float(trend[n // 2]),
+        "lid_last_layer": float(trend[-1]),
+        "lid_depth_slope": (
+            float(np.polyfit(np.linspace(0.0, 1.0, n), np.asarray(trend, dtype=float), 1)[0])
+            if n > 1 and np.all(np.isfinite(trend)) else float("nan")),
+    }
 
 
 def _two_nearest_neighbor_distances(
