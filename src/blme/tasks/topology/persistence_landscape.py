@@ -316,13 +316,15 @@ class PersistenceLandscapeTask(DiagnosticTask):
                     stats["landscape_norms"][0] * _m32 if stats["landscape_norms"] else 0.0)
                 results[f"{prefix}_landscape_integrals"] = [
                     v * _m2 for v in stats["landscape_integrals"]]
-                results[f"{prefix}_meta_last_entry_is_block_output"] = bool(
+                # Status keys carry the _meta_ prefix at the START of the name
+                # (they were layer_<l>_<dim>_meta_*, which a reader testing
+                # startswith("_meta_") took for features).
+                results[f"_meta_{prefix}_last_entry_is_block_output"] = bool(
                     _last_is_block) if l_idx == target_layers[-1] else True
-                results[f"{prefix}_meta_prescale"] = float(_resc)
-                for _sk in ("_meta_landscape_max_status",
-                            "_meta_landscape_quadrature",
-                            "_meta_landscape_n_bars"):
-                    results[f"{prefix}{_sk}"] = stats[_sk]
+                results[f"_meta_{prefix}_prescale"] = float(_resc)
+                for _sk in ("landscape_max_status", "landscape_quadrature",
+                            "landscape_n_bars"):
+                    results[f"_meta_{prefix}_{_sk}"] = stats[f"_meta_{_sk}"]
 
         if not results:
             return {"error": "No layers produced landscape features"}

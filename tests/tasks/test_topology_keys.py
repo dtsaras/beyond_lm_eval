@@ -43,6 +43,19 @@ def test_persistence_entropy_keys_are_named_by_depth_role(states):
     assert res[f"_meta_layer_{L - 1}_pe_h1"] == res["last_layer_pe_h1"]
 
 
+def test_landscape_status_keys_start_with_meta(states):
+    """30 keys were named layer_<l>_<h0|h1>_meta_*: a reader testing
+    startswith("_meta_") ingested string/bool status flags as features."""
+    res = _run("topology_persistence_landscape", states)
+    assert not [k for k in res if "_meta_" in k and not k.startswith("_meta_")]
+    L = states.n_layers
+    for l in sorted({0, L // 2, L - 1}):
+        for dim in ("h0", "h1"):
+            for k in ("last_entry_is_block_output", "prescale", "landscape_max_status",
+                      "landscape_quadrature", "landscape_n_bars"):
+                assert f"_meta_layer_{l}_{dim}_{k}" in res, (l, dim, k)
+
+
 def test_persistence_entropy_h0_family_is_meta(states):
     """Raw H0 entropy of N points is log2(N - 1) to three digits; E / log2(n)
     passes every direct test but does not separate models (dossier: between/
