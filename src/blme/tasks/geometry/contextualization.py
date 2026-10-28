@@ -30,7 +30,7 @@ anisotropy-adjusted (Sec. 3.4) and are NOT directly comparable.
 
 import logging
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 from .utils import safe_unit_rows
@@ -39,6 +39,8 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._sink_norms import SinkNormCollector
+from .._tokens import massive_token_share, position0_share, sink_meta
 
 logger = logging.getLogger("blme")
 
@@ -213,14 +215,17 @@ class ContextualizationTask(DiagnosticTask):
     word alignment and no punctuation filter, unlike kawine/contextual), so
     the tracked set is tokenizer-specific (``_meta_n_words_tracked``).
 
-    Position 0 is dropped for every tokenizer (``TOKEN_POLICY``). The reference
-    strips special tokens, which removes the sink on BOS tokenizers only; on
-    GPT-2-style tokenizers the sink is the first real word and stayed in every
-    statistic (mev_corrected_sizematched flipped sign on gpt2 / pythia-1b in
-    the dossier). The reference protocol (special tokens dropped, first word
-    kept) is kept as ``_meta_paper_protocol_*``.
+    Sink rows are dropped for every tokenizer (``TOKEN_POLICY``): position 0
+    and every massive-activation token, one mask per token from the middle
+    depths for every layer. The reference strips special tokens, which removes
+    the sink on BOS tokenizers only; on GPT-2-style tokenizers the sink is the
+    first real word and stayed in every statistic (mev_corrected_sizematched
+    flipped sign on gpt2 / pythia-1b in the dossier), and in-text sinks (the
+    first "." on pythia) stay on every tokenizer. The reference protocol
+    (special tokens dropped, every other token kept) is kept as
+    ``_meta_paper_protocol_*``.
     """
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:1909.00512",
         "code": "kawine/contextual@c10c992a20d09660bcbac1e84466a3004374317c",
@@ -269,25 +274,25 @@ class ContextualizationTask(DiagnosticTask):
         device = next(model.parameters()).device
 
         # Step 1: collect per-token hidden states grouped by token id, per layer,
-        # for every non-special position; `token_is_p0[token_id]` marks which
-        # occurrences sit at position 0, so both token policies read one store.
+        # for every non-special position; `token_occ[token_id]` records the
+        # (document, position) of each occurrence, so every token policy reads
+        # one store once the sink masks exist (they need every document).
         token_states: Dict[int, Dict[int, List[np.ndarray]]] = defaultdict(lambda: defaultdict(list))
-        token_is_p0: Dict[int, List[bool]] = defaultdict(list)
-        intra_first_is_p0: List[bool] = []
-        pool_excl_per_layer: Dict[int, List[np.ndarray]] = defaultdict(list)
-
+        token_occ: Dict[int, List[Tuple[int, int]]] = defaultdict(list)
+        # Per document: its non-special positions, and per layer their rows
+        # (IntraSim and the policy's baseline pool read these).
+        doc_pos: List[np.ndarray] = []
+        doc_rows: Dict[int, List[np.ndarray]] = defaultdict(list)
         all_states_per_layer: Dict[int, List[np.ndarray]] = defaultdict(list)
-        # For intra-sentence similarity: list of (layer -> per-sample vectors).
-        intra_per_layer: Dict[int, List[np.ndarray]] = defaultdict(list)
+        sinks = SinkNormCollector()
 
         n_layers_seen = 0
         # Seeded ONCE per evaluate: picks which token of each sentence joins
-        # the anisotropy baseline pool. Seeded for reproducibility, drawn
-        # per sentence so the pool is not positionally biased.
+        # the reference protocol's anisotropy baseline pool. Seeded for
+        # reproducibility, drawn per sentence so the pool is not positionally
+        # biased. The headline policy's pool is drawn after the loop from its
+        # own stream (`_pool`).
         rng_pool = np.random.default_rng(20260902)
-        # Separate stream for the position-0-excluded pool, so the reference
-        # protocol's draws (rng_pool) are unchanged.
-        rng_pool_excl = np.random.default_rng(20260902)
 
         # post-final-norm=False, DELIBERATELY: kawine/contextual's vendored GPT-2
         # pops the pre-norm last layer and appends ln_f(...)
@@ -315,34 +320,31 @@ class ContextualizationTask(DiagnosticTask):
                 if not n_layers_seen:
                     n_layers_seen = len(per_layer)
 
+                # Every position (special tokens included) feeds the sink
+                # mask; the threshold is a median over all documents.
+                doc = len(doc_pos)
+                sinks.add(per_layer)
+
                 # Baseline pool: one token per sentence, chosen uniformly over
                 # the kept positions and reused for every layer (random pairs
                 # must not share a context).
                 non_special = [p_ for p_, t_ in enumerate(token_ids)
                                if t_ not in special_ids]
-                non_special_all = non_special
                 pool_pos = (int(rng_pool.choice(non_special))
                             if non_special else None)
-                non_special_excl = [p_ for p_ in non_special if p_ != 0]
-                pool_pos_excl = (int(rng_pool_excl.choice(non_special_excl))
-                                 if non_special_excl else None)
 
                 # IntraSim sees the same positions as SelfSim and MEV.
-                keep_pos = np.asarray(non_special_all, dtype=np.int64)
-                if keep_pos.size >= 2:
-                    intra_first_is_p0.append(bool(keep_pos[0] == 0))
+                keep_pos = np.asarray(non_special, dtype=np.int64)
+                doc_pos.append(keep_pos)
                 for tok_pos, tok_id in enumerate(token_ids):
                     if tok_id not in special_ids:
-                        token_is_p0[tok_id].append(tok_pos == 0)
+                        token_occ[tok_id].append((doc, tok_pos))
 
                 for li, h in enumerate(per_layer):
                     h_np = h[0].float().cpu().numpy()  # (T, D)
-                    if keep_pos.size >= 2:
-                        intra_per_layer[li].append(h_np[keep_pos])
+                    doc_rows[li].append(h_np[keep_pos])
                     if pool_pos is not None:
                         all_states_per_layer[li].append(h_np[pool_pos])
-                    if pool_pos_excl is not None:
-                        pool_excl_per_layer[li].append(h_np[pool_pos_excl])
                     for tok_pos, tok_id in enumerate(token_ids):
                         if tok_id in special_ids:
                             continue
@@ -361,10 +363,47 @@ class ContextualizationTask(DiagnosticTask):
             n_pick = min(5, n_layers_seen)
             layers_to_report = list(np.linspace(0, n_layers_seen - 1, n_pick).astype(int))
 
-        # Step 2: per-layer metrics, under the headline policy (position 0
-        # dropped) and the reference protocol (_meta_).
-        def _layer_metrics(li, drop_p0):
-            pool = pool_excl_per_layer if drop_p0 else all_states_per_layer
+        # Step 2: per-layer metrics, under the headline policy (sink rows
+        # dropped) and the reference protocol ("all": every non-special token;
+        # _meta_). One sink mask per document, from the middle depths, applies
+        # at every layer (tests/tasks/invariance/test_contextualization.py).
+        masks, sink_info = sinks.masks()
+        masks = [m.numpy() for m in masks]
+
+        def _kept(doc, positions, policy):
+            positions = np.asarray(positions, dtype=np.int64)
+            if policy == "exclude_sinks":
+                return masks[doc][positions]
+            if policy == "exclude_pos0":
+                return positions != 0
+            return np.ones(positions.shape, dtype=bool)
+
+        def _occ_keep(policy):
+            return {t: np.fromiter((bool(_kept(d, [p_], policy)[0]) for d, p_ in occ),
+                                   dtype=bool, count=len(occ))
+                    for t, occ in token_occ.items()}
+
+        def _pool(policy):
+            """Baseline pool: one kept token per sentence, drawn in document
+            order from its own stream (seeded as the reference protocol's)."""
+            if policy == "all":
+                return all_states_per_layer
+            rng = np.random.default_rng(20260902)
+            pool: Dict[int, List[np.ndarray]] = defaultdict(list)
+            for doc, pos in enumerate(doc_pos):
+                cand = pos[_kept(doc, pos, policy)]
+                if not cand.size:
+                    continue
+                j = int(np.searchsorted(pos, int(rng.choice(cand.tolist()))))
+                for li in range(n_layers_seen):
+                    pool[li].append(doc_rows[li][doc][j])
+            return pool
+
+        _keep_by_policy = {pol: (_occ_keep(pol), _pool(pol))
+                           for pol in {"all", self.TOKEN_POLICY}}
+
+        def _layer_metrics(li, policy):
+            occ_keep, pool = _keep_by_policy[policy]
             all_vecs = np.asarray(pool[li])
             baseline = _baseline_anisotropy(all_vecs)
 
@@ -373,8 +412,8 @@ class ContextualizationTask(DiagnosticTask):
             mevs = []
             occ_counts = []
             for tok_id, vecs in token_states[li].items():
-                if drop_p0:
-                    vecs = [v for v, p0 in zip(vecs, token_is_p0[tok_id]) if not p0]
+                if policy != "all":
+                    vecs = [v for v, k in zip(vecs, occ_keep[tok_id]) if k]
                 if len(vecs) < min_word_occurrences:
                     continue
                 arr = np.asarray(vecs)
@@ -398,9 +437,9 @@ class ContextualizationTask(DiagnosticTask):
 
             # 2. IntraSim: mean cosine of each token to its sentence mean.
             intra_sims = []
-            for h_np, p0 in zip(intra_per_layer[li], intra_first_is_p0):
-                if drop_p0 and p0:
-                    h_np = h_np[1:]
+            for doc, (pos, h_np) in enumerate(zip(doc_pos, doc_rows[li])):
+                if policy != "all":
+                    h_np = h_np[_kept(doc, pos, policy)]
                 if h_np.shape[0] < 2:
                     continue
                 intra_sims.append(_intra_sentence_mean_cosine(h_np))
@@ -422,11 +461,10 @@ class ContextualizationTask(DiagnosticTask):
                 "_meta_n_words_tracked": len(self_sims),
             }
 
-        drop_p0 = self.TOKEN_POLICY == "exclude_pos0"
         per_layer_metrics: Dict[str, Dict[str, float]] = {
-            f"layer{li}": _layer_metrics(li, drop_p0) for li in layers_to_report}
+            f"layer{li}": _layer_metrics(li, self.TOKEN_POLICY) for li in layers_to_report}
         paper_metrics = {
-            f"layer{li}": _layer_metrics(li, False) for li in layers_to_report}
+            f"layer{li}": _layer_metrics(li, "all") for li in layers_to_report}
 
         # Compact aggregate summary across the reported layers.
         def _agg(key, metrics=None):
@@ -440,12 +478,20 @@ class ContextualizationTask(DiagnosticTask):
         paper = {f"_meta_paper_protocol_mean_{k}": _agg(k, paper_metrics) for k in _AGG}
         paper["_meta_paper_protocol_n_words_tracked_mean"] = _agg(
             "_meta_n_words_tracked", paper_metrics)
-        n_p0 = sum(sum(v) for v in token_is_p0.values())
+        # Occurrences the headline policy dropped: those at position 0, then
+        # those dropped as massive rows.
+        n_p0 = sum(1 for occ in token_occ.values() for _, p_ in occ if p_ == 0)
+        n_dropped = sum(int((~k).sum()) for k in _keep_by_policy[self.TOKEN_POLICY][0].values())
+        n_p0_dropped = int(n_p0) if self.TOKEN_POLICY in ("exclude_pos0", "exclude_sinks") else 0
 
         return {
             **paper,
             "_meta_token_policy": self.TOKEN_POLICY,
-            "_meta_n_position0_occurrences_dropped": int(n_p0) if drop_p0 else 0,
+            "_meta_n_position0_occurrences_dropped": n_p0_dropped,
+            "_meta_n_massive_occurrences_dropped": int(n_dropped) - n_p0_dropped,
+            **sink_meta(sink_info),
+            "_meta_position0_share": position0_share(sinks.mid_docs),
+            "_meta_massive_token_share": massive_token_share(sinks.mid_docs),
             # False: the deepest layer is post-ln_f, as the reference defines it.
             "_meta_last_entry_is_block_output": False,
             "mean_self_similarity_corrected": _agg("self_similarity_corrected"),
