@@ -250,6 +250,57 @@ def _landscape_stats(landscapes: np.ndarray, dt: float,
     }
 
 
+def _subsamples(n: int, size: int, k: int, seed: int) -> List[np.ndarray]:
+    """``k`` seeded draws of ``size`` rows without replacement; one draw of
+    every row when the cloud is no larger than ``size``."""
+    if n <= size or k <= 1:
+        return [np.arange(n)]
+    rng = np.random.default_rng(seed)
+    return [np.sort(rng.choice(n, size=size, replace=False)) for _ in range(k)]
+
+
+def _mean_value(values):
+    if values and isinstance(values[0], list):
+        return [float(x) for x in np.mean(np.asarray(values, dtype=np.float64), axis=0)]
+    return float(np.mean(values)) if values else float("nan")
+
+
+def _layer_landscape(X: np.ndarray, n_landscapes: int, n_points: int) -> Dict[str, dict]:
+    """Landscape summaries of one cloud, per homology dimension, in the
+    cloud's own units."""
+    # ripser reads float64 pairwise distances, divided by a power of two when
+    # out of float32's range; the degree-1/2/1.5 restores undo the shift.
+    dgms, _resc = rips_diagrams(X)
+    dgms = [d / _resc for d in dgms]
+    out = {}
+    for dim_idx, dim_label in enumerate(["h0", "h1"]):
+        if dim_idx >= len(dgms):
+            continue
+        dgm = dgms[dim_idx]
+        landscapes = _compute_landscape(dgm, n_landscapes, n_points)
+        finite = dgm[np.isfinite(dgm[:, 1])]
+        finite = finite[finite[:, 1] > finite[:, 0]] if finite.size else finite
+        if finite.size > 0:
+            dt = (finite[:, 1].max() - finite[:, 0].min()) / max(1, n_points - 1)
+        else:
+            dt = 1.0
+        stats = _landscape_stats(landscapes, dt, dgm=finite)
+        # A max is degree 1 in the metric, an integral degree 2, an L2 norm 3/2.
+        _m1, _m2, _m32 = _resc, _resc ** 2, _resc ** 1.5
+        vals = {
+            "mean_landscape_integral": stats["mean_landscape_integral"] * _m2,
+            "landscape_max_1": (stats["landscape_maxes"][0] * _m1
+                                if stats["landscape_maxes"] else 0.0),
+            "landscape_norm_1": (stats["landscape_norms"][0] * _m32
+                                 if stats["landscape_norms"] else 0.0),
+            "landscape_integrals": [v * _m2 for v in stats["landscape_integrals"]],
+        }
+        status = {k: stats[f"_meta_{k}"] for k in
+                  ("landscape_max_status", "landscape_quadrature", "landscape_n_bars")}
+        out[dim_label] = {"vals": vals, "status": status, "prescale": float(_resc)}
+    return out
+
+
 @register_task("topology_persistence_landscape")
 class PersistenceLandscapeTask(DiagnosticTask):
     """Persistence landscapes (Bubenik 2015) at early / mid / late layers."""
@@ -267,6 +318,9 @@ class PersistenceLandscapeTask(DiagnosticTask):
         n_landscapes = self.config.get("n_landscapes", 5)
         n_points = self.config.get("n_points", 200)
         use_cache = self.config.get("use_cache", True)
+        n_sub = int(self.config.get("n_subsamples", 16))
+        sub_size = int(self.config.get("subsample_size", 500))
+        seed = int(self.config.get("seed", 42))
 
         if dataset is None:
             dataset = [{"text": f"Sample {i} for topological landscape analysis."}
@@ -286,54 +340,44 @@ class PersistenceLandscapeTask(DiagnosticTask):
         roles = role_names(target_layers)
         results.update(role_meta(roles, pinfo["n_layers"]))
 
+        # Bubenik's statistical use: the landscape is a random variable whose
+        # mean is estimated over samples. Each layer's cloud is subsampled (the
+        # same documents at every layer) and the summaries are averaged; the
+        # integrals are linear, so their mean is the mean landscape's integral.
+        subsets = _subsamples(min(len(v) for v in layer_reps.values()), sub_size, n_sub, seed)
+        results["_meta_landscape_n_subsamples"] = int(len(subsets))
+        results["_meta_landscape_subsample_size"] = int(len(subsets[0])) if subsets else 0
+
         for l_idx in target_layers:
             if len(layer_reps[l_idx]) < 3:
                 continue
             X = np.stack(layer_reps[l_idx])
-            # ripser reads float64 pairwise distances, divided by a power of
-            # two when out of float32's range; the diagram is computed in those
-            # units and the degree-1/2/1.5 restores below undo the shift.
-            dgms, _resc = rips_diagrams(X)
-            dgms = [d / _resc for d in dgms]
-
-            for dim_idx, dim_label in enumerate(["h0", "h1"]):
-                if dim_idx >= len(dgms):
+            per = [_layer_landscape(X[idx], n_landscapes, n_points) for idx in subsets]
+            full = _layer_landscape(X, n_landscapes, n_points)
+            for dim_label in ("h0", "h1"):
+                if dim_label not in full:
                     continue
-                dgm = dgms[dim_idx]
-                landscapes = _compute_landscape(dgm, n_landscapes, n_points)
-                # Compute dt for integration.
-                finite = dgm[np.isfinite(dgm[:, 1])]
-                finite = finite[finite[:, 1] > finite[:, 0]] if finite.size else finite
-                if finite.size > 0:
-                    dt = (finite[:, 1].max() - finite[:, 0].min()) / max(1, n_points - 1)
-                else:
-                    dt = 1.0
-                stats = _landscape_stats(landscapes, dt, dgm=finite)
                 prefix = f"layer_{l_idx}_{dim_label}"
-                # Undo the pre-rescale: a max is degree 1 in the metric, an
-                # integral degree 2, an L2 norm degree 3/2.
-                _m1, _m2, _m32 = _resc, _resc ** 2, _resc ** 1.5
-                vals = {
-                    "mean_landscape_integral": stats["mean_landscape_integral"] * _m2,
-                    "landscape_max_1": (stats["landscape_maxes"][0] * _m1
-                                        if stats["landscape_maxes"] else 0.0),
-                    "landscape_norm_1": (stats["landscape_norms"][0] * _m32
-                                         if stats["landscape_norms"] else 0.0),
-                    "landscape_integrals": [v * _m2 for v in stats["landscape_integrals"]],
-                }
+                rows = [p[dim_label] for p in per if dim_label in p]
+                vals = {k: _mean_value([r["vals"][k] for r in rows]) for k in full[dim_label]["vals"]}
                 for k, v in vals.items():
                     results[f"_meta_{prefix}_{k}"] = v
                     if l_idx in roles:
                         results[f"{roles[l_idx]}_layer_{dim_label}_{k}"] = v
+                # The single landscape of the whole cloud, for continuity.
+                for k, v in full[dim_label]["vals"].items():
+                    results[f"_meta_{prefix}_full_{k}"] = v
                 # Status keys carry the _meta_ prefix at the START of the name
                 # (they were layer_<l>_<dim>_meta_*, which a reader testing
                 # startswith("_meta_") took for features).
                 results[f"_meta_{prefix}_last_entry_is_block_output"] = bool(
                     _last_is_block) if l_idx == target_layers[-1] else True
-                results[f"_meta_{prefix}_prescale"] = float(_resc)
+                results[f"_meta_{prefix}_prescale"] = float(full[dim_label]["prescale"])
                 for _sk in ("landscape_max_status", "landscape_quadrature",
                             "landscape_n_bars"):
-                    results[f"_meta_{prefix}_{_sk}"] = stats[f"_meta_{_sk}"]
+                    results[f"_meta_{prefix}_{_sk}"] = full[dim_label]["status"][_sk]
+                results[f"_meta_{prefix}_n_inexact_subsamples"] = int(sum(
+                    r["status"]["landscape_quadrature"] != "exact" for r in rows))
 
         if not results:
             return {"error": "No layers produced landscape features"}

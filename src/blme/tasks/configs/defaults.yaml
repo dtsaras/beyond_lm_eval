@@ -166,6 +166,9 @@ topology_persistence_entropy:
 
 topology_persistence_landscape:
   num_samples: 1000
+  # Bubenik 2015: the summaries are means over subsamples (the mean landscape).
+  n_subsamples: 16
+  subsample_size: 500
   n_landscapes: 5
   n_points: 200
 

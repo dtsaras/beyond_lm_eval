@@ -64,6 +64,29 @@ def test_landscape_keys_are_named_by_depth_role(states):
     assert res["_meta_last_layer_frac"] == 1.0
 
 
+def test_landscape_is_the_mean_over_subsamples(states):
+    """Bubenik 2015 (Sec. 3-4) estimates the mean landscape over samples; the
+    task reported one landscape of one cloud. Each summary is now the mean over
+    seeded subsamples (the same documents at every layer)."""
+    import numpy as np
+    from blme.tasks.topology._points import role_layers
+    from blme.tasks.topology.persistence_landscape import _layer_landscape, _subsamples
+    res = _run("topology_persistence_landscape", states, subsample_size=10,
+               n_subsamples=4, seed=3)
+    assert res["_meta_landscape_n_subsamples"] == 4
+    assert res["_meta_landscape_subsample_size"] == 10
+    from blme.tasks.topology._points import last_token_points
+    stub = fd.inv.InjectedStateCache(states)
+    pts, _ = last_token_points(None, None, None, stub, num_samples=states.n_docs,
+                               layers=role_layers)
+    mid = sorted(pts)[1]
+    per = [_layer_landscape(pts[mid][idx], 5, 200) for idx in _subsamples(states.n_docs, 10, 4, 3)]
+    want = float(np.mean([p["h1"]["vals"]["mean_landscape_integral"] for p in per]))
+    assert res["mid_layer_h1_mean_landscape_integral"] == pytest.approx(want, rel=1e-12)
+    full = _layer_landscape(pts[mid], 5, 200)["h1"]["vals"]["mean_landscape_integral"]
+    assert res["_meta_layer_%d_h1_full_mean_landscape_integral" % mid] == full
+
+
 def test_persistence_entropy_h0_family_is_meta(states):
     """Raw H0 entropy of N points is log2(N - 1) to three digits; E / log2(n)
     passes every direct test but does not separate models (dossier: between/
