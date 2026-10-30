@@ -372,11 +372,14 @@ class SVDIsotropyTask(DiagnosticTask):
                 else:
                     erank_per_layer.append(float("nan"))
                     pr_per_layer.append(float("nan"))
-            # Last-layer metrics as top-level for backward compat
+            # Last-layer metrics as top-level for backward compat. The profiles
+            # are _meta_ (P4: their uniform layer mean / slope / quartiles move
+            # under identity blocks) and so is the dict keyed by absolute layer
+            # index (P7).
             result = dict(per_layer.get(f"layer_{layers[-1]}", {}))
-            result["layer_effective_rank"] = erank_per_layer
-            result["layer_participation_ratio"] = pr_per_layer
-            result["layer_metrics"] = per_layer
+            result["_meta_layer_effective_rank"] = erank_per_layer
+            result["_meta_layer_participation_ratio"] = pr_per_layer
+            result["_meta_layer_metrics"] = per_layer
             result["_meta_svd_mode"] = "layerwise"
         else:
             # --- Single-layer mode (the last layer) ---

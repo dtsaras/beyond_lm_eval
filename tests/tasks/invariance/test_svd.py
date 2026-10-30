@@ -32,7 +32,7 @@ def test_layerwise_without_a_cache_collects_every_layer(tiny, tiny_states):
     collects every layer and reproduces the cache route."""
     model, tok = tiny
     r = _run_model(model, tok, layerwise=True, use_cache=False)
-    assert "layer_effective_rank" in r
+    assert "_meta_layer_effective_rank" in r
     assert r["_meta_svd_mode"] == "layerwise"
     assert r["_meta_svd_source"] == "self_collected"
     cached = inv.run_task_on_states(TASK, tiny_states, {"layerwise": True})
@@ -65,7 +65,7 @@ def test_spectra_drop_sinks_and_the_cosine_keeps_every_token(tiny_states, mode):
     absent = inv.run_task_on_states(TASK, _map(tiny_states, lambda y: np.delete(y, 3, 0)), mode)
     keys = ["effective_rank", "participation_ratio"]
     if mode:
-        keys += ["layer_effective_rank", "layer_participation_ratio"]
+        keys += ["_meta_layer_effective_rank", "_meta_layer_participation_ratio"]
     inv.assert_invariant(absent, sunk, keys, rtol=1e-9)
     assert sunk["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
     assert sunk["_meta_rows_policy"] == "exclude_sinks"
@@ -80,3 +80,24 @@ def test_cond_number_is_meta_and_moves_with_n(tiny_states):
     assert "cond_number" not in full
     half = inv.run_task_on_states(TASK, inv.subsample_docs(tiny_states, 6, seed=0))
     inv.assert_moves(full, half, "_meta_cond_number", 1e-3)
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_layer_profiles_are_meta(tiny_states, tiny_identity_states):
+    """P4/P7: the layerwise lists' uniform mean moves under identity blocks and
+    the per-layer dict is keyed by absolute layer index, so both are _meta_;
+    the last-layer headline does not move."""
+    lw = {"layerwise": True}
+    base = inv.run_task_on_states(TASK, tiny_states, lw)
+    assert not {"layer_effective_rank", "layer_participation_ratio", "layer_metrics"} & set(base)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states, lw)
+    inv.assert_invariant(base, ins, ["effective_rank", "participation_ratio",
+                                     "avg_cosine_similarity"], rtol=1e-9)
+    assert inv.rel_change(inv.uniform_layer_mean(base["_meta_layer_participation_ratio"]),
+                          inv.uniform_layer_mean(ins["_meta_layer_participation_ratio"])) > 1e-4
