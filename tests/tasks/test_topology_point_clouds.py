@@ -145,10 +145,12 @@ def test_a_smaller_cache_is_not_silently_accepted(tiny):
 
 
 @pytest.mark.parametrize("task", sorted(TASKS))
-def test_a_short_dataset_is_recorded_against_the_requested_n(task, tiny):
-    """A caller dataset smaller than N caps the cloud; the result says so
-    (the study once passed a 500-passage corpus to N = 1000 tasks)."""
+def test_a_short_dataset_is_recorded_against_the_requested_n(task, tiny, caplog):
+    """A caller dataset smaller than N caps the cloud; the result and the log
+    say so (the study once passed a 500-passage corpus to N = 1000 tasks)."""
     model, tok, _ = tiny
     n = len(fd.TEXTS)
-    res = _cls(task)({"num_samples": 1000}).evaluate(model, tok, fd.dataset(), cache=None)
+    with caplog.at_level("WARNING", logger="blme"):
+        res = _cls(task)({"num_samples": 1000}).evaluate(model, tok, fd.dataset(), cache=None)
     assert res["_meta_n_points"] == n and res["_meta_n_points_requested"] == 1000
+    assert f"{n} of the 1000 requested sequences" in caplog.text

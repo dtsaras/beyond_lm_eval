@@ -86,6 +86,10 @@ def last_token_points(model, tokenizer, dataset, cache=None, *, num_samples: int
     """
     pts, info = _last_token_points(model, tokenizer, dataset, cache, num_samples=num_samples,
                                    layers=layers, policy=policy, use_cache=use_cache)
+    got = int(next(iter(pts.values())).shape[0]) if pts else 0
+    if got < int(num_samples):
+        logger.warning(f"last_token_points: {got} of the {int(num_samples)} requested "
+                       f"sequences; the dataset is shorter than the task's N")
     return pts, dict(info, n_requested=int(num_samples))
 
 

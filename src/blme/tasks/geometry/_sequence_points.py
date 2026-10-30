@@ -169,13 +169,18 @@ def sequence_clouds(
         replace_final_norm=replace_final_norm, layer_idx="all", use_cache=use_cache,
         per_sample=True, min_cached_docs=n, fallback="none")
     if states:
-        return _from_states(states, layer, m, dict(info, n_requested=n))
-    if dataset is None:
+        out = _from_states(states, layer, m, dict(info, n_requested=n))
+    elif dataset is None:
         raise ValueError("sequence_clouds: the cache cannot supply the documents "
                          "and no dataset was given")
-    return _from_forward(model, tokenizer, dataset, n=n, layer=layer, m=m,
-                         replace_final_norm=replace_final_norm,
-                         info=dict(info, n_requested=n))
+    else:
+        out = _from_forward(model, tokenizer, dataset, n=n, layer=layer, m=m,
+                            replace_final_norm=replace_final_norm,
+                            info=dict(info, n_requested=n))
+    if out.n_points < n:
+        logger.warning(f"sequence_clouds: {out.n_points} of the {n} requested sequences; "
+                       f"the dataset is shorter than the task's N")
+    return out
 
 
 def _from_states(states, layer, m, info) -> SequenceClouds:

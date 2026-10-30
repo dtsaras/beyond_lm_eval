@@ -75,6 +75,15 @@ def test_a_cache_with_fewer_documents_than_n_is_not_used(tiny):
     assert sc.n_points == 6
 
 
+def test_a_dataset_shorter_than_n_is_logged(tiny, caplog):
+    model, tok = tiny
+    data = [{"text": t} for t in TEXTS]
+    with caplog.at_level("WARNING", logger="blme"):
+        sc = sequence_clouds(model, tok, data, None, n=1000, layer=-1, replace_final_norm=False)
+    assert sc.n_points == 6 and sc.meta()["_meta_n_points_requested"] == 1000
+    assert "6 of the 1000 requested sequences" in caplog.text
+
+
 def test_norm_columns_give_the_full_row_masks():
     g = torch.Generator().manual_seed(0)
     depths = [[torch.randn(T, 16, generator=g, dtype=torch.float64) for T in (7, 5, 9)]
