@@ -102,15 +102,16 @@ def _matrix_entropy(Z: torch.Tensor) -> dict:
 
 
 def _collect_per_sample_layer_tokens(cache, num_samples, use_cache,
-                                     replace_final_norm=True):
+                                     replace_final_norm=True, max_length=None):
     """``{layer_idx: List[Tensor(T_i, D)]}`` from the shared cache, or None.
 
     This task reads the cache twice: the hooked profile and the untouched
-    post-norm headline (see the call site).
+    post-norm headline (see the call site). A cache tokenised at another
+    window than ``max_length`` is refused.
     """
     hs, _ = hidden_states_for_task(
         None, None, None, cache, num_samples=num_samples, layer_idx="all",
-        use_cache=use_cache, per_sample=True,
+        use_cache=use_cache, per_sample=True, max_length=max_length,
         replace_final_norm=replace_final_norm, fallback="none")
     if not hs:
         return None
@@ -190,8 +191,10 @@ class MatrixEntropyTask(DiagnosticTask):
         # AutoModel(...)[0] = last_hidden_state = HF's post-norm last entry.
         per_layer_tokens = _collect_per_sample_layer_tokens(
             cache, num_samples, use_cache, replace_final_norm=True,
+            max_length=max_length,
         )
         _postnorm_tokens = None
+        _source = "shared_cache" if per_layer_tokens is not None else "self_collected"
 
         if per_layer_tokens is None:
             if dataset is None:
@@ -206,7 +209,8 @@ class MatrixEntropyTask(DiagnosticTask):
         else:
             # Same cache, same documents, the untouched deepest entry.
             _pn = _collect_per_sample_layer_tokens(
-                cache, num_samples, use_cache, replace_final_norm=False)
+                cache, num_samples, use_cache, replace_final_norm=False,
+                max_length=max_length)
             if _pn:
                 _postnorm_tokens = _pn[max(_pn.keys())]
 
@@ -259,6 +263,8 @@ class MatrixEntropyTask(DiagnosticTask):
             "_meta_headline_is_post_final_norm": bool(_headline_is_postnorm),
             "_meta_last_entry_is_block_output": bool(
                 per_layer_tokens is not None and _postnorm_tokens is not None),
+            "_meta_matrix_entropy_source": _source,
+            "_meta_matrix_entropy_max_length": int(max_length),
             "matrix_entropy": headline_norm,
             # Raw H: unchanged by zero-padding / isometric embedding, while the
             # 1/log d of the headline is a width factor.
