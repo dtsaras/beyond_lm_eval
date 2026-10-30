@@ -877,11 +877,11 @@ def test_positional_decay_uniform_causal_attention_is_null():
     # headline is the rowwise one. Pinned so the evidence for overriding the
     # paper survives: the pooled null bias converges to about -0.467 as the
     # context grows (-0.4344766895 at L=8, -0.4666215371 at L=256).
-    _pooled = result["mean_positional_decay_correlation_pooled"]
+    _pooled = result["_meta_mean_positional_decay_correlation_pooled"]
     assert _pooled < -0.3, (
         f"pooled estimand no longer shows its null bias ({_pooled}); if this "
         f"changed, revisit which estimand should be the headline")
-    assert result["layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
+    assert result["_meta_layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_rsa(mock_model, mock_tokenizer):

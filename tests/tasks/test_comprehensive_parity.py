@@ -3682,7 +3682,7 @@ def test_geometry_positional_decay():
     task = PositionalAttentionDecayTask({"num_samples": 1})
     res = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in res, res
-    assert set(res) >= {"_meta_mean_positional_decay_correlation", "layer_positional_decay"}
+    assert set(res) >= {"_meta_mean_positional_decay_correlation", "_meta_layer_positional_decay"}
 
     # Independent recomputation from the SAME attention tensors.
     inputs = tok(text, return_tensors="pt", truncation=True, max_length=256)
@@ -3747,13 +3747,13 @@ def test_geometry_positional_decay():
     assert res["_meta_mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
         f"rowwise: BLME={res['mean_positional_decay_correlation']} ref={ref_mean}"
     )
-    assert res["mean_positional_decay_correlation_pooled"] == pytest.approx(
+    assert res["_meta_mean_positional_decay_correlation_pooled"] == pytest.approx(
         ref_pooled, abs=1e-9), (
         f"pooled: BLME={res['mean_positional_decay_correlation_pooled']} ref={ref_pooled}"
     )
-    assert set(res["layer_positional_decay"]) == set(layer_vals)
+    assert set(res["_meta_layer_positional_decay"]) == set(layer_vals)
     for k, v in layer_vals.items():
-        assert res["layer_positional_decay"][k] == pytest.approx(v, abs=1e-9), (
+        assert res["_meta_layer_positional_decay"][k] == pytest.approx(v, abs=1e-9), (
             f"layer {k}: BLME={res['layer_positional_decay'][k]} ref={v}"
         )
     # The correlation is bounded by Spearman's range.
