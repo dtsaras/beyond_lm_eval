@@ -1256,16 +1256,16 @@ def test_trajectory_curvature_integration(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     assert "error" not in results, f"trajectory curvature failed: {results}"
     for key in (
-        "curvature_mean_first_layer", "curvature_mean_mid_layer",
-        "curvature_mean_last_layer", "curvature_overall_mean",
-        "straightening_ratio", "curvature_slope",
-        "curvature_q25", "curvature_q50", "curvature_q75",
+        "curvature_mean_first_layer", "_meta_curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "_meta_curvature_overall_mean",
+        "straightening_ratio", "_meta_curvature_slope",
+        "_meta_curvature_q25", "_meta_curvature_q50", "_meta_curvature_q75",
     ):
         assert key in results, f"missing {key}"
         assert np.isfinite(results[key]), f"{key} not finite: {results[key]}"
     for key in (
-        "curvature_mean_first_layer", "curvature_mean_mid_layer",
-        "curvature_mean_last_layer", "curvature_overall_mean",
+        "curvature_mean_first_layer", "_meta_curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "_meta_curvature_overall_mean",
     ):
         assert 0.0 <= results[key] <= np.pi
 

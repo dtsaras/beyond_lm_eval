@@ -176,6 +176,22 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         curvature_q25/q50/q75    — quartiles of per-layer means
     """
 
+    TOKEN_POLICY = ("paper_protocol:Hosseini2023 every token of each sequence in order; a "
+                    "tokenizer-added BOS row skipped")
+    SOURCES = {
+        "paper": "arXiv:2311.04930",
+        "code": "eghbalhosseini/sent_sampling@32ac2715a47da9b0d35e3860f37a2a5295e41302",
+        "llm_precedent": "arXiv:2311.04930 (proposed for LLMs; GPT-2 family)",
+    }
+    HEADLINE_KEYS = ("straightening_ratio", "curvature_mean_first_layer",
+                     "curvature_mean_last_layer")
+    SIZE_INVARIANT = {
+        k: (("insert_identity_blocks", "embed_isometric", "zero_pad", "rescale"),
+            "tests/tasks/invariance/test_geometry_trajectory_curvature.py::"
+            "test_endpoints_invariant_under_identity_blocks")
+        for k in ("straightening_ratio", "curvature_mean_first_layer",
+                  "curvature_mean_last_layer")}
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Trajectory Curvature Analysis...")
 
@@ -243,14 +259,17 @@ class TrajectoryCurvatureTask(DiagnosticTask):
             # Derived: whether the deepest entry is the hooked raw block output.
             "_meta_last_entry_is_block_output": bool(_last_is_block),
             "curvature_mean_first_layer": float(c_first),
-            "curvature_mean_mid_layer": float(c_mid),
             "curvature_mean_last_layer": float(c_last),
-            "curvature_overall_mean": float(np.mean(finite_curv)),
             "straightening_ratio": straightening_ratio,
-            "curvature_slope": slope,
-            "curvature_q25": float(np.percentile(finite_curv, 25)),
-            "curvature_q50": float(np.percentile(finite_curv, 50)),
-            "curvature_q75": float(np.percentile(finite_curv, 75)),
+            # Profile summaries that move under identity-block insertion (P4):
+            # the middle index shifts, and a mean, quartile or slope over
+            # layers counts the duplicated layers.
+            "_meta_curvature_mean_mid_layer": float(c_mid),
+            "_meta_curvature_overall_mean": float(np.mean(finite_curv)),
+            "_meta_curvature_slope": slope,
+            "_meta_curvature_q25": float(np.percentile(finite_curv, 25)),
+            "_meta_curvature_q50": float(np.percentile(finite_curv, 50)),
+            "_meta_curvature_q75": float(np.percentile(finite_curv, 75)),
             # Counts, not features.
             "_meta_n_layers": int(n_layers),
             "_meta_n_samples_used": int(n_samples_used),
