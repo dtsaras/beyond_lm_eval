@@ -56,7 +56,9 @@ def _unit_rows(E, device):
 
     Each row is first divided by its largest-magnitude coordinate so the norm
     cannot underflow, then by its norm (clamped at the smallest positive
-    value, never offset by an epsilon). Returns ``(U, n_zero, n_nonfinite)``.
+    value, never offset by an epsilon). Returns ``(U, n_zero, n_nonfinite,
+    has_direction)``; rows without a direction (zero or non-finite) must not be
+    ranked -- see :func:`_k_occurrences`.
     """
     U = E.detach().to(device=device, dtype=torch.float64)
     _rmax = U.abs().amax(dim=1, keepdim=True)
@@ -73,8 +75,9 @@ def _unit_rows(E, device):
             "hubness: %d zero-norm and %d non-finite embedding rows; "
             "they have no direction and their neighbour ranks are not "
             "meaningful", n_zero, n_nonfinite)
+    has_direction = ((_rm > 0) & torch.isfinite(_rm)).cpu()
     U = torch.where(_rmax > 0, U, torch.zeros_like(U))
-    return U, n_zero, n_nonfinite
+    return U, n_zero, n_nonfinite, has_direction
 
 
 def _k_occurrences(U, k_values, batch_size):
@@ -144,12 +147,18 @@ class GlobalHubnessTask(DiagnosticTask):
         else:
             device = torch.device("cpu")
 
-        E_norm, _n_zero, _n_nonfinite = _unit_rows(E, device)
+        E_norm, _n_zero, _n_nonfinite, _dir = _unit_rows(E, device)
+        # Rows without a direction are not ranked: a zero vector sits at chord
+        # distance exactly 1 from every unit row (cosine 0.5), nearer than most
+        # true neighbours in a near-isotropic table, so it became a
+        # near-universal hub (test_hubness_protocol.py::test_zero_rows_are_not_ranked).
+        E_norm = E_norm[_dir.to(E_norm.device)]
         occ = _k_occurrences(E_norm, k_values, batch_size)
 
         results = {
             "_meta_n_zero_rows": _n_zero,
             "_meta_n_nonfinite_rows": _n_nonfinite,
+            "_meta_n_rows_ranked": int(E_norm.shape[0]),
             "_meta_k_values_duplicates_dropped": len(_k_raw) - len(k_values),
         }
         for k in k_values:
