@@ -30,6 +30,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
+from scipy.spatial.distance import pdist
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
@@ -250,6 +251,17 @@ def _landscape_stats(landscapes: np.ndarray, dt: float,
     }
 
 
+_ROLES = ("first", "mid", "last")
+_TWINS = ("mean_landscape_integral_mpd2", "landscape_max_1_mpd", "landscape_norm_1_mpd15")
+_HEADLINES = tuple(f"{r}_layer_h1_{k}" for r in _ROLES
+                   for k in ("mean_landscape_integral", "landscape_max_1") + _TWINS)
+_SIZE_INVARIANT = {
+    f"{r}_layer_h1_{k}": (("embed_isometric", "zero_pad", "rescale"),
+                          "tests/tasks/invariance/test_topology_persistence_landscape.py::"
+                          "test_mpd_twins_are_width_and_scale_free")
+    for r in _ROLES for k in _TWINS}
+
+
 def _subsamples(n: int, size: int, k: int, seed: int) -> List[np.ndarray]:
     """``k`` seeded draws of ``size`` rows without replacement; one draw of
     every row when the cloud is no larger than ``size``."""
@@ -295,6 +307,13 @@ def _layer_landscape(X: np.ndarray, n_landscapes: int, n_points: int) -> Dict[st
                                  if stats["landscape_norms"] else 0.0),
             "landscape_integrals": [v * _m2 for v in stats["landscape_integrals"]],
         }
+        # Twins divided by the cloud's mean pairwise distance to the matching
+        # degree: scale- and width-free (test_topology_persistence_landscape.py).
+        mpd = float(pdist(np.asarray(X, dtype=np.float64)).mean()) if len(X) > 1 else 0.0
+        if mpd > 0:
+            vals["mean_landscape_integral_mpd2"] = vals["mean_landscape_integral"] / mpd ** 2
+            vals["landscape_max_1_mpd"] = vals["landscape_max_1"] / mpd
+            vals["landscape_norm_1_mpd15"] = vals["landscape_norm_1"] / mpd ** 1.5
         status = {k: stats[f"_meta_{k}"] for k in
                   ("landscape_max_status", "landscape_quadrature", "landscape_n_bars")}
         out[dim_label] = {"vals": vals, "status": status, "prescale": float(_resc)}
@@ -306,6 +325,26 @@ class PersistenceLandscapeTask(DiagnosticTask):
     """Persistence landscapes (Bubenik 2015) at early / mid / late layers."""
 
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:1207.6437",
+        "code": "scikit-tda/persim 0.3.8 (installed package; landscape parity tests)",
+        "llm_precedent": ("arXiv:2505.20435 (Fay et al. 2025: VR barcodes of last-token "
+                          "clouds, summaries averaged over subsamples)"),
+    }
+    ADAPTATION_NOTE = (
+        "Persistence landscapes (Bubenik 2015) of the Vietoris-Rips barcodes of one point per "
+        "sequence, its last token, at the first, middle and last block (the LLM precedent's "
+        "point cloud, Fay et al. 2025), with N = 1000 sequences. Following Bubenik's statistical "
+        "use, each summary is the mean over 16 subsamples of 500 points: sum_{k<=5} of the "
+        "landscape integrals (Eq. 3.4, reported divided by K), the sup of lambda_1 (Prop. 2.5) "
+        "and the L2 norm of lambda_1. For H0 every bar is born at 0, so these are closed forms "
+        "of the largest H0 deaths and are _meta_; the H1 summaries are the features. Raw values "
+        "carry the representation's units (degree 2, 1 and 1.5), so each is also divided by the "
+        "mean pairwise distance to that power, which removes a rescale and a width change "
+        "exactly; the twins still grow with N, so models are compared at the same N."
+    )
+    HEADLINE_KEYS = _HEADLINES
+    SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistence Landscape Analysis...")
