@@ -68,19 +68,37 @@ def _matrix_entropy(Z: torch.Tensor) -> dict:
     if float(_gmax0) > 0 and (float(_gmax0) < _lo0 or float(_gmax0) > _hi0):
         Z = _pow2_rescale(Z, float(_gmax0))
     # Back to float32 for the SVD, now that the data is centred and in range.
+    Zd = Z
     Z = Z.float()
-
-    # Row L2 normalisation (Def. 4.1), each row first scaled by its own max
-    # (exact) so the squared norm cannot underflow; only an exactly zero row
-    # is dropped (tests/test_scale_invariance.py).
-    _rmax = Z.abs().amax(dim=1, keepdim=True)
-    Z = Z / _rmax.clamp_min(torch.finfo(Z.dtype).tiny)
-    Z = torch.where(_rmax > 0, Z, torch.zeros_like(Z))
-    row_norms = Z.norm(p=2, dim=1, keepdim=True)
-    keep = row_norms.squeeze(-1) > 0
-    if int(keep.sum().item()) < 2:
-        return {"entropy": float("nan"), "entropy_normalized": float("nan")}
-    Z = Z[keep] / row_norms[keep]
+    # GATED float64 row normalisation. One global factor cannot serve rows
+    # spanning ~50 orders of magnitude: the cast above can flush whole rows to
+    # zero. Only then (the float32 path has failed) are the rows normalised
+    # in float64 first; ordinary data keeps the float32 path, which is pinned
+    # to the reference (tests/tasks/parity/test_matrix_entropy_parity.py).
+    n_rows_rescued = int(((Zd.abs().amax(dim=1) > 0) & (Z.abs().amax(dim=1) == 0)).sum())
+    if n_rows_rescued:
+        _rmax_d = Zd.abs().amax(dim=1, keepdim=True)
+        Zd = torch.where(_rmax_d > 0, Zd / _rmax_d.clamp_min(torch.finfo(Zd.dtype).tiny),
+                         torch.zeros_like(Zd))
+        _nd = Zd.norm(p=2, dim=1, keepdim=True)
+        _kd = _nd.squeeze(-1) > 0
+        if int(_kd.sum().item()) < 2:
+            return {"entropy": float("nan"), "entropy_normalized": float("nan"),
+                    "n_rows_rescued": n_rows_rescued}
+        Z = (Zd[_kd] / _nd[_kd]).float()
+    else:
+        # Row L2 normalisation (Def. 4.1), each row first scaled by its own max
+        # (exact) so the squared norm cannot underflow; only an exactly zero
+        # row is dropped (tests/test_scale_invariance.py).
+        _rmax = Z.abs().amax(dim=1, keepdim=True)
+        Z = Z / _rmax.clamp_min(torch.finfo(Z.dtype).tiny)
+        Z = torch.where(_rmax > 0, Z, torch.zeros_like(Z))
+        row_norms = Z.norm(p=2, dim=1, keepdim=True)
+        keep = row_norms.squeeze(-1) > 0
+        if int(keep.sum().item()) < 2:
+            return {"entropy": float("nan"), "entropy_normalized": float("nan"),
+                    "n_rows_rescued": 0}
+        Z = Z[keep] / row_norms[keep]
 
     # A = Zᵀ Z / N. Use SVD on Z to avoid materialising a d×d matrix
     # when N < d. Squared singular values / N are the eigenvalues of A.
@@ -98,6 +116,8 @@ def _matrix_entropy(Z: torch.Tensor) -> dict:
     return {
         "entropy": H,
         "entropy_normalized": H / math.log(max(d, 2)),
+        # Rows the float32 cast would have discarded (> 0 = float64 path ran).
+        "n_rows_rescued": n_rows_rescued,
     }
 
 
@@ -217,6 +237,7 @@ class MatrixEntropyTask(DiagnosticTask):
         if not per_layer_tokens:
             return {"error": "Could not collect hidden states."}
 
+        _n_rescued_docs = 0
         layer_entropies: dict[str, float] = {}
         layer_entropies_norm: dict[str, float] = {}
         for li in sorted(per_layer_tokens.keys()):
@@ -224,6 +245,7 @@ class MatrixEntropyTask(DiagnosticTask):
             per_sentence_norm = []
             for Z in per_layer_tokens[li]:
                 res = _matrix_entropy(Z)
+                _n_rescued_docs += int(res.get("n_rows_rescued", 0) > 0)
                 if np.isfinite(res["entropy"]):
                     per_sentence.append(res["entropy"])
                 if np.isfinite(res["entropy_normalized"]):
@@ -243,6 +265,7 @@ class MatrixEntropyTask(DiagnosticTask):
         _hl, _hl_norm = [], []
         for Z in (_postnorm_tokens or []):
             res = _matrix_entropy(Z)
+            _n_rescued_docs += int(res.get("n_rows_rescued", 0) > 0)
             if np.isfinite(res["entropy"]):
                 _hl.append(res["entropy"])
             if np.isfinite(res["entropy_normalized"]):
@@ -264,6 +287,8 @@ class MatrixEntropyTask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(
                 per_layer_tokens is not None and _postnorm_tokens is not None),
             "_meta_matrix_entropy_source": _source,
+            # (document, layer) matrices that needed the float64 row path.
+            "_meta_n_matrices_float64_rownorm": int(_n_rescued_docs),
             "_meta_matrix_entropy_max_length": int(max_length),
             "matrix_entropy": headline_norm,
             # Raw H: unchanged by zero-padding / isometric embedding, while the

@@ -32,3 +32,19 @@ def test_cache_route_honours_max_length(tiny):
     full = inv.run_task_on_model(TASK, model, tok, TEXTS, {}, use_cache=True)
     assert full["_meta_matrix_entropy_source"] == "shared_cache"
     assert full["matrix_entropy"] != via_cache["matrix_entropy"]
+
+
+def test_rows_spanning_50_orders_survive_row_normalisation():
+    """Wei et al. normalise every row, so the centred row-normalised
+    covariance of the fixture is exactly I_2 / 2 and H / ln 2 = 1 (both
+    released implementations return 1.0). The global power-of-two rescale
+    and float32 cast used to flush the 1e-25 rows, leaving two collinear rows
+    and 9.97e-29. The float64 row path runs only when rows were lost."""
+    from adversarial_fixtures import wide_row_magnitude_span
+    from blme.tasks.geometry.matrix_entropy import _matrix_entropy
+    for label, X, want in wide_row_magnitude_span():
+        got = _matrix_entropy(torch.tensor(X, dtype=torch.float32))
+        assert got["entropy_normalized"] == pytest.approx(want, rel=1e-6), label
+        assert got["n_rows_rescued"] == 2
+    ordinary = _matrix_entropy(torch.randn(24, 16, generator=torch.Generator().manual_seed(0)))
+    assert ordinary["n_rows_rescued"] == 0
