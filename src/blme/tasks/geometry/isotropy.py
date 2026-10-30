@@ -1,6 +1,8 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import hidden_states_for_task
+from .._tokens import (hidden_states_for_task, massive_token_share,
+                       middle_depth_layers, position0_share, select_rows,
+                       sink_keep_masks, sink_meta)
 from .utils import effective_rank as _effective_rank, safe_svdvals
 import numpy as np
 import torch
@@ -283,6 +285,13 @@ class IsoScoreTask(DiagnosticTask):
 
 @register_task("geometry_svd")
 class SVDIsotropyTask(DiagnosticTask):
+    # Effective rank and participation ratio are non-LLM spectra of a pooled
+    # cloud in which position 0 holds 95-99% of the centred variance at middle
+    # layers: position 0 and massive rows are dropped (one mask, all layers).
+    TOKEN_POLICY = "exclude_sinks"
+    # The cosine anisotropy is LLM-native and keeps every token, as Ethayarajh.
+    COSINE_TOKEN_POLICY = "paper_protocol:Ethayarajh2019 Eq. 4, every token"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running SVD Analysis...")
         # The model's precision, for the disclosed source-precision rank
@@ -307,50 +316,74 @@ class SVDIsotropyTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         layerwise = self.config.get("layerwise", False)
 
-        # --- Per-layer mode (all layers) ---
-        # HF's post-norm last entry is kept (replace_final_norm=False): it is
-        # what Ethayarajh's extractor scores as the last layer
-        # (contextual/pytorch_pretrained/modeling_gpt2.py:562-565).
-        # Without a usable cache the layers are collected: the schema must not
-        # depend on the route.
-        if layerwise:
-            all_layers, _linfo = hidden_states_for_task(
-                model, tokenizer, dataset, cache, num_samples=num_samples,
-                layer_idx="all", use_cache=use_cache, replace_final_norm=False)
-            if all_layers:
-                per_layer = {}
-                erank_per_layer = []
-                pr_per_layer = []
-                for li in sorted(all_layers.keys()):
-                    m = _svd_metrics_for_layer(all_layers[li],
-                                               source_dtype=_src_dt)
-                    if m is not None:
-                        per_layer[f"layer_{li}"] = m
-                        erank_per_layer.append(m["effective_rank"])
-                        pr_per_layer.append(m["participation_ratio"])
-                    else:
-                        erank_per_layer.append(float("nan"))
-                        pr_per_layer.append(float("nan"))
-                # Last-layer metrics as top-level for backward compat
-                last_key = f"layer_{max(all_layers.keys())}"
-                result = dict(per_layer.get(last_key, {}))
-                result["layer_effective_rank"] = erank_per_layer
-                result["layer_participation_ratio"] = pr_per_layer
-                result["layer_metrics"] = per_layer
-                result["_meta_svd_mode"] = "layerwise"
-                result["_meta_svd_source"] = _linfo["source"]
-                return result
-
-        # --- Single-layer mode (last layer, original behaviour) ---
-        # Same gate as geometry_isoscore: the cache only if it holds N docs.
-        X, _info = hidden_states_for_task(
+        # Every layer, per document (HF's post-norm last entry kept, as
+        # Ethayarajh's extractor scores it, contextual/pytorch_pretrained/
+        # modeling_gpt2.py:562-565): the sink mask comes from the middle depths
+        # even when only the last layer is reported. Without a usable cache the
+        # layers are collected, so the schema does not depend on the route.
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            layer_idx=-1, use_cache=use_cache, replace_final_norm=False,
-            min_cached_docs=int(num_samples), max_tokens_per_doc=None)
-
-        m = _svd_metrics_for_layer(X, source_dtype=_src_dt)
-        if m is None:
+            layer_idx="all", use_cache=use_cache, replace_final_norm=False,
+            per_sample=True, max_tokens_per_doc=None,
+            min_cached_docs=None if layerwise else int(num_samples))
+        if not per_doc:
             return {"error": "Too few finite hidden states for SVD"}
-        m["_meta_svd_mode"] = "single_layer"
-        m["_meta_svd_source"] = _info["source"]
-        return m
+        layers = sorted(per_doc.keys())
+        _keep, _sink_info = sink_keep_masks(
+            [per_doc[k] for k in middle_depth_layers(per_doc)])
+        _cos_policy = ("all" if self.COSINE_TOKEN_POLICY.startswith("paper_protocol")
+                       else self.COSINE_TOKEN_POLICY)
+        _rows_meta = None
+
+        def _layer(li):
+            nonlocal _rows_meta
+            X_sink, _rows_meta = select_rows(per_doc[li], self.TOKEN_POLICY, keep=_keep)
+            X_all = select_rows(per_doc[li], _cos_policy)[0]
+            m = _svd_metrics_for_layer(X_sink, source_dtype=_src_dt)
+            m_all = _svd_metrics_for_layer(X_all, source_dtype=_src_dt)
+            if m is None or m_all is None:
+                return None
+            # The cosine anisotropy keeps every token (Ethayarajh); the
+            # spectra drop the sink rows. Each one's other form is _meta_.
+            m["_meta_avg_cosine_similarity_excl_sinks"] = m["avg_cosine_similarity"]
+            m["avg_cosine_similarity"] = m_all["avg_cosine_similarity"]
+            m["_meta_effective_rank_all_tokens"] = m_all["effective_rank"]
+            m["_meta_participation_ratio_all_tokens"] = m_all["participation_ratio"]
+            return m
+
+        _mid_docs = per_doc[layers[len(layers) // 2]]
+        _diag = {**sink_meta(_sink_info),
+                 "_meta_massive_token_share": massive_token_share(_mid_docs),
+                 "_meta_position0_share": position0_share(_mid_docs)}
+
+        # --- Per-layer mode (all layers) ---
+        if layerwise:
+            per_layer = {}
+            erank_per_layer = []
+            pr_per_layer = []
+            for li in layers:
+                m = _layer(li)
+                if m is not None:
+                    per_layer[f"layer_{li}"] = m
+                    erank_per_layer.append(m["effective_rank"])
+                    pr_per_layer.append(m["participation_ratio"])
+                else:
+                    erank_per_layer.append(float("nan"))
+                    pr_per_layer.append(float("nan"))
+            # Last-layer metrics as top-level for backward compat
+            result = dict(per_layer.get(f"layer_{layers[-1]}", {}))
+            result["layer_effective_rank"] = erank_per_layer
+            result["layer_participation_ratio"] = pr_per_layer
+            result["layer_metrics"] = per_layer
+            result["_meta_svd_mode"] = "layerwise"
+        else:
+            # --- Single-layer mode (the last layer) ---
+            result = _layer(layers[-1])
+            if result is None:
+                return {"error": "Too few finite hidden states for SVD"}
+            result["_meta_svd_mode"] = "single_layer"
+        result["_meta_svd_source"] = _info["source"]
+        result.update(_diag)
+        if _rows_meta is not None:
+            result.update(_rows_meta.as_meta())
+        return result

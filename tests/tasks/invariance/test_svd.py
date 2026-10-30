@@ -42,3 +42,32 @@ def test_layerwise_without_a_cache_collects_every_layer(tiny, tiny_states):
     assert lw and set(lw) <= set(r)
     single = _run_model(model, tok, layerwise=False, use_cache=False)
     assert single["_meta_svd_mode"] == "single_layer"
+
+
+def _map(S, fn):
+    return S.map(lambda x: fn(np.asarray(x, dtype=np.float64)))
+
+
+def _sink(y):
+    y = y.copy()
+    y[0] *= 1e3
+    y[3] *= 1e3
+    return y
+
+
+@pytest.mark.parametrize("mode", [{}, {"layerwise": True}], ids=["single", "layerwise"])
+def test_spectra_drop_sinks_and_the_cosine_keeps_every_token(tiny_states, mode):
+    """A 1e3 position-0 row and a 1e3 row at position 3 in every entry: the
+    effective rank and participation ratio equal those of the same documents
+    with those rows absent (exclude_sinks), while the cosine anisotropy keeps
+    every token as Ethayarajh's protocol does, so it moves."""
+    sunk = inv.run_task_on_states(TASK, _map(tiny_states, _sink), mode)
+    absent = inv.run_task_on_states(TASK, _map(tiny_states, lambda y: np.delete(y, 3, 0)), mode)
+    keys = ["effective_rank", "participation_ratio"]
+    if mode:
+        keys += ["layer_effective_rank", "layer_participation_ratio"]
+    inv.assert_invariant(absent, sunk, keys, rtol=1e-9)
+    assert sunk["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
+    assert sunk["_meta_rows_policy"] == "exclude_sinks"
+    inv.assert_moves(absent, sunk, "avg_cosine_similarity", 1e-2)
+    inv.assert_moves(absent, sunk, "_meta_effective_rank_all_tokens", 1e-2)
