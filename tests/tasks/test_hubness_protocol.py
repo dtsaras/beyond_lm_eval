@@ -78,3 +78,16 @@ def test_unused_rows_are_excluded():
     padded = GlobalHubnessTask(dict(K)).evaluate(_Tables(np.concatenate([W, pad])), _Tok(len(W)), None)
     assert _feature(padded) == _feature(base)
     assert padded["_meta_n_unused_rows"] == 40 and padded["_meta_n_emittable_rows"] == len(W)
+
+
+def test_row_count_is_pinned():
+    """S_Nk grows with the number of rows, so a fixed seeded draw of n_rows
+    emittable ids is ranked: a 900-row table at n_rows=400 equals the 400 drawn
+    rows scored on their own."""
+    W = _table(n=900, seed=4)
+    cfg = {**K, "n_rows": 400}
+    out = GlobalHubnessTask(cfg).evaluate(_Tables(W), _Tok(len(W)), None)
+    idx = np.sort(np.random.default_rng(0).choice(900, 400, replace=False))
+    ref = GlobalHubnessTask(cfg).evaluate(_Tables(W[idx]), _Tok(400), None)
+    assert out["_meta_n_rows_ranked"] == 400 and out["_meta_rows_subsampled"]
+    assert _feature(out) == _feature(ref)

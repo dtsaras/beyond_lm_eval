@@ -51,6 +51,10 @@ def _hubness_stats_from_occurrences(n_occ, k: int) -> dict:
     }
 
 
+# Rows ranked per table: the smallest vocabulary in the study zoo.
+_N_ROWS = 32000
+
+
 def _n_emittable(tokenizer, n_rows: int) -> int:
     """Rows the tokenizer can emit: ids below len(tokenizer) (added tokens
     included), capped at the table's row count; all rows without a length."""
@@ -169,13 +173,27 @@ class GlobalHubnessTask(DiagnosticTask):
         # untrained padding (pythia: 27 rows of norm 0.007; Qwen3-4B: 267) and
         # change the counts (test_hubness_protocol.py::test_unused_rows_are_excluded).
         n_emit = _n_emittable(tokenizer, W.shape[0])
-        results = self._score(W[:n_emit], k_values, batch_size, device)
+        # The row count is pinned (seeded draw of n_rows emittable ids, the same
+        # ids in both tables; default 32000, the smallest study vocabulary):
+        # S_Nk grows with the number of rows, which is otherwise the vocabulary
+        # size (test_hubness_protocol.py::test_row_count_is_pinned).
+        n_rows = int(self.config.get("n_rows", _N_ROWS))
+        idx = None
+        if 0 < n_rows < n_emit:
+            rng = np.random.default_rng(int(self.config.get("seed", 0)))
+            idx = torch.from_numpy(np.sort(rng.choice(n_emit, n_rows, replace=False)))
+
+        def rows(T):
+            T = T[:n_emit]
+            return T if idx is None else T[idx.to(T.device)]
+
+        results = self._score(rows(W), k_values, batch_size, device)
         results["_meta_n_emittable_rows"] = int(n_emit)
         results["_meta_n_unused_rows"] = int(W.shape[0] - n_emit)
+        results["_meta_rows_subsampled"] = idx is not None
         tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
         if E_in is not None and matrix == "unembedding":
-            inp = results if tied else self._score(
-                E_in[:_n_emittable(tokenizer, E_in.shape[0])], k_values, batch_size, device)
+            inp = results if tied else self._score(rows(E_in), k_values, batch_size, device)
             results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()
                             if k.startswith("hubness_")})
         results["_meta_hubness_matrix"] = matrix
