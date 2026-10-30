@@ -353,6 +353,48 @@ def final_norm_unembedding_gauge(model, D=None, seed: int = 0, verify_on=None,
 
 
 # --------------------------------------------------------------------------
+# Width
+# --------------------------------------------------------------------------
+
+def zero_pad_width(model, k: int = 4, verify_on=None, atol: Optional[float] = None):
+    """Function-preserving residual-width padding d -> k*d (Llama family).
+
+    Residual-reading projections get zero input columns, residual-writing ones
+    zero output rows, the embedding and unembedding zero columns, so the extra
+    coordinates stay exactly 0. RMSNorm over k*d coordinates sees mean(x^2)/k:
+    its eps is divided by k and its live gains by sqrt(k) (k = 4 keeps both
+    exact powers of two). head_dim is pinned so attention is unchanged. Logits
+    agree to float rounding of the padded reductions (< 1e-5 on tiny models).
+    LayerNorm models (GPT-2, NeoX) cannot be padded this way: the mean and
+    variance over k*d coordinates change.
+    """
+    import math
+    a = _arch(model)
+    if a.family not in _LLAMA_FAMILY:
+        raise NotImplementedError(f"zero_pad_width supports {_LLAMA_FAMILY}, not {a.family}")
+    cfg = copy.deepcopy(model.config)
+    d = cfg.hidden_size
+    cfg.head_dim = getattr(cfg, "head_dim", None) or d // cfg.num_attention_heads
+    cfg.hidden_size = k * d
+    cfg.rms_norm_eps = cfg.rms_norm_eps / k
+    new = type(model)(cfg).eval()
+    src = model.state_dict()
+    with torch.no_grad():
+        for name, p in new.state_dict().items():
+            s = src[name]
+            p.zero_()
+            if name.endswith("norm.weight"):
+                p[:d] = s / math.sqrt(k)
+            elif p.ndim == 2:
+                p[:s.shape[0], :s.shape[1]] = s
+            else:
+                p[:s.shape[0]] = s
+    if verify_on is not None:
+        _verify(model, new, verify_on, atol=atol, what="zero_pad_width")
+    return new
+
+
+# --------------------------------------------------------------------------
 # Vocabulary
 # --------------------------------------------------------------------------
 

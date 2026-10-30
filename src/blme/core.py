@@ -223,22 +223,20 @@ def evaluate(
         # no requesting task is in the run. (cache is initialised to None above.)
         cache_hidden_tasks = {
             "geometry_svd",
-            "geometry_lid",
             "geometry_lipschitz",
             "geometry_collapse",
             "geometry_hsic",
-            "geometry_intrinsic_dim",
             "geometry_prediction_alignment",
             "geometry_rsa",
             "geometry_matrix_entropy",
             "geometry_cka",
             "geometry_trajectory_curvature",
             "geometry_mp_bulk_deviation",
-            # audit 2026-07-16: both consume cached hidden states but were
-            # missing here — a cache populated for logits-only tasks made
-            # them error out instead of falling back to self-collection.
-            "geometry_cknna",
             "geometry_procrustes_linearity",
+            # geometry_lid, geometry_intrinsic_dim and geometry_cknna are NOT
+            # here: they ask for 1000-1024 documents and read the cache only
+            # when it already holds that many (min_cached_docs), so listing them
+            # would size every task's shared all-layer cache to their N.
             # `geometry_isoscore` is DELIBERATELY NOT HERE.
             #
             # It consumes hidden states, so registering it looks right -- and I
@@ -285,8 +283,6 @@ def evaluate(
             if not cfg.get("use_cache", True):
                 continue
             if task_name not in cache_candidates:
-                continue
-            if task_name == "geometry_intrinsic_dim" and not cfg.get("layerwise", False):
                 continue
             cache_tasks.append(task_name)
 

@@ -5,8 +5,8 @@ its stores directly, so slicing, per-document splitting, ``replace_final_norm``
 and ``include_embedding`` all run the library's own code. ``StubModel`` reports
 the depth and width of the injected states in its config (``num_hidden_layers``,
 ``n_layer``, ``hidden_size``, ``n_embd``): a config without them makes
-``collected_layer_count`` fall back to 2 and trims RSA/HSIC profiles to two
-layers. Any forward pass, tokenizer call or cache re-population raises
+``collected_layer_count(model)`` fall back to 2 for any task that still asks the
+model rather than the collected layers. Any forward pass, tokenizer call or cache re-population raises
 ``TaskForwardAttempted``; ``run_task_on_states`` converts that, even when the
 task swallowed it, into ``TaskNotDrivable``.
 
@@ -49,6 +49,7 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_cka": {},
     "geometry_cknna": {},
     "geometry_collapse": {},
+    "geometry_correlation_dimension": {},
     "geometry_hsic": {},
     # The default (non-layerwise) mode measures the embedding matrix.
     "geometry_intrinsic_dim": {"layerwise": True},
@@ -60,9 +61,6 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_mp_bulk_deviation": {},
     "geometry_procrustes_linearity": {},
     "geometry_rsa": {},
-    # Self-collects unless its window equals the cache's (512); the packaged
-    # default is 128, so a production run never takes the cache path.
-    "geometry_schatten": {"max_length": 512},
     "geometry_svd": {},
     "geometry_trajectory_curvature": {},
     "geometry_vendi_score": {},
@@ -73,7 +71,7 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
 # Tasks the stub cache cannot drive, grouped by reason.
 NOT_STATE_DRIVABLE: Dict[str, str] = {
     **{t: "runs its own forward pass to collect hidden states" for t in (
-        "geometry_contextualization", "geometry_correlation_dimension",
+        "geometry_contextualization",
         "geometry_effective_depth", "geometry_mahalanobis",
         "geometry_neural_collapse", "geometry_representation_sensitivity",
         "topology_betti_curve", "topology_homology",
@@ -81,6 +79,9 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "repe_concept_separability", "repe_refusal_direction",
         "repe_steering_effectiveness", "repe_task_vectors",
     )},
+    "geometry_schatten": (
+        "runs its own forward pass: Yusupov et al.'s Schatten norm reads the "
+        "MLP-internal activations, which the cache does not hold"),
     "geometry_phd_dimension": (
         "only the pooled _meta_ value reads the cache; the per-text headline "
         "runs its own forward pass per document"),
