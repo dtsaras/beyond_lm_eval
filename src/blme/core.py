@@ -233,10 +233,11 @@ def evaluate(
             "geometry_trajectory_curvature",
             "geometry_mp_bulk_deviation",
             "geometry_procrustes_linearity",
-            # geometry_lid, geometry_intrinsic_dim and geometry_cknna are NOT
-            # here: they ask for 1000-1024 documents and read the cache only
-            # when it already holds that many (min_cached_docs), so listing them
-            # would size every task's shared all-layer cache to their N.
+            # geometry_lid, geometry_intrinsic_dim, geometry_cknna and the four
+            # Vietoris-Rips topology tasks are NOT here: they ask for 1000-1024
+            # documents and read the cache only when it already holds that many
+            # (min_cached_docs), so listing them would size every task's shared
+            # all-layer cache to their N.
             # `geometry_isoscore` is DELIBERATELY NOT HERE.
             #
             # It consumes hidden states, so registering it looks right -- and I

@@ -63,7 +63,10 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_svd": {},
     "geometry_trajectory_curvature": {},
     "geometry_vendi_score": {},
-    "topology_zigzag_persistence": {},
+    "topology_betti_curve": {},
+    "topology_homology": {},
+    "topology_persistence_entropy": {},
+    "topology_persistence_landscape": {},
     "interpretability_activation_kurtosis": {},
 }
 
@@ -73,11 +76,11 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "geometry_contextualization", "geometry_correlation_dimension",
         "geometry_effective_depth", "geometry_mahalanobis",
         "geometry_neural_collapse", "geometry_representation_sensitivity",
-        "topology_betti_curve", "topology_homology",
-        "topology_persistence_entropy", "topology_persistence_landscape",
         "repe_concept_separability", "repe_refusal_direction",
         "repe_steering_effectiveness", "repe_task_vectors",
     )},
+    "topology_zigzag_persistence": (
+        "hooks the post-attention-norm sites and the final norm in its own forward"),
     "geometry_schatten": (
         "runs its own forward pass: Yusupov et al.'s Schatten norm reads the "
         "MLP-internal activations, which the cache does not hold"),

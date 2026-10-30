@@ -297,7 +297,7 @@ def test_legacy_cache_trim_does_not_depend_on_the_stub_config():
     assert lengths == {"depth": L - 2, "no depth": L - 2}
 
 
-@pytest.mark.parametrize("task", ["geometry_correlation_dimension", "topology_homology",
+@pytest.mark.parametrize("task", ["geometry_correlation_dimension", "topology_zigzag_persistence",
                                   "geometry_weight_norms", "geometry_phd_dimension",
                                   "geometry_perplexity"])
 def test_unlisted_tasks_are_refused(task, tiny_states):
