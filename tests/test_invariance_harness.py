@@ -641,3 +641,12 @@ def test_weight_norms_zero_padding_on_gpt2(gpt2):
     assert pad["_meta_mean_stable_rank_normalized"] / base["_meta_mean_stable_rank_normalized"] == \
         pytest.approx(0.5, rel=1e-12)
     inv.assert_invariant(base, pad, ["mean_stable_rank"], rtol=1e-12)
+
+
+def test_get_key_reads_dotted_key_names_and_nested_dicts():
+    from invariance.compare import get_key
+    r = {"renyi_alpha_0.5": 1.0, "per_layer": {"k_0.9": 2.0, "a": {"b": 3.0}}}
+    assert get_key(r, "renyi_alpha_0.5") == 1.0
+    assert get_key(r, "per_layer.k_0.9") == 2.0 and get_key(r, "per_layer.a.b") == 3.0
+    with pytest.raises(KeyError):
+        get_key(r, "per_layer.missing")

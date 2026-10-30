@@ -8,11 +8,16 @@ import numpy as np
 
 
 def get_key(result: Dict[str, Any], key: str):
-    """``a.b.c`` looks up nested dicts."""
-    cur = result
-    for part in key.split("."):
-        cur = cur[part]
-    return cur
+    """``a.b.c`` looks up nested dicts; key names may themselves contain dots
+    (``alpha_0.5``), so the longest prefix present at each level wins."""
+    if key in result:
+        return result[key]
+    parts = key.split(".")
+    for i in range(len(parts) - 1, 0, -1):
+        head = ".".join(parts[:i])
+        if head in result and isinstance(result[head], dict):
+            return get_key(result[head], ".".join(parts[i:]))
+    raise KeyError(key)
 
 
 def rel_change(a, b) -> float:
