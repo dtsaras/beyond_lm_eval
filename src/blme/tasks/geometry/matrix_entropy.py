@@ -205,6 +205,21 @@ class MatrixEntropyTask(DiagnosticTask):
     layer; we report every layer too as a convenient extension but flag
     the last-layer value as the headline metric.
     """
+    TOKEN_POLICY = "paper_protocol:Wei2024 every token, tokenizer BOS kept"
+    SOURCES = {
+        "paper": "arXiv:2401.17139v1 (Wei et al. 2024, Def. 4.1-4.3, Eq. 5)",
+        "code": "waltonfuture/Diff-eRank@fd3a395d9a2f792f9b156218db37a147b339bc5f "
+                "(utils/diff_erank_dataset.py:10-31, 103-104)",
+        "llm_precedent": "arXiv:2401.17139 (proposed on LLM last hidden states); "
+                         "arXiv:2502.02013 (Skean et al. 2025, prompt entropy per layer)",
+    }
+    HEADLINE_KEYS = ("matrix_entropy", "matrix_entropy_raw")
+    # H / ln d (Def. 4.3) carries 1/ln d, so it falls under zero-padding; the
+    # raw H is the twin. Not N- or T-free: H <= ln(T - 1) per document.
+    SIZE_INVARIANT = {"matrix_entropy_raw": (
+        ("zero_pad", "isometry", "rescale", "identity_blocks"),
+        "tests/tasks/invariance/test_matrix_entropy.py::test_size_invariant_entry"
+        "[matrix_entropy_raw]")}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Matrix Entropy (Wei et al. 2024)...")

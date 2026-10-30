@@ -112,3 +112,41 @@ def test_own_forward_drops_an_appended_eos(tiny):
     assert eos["matrix_entropy"] == plain["matrix_entropy"]
     assert eos["_meta_n_trailing_special_stripped"] == len(TEXTS)
     assert plain["_meta_n_trailing_special_stripped"] == 0
+
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.matrix_entropy import MatrixEntropyTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.mark.parametrize("key", sorted(MatrixEntropyTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
+    """Raw H is unchanged by zero-padding, isometric embedding, rescaling and
+    identity blocks; the headline H / ln d falls by exactly ln d / ln 2d under
+    zero-padding (known negative)."""
+    transforms, node = MatrixEntropyTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    base = inv.run_task_on_states(TASK, tiny_states)
+    d = tiny_states.d
+    for t in transforms:
+        S = tiny_identity_states if t == "identity_blocks" else _WIDTH[t](tiny_states)
+        other = inv.run_task_on_states(TASK, S)
+        inv.assert_invariant(base, other, [key], rtol=1e-5)
+        if t == "zero_pad":
+            assert other["matrix_entropy"] / base["matrix_entropy"] == pytest.approx(
+                math.log(d) / math.log(2 * d), rel=1e-5)
+
+
+def test_declarations(tiny_states):
+    cls = MatrixEntropyTask
+    assert cls.TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    assert set(cls.HEADLINE_KEYS) <= set(inv.run_task_on_states(TASK, tiny_states))
