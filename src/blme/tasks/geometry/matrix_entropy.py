@@ -20,7 +20,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task
+from .._tokens import hidden_states_for_task, massive_token_share, position0_share
 from .utils import pow2_rescale as _pow2_rescale
 
 logger = logging.getLogger("blme")
@@ -263,9 +263,17 @@ class MatrixEntropyTask(DiagnosticTask):
         # Headline = the POST-NORM last-layer entropy (see collection).
         last_key = max(layer_entropies.keys(), key=lambda k: int(k.split("_")[1]))
         _hl, _hl_norm = [], []
+        _x0, _x0_norm = [], []
         for Z in (_postnorm_tokens or []):
             res = _matrix_entropy(Z)
             _n_rescued_docs += int(res.get("n_rows_rescued", 0) > 0)
+            # P2: the headline keeps position 0 (TOKEN_POLICY, Wei et al.'s
+            # released code); the value without it is _meta_.
+            r0 = _matrix_entropy(Z[1:])
+            if np.isfinite(r0["entropy"]):
+                _x0.append(r0["entropy"])
+            if np.isfinite(r0["entropy_normalized"]):
+                _x0_norm.append(r0["entropy_normalized"])
             if np.isfinite(res["entropy"]):
                 _hl.append(res["entropy"])
             if np.isfinite(res["entropy_normalized"]):
@@ -287,6 +295,14 @@ class MatrixEntropyTask(DiagnosticTask):
             "_meta_last_entry_is_block_output": bool(
                 per_layer_tokens is not None and _postnorm_tokens is not None),
             "_meta_matrix_entropy_source": _source,
+            "_meta_matrix_entropy_excl_pos0": (float(np.mean(_x0_norm)) if _x0_norm
+                                               else float("nan")),
+            "_meta_matrix_entropy_raw_excl_pos0": (float(np.mean(_x0)) if _x0
+                                                   else float("nan")),
+            "_meta_position0_share": (position0_share(_postnorm_tokens)
+                                      if _postnorm_tokens else float("nan")),
+            "_meta_massive_token_share": (massive_token_share(_postnorm_tokens)
+                                          if _postnorm_tokens else float("nan")),
             # (document, layer) matrices that needed the float64 row path.
             "_meta_n_matrices_float64_rownorm": int(_n_rescued_docs),
             "_meta_matrix_entropy_max_length": int(max_length),

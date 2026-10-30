@@ -48,3 +48,24 @@ def test_rows_spanning_50_orders_survive_row_normalisation():
         assert got["n_rows_rescued"] == 2
     ordinary = _matrix_entropy(torch.randn(24, 16, generator=torch.Generator().manual_seed(0)))
     assert ordinary["n_rows_rescued"] == 0
+
+
+@pytest.fixture(scope="module")
+def tiny_states(tiny):
+    return inv.states_from_model(*tiny, TEXTS)
+
+
+def test_headline_keeps_position0_and_reports_the_value_without_it(tiny_states):
+    """Wei et al.'s released code scores every token of the text, so a sink
+    at position 0 of the post-norm state moves the headline; the
+    position-0-free value is _meta_ and does not move."""
+    def sink(x):
+        y = np.array(x, dtype=np.float64, copy=True)
+        y[0] *= 1e3
+        return y
+    base = inv.run_task_on_states(TASK, tiny_states)
+    sunk = inv.run_task_on_states(TASK, tiny_states.map(sink))
+    inv.assert_moves(base, sunk, "matrix_entropy", 1e-2)
+    inv.assert_invariant(base, sunk, ["_meta_matrix_entropy_excl_pos0",
+                                      "_meta_matrix_entropy_raw_excl_pos0"], rtol=1e-6)
+    assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
