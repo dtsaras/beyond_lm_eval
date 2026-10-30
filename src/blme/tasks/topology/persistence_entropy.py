@@ -72,6 +72,15 @@ def _persistence_entropy(lifespans):
 
 
 _H0_FAMILY = ("pe_h0", "pe_h0_full", "pe_h0_norm", "num_features_h0")
+_ROLES = ("first", "mid", "last")
+_HEADLINES = tuple(f"{r}_layer_{k}" for r in _ROLES for k in ("pe_h1", "pe_h1_norm"))
+# PE is a function of the normalised bar lengths, and E / log2(n) of the bar
+# count, so both ignore a rescale and depend on pairwise distances only.
+_SIZE_INVARIANT = {
+    k: (("embed_isometric", "zero_pad", "rescale"),
+        "tests/tasks/invariance/test_topology_persistence_entropy.py::"
+        "test_h1_entropy_is_width_and_scale_free")
+    for k in _HEADLINES}
 
 
 @register_task("topology_persistence_entropy")
@@ -83,6 +92,26 @@ class PersistenceEntropyTask(DiagnosticTask):
     and computes the Shannon entropy of the H0 and H1 lifespan distributions.
     """
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:1803.08304",
+        "code": "giotto-ai/giotto-tda@6f896531b7c59216fd292018bf73728dea40b7e6",
+        "llm_precedent": ("arXiv:2505.20435 (Fay et al. 2025: persistent entropy among the "
+                          "barcode summaries of last-token clouds)"),
+    }
+    ADAPTATION_NOTE = (
+        "Persistent entropy (Atienza et al. 2020 Def. 3.1, log base 2) is computed per homology "
+        "dimension on the Vietoris-Rips barcode of one point per sequence, its last token, at the "
+        "first, middle and last block (the LLM precedent's point cloud, Fay et al. 2025), with "
+        "N = 1000 sequences. The essential H0 bar is dropped, as giotto-tda's reduced homology "
+        "does; pe_h0_full keeps it through Atienza's scale-invariant mu_2 projection. The H0 "
+        "family is _meta_: raw H0 entropy of N points is log2(N - 1) to three digits, and its "
+        "E / log2(n) form, though N-flat, does not separate models. The features are the H1 "
+        "entropy and E / log2(n), the maximum-entropy normalisation Atienza's Sec. 3.3 uses; "
+        "giotto-tda's normalize=True (E / log2 of total persistence) depends on the units and "
+        "is not used."
+    )
+    HEADLINE_KEYS = _HEADLINES
+    SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistence Entropy Analysis...")
