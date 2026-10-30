@@ -58,6 +58,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .utils import as_numpy
 from .._tokens import hidden_states_for_task
 
 logger = logging.getLogger("blme")
@@ -136,7 +137,7 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
             continue
         if isinstance(chunk, torch.Tensor):
             # Keep the incoming float dtype (never narrow a float64 input).
-            chunk = chunk.detach().cpu().numpy()
+            chunk = as_numpy(chunk)
         chunk = np.asarray(chunk, dtype=np.float64)
         if chunk.ndim != 2 or chunk.shape[0] < skip_first + 3:
             continue

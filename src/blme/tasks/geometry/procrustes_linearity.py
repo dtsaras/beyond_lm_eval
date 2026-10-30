@@ -82,6 +82,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .utils import as_numpy
 from .._tokens import (hidden_states_for_task, massive_token_share,
                        position0_share, select_rows)
 
@@ -167,9 +168,9 @@ def _pair_profile(layer_states, layers, reference_rule: bool = True):
         Y = layer_states[b]
         if isinstance(X, torch.Tensor):
             # numpy then float64: never narrow a float64 input to float32.
-            X = X.detach().cpu().numpy()
+            X = as_numpy(X)
         if isinstance(Y, torch.Tensor):
-            Y = Y.detach().cpu().numpy()
+            Y = as_numpy(Y)
         X = np.asarray(X, dtype=np.float64)
         Y = np.asarray(Y, dtype=np.float64)
         if X.ndim != 2 or Y.ndim != 2 or X.shape != Y.shape:
