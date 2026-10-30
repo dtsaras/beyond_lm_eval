@@ -153,8 +153,8 @@ class ContaminationDetectionTask(DiagnosticTask):
             "contamination_z_score": float(np.mean(z_scores)),
             "contamination_ratio": contamination_ratio,
             "mean_token_logprob": mean_logprob,
-            "k_pct": k_pct,
-            "num_samples_analyzed": len(all_min_k_probs),
+            "_meta_k_pct": k_pct,
+            "_meta_num_samples_analyzed": len(all_min_k_probs),
         }
         if has_calibration:
             if (
