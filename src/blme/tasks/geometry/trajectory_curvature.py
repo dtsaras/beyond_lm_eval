@@ -26,15 +26,9 @@ Definition (Hosseini & Fedorenko 2023, Methods):
     straighten more.
 
 Implementation notes:
-    * Tier 2 — consumes the shared cache via
-      ``cache.get_hidden_states(layer_idx="all", per_sample=True,
-      replace_final_norm=True)`` -- the last flag matters: without it the
-      deepest point is ``ln_f(b_{L-1})``, a LayerNorm output, not a block
-      output (see the note at the call site).
-      Trajectory order matters, so the per-sample ``(T_i, D)`` chunks
-      are required; the flattened token cloud would silently mix
-      documents. Without a cache the task runs its own forward pass
-      through a private :class:`~blme.cache.ModelOutputCache`.
+    * Reads per-sample ``(T_i, D)`` chunks (trajectory order matters) through
+      ``hidden_states_for_task``: the shared cache, else a private
+      :class:`~blme.cache.ModelOutputCache`.
     * The shared cache stores only post-block hidden states (it drops
       the embedding output ``hs[0]``), so "first layer" here is the
       output of the first transformer block — which MATCHES the paper:
@@ -42,10 +36,11 @@ Implementation notes:
       contextualized layer L0", and the official curvature_utils.py
       likewise baselines curvature change at hs[1]. (An earlier note
       here claimed the paper uses the input embedding; it does not.)
-    * The BOS token is skipped (``skip_first_tokens``, default 1)
-      because the BOS hidden state is an extreme outlier in most
-      architectures and the first difference vector through it would
-      dominate the angle statistics.
+    * The reference tokenises without special tokens and keeps every token
+      (analyze_the_curvature_in_bert_and_gpt2.py:56-59). The cache adds the
+      tokenizer's special tokens, so ``skip_first_tokens`` ("auto") drops the
+      first row only when the tokenizer prepends a BOS; on BOS-less
+      tokenizers (GPT-2, Pythia, Qwen) no real token is dropped.
     * Angles are computed in float64 with the cosine clamped to
       [-1, 1]; zero-norm difference vectors (repeated identical hidden
       states) are skipped rather than propagated as NaN.
@@ -63,6 +58,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import hidden_states_for_task
 
 logger = logging.getLogger("blme")
 
@@ -94,39 +90,9 @@ def _trajectory_angles(X) -> np.ndarray:
 
     dots = np.einsum("ij,ij->i", V[:-1], V[1:])  # (T-2,)
     denom = norms[:-1] * norms[1:]
-    # RELATIVE validity test, not an absolute epsilon.
-    #
-    # The angle between two difference vectors is homogeneous of degree ZERO --
-    # scaling the whole trajectory cannot change it. `norms > _ZERO_NORM_EPS`
-    # made it scale-dependent: at 1e-30, 1e-25 and 1e-13 every norm falls below
-    # the fixed threshold, `valid` is all-False, and the function returns an
-    # EMPTY array, so a genuine 1.0471975512-rad turn was reported as no angle
-    # at all while 1, 1e13, 1e25 and 2.406159650500376e38 returned it correctly
-    # (gpt-5.6-sol round 9, 2026-09-07).
-    #
-    # `X` is already float64 here, so the norms themselves are fine at 1e-30
-    # (1e-60 is comfortably representable) -- the threshold was the whole
-    # defect. Scaling it by the trajectory's own largest step makes the test
-    # mean "this step is negligible COMPARED TO THIS TRAJECTORY", which is the
-    # only scale-free reading of "non-negligible norm".
-    #
-    # Fourth absolute-epsilon-in-a-scale-free-operation found on 2026-09-07,
-    # after `stability`'s clamp_min(1e-10), `coe`'s z_mag <= 1e-12, and
-    # `trajectories`' two norm + 1e-10 rescales.
-    # STRICTLY > 0, and nothing else.
-    #
-    # I replaced an absolute floor with one relative to the largest step, which
-    # fixed uniform rescaling and still discarded a step that is merely small
-    # RELATIVE TO ITS NEIGHBOURS: for X=[(0,0),(1e-13,0),(1e-13,1),(1e-13,2)]
-    # the norms are [1e-13, 1, 1], the defined angles are [pi/2, 0] and the
-    # executed released implementation gives mean 0.7853981634, while BLME
-    # emitted [0.0] (gpt-6-astra round 10, 2026-09-07).
-    #
-    # The angle between two difference vectors is well defined for ANY pair of
-    # nonzero steps, whatever their relative size. There is no magnitude below
-    # which it stops meaning something, so neither an absolute nor a relative
-    # epsilon belongs here -- both were answers to a question that should not
-    # have been asked. Only an exactly zero step has no direction.
+    # The angle is scale-free and defined for any pair of nonzero steps, so
+    # neither an absolute nor a relative epsilon applies: only an exactly zero
+    # step has no direction (test_trajectory_curvature_degenerate_no_nan).
     valid = (norms[:-1] > 0.0) & (norms[1:] > 0.0)
     if not np.any(valid):
         return np.empty(0, dtype=np.float64)
@@ -169,13 +135,7 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
         if chunk is None:
             continue
         if isinstance(chunk, torch.Tensor):
-            # PRESERVE the incoming float dtype. `.float()` is a no-op for the
-            # float32 every checkpoint emits and a NARROWING for float64. Probed on a
-            # 40x16 cloud with 1e-4 structure on a 1e5 offset -- the shape real hidden
-            # states have -- the narrowed path returns NaN where float64 returns a
-            # finite value (2.0871608250868765). Confirmed by counterexample rather than swept
-            # blindly: geometry_vendi_score has the same spelling and is UNAFFECTED
-            # (rel 2.7e-15), so it was left alone (2026-09-10).
+            # Keep the incoming float dtype (never narrow a float64 input).
             chunk = chunk.detach().cpu().numpy()
         chunk = np.asarray(chunk, dtype=np.float64)
         if chunk.ndim != 2 or chunk.shape[0] < skip_first + 3:
@@ -186,6 +146,18 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
     if not per_sentence_means:
         return float("nan")
     return float(np.mean(per_sentence_means))
+
+
+def _tokenizer_adds_bos(tokenizer) -> bool:
+    """Whether ``tokenizer(text)`` starts with a BOS it added itself."""
+    bos = getattr(tokenizer, "bos_token_id", None)
+    if bos is None:
+        return False
+    try:
+        ids = tokenizer("a")["input_ids"]
+    except Exception:  # noqa: BLE001 - a tokenizer that cannot encode adds nothing we can see
+        return False
+    return bool(len(ids) > 0 and int(ids[0]) == int(bos))
 
 
 @register_task("geometry_trajectory_curvature")
@@ -204,65 +176,44 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         curvature_q25/q50/q75    — quartiles of per-layer means
     """
 
+    TOKEN_POLICY = ("paper_protocol:Hosseini2023 every token of each sequence in order; a "
+                    "tokenizer-added BOS row skipped")
+    SOURCES = {
+        "paper": "arXiv:2311.04930",
+        "code": "eghbalhosseini/sent_sampling@32ac2715a47da9b0d35e3860f37a2a5295e41302",
+        "llm_precedent": "arXiv:2311.04930 (proposed for LLMs; GPT-2 family)",
+    }
+    HEADLINE_KEYS = ("straightening_ratio", "curvature_mean_first_layer",
+                     "curvature_mean_last_layer")
+    SIZE_INVARIANT = {
+        k: (("insert_identity_blocks", "embed_isometric", "zero_pad", "rescale"),
+            "tests/tasks/invariance/test_geometry_trajectory_curvature.py::"
+            "test_endpoints_invariant_under_identity_blocks")
+        for k in ("straightening_ratio", "curvature_mean_first_layer",
+                  "curvature_mean_last_layer")}
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Trajectory Curvature Analysis...")
 
         num_samples = self.config.get("num_samples", 100)
-        skip_first = int(self.config.get("skip_first_tokens", 1))
+        _bos = _tokenizer_adds_bos(tokenizer)
+        _skip_cfg = self.config.get("skip_first_tokens", "auto")
+        skip_first = int(_bos) if _skip_cfg == "auto" else int(_skip_cfg)
         use_cache = self.config.get("use_cache", True)
 
-        # THE 12TH INSTANCE of the post-final-norm defect, and the only task
-        # in `core.py`'s `cache_hidden_tasks` that never opted in.
-        #
-        # HF's last `hidden_states` entry is `ln_f(b_{L-1})`, not a block
-        # output; `cache.py` grew `replace_final_norm=True` for exactly this,
-        # and rsa/collapse/lipschitz/procrustes_linearity/schatten/mutual_info
-        # all took it. This file did not, and it is ALWAYS on the cache path in
-        # production. A trajectory metric is especially exposed: the deepest
-        # point is an endpoint of every segment the curvature integrates.
-        # Measured over 100 wikitext passages at the shipped config
-        # (red-team review, 2026-09-05):
-        #
-        #   pythia-70m   straightening_ratio 0.031299 -> 0.052133  (+66.6%)
-        #                curvature_slope    -0.047855 -> -0.078497 (-64.0%)
-        #   pythia-160m  straightening_ratio 0.045122 -> 0.067378  (+49.3%)
-        #   gpt2         straightening_ratio 0.043095 -> 0.039696  (-7.9%)
-        #
-        # The SIGN of the bias is architecture-family determined, so it does
-        # not cancel in a cross-model comparison: over five models
-        # Spearman(shipped, corrected) is only +0.20 for `straightening_ratio`.
-        per_layer_chunks = None
-        if cache is not None and cache.is_populated and use_cache:
-            per_layer_chunks = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples, per_sample=True,
-                replace_final_norm=True,
-            )
-            _last_is_block = bool(
-                getattr(cache, "_last_block_substituted", False))
-            if per_layer_chunks is None:
-                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
-                # orrectly with NO cache and returned an error with an attention-onl
-                # y one, i.e. it refused rather than self-collecting -- the defect a
-                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
-                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
-                # only sweep reported (2026-09-09).
-                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
-        if per_layer_chunks is None:
-            # Fallback: run our own forward pass through a private cache
-            # so the per-sample (T_i, D) split logic stays in one place.
-            from ...cache import ModelOutputCache, load_default_corpus
-
-            if dataset is None:
-                dataset = load_default_corpus(num_samples)
-            local_cache = ModelOutputCache(
-                model, tokenizer, dataset=dataset, num_samples=num_samples,
-            )
-            local_cache.populate(need_hidden=True)
-            per_layer_chunks = local_cache.get_hidden_states(
-                layer_idx="all", per_sample=True, replace_final_norm=True,
-            )
-            _last_is_block = bool(
-                getattr(local_cache, "_last_block_substituted", False))
+        # Per-sample (T_i, D) chunks in trajectory order: the shared cache when
+        # it is populated, else a private ModelOutputCache. replace_final_norm
+        # =False, DELIBERATELY: the released curvature_utils.py:22-23 keeps HF's
+        # hidden_states as returned, so the last entry is the post-norm state.
+        if dataset is None and not (cache is not None and getattr(cache, "is_populated", False)
+                                    and use_cache):
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
+        per_layer_chunks, _info = hidden_states_for_task(
+            model, tokenizer, dataset, cache, num_samples=num_samples,
+            replace_final_norm=False, layer_idx="all", use_cache=use_cache,
+            per_sample=True, fallback="private_cache")
+        _last_is_block = bool(_info["last_is_block"])
 
         if not per_layer_chunks:
             return {"error": "No hidden states available for trajectory curvature"}
@@ -292,8 +243,7 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         else:
             straightening_ratio = float("nan")
 
-        # Slope on NORMALIZED depth l/(n_layers-1) — house convention
-        # for cross-model comparability (AUDIT_REPORT fix #45).
+        # Slope on normalised depth l / (n_layers - 1).
         finite = np.isfinite(curv)
         if n_layers >= 2 and finite.sum() >= 2:
             depth = (
@@ -306,22 +256,23 @@ class TrajectoryCurvatureTask(DiagnosticTask):
 
         finite_curv = curv[finite]
         return {
-            # Provenance, derived: True only if the deepest entry really is the
-            # hooked raw block output. Every sibling that opted into
-            # `replace_final_norm` emits this; this task did not, so nothing in
-            # its output revealed that it was reading a LayerNorm.
+            # Derived: whether the deepest entry is the hooked raw block output.
             "_meta_last_entry_is_block_output": bool(_last_is_block),
             "curvature_mean_first_layer": float(c_first),
-            "curvature_mean_mid_layer": float(c_mid),
             "curvature_mean_last_layer": float(c_last),
-            "curvature_overall_mean": float(np.mean(finite_curv)),
             "straightening_ratio": straightening_ratio,
-            "curvature_slope": slope,
-            "curvature_q25": float(np.percentile(finite_curv, 25)),
-            "curvature_q50": float(np.percentile(finite_curv, 50)),
-            "curvature_q75": float(np.percentile(finite_curv, 75)),
-            # _meta_ prefix => excluded from the analysis feature matrix so these
-            # architecture/sampling counts cannot leak in as size proxies (Audit-V2).
+            # Profile summaries that move under identity-block insertion (P4):
+            # the middle index shifts, and a mean, quartile or slope over
+            # layers counts the duplicated layers.
+            "_meta_curvature_mean_mid_layer": float(c_mid),
+            "_meta_curvature_overall_mean": float(np.mean(finite_curv)),
+            "_meta_curvature_slope": slope,
+            "_meta_curvature_q25": float(np.percentile(finite_curv, 25)),
+            "_meta_curvature_q50": float(np.percentile(finite_curv, 50)),
+            "_meta_curvature_q75": float(np.percentile(finite_curv, 75)),
+            # Counts, not features.
             "_meta_n_layers": int(n_layers),
             "_meta_n_samples_used": int(n_samples_used),
+            "_meta_skip_first_tokens": int(skip_first),
+            "_meta_tokenizer_adds_bos": bool(_bos),
         }

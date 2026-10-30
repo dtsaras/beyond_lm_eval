@@ -305,8 +305,9 @@ def test_unlisted_tasks_are_refused(task, tiny_states):
         inv.run_task_on_states(task, tiny_states)
 
 
-@pytest.mark.parametrize("task", ["topology_homology", "geometry_phd_dimension",
-                                  "geometry_effective_depth"])
+# topology_homology now reads last-token rows from a cache holding enough
+# documents, so it no longer self-forwards when forced onto the stub.
+@pytest.mark.parametrize("task", ["geometry_phd_dimension", "geometry_effective_depth"])
 def test_forced_self_forward_tasks_are_caught(task, tiny_states):
     """A forced run still fails loudly when the task tries its own forward,
     including when the task swallows the exception."""
@@ -386,8 +387,9 @@ def test_lid_invariant_under_random_orthogonal_embedding(gpt2_states, mode):
 ISOMETRY_INVARIANT_TASKS = [
     "geometry_collapse", "geometry_hsic", "geometry_intrinsic_dim", "geometry_lipschitz",
     "geometry_svd", "geometry_trajectory_curvature", "geometry_vendi_score",
-    "topology_zigzag_persistence",
 ]
+# topology_zigzag_persistence: width/scale invariance of its barcode is pinned
+# at the estimator (tests/tasks/invariance/test_topology_zigzag_persistence.py).
 
 
 def _feature_keys(result):

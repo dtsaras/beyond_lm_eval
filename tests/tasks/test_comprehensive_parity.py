@@ -3696,7 +3696,7 @@ def test_geometry_positional_decay():
     task = PositionalAttentionDecayTask({"num_samples": 1})
     res = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in res, res
-    assert set(res) >= {"mean_positional_decay_correlation", "layer_positional_decay"}
+    assert set(res) >= {"_meta_mean_positional_decay_correlation", "_meta_layer_positional_decay"}
 
     # Independent recomputation from the SAME attention tensors.
     inputs = tok(text, return_tensors="pt", truncation=True, max_length=256)
@@ -3758,25 +3758,25 @@ def test_geometry_positional_decay():
     # because pooling triangular causal entries confounds distance with row
     # normalisation. The manuscript's pooled quantity is still emitted, and
     # still pinned, under its own name.
-    assert res["mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
+    assert res["_meta_mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
         f"rowwise: BLME={res['mean_positional_decay_correlation']} ref={ref_mean}"
     )
-    assert res["mean_positional_decay_correlation_pooled"] == pytest.approx(
+    assert res["_meta_mean_positional_decay_correlation_pooled"] == pytest.approx(
         ref_pooled, abs=1e-9), (
         f"pooled: BLME={res['mean_positional_decay_correlation_pooled']} ref={ref_pooled}"
     )
-    assert set(res["layer_positional_decay"]) == set(layer_vals)
+    assert set(res["_meta_layer_positional_decay"]) == set(layer_vals)
     for k, v in layer_vals.items():
-        assert res["layer_positional_decay"][k] == pytest.approx(v, abs=1e-9), (
+        assert res["_meta_layer_positional_decay"][k] == pytest.approx(v, abs=1e-9), (
             f"layer {k}: BLME={res['layer_positional_decay'][k]} ref={v}"
         )
     # The correlation is bounded by Spearman's range.
-    assert -1.0 <= res["mean_positional_decay_correlation"] <= 1.0
+    assert -1.0 <= res["_meta_mean_positional_decay_correlation"] <= 1.0
 
     # Determinism: identical output on a re-run.
     res2 = task.evaluate(model, tok, dataset, cache=None)
-    assert res2["mean_positional_decay_correlation"] == pytest.approx(
-        res["mean_positional_decay_correlation"], abs=1e-12
+    assert res2["_meta_mean_positional_decay_correlation"] == pytest.approx(
+        res["_meta_mean_positional_decay_correlation"], abs=1e-12
     )
 
 # === geometry_prediction_alignment  [NUMERIC_PARITY / strong_independent_numeric / ref=pip_package] ===
@@ -6746,23 +6746,27 @@ def test_topology_betti_curve():
     from blme.tasks.topology.betti_curve import _count_betti
 
     def ref_beta0_networkx(X, n_neighbors):
-        """Independent beta_0: connected components of the symmetric kNN graph,
-        built with cKDTree (same construction as BLME) but counted by networkx
-        rather than scipy.sparse.csgraph."""
+        """Independent beta_0: connected components of the symmetric kNN graph
+        of the RELEASED loader (topnn_framework@8779aea
+        transformers/betti_calc_parallel.py find_neighbors: n_neighbors capped
+        at N, NearestNeighbors(n_neighbors).fit(X).kneighbors_graph(X), which
+        counts each point as its own neighbour), counted by networkx. The pin
+        was re-derived from that code when BLME aligned its k convention to it;
+        it previously re-used BLME's own k-excludes-self cKDTree construction."""
+        from sklearn.neighbors import NearestNeighbors
         X = np.asarray(X, dtype=np.float64)
         X = X[np.all(np.isfinite(X), axis=1)]
         n = len(X)
         if n < 3:
             return max(n, 0)
-        k = int(min(n_neighbors, n - 1))
-        tree = cKDTree(X)
-        _, idx = tree.query(X, k=k + 1)
-        idx = np.atleast_2d(idx)
+        k = n if n < n_neighbors + 1 else n_neighbors
+        A = NearestNeighbors(n_neighbors=k, algorithm="ball_tree").fit(X).kneighbors_graph(X)
+        A = A.toarray()
         G = nx.Graph()
         G.add_nodes_from(range(n))
-        for i in range(n):
-            for j in idx[i, 1:]:
-                G.add_edge(i, int(j))  # undirected == BLME's graph.maximum(graph.T)
+        for i, j in zip(*np.nonzero(A)):
+            if i != j:
+                G.add_edge(int(i), int(j))  # undirected == BLME's graph.maximum(graph.T)
         return nx.number_connected_components(G)
 
     # ---- beta_0 numeric parity across randomized cluster configurations -----

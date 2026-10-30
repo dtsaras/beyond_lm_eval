@@ -144,7 +144,7 @@ geometry_tokenizer_efficiency:
 
 geometry_trajectory_curvature:
   num_samples: 100
-  skip_first_tokens: 1  # drop BOS — its hidden state is an extreme outlier
+  skip_first_tokens: auto  # drop the first row only where the tokenizer prepends a BOS
 
 geometry_mp_bulk_deviation:
   # The fixed-gamma headline needs 4d+1 tokens: 400 documents (~40k tokens)
@@ -169,26 +169,23 @@ geometry_mp_bulk_deviation:
   fixed_gamma: 0.25  # also emit *_g25 variants at a common D/N aspect ratio
 
 # ---- Topology Tasks ----
+# The four point-cloud topology tasks read one point per sequence (its last
+# token, Fay et al. 2025 / Gardinazzi et al. 2025) and use N = 1000 sequences
+# for every model (Q1); at a few dozen points every summary is N-dominated.
 topology_homology:
-  num_samples: 20
+  num_samples: 1000
 
 topology_betti_curve:
-  # 20 mean-pooled points is not a point cloud: persistent homology over 20
-  # samples returns integers driven by sampling noise. Also note that at N=20
-  # the calibrated k = max(5, ceil(log2 N)) collapses to the old fixed 5, so
-  # leaving this at 20 made the k calibration a no-op.
   num_samples: 1000
 
 topology_persistence_entropy:
-  # Raised with topology_betti_curve, which sits four lines above. At 20 points
-  # an iid Gaussian already SATURATES the entropy ceiling for any d_model >= 512
-  # -- pe_h0 was pinned at log2(m) with m = 49 for every model in the zoo, a
-  # 0.70% spread across 66 models. Leaving this at 20 while raising its
-  # neighbour would have been an inconsistency introduced by the same edit.
   num_samples: 1000
 
 topology_persistence_landscape:
-  num_samples: 20
+  num_samples: 1000
+  # Bubenik 2015: the summaries are means over subsamples (the mean landscape).
+  n_subsamples: 16
+  subsample_size: 500
   n_landscapes: 5
   n_points: 200
 
@@ -454,25 +451,18 @@ interpretability_activation_kurtosis:
   use_cache: true
 
 topology_zigzag_persistence:
-  num_samples: 40
-  n_neighbors: 5
-  # 0.3 -> 0.1 (2026-09-05). `persistence_frac` counts an H1 loop only if it
-  # persists for more than this fraction of the point cloud's geodesic scale,
-  # and at 0.3 -- 30% of the diameter -- NOTHING in a real hidden-state cloud
-  # qualifies. Swept on gpt2 (independent Opus review, 2026-09-05):
-  #
-  #   persistence_frac  betti1_fraction_layers  h1_num_bands
-  #   0.30 (was)        0.0000 at N = 40/100/200/400   0.00
-  #   0.10              0.6667                          3.00
-  #   0.05              0.9167                          2.00
-  #
-  # So SEVEN shipped feature columns were exactly constant across every model,
-  # and it was the threshold rather than the sample size: raising N from 40 to
-  # 400 changed nothing. 0.1 is a BLME choice, not a reference value -- the
-  # source publishes no threshold -- and the task now warns when the H1 family
-  # comes back identically zero, which is the condition that matters.
+  # Gardinazzi et al. 2025 Sec. 4.1: descriptors are means over 16 subsets of
+  # 500 prompts. num_samples is the pool requested (16 x 500); WikiText-103
+  # validation holds 1,703 passages, so the subsets overlap (reported in
+  # _meta_zz_subset_overlap).
+  num_samples: 8000
+  subset_size: 500
+  num_subsets: 16
+  # k_NN = 4, the paper's value (Gardinazzi et al. 2025 Fig. 2, Sec. 4.2).
+  n_neighbors: 4
+  # Loop-significance threshold of the _meta_ band proxy (a BLME choice; at
+  # 0.3 no loop in a hidden-state cloud qualified). The paper has no threshold.
   persistence_frac: 0.1
-  use_cache: true
 
 interpretability_attention_rollout:
   num_samples: 10

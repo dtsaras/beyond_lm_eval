@@ -123,11 +123,11 @@ def test_betti_curve(mock_model, mock_tokenizer):
         curve0 = results["betti_0_curve"]
         curve1 = results["betti_1_curve"]
         L = len(curve0)
-        assert results["betti_0_first"] == curve0[0]
-        assert results["betti_0_last"] == curve0[-1]
+        assert results["_meta_betti_0_first"] == curve0[0]
+        assert results["_meta_betti_0_last"] == curve0[-1]
         # simplification_ratio = last/first (1.0 fallback when first == 0)
         expected_ratio = curve0[-1] / curve0[0] if curve0[0] > 0 else 1.0
-        assert results["simplification_ratio"] == pytest.approx(
+        assert results["_meta_simplification_ratio"] == pytest.approx(
             expected_ratio, abs=1e-12
         )
         # decay rate = degree-1 polyfit SLOPE on normalized depth in [0, 1]
@@ -137,7 +137,7 @@ def test_betti_curve(mock_model, mock_tokenizer):
             assert results["betti_0_decay_rate"] == pytest.approx(
                 expected_slope, abs=1e-9
             )
-        assert results["max_betti_1_layer"] == int(np.argmax(curve1))
+        assert results["_meta_max_betti_1_layer"] == int(np.argmax(curve1))
         assert results["max_betti_1"] == int(np.max(curve1))
 
 
@@ -187,7 +187,7 @@ def test_persistence_entropy(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     # May error if get_layers returns None for this architecture
     if "error" not in results:
-        assert "pe_simplification_ratio" in results
+        assert "_meta_pe_simplification_ratio" in results
         assert any("pe_h0" in k for k in results.keys())
         for key in list(results):
             if not key.endswith("_pe_h0_norm"):

@@ -873,16 +873,16 @@ def test_positional_decay_uniform_causal_attention_is_null():
 
     assert "error" not in result, result
     # The HEADLINE (rowwise) must be exactly 0 on this null.
-    assert result["mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
+    assert result["_meta_mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
     # And the MANUSCRIPT'S pooled estimand must NOT be, which is why the
     # headline is the rowwise one. Pinned so the evidence for overriding the
     # paper survives: the pooled null bias converges to about -0.467 as the
     # context grows (-0.4344766895 at L=8, -0.4666215371 at L=256).
-    _pooled = result["mean_positional_decay_correlation_pooled"]
+    _pooled = result["_meta_mean_positional_decay_correlation_pooled"]
     assert _pooled < -0.3, (
         f"pooled estimand no longer shows its null bias ({_pooled}); if this "
         f"changed, revisit which estimand should be the headline")
-    assert result["layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
+    assert result["_meta_layer_positional_decay"]["layer_0"] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_rsa(mock_model, mock_tokenizer):
@@ -1257,16 +1257,16 @@ def test_trajectory_curvature_integration(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     assert "error" not in results, f"trajectory curvature failed: {results}"
     for key in (
-        "curvature_mean_first_layer", "curvature_mean_mid_layer",
-        "curvature_mean_last_layer", "curvature_overall_mean",
-        "straightening_ratio", "curvature_slope",
-        "curvature_q25", "curvature_q50", "curvature_q75",
+        "curvature_mean_first_layer", "_meta_curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "_meta_curvature_overall_mean",
+        "straightening_ratio", "_meta_curvature_slope",
+        "_meta_curvature_q25", "_meta_curvature_q50", "_meta_curvature_q75",
     ):
         assert key in results, f"missing {key}"
         assert np.isfinite(results[key]), f"{key} not finite: {results[key]}"
     for key in (
-        "curvature_mean_first_layer", "curvature_mean_mid_layer",
-        "curvature_mean_last_layer", "curvature_overall_mean",
+        "curvature_mean_first_layer", "_meta_curvature_mean_mid_layer",
+        "curvature_mean_last_layer", "_meta_curvature_overall_mean",
     ):
         assert 0.0 <= results[key] <= np.pi
 
