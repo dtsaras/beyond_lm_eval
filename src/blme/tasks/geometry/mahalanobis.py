@@ -79,6 +79,33 @@ _DEFAULT_ID_TEXTS = [
 ]
 
 
+# WikiText-103 splits in the order the extended corpus walks them.
+_SPLITS = ("validation", "test", "train")
+
+
+def _wikitext_passages_extended(n: int) -> list:
+    """``n`` stripped WikiText-103 passages beyond the validation split.
+
+    The default corpus (``load_default_corpus``) holds only the validation
+    split (about 1,700 passages of >= 64 characters). This walks validation,
+    then test, then train, each in its own ``nested_order`` with the same
+    filter and stripping, so draws nest and the first passages ARE the default
+    corpus. Raises ``ValueError`` if the three splits hold fewer than ``n``.
+    """
+    from ...cache import (MIN_PASSAGE_CHARS, WIKITEXT_DATASET, _load_split,  # noqa: F401
+                          _stripped_texts, nested_order)
+    path, name, _ = WIKITEXT_DATASET
+    out = []
+    for split in _SPLITS:
+        if len(out) >= n:
+            break
+        passages = _stripped_texts(_load_split(path, name, split), "text")
+        out.extend({"text": passages[i]} for i in nested_order(len(passages))[:n - len(out)])
+    if len(out) < n:
+        raise ValueError(f"{n} passages requested, WikiText-103 holds {len(out)}")
+    return out
+
+
 def _default_id_dataset(num_samples: int):
     """Distinct in-distribution samples for the dataset=None fallback.
 
@@ -261,7 +288,18 @@ class MahalanobisOODTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Mahalanobis OOD Detection...")
-        num_samples = self.config.get("num_samples", 50)
+        # Q3: the fit should not be 25 points in 768-5120 dimensions; the
+        # default 2000 ID texts give a Ledoit-Wolf fit on 1000 and 1000 held out.
+        num_samples = int(self.config.get("num_samples", 2000))
+        id_corpus = self.config.get("id_corpus", "wikitext")
+        if id_corpus == "wikitext":
+            # The default corpus stops at the validation split, below what
+            # this fit needs: an extended nested corpus (validation, test,
+            # train) is loaded here (test_mahalanobis_protocol.py).
+            try:
+                dataset = _wikitext_passages_extended(num_samples)
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"geometry_mahalanobis: WikiText passages unavailable: {e}"}
         max_length = int(self.config.get("max_length", 128))
         ood_strategy = self.config.get("ood_strategy", "shuffle")  # "shuffle" or "random"
 
@@ -310,8 +348,15 @@ class MahalanobisOODTask(DiagnosticTask):
                  dataset_ood = [_shuffle_tokens(d["text"], tokenizer, rng) for d in dataset_id]
         else:
             # For standard benchmark, we split the given dataset in half and perturb the second half
-            samples = list(dataset)[:num_samples*2]
-            mid = max(1, len(samples) // 2)
+            # Shuffle mode scores the ID texts against their own shuffles, so it
+            # needs num_samples texts; the random strategy also uses the next
+            # num_samples as its comparison set.
+            if ood_strategy == "random":
+                samples = list(dataset)[:num_samples*2]
+                mid = max(1, len(samples) // 2)
+            else:
+                samples = list(dataset)[:num_samples]
+                mid = len(samples)
             dataset_id = samples[:mid]
             if ood_strategy == "random":
                 import string
@@ -472,6 +517,7 @@ class MahalanobisOODTask(DiagnosticTask):
             result["_meta_d_over_n_fit"] = float(_d / _n) if _n else float("nan")
             result["_meta_d_model"] = int(_d)
             result["_meta_n_cov_fit"] = int(_n)
+            result["_meta_id_corpus"] = str(id_corpus)
         if "shrinkage" in _diag:
             result["_meta_ledoit_wolf_shrinkage"] = _diag["shrinkage"]
         # Sink policy of the ID collection (position 0 + massive rows out of

@@ -127,7 +127,11 @@ geometry_neural_collapse:
   n_sentences_per_topic: null
 
 geometry_mahalanobis:
-  num_samples: 50
+  # 2000 ID texts: a Ledoit-Wolf fit on 1000, 1000 held out and scored against
+  # their own token shuffles (Q3). The corpus extends past WikiText-103
+  # validation (test, then train) in a nested order: id_corpus: wikitext.
+  num_samples: 2000
+  id_corpus: wikitext
   ood_strategy: shuffle  # "shuffle" or "random"
 
 geometry_weight_norms: {}

@@ -77,7 +77,7 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
         def decode(self, ids):
             return "decoded"
 
-    task = MahalanobisOODTask({"num_samples": 30, "ood_strategy": "shuffle"})
+    task = MahalanobisOODTask({"num_samples": 30, "ood_strategy": "shuffle", "id_corpus": "dataset"})
     result = task.evaluate(model=None, tokenizer=StubTok(), dataset=dataset, cache=None)
     # Must not report the degenerate zero-ID case.
     assert "mean_mahalanobis_id" in result, result
@@ -141,7 +141,7 @@ def test_task_scores_mean_pooled_sample_representations():
             return Out()
 
     dataset = [{"text": f"sample {i}"} for i in range(20)]
-    result = MahalanobisOODTask({"num_samples": 10, "ood_strategy": "shuffle"}).evaluate(
+    result = MahalanobisOODTask({"num_samples": 10, "ood_strategy": "shuffle", "id_corpus": "dataset"}).evaluate(
         Model(), Tokenizer(), dataset=dataset, cache=None,
     )
 

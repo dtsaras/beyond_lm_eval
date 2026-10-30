@@ -71,3 +71,34 @@ def test_sinks_are_left_out_of_the_mean_pool():
     for k in keys:
         assert base[k] == moved[k], (k, base[k], moved[k])
     assert base["_meta_sink_n_massive_dropped"] > 0
+
+
+def test_fit_size_is_half_of_2000_texts_from_an_extended_corpus(monkeypatch):
+    """Q3: by default 2000 ID texts (a Ledoit-Wolf fit on 1000, the reference
+    regime of N >> d rather than 25 points in d=768-5120) come from WikiText
+    passages beyond the validation split; the given corpus is not shrunk to
+    half of it."""
+    import blme.tasks.geometry.mahalanobis as mah
+    calls = []
+
+    def fake_corpus(n):
+        calls.append(n)
+        return [{"text": f"sample {i}"} for i in range(n)]
+
+    monkeypatch.setattr(mah, "_wikitext_passages_extended", fake_corpus, raising=False)
+    out = MahalanobisOODTask({"n_splits": 1}).evaluate(_Model(), _Tok(), [{"text": "sample 0"}],
+                                                       cache=None)
+    assert calls == [2000]
+    assert out["_meta_n_cov_fit"] == 1000 and out["_meta_id_corpus"] == "wikitext"
+
+
+def test_extended_corpus_nests_and_starts_with_the_default_corpus():
+    from blme.cache import default_corpus_size, load_default_corpus
+    from blme.tasks.geometry.mahalanobis import _wikitext_passages_extended
+    try:
+        n_val = default_corpus_size()
+        ext = _wikitext_passages_extended(n_val + 5)
+    except (RuntimeError, ValueError) as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"WikiText unavailable: {e}")
+    assert ext[:n_val] == load_default_corpus(n_val)
+    assert _wikitext_passages_extended(n_val + 2) == ext[:n_val + 2]
