@@ -87,6 +87,18 @@ def test_landscape_is_the_mean_over_subsamples(states):
     assert res["_meta_layer_%d_h1_full_mean_landscape_integral" % mid] == full
 
 
+def test_landscape_h0_keys_are_meta_closed_forms_of_homology(states):
+    """Every H0 bar is born at 0, so lambda_1's max is half the largest death:
+    the H0 landscape keys restate topology_homology's H0 lifetimes."""
+    res = _run("topology_persistence_landscape", states, subsample_size=10 ** 6)
+    hom = _run("topology_homology", states)
+    assert not [k for k in _features(res) if "_h0_" in k]
+    for r in ("first", "mid", "last"):
+        assert res[f"_meta_{r}_layer_h0_landscape_max_1"] == pytest.approx(
+            hom[f"{r}_layer_max_persistence_h0"] / 2, rel=1e-12)
+        assert f"{r}_layer_h1_landscape_max_1" in res
+
+
 def test_persistence_entropy_h0_family_is_meta(states):
     """Raw H0 entropy of N points is log2(N - 1) to three digits; E / log2(n)
     passes every direct test but does not separate models (dossier: between/

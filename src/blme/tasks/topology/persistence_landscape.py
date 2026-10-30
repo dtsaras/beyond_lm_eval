@@ -360,10 +360,14 @@ class PersistenceLandscapeTask(DiagnosticTask):
                 prefix = f"layer_{l_idx}_{dim_label}"
                 rows = [p[dim_label] for p in per if dim_label in p]
                 vals = {k: _mean_value([r["vals"][k] for r in rows]) for k in full[dim_label]["vals"]}
+                # H0 bars are all born at 0, so its landscape summaries are closed
+                # forms of the largest deaths (integral of lambda_k = d_(k)^2 / 4,
+                # max = d_(1) / 2): topology_homology's H0 lifetimes again. _meta_.
+                pfx = "_meta_" if dim_label == "h0" else ""
                 for k, v in vals.items():
                     results[f"_meta_{prefix}_{k}"] = v
                     if l_idx in roles:
-                        results[f"{roles[l_idx]}_layer_{dim_label}_{k}"] = v
+                        results[f"{pfx}{roles[l_idx]}_layer_{dim_label}_{k}"] = v
                 # The single landscape of the whole cloud, for continuity.
                 for k, v in full[dim_label]["vals"].items():
                     results[f"_meta_{prefix}_full_{k}"] = v
