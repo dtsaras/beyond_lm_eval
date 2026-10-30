@@ -391,6 +391,16 @@ geometry_vendi_score:
 
 geometry_phd_dimension:
   num_samples: 100
+  # GPTID protocol: whole WikiText-103 articles of >= 300 tokens (train split,
+  # nested order), truncated at 512 tokens, each estimated on tokens [1:-1]
+  # with the notebook's adaptive grid (min 40, 7 steps, 9 subsamples per size).
+  documents: long_documents
+  doc_split: train
+  min_doc_tokens: 300
+  min_subsample: 40
+  intermediate_points: 7
+  text_n_points: 9
+  min_text_tokens: 50
   # Pin the window: without it the code-level fallback max_length=128 fires on
   # the uncached path while the shared cache truncates at 512, so a cached and
   # an uncached run of the same model on the same corpus built DIFFERENT point

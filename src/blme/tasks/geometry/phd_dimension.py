@@ -70,12 +70,18 @@ from scipy.spatial.distance import cdist
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ...cache import load_long_documents
 from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
 
 # Reference's floor for a usable cloud (GPTID: MINIMAL_CLOUD = 80).
 MINIMAL_CLOUD = 80
+
+
+def _preprocess_text(text: str) -> str:
+    """GPTID example.ipynb cell 5 ``preprocess_text``, verbatim."""
+    return text.replace('\n', ' ').replace('  ', ' ')
 
 
 def _prim_tree(adj_matrix: np.ndarray, alpha: float = 1.0) -> float:
@@ -331,7 +337,8 @@ class PHDimensionTask(DiagnosticTask):
 
         cfg = self.config
         num_samples = int(cfg.get("num_samples", 100))
-        max_length = int(cfg.get("max_length", 128))
+        # The notebook truncates every text at 512 tokens (cell 6).
+        max_length = int(cfg.get("max_length", 512))
         layer_idx = int(cfg.get("layer_idx", -1))
         pooling = cfg.get("pooling", "all_tokens")
         max_points = int(cfg.get("max_points", 2000))
@@ -351,6 +358,27 @@ class PHDimensionTask(DiagnosticTask):
         intermediate_points = int(cfg.get("intermediate_points", 7))
         text_n_points = int(cfg.get("text_n_points", 9))
         min_text_tokens = int(cfg.get("min_text_tokens", 50))
+
+        # Texts of >= 300 tokens (the paper's texts are ~300 tokens; short ones
+        # blow up: a 62-token passage gives PHD 540): whole WikiText-103
+        # articles in a fixed nested order, unless documents="dataset".
+        # The notebook's preprocess_text (newlines -> spaces) is applied.
+        source = cfg.get("documents", "long_documents")
+        if source == "dataset":
+            texts = list(dataset or [])[:num_samples]
+            source_name = "dataset"
+        else:
+            doc_split = cfg.get("doc_split", "train")
+            try:
+                texts = load_long_documents(num_samples,
+                                            min_tokens=int(cfg.get("min_doc_tokens", 300)),
+                                            tokenizer=tokenizer, split=doc_split)
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"geometry_phd_dimension: long documents unavailable: {e}"}
+            source_name = f"wikitext_document_level:{doc_split}"
+            cache = None    # the shared cache holds the corpus passages, not these
+        dataset = [{"text": _preprocess_text(t["text"] if isinstance(t, dict) else str(t))}
+                   for t in texts]
 
         X = _gather_point_cloud(
             model, tokenizer, dataset, num_samples, max_length,
@@ -452,6 +480,7 @@ class PHDimensionTask(DiagnosticTask):
             out["_meta_phd_n_texts"] = int(len(per_text))
             out["_meta_phd_n_end_rows_dropped"] = int(_slice_stats.get("rows_dropped", 0))
             out["_meta_phd_n_texts_seen"] = int(_n_seen)
+            out["_meta_phd_documents"] = source_name
             out["_meta_phd_n_texts_too_short"] = int(_n_short)
             out["_meta_phd_n_texts_ungriddable"] = int(_n_ungriddable)
             out["_meta_phd_n_texts_nonfinite"] = int(_n_nonfinite)
