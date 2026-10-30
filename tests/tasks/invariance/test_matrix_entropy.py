@@ -69,3 +69,22 @@ def test_headline_keeps_position0_and_reports_the_value_without_it(tiny_states):
     inv.assert_invariant(base, sunk, ["_meta_matrix_entropy_excl_pos0",
                                       "_meta_matrix_entropy_raw_excl_pos0"], rtol=1e-6)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_layer_aggregates_are_meta(tiny_states, tiny_identity_states):
+    """P4/P7: the per-layer dicts (absolute layer index) and their uniform
+    means are _meta_; the means move under identity blocks while the post-norm
+    headline does not."""
+    base = inv.run_task_on_states(TASK, tiny_states)
+    assert not {"mean_matrix_entropy", "mean_matrix_entropy_raw",
+                "layer_matrix_entropies", "layer_matrix_entropies_normalized"} & set(base)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states)
+    inv.assert_invariant(base, ins, ["matrix_entropy", "matrix_entropy_raw"], rtol=1e-9)
+    inv.assert_moves(base, ins, "_meta_mean_matrix_entropy_raw", 1e-4)

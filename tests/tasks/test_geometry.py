@@ -909,10 +909,10 @@ def test_matrix_entropy(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     assert "error" not in results, f"matrix_entropy failed: {results}"
-    assert "mean_matrix_entropy" in results
+    assert "_meta_mean_matrix_entropy" in results
     # Von Neumann entropy must be finite and non-negative. NaN/0 means
     # the covariance collapsed (single row / all-zero) — the historic bug.
-    me = results["mean_matrix_entropy"]
+    me = results["_meta_mean_matrix_entropy"]
     assert np.isfinite(me), f"mean_matrix_entropy is not finite: {me}"
     assert me > 0.0, f"mean_matrix_entropy collapsed to zero: {me}"
 
@@ -1041,7 +1041,7 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     assert 0 <= res["matrix_entropy"] <= 1.01, (
         f"H_normalized out of [0, 1]: {res['matrix_entropy']}"
     )
-    assert 0 <= res["mean_matrix_entropy"] <= 1.01
+    assert 0 <= res["_meta_mean_matrix_entropy"] <= 1.01
     assert "_meta_matrix_entropy_normalized" not in res
     assert res["matrix_entropy_raw"] >= 0.0
 
@@ -1052,7 +1052,7 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     # published 0.7003 matches the normalised 0.6659 (-4.9%), against a raw
     # H of 4.1542 (+493%). The raw value is retained under a _meta_ key.
     last_key = max(
-        res["layer_matrix_entropies"].keys(),
+        res["_meta_layer_matrix_entropies"].keys(),
         key=lambda k: int(k.split("_")[1]),
     )
     # THE HEADLINE IS NO LONGER THE PROFILE'S LAST ENTRY, deliberately.
@@ -1068,8 +1068,8 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     # The profile's deepest entry is the HOOKED one, so it must differ from the
     # headline on any model with a real final norm -- if these ever coincide,
     # the substitution silently stopped happening.
-    assert res["matrix_entropy"] != res["layer_matrix_entropies_normalized"][last_key]
-    assert res["matrix_entropy_raw"] != res["layer_matrix_entropies"][last_key]
+    assert res["matrix_entropy"] != res["_meta_layer_matrix_entropies_normalized"][last_key]
+    assert res["matrix_entropy_raw"] != res["_meta_layer_matrix_entropies"][last_key]
     # The headline must be the normalised one, not the raw one.
     assert 0 <= res["matrix_entropy"] <= 1.01
 
@@ -1125,7 +1125,7 @@ def test_matrix_entropy_uses_per_sample_cache():
                              dataset=[{"text": "x"}] * n_samples, cache=cache)
 
     assert "error" not in results
-    me = results["mean_matrix_entropy"]
+    me = results["_meta_mean_matrix_entropy"]
     assert np.isfinite(me), f"cache path produced non-finite matrix entropy: {me}"
     assert me > 0.0, "cache path collapsed hidden states to a single row"
 

@@ -310,13 +310,15 @@ class MatrixEntropyTask(DiagnosticTask):
             # Raw H: unchanged by zero-padding / isometric embedding, while the
             # 1/log d of the headline is a width factor.
             "matrix_entropy_raw": headline,
-            # Per-layer extension (same metric applied to every block).
-            "layer_matrix_entropies": layer_entropies,
-            "layer_matrix_entropies_normalized": layer_entropies_norm,
-            "mean_matrix_entropy": (
+            # Per-layer extension (same metric at every block), _meta_: the
+            # dicts are keyed by absolute layer index (P7) and their uniform
+            # means move under function-preserving identity blocks (P4).
+            "_meta_layer_matrix_entropies": layer_entropies,
+            "_meta_layer_matrix_entropies_normalized": layer_entropies_norm,
+            "_meta_mean_matrix_entropy": (
                 float(np.mean(finite_norm)) if finite_norm else float("nan")
             ),
-            "mean_matrix_entropy_raw": float(np.mean(finite_raw)),
+            "_meta_mean_matrix_entropy_raw": float(np.mean(finite_raw)),
             "interpretation": (
                 "Lower last-layer matrix entropy indicates a stronger "
                 "information bottleneck (Wei et al., 2024)."
