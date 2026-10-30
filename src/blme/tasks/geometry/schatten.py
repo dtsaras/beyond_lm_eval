@@ -33,10 +33,10 @@ a forward hook (HF's final `hidden_states` entry is `ln_f(block L-1)`);
 `_meta_last_entry_is_block_output` records whether that substitution actually
 happened.
 
-NOT a reproduction of Yusupov et al. Eq. 5, which is the Schatten norm of the
-RAW MLP-block activation matrix averaged over layers; ``schatten_*`` here are
-raw (uncentred, un-normalised) residual-stream norms, and the centred,
-row-L2-normalised family carries the ``row_normalized_`` prefix. Dividing by
+``schatten_1`` / ``schatten_4`` follow Yusupov et al. (Sec. 4.1, Eq. 5): the
+Schatten norm of each text's RAW MLP-internal activation matrix, averaged over
+all layers. The raw residual-stream norms are ``_meta_schatten_*``, and the
+centred, row-L2-normalised family carries the ``row_normalized_`` prefix. Dividing by
 d^(1/p) (``_meta_row_normalized_schatten_1/4``) manufactures a width
 dependence: zero-padding 768 -> 3072 leaves the raw value unchanged and
 divides the divided form by 4.
@@ -51,6 +51,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import strip_trailing_special
 from .utils import safe_svdvals
 from .utils import pow2_rescale as _pow2_rescale
 
@@ -237,88 +238,71 @@ def _per_sentence_measurements(Z: torch.Tensor) -> Dict[str, float]:
     }
 
 
-def _collect_per_layer(cache, num_samples, use_cache, flag=None):
-    """Match matrix_entropy's cache path, returning per-layer per-
-    sentence hidden states."""
-    if cache is None or not cache.is_populated or not use_cache:
-        return None
-    # BOTH, because this task needs both. The per-layer PROFILE must be
-    # homogeneous, so it is hooked; the `*_last` HEADLINE is what the released
-    # MNN reference measures, and that reference reads the POST-NORM state --
-    # see the note at `headline_idx`.
-    hs = cache.get_hidden_states(
-        layer_idx="all", num_samples=num_samples, per_sample=True,
-        replace_final_norm=True,
-    )
-    if not hs:
-        return None
-    if flag is not None:
-        # READ THE SUBSTITUTION FLAG BEFORE the post-norm call, which resets it.
-        # `get_hidden_states(replace_final_norm=False)` clears
-        # `_last_block_substituted`, so querying it afterwards made
-        # `_meta_last_entry_is_block_output` structurally always False on this
-        # route -- the split fix defeated its own provenance (independent Opus
-        # review, 2026-09-06).
-        flag["last_is_block"] = bool(
-            getattr(cache, "_last_block_substituted", False))
-        _pn = cache.get_hidden_states(
-            layer_idx="all", num_samples=num_samples, per_sample=True,
-            replace_final_norm=False)
-        if _pn:
-            flag["post_norm_last"] = _pn[max(_pn.keys())]
-        # (The stale re-read that used to sit here is gone: it ran AFTER the
-        # post-norm call and therefore always saw False.)
-        # Set ONLY on the path that actually returns cached states, so the
-        # caller's `_meta_schatten_source` cannot claim a cache it did not use.
-        flag["from_cache"] = True
-    return {li: chunks for li, chunks in hs.items() if chunks}
+def _mlp_down_projections(model):
+    """(block index, down-projection) for every block whose MLP is found.
+
+    The down-projection's INPUT is the MLP-internal activation (after the
+    activation function, before the projection back to the residual stream).
+    """
+    from ..common import get_layers
+    from ..interpretability.sparsity import _find_down_proj
+    out = []
+    for i, layer in enumerate(get_layers(model) or []):
+        mlp = getattr(layer, "mlp", None) or getattr(layer, "feed_forward", None)
+        dp = _find_down_proj(mlp) if mlp is not None else None
+        if dp is not None:
+            out.append((i, dp))
+    return out
 
 
 def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
-    """Fallback path (no cache) — run a forward per sample, asking HF
-    for ``hidden_states``. Mirrors matrix_entropy's fresh-collection
-    helper so the two share semantics."""
+    """One forward per text, full text up to ``max_length`` (None: the model's
+    context). Returns the residual profile (deepest entry the hooked raw
+    block) and, in ``flag``: HF's post-norm last entry, the per-layer Schatten
+    norms of the MLP-internal activations (reduced on the fly, so the (T,
+    d_ff) matrices are never stored), and the provenance counters."""
     device = next(model.parameters()).device
     per_layer: Dict[int, List[torch.Tensor]] = {}
-    # post-final-norm: BOTH. The per-layer PROFILE is hooked (homogeneous);
-    # `post_norm_last` keeps the untouched `ln_f` entry, which is what the
-    # released MNN reference measures -- see the note at `headline_idx`.
     post_norm_last: List[torch.Tensor] = []
+    mlp: Dict[int, Dict[str, List[float]]] = {}
     from ..common import get_layers as _gl
     _blocks = _gl(model)
-    _sink = {}
-    _hook = None
-    _n_fwd = 0
-    _n_sub = 0
+    _sink, _act = {}, {}
+    _hooks = []
+    _n_fwd = _n_sub = _n_trunc = _n_strip = 0
     if _blocks is not None and len(_blocks) > 0:
         def _cap_last(module, inputs, output):
-            _sink["h"] = (output[0] if isinstance(output, tuple)
-                          else output).detach()
-        _hook = _blocks[-1].register_forward_hook(_cap_last)
+            _sink["h"] = (output[0] if isinstance(output, tuple) else output).detach()
+        _hooks.append(_blocks[-1].register_forward_hook(_cap_last))
+    _down = _mlp_down_projections(model)
+    for _i, _dp in _down:
+        def _cap_mlp(module, args, _i=_i):
+            if args and isinstance(args[0], torch.Tensor):
+                _act[_i] = args[0].detach()
+        _hooks.append(_dp.register_forward_pre_hook(_cap_mlp))
+    _cfg = getattr(model, "config", None)
+    _cap = max_length if max_length is not None else getattr(_cfg, "max_position_embeddings", None)
     try:
         with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(
-                    text, return_tensors="pt",
-                    truncation=True, max_length=max_length,
-                )
-                # BatchEncoding objects have .to(); plain dicts need
-                # per-tensor movement.
-                if hasattr(inputs, "to") and callable(inputs.to):
-                    inputs = inputs.to(device)
+                if _cap is not None:
+                    inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                                       max_length=int(_cap))
+                    _full = tokenizer(text, return_tensors="pt")["input_ids"].shape[-1]
+                    _n_trunc += int(_full > int(_cap))
                 else:
-                    inputs = {k: (v.to(device) if hasattr(v, "to") else v)
-                              for k, v in inputs.items()}
-                # CLEAR the sink before every forward, and require the swap on
-                # EVERY forward. A conditional final block that skips one sample
-                # left a stale, same-shaped tensor behind, which was then
-                # substituted into the NEXT sample while `substituted` stayed true
-                # (adversarial review round 2, 2026-09-04).
+                    inputs = tokenizer(text, return_tensors="pt")
+                # Drop a tokenizer-appended EOS/SEP, as the shared cache does.
+                inputs, _k = strip_trailing_special(inputs, tokenizer)
+                _n_strip += _k
+                inputs = {k: (v.to(device) if hasattr(v, "to") else v)
+                          for k, v in inputs.items()}
+                # Clear both sinks before every forward, so a block that skips
+                # one sample cannot leave a stale tensor behind.
                 _sink.pop("h", None)
+                _act.clear()
                 out = model(**inputs, output_hidden_states=True)
-                # post-final-norm: SUBSTITUTED -- this route feeds a per-layer
-                # profile, and the cache route above already opts in, so both must.
                 hs = getattr(out, "hidden_states", None)
                 if not hs:
                     continue
@@ -331,115 +315,73 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
                     _n_sub += 1
                 for li, h in enumerate(hs[1:]):  # skip embedding
                     per_layer.setdefault(li, []).append(h[0].detach().float())
+                for li, A in _act.items():
+                    A = A.reshape(-1, A.shape[-1]).float()
+                    if A.shape[0] < 2:
+                        continue
+                    S = safe_svdvals(A).detach().cpu().numpy().astype(np.float64)
+                    acc = mlp.setdefault(li, {"schatten_1": [], "schatten_4": []})
+                    acc["schatten_1"].append(_schatten_p_norm(S, p=1))
+                    acc["schatten_4"].append(_schatten_p_norm(S, p=4))
     finally:
-        if _hook is not None:
-            _hook.remove()
+        for _h in _hooks:
+            _h.remove()
     if flag is not None:
         flag["last_is_block"] = bool(_n_fwd > 0 and _n_sub == _n_fwd)
         flag["post_norm_last"] = post_norm_last
+        flag["mlp"] = mlp
+        flag["n_mlp_layers_found"] = len(_down)
+        flag["max_length"] = _cap
+        flag["n_truncated"] = _n_trunc
+        flag["n_stripped"] = _n_strip
     return per_layer
 
 
 @register_task("geometry_schatten")
 class SchattenNormTask(DiagnosticTask):
-    """Per-layer Schatten-p norms + Matrix Nuclear-Norm + RankMe.
+    """Schatten-p norms (Yusupov et al. 2025), Matrix Nuclear-Norm (Li et al.
+    2024) and RankMe (Garrido et al. 2023) of per-text token matrices.
 
     Reports:
-      - ``row_normalized_schatten_1_last``, ``row_normalized_schatten_4_last``,
-        ``row_normalized_schatten_inf_last`` — last-layer values of each norm,
-        normalised by ``d^{1/p}`` so they're comparable across
-        d_model (BLME width-comparability convention — Yusupov et al. use the PLAIN norm on MLP-internal activations with no dimension normalization; attribution fixed, audit 2026-07-16). Schatten-2 is omitted
-        because it is content-free under row-L2 preprocessing
-        (``‖X‖_F = sqrt(T)`` for ``T`` unit-norm rows).
-      - ``row_normalized_matrix_nuclear_norm_last`` — fast L1,2 approximation,
-        also normalised by ``d``.
-      - ``rankme_last`` — raw-singular-value effective rank (Garrido
-        2023), matching our Roy-Vetterli ``effective_rank`` convention
-        in ``geometry_svd``.
-      - Per-layer lists (``*_per_layer``) so the aggregator can emit
-        mean/std/slope/q25/q50/q75 cross-model summaries.
-      - ``preprocessing`` metadata describing centre + row-L2 normalisation.
+      - ``schatten_1``, ``schatten_4`` — Yusupov et al.'s quantity: the
+        Schatten-p norm of each text's RAW MLP-internal activation matrix
+        (the down-projection input), averaged over all L layers, then over
+        texts. The residual-stream last-layer versions are
+        ``_meta_schatten_{1,4}_last`` / ``_meta_schatten_{1,4}_per_layer``.
+      - ``row_normalized_matrix_nuclear_norm_last`` — MNN / T on HF's
+        post-norm last entry, as the released MNN.py.
+      - ``rankme_last``, ``row_normalized_rankme_last``,
+        ``row_normalized_schatten_inf_last`` — residual post-norm last layer.
+      - Per-layer residual lists (``*_per_layer``); Schatten-2 is omitted
+        (content-free under row-L2 normalisation).
     """
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Schatten-p norms + MNN + RankMe...")
         num_samples = int(self.config.get("num_samples", 10))
-        use_cache = self.config.get("use_cache", True)
-        max_length = int(self.config.get("max_length", 128))
+        _ml = self.config.get("max_length", 128)
+        max_length = int(_ml) if _ml is not None else None
 
+        # The MLP-internal activations are not in the shared cache, so this
+        # task always runs its own forward (one per text) and reads the
+        # residual states from the same forward.
         _prov = {"last_is_block": False}
-        # THE SHARED CACHE IS REFUSED UNLESS ITS WINDOW MATCHES OURS.
-        #
-        # `defaults.yaml` sets `max_length: 128` for this task, but the shared
-        # cache tokenises at a HARD-CODED 512 (`cache.py:422`) and `core.py`
-        # hands the same cache to every task. `use_cache` is absent from this
-        # task's config, so the code default True fired and the declared 128
-        # was DEAD whenever any other task populated a hidden cache -- which is
-        # every run in the archive. The effect is not marginal:
-        #
-        #   gpt2      rankme_last                      54.762 -> 141.895  (+159.1%)
-        #   pythia-70m rankme_last                     30.394 ->  83.781  (+175.7%)
-        #   gpt2      schatten_1_last                20119.27 -> 46961.73 (+133.4%)
-        #   gpt2      row_normalized_matrix_nuclear...  0.578345 -> 0.712491 (+23.2%)
-        #
-        # and `results/blme_verified_a/*.json` shows
-        # `cache_num_samples_resolved = 200` with seven hidden-cached tasks, so
-        # EVERY ARCHIVED SCHATTEN NUMBER WAS COMPUTED AT 512 TOKENS, NOT 128 --
-        # with nothing in the output to say so (red-team review, 2026-09-05).
-        #
-        # Same discipline as `geometry_isoscore`: a task whose value depends on
-        # its window must not silently accept someone else's. The window
-        # actually used is emitted below.
-        # Read from the cache module rather than duplicated here: two
-        # hard-coded 512s coupled by nothing but a comment is how the original
-        # mismatch survived (independent Opus review, 2026-09-05).
-        from ...cache import CACHE_TOKENIZER_MAX_LENGTH as _CACHE_WINDOW
-        _cache_window_ok = (max_length == _CACHE_WINDOW)
-        if use_cache and cache is not None and getattr(cache, "is_populated", False) \
-                and not _cache_window_ok:
-            logger.info(
-                f"  schatten: shared cache tokenises at {_CACHE_WINDOW} but this "
-                f"task is configured for max_length={max_length}; self-collecting "
-                f"so the window is the one declared.")
-        per_layer = _collect_per_layer(
-            cache, num_samples, use_cache and _cache_window_ok, flag=_prov)
-        if per_layer is None:
-            if dataset is None:
-                from ...cache import load_default_corpus
-                dataset = load_default_corpus(num_samples)
-            samples = list(dataset)[:num_samples]
-            if not samples:
-                return {"error": "Need at least 1 sample"}
-            per_layer = _collect_per_layer_fresh(
-                model, tokenizer, samples, max_length, flag=_prov,
-            )
-
+        if dataset is None:
+            from ...cache import load_default_corpus
+            dataset = load_default_corpus(num_samples)
+        samples = list(dataset)[:num_samples]
+        if not samples:
+            return {"error": "Need at least 1 sample"}
+        per_layer = _collect_per_layer_fresh(model, tokenizer, samples, max_length,
+                                             flag=_prov)
         if not per_layer:
             return {"error": "Could not collect hidden states"}
 
         per_layer_profiles: Dict[str, List[float]] = {
-            # The undivided PAPER quantities. They were computed in
-            # `_per_sentence_measurements` but not listed here, so the loop
-            # discarded them and the fix never reached the output at all
-            # (adversarial review, 2026-09-03).
-            "schatten_1": [],
-            "schatten_4": [],
-            "row_normalized_schatten_1": [],
-            "row_normalized_schatten_4": [],
-            "row_normalized_schatten_inf": [],
-            "row_normalized_matrix_nuclear_norm": [],
-            "rankme": [],
-            # THE SAME OMISSION, TWICE. This dict is the ONLY thing the
-            # emission loop iterates, so a key computed in
-            # `_per_sentence_measurements` and missing here is discarded
-            # silently. That is exactly the note above -- and
-            # `row_normalized_rankme` was then added to the measurement
-            # function on 2026-09-05 without being added here, so it never
-            # reached the output and the ledger recorded it as fixed when it
-            # was not (independent Opus review, 2026-09-05).
-            "row_normalized_rankme": [],
-        }
-
+            k: [] for k in ("schatten_1", "schatten_4", "row_normalized_schatten_1",
+                            "row_normalized_schatten_4", "row_normalized_schatten_inf",
+                            "row_normalized_matrix_nuclear_norm", "rankme",
+                            "row_normalized_rankme")}
         for li in sorted(per_layer.keys()):
             per_sentence = {k: [] for k in per_layer_profiles}
             for Z in per_layer[li]:
@@ -450,31 +392,11 @@ class SchattenNormTask(DiagnosticTask):
                         per_sentence[k].append(v)
             for k in per_layer_profiles:
                 per_layer_profiles[k].append(
-                    float(np.mean(per_sentence[k])) if per_sentence[k] else float("nan")
-                )
+                    float(np.mean(per_sentence[k])) if per_sentence[k] else float("nan"))
 
         headline_idx = max(per_layer.keys())
-
-        # THE HEADLINE FOLLOWS THE RELEASED REFERENCE, WHICH READS POST-NORM.
-        #
-        # `MLGroupJLU/MatrixNuclearNorm`'s `code/MNN.py:184` is
-        #     R = model(token_ids)[0][0, :, :]
-        # with `model = AutoModel.from_pretrained(...)` (lines 116/118), i.e.
-        # `last_hidden_state` -- which is `hidden_states[-1] = ln_f(b_{L-1})`.
-        # That is the IDENTICAL recipe to Wei et al.'s Diff-eRank, and the same
-        # third clause applies: a per-layer profile must be homogeneous, a
-        # single-layer estimand may want post-norm, and THE RELEASED REFERENCE
-        # WINS. This is the fourth task to need it, after `matrix_entropy`,
-        # `contextualization` and `coe`.
-        #
-        # Flagged by an independent review on 2026-09-05 and confirmed here by
-        # cloning the repository and reading the line, rather than taken on
-        # report -- the previous three cost a RED and two YELLOWs because a
-        # blanket rule was applied without checking what each reference does.
-        #
-        # So the profile stays hooked and `*_last` is recomputed on the
-        # untouched post-norm entry. `_meta_schatten_headline_is_post_final_norm`
-        # records whether that actually happened.
+        # `*_last` follows the released MNN.py (MNN.py:184, last_hidden_state =
+        # HF's post-norm last entry); the per-layer profile stays hooked.
         _pn_tokens = _prov.get("post_norm_last") or []
         _pn_profile = {}
         if _pn_tokens:
@@ -489,33 +411,19 @@ class SchattenNormTask(DiagnosticTask):
                            for k, v in _acc.items()}
 
         result = {}
-        # The d-DIVIDED keys go to _meta_: the divisor INTRODUCES the width
-        # dependence it was meant to remove.
-        #
-        # A Schatten norm is isometry-invariant, so embedding the same cloud
-        # into higher d must not change it -- and the raw value is
-        # bit-identical (120.403159) across d = 16..4096, while
-        # `raw / d` falls by exactly x256 over the same range. On the 61-model
-        # archive that shows up as row_normalized_schatten_1_last vs d_model
-        # Spearman **-0.950** (p = 1.6e-31), against +0.289 for the undivided
-        # schatten_1 and +0.072 for schatten_4. The undivided keys are both the
-        # paper's quantity and the width-neutral one (adversarial review,
-        # 2026-09-04).
-        _D_DIVIDED = {"row_normalized_schatten_1", "row_normalized_schatten_4"}
-
-        def _pfx(name):
-            return "_meta_" if name in _D_DIVIDED else ""
+        # _meta_: the d^(1/p)-divided keys (the divisor manufactures a width
+        # dependence) and the residual-stream Schatten norms (Yusupov's
+        # quantity is on the MLP activations, below).
+        _META = {"row_normalized_schatten_1", "row_normalized_schatten_4",
+                 "schatten_1", "schatten_4"}
 
         for k, profile in per_layer_profiles.items():
-            _k = f"{_pfx(k)}{k}"
+            _k = f"{'_meta_' if k in _META else ''}{k}"
             finite = [v for v in profile if np.isfinite(v)]
             if not finite:
                 result[f"{_k}_last"] = float("nan")
                 result[f"{_k}_per_layer"] = profile
                 continue
-            # Headline = last layer, on the POST-NORM entry (see above). The
-            # per-layer profile beside it is the hooked, homogeneous one; the
-            # two are different tensors on purpose.
             if k in _pn_profile and np.isfinite(_pn_profile[k]):
                 last_val = _pn_profile[k]
             else:
@@ -523,24 +431,29 @@ class SchattenNormTask(DiagnosticTask):
             result[f"{_k}_last"] = float(last_val) if np.isfinite(last_val) else float("nan")
             result[f"{_k}_per_layer"] = profile
 
-        # DERIVED, not asserted. Hard-coding True made this flag lie on any
-        # architecture where get_layers() returns None: the hook never
-        # attaches, `*_last` silently reverts to the post-ln_f value (gpt2
-        # 35.19 vs 62.32, -43.5%; pythia-70m +18.7%, sign-flipped by family)
-        # while the flag still claimed a block output.
+        # Yusupov et al. 2025 Sec. 4.1: per text, the mean over all L layers
+        # of the Schatten-p norm of the MLP-internal activations; then the
+        # mean over texts.
+        mlp = _prov.get("mlp") or {}
+        for key in ("schatten_1", "schatten_4"):
+            layers_ok = sorted(li for li in mlp if mlp[li][key])
+            n_docs = min((len(mlp[li][key]) for li in layers_ok), default=0)
+            per_text = [float(np.mean([mlp[li][key][j] for li in layers_ok]))
+                        for j in range(n_docs)]
+            result[key] = float(np.mean(per_text)) if per_text else float("nan")
+            result[f"_meta_{key}_mlp_per_layer"] = [
+                float(np.mean(mlp[li][key])) if li in mlp and mlp[li][key] else float("nan")
+                for li in sorted(per_layer.keys())]
+
         result["_meta_last_entry_is_block_output"] = bool(_prov.get("last_is_block"))
-        # THE WINDOW ACTUALLY USED, and where the states came from. Neither
-        # was emitted, which is why an entire archived sweep ran at 512 tokens
-        # under a config that says 128 with nothing to reveal it.
         result["_meta_schatten_headline_is_post_final_norm"] = bool(_pn_profile)
-        result["_meta_schatten_max_length"] = int(max_length)
-        # DERIVED from what `_collect_per_layer` actually returned, not from
-        # the request. With a LOGITS-ONLY cache (`need_hidden=False`) the task
-        # self-collects but the request-shaped test still said "shared_cache"
-        # (independent Opus review, 2026-09-05). Same discipline as
-        # `_meta_last_entry_is_block_output`.
-        result["_meta_schatten_source"] = (
-            "shared_cache" if _prov.get("from_cache") else "self_collected")
+        result["_meta_schatten_max_length"] = (int(_prov["max_length"])
+                                               if _prov.get("max_length") is not None
+                                               else -1)
+        result["_meta_schatten_n_docs_truncated"] = int(_prov.get("n_truncated", 0))
+        result["_meta_schatten_mlp_layers_found"] = int(_prov.get("n_mlp_layers_found", 0))
+        result["_meta_n_trailing_special_stripped"] = int(_prov.get("n_stripped", 0))
+        result["_meta_schatten_source"] = "self_collected"
         result["preprocessing"] = "center_columns_then_row_l2_normalize"
         result["schatten_2_excluded_reason"] = (
             "content_free_under_row_l2_normalization"
