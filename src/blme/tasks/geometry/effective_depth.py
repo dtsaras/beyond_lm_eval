@@ -29,6 +29,7 @@ orthogonal-rotation layer -> BI = 1; a sign-flip layer -> BI = 2.
 """
 
 import logging
+import math
 from typing import List
 
 import numpy as np
@@ -106,7 +107,30 @@ def _depth_profile(layer_states: List[torch.Tensor]) -> dict:
 
 @register_task("geometry_effective_depth")
 class EffectiveDepthTask(DiagnosticTask):
-    """Block-Influence profile + effective-depth ratio (forward pass only)."""
+    """Block-Influence profile + effective-depth ratio (forward pass only).
+
+    ``effective_depth_90`` is a CAPACITY RATIO: the fraction of nominal depth
+    (k90 / L) that carries 90% of the summed relative contributions. Appending
+    identity blocks lowers it by design, and it is already divided by L, so it
+    must not be divided by L again.
+    """
+
+    TOKEN_POLICY = ("paper_protocol:ShortGPT2024+Csordas2025 every token of each sample, "
+                    "position 0 included")
+    SOURCES = {
+        "paper": "arXiv:2403.03853; arXiv:2505.13898",
+        "code": ("robertcsordas/llm_effective_depth@393e5c740e2a46d8b06d60129b1a3fb4b581a01a; "
+                 "RitAreaSciencePark/ZigZagLLMs@2d10c07 (short-transformers BI)"),
+        "llm_precedent": "arXiv:2403.03853 and arXiv:2505.13898 (proposed for LLMs)",
+    }
+    HEADLINE_KEYS = ("effective_depth_90", "total_block_influence", "max_block_influence")
+    _INV = "tests/tasks/invariance/test_geometry_effective_depth.py::"
+    SIZE_INVARIANT = {
+        "total_block_influence": (("insert_identity_blocks",),
+                                  _INV + "test_depth_additive_keys_under_identity_blocks"),
+        "max_block_influence": (("insert_identity_blocks",),
+                                _INV + "test_depth_additive_keys_under_identity_blocks"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Effective Depth / Block Influence...")
@@ -168,4 +192,11 @@ class EffectiveDepthTask(DiagnosticTask):
         if not results:
             return {"error": "Depth profile could not be computed"}
         results["_meta_n_layers_profiled"] = len(layer_states) - 1
+        # Depth-additive twin: an identity block has BI = 0, so the sum over
+        # blocks is unchanged by inserting one, while the mean is diluted as
+        # L0 / L and the minimum and the BI < 0.05 fraction count the inserted
+        # blocks (P4): those three are _meta_.
+        results["total_block_influence"] = float(math.fsum(results["block_influence_per_layer"]))
+        for k in ("mean_block_influence", "min_block_influence", "frac_low_influence"):
+            results[f"_meta_{k}"] = results.pop(k)
         return results
