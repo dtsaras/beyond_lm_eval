@@ -58,7 +58,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task, select_rows
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 
 logger = logging.getLogger("blme")
 
@@ -453,6 +454,8 @@ class MPBulkDeviationTask(DiagnosticTask):
     ``mp_gamma_*`` / ``mp_n_tokens_*`` / ``mp_dropped_dims_*`` metadata.
     """
 
+    TOKEN_POLICY = "exclude_sinks"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Marchenko-Pastur Bulk Deviation Analysis...")
 
@@ -478,8 +481,21 @@ class MPBulkDeviationTask(DiagnosticTask):
                 model, tokenizer, dataset, None, num_samples=num_samples,
                 layer_idx="all", use_cache=False, replace_final_norm=True,
                 per_sample=True)
-        layer_activations = ({li: select_rows(per_doc[li], "all")[0] for li in per_doc}
-                             if per_doc else None)
+        # TOKEN_POLICY: an iid-row null on a pooled cloud, so position 0 and
+        # massive rows (Sun et al. 2024) are dropped with one mask from the
+        # middle depths, the same rows at every layer.
+        layer_activations, _diag = None, {}
+        if per_doc:
+            _keep, _sink_info = sink_keep_masks(
+                [per_doc[k] for k in middle_depth_layers(per_doc)])
+            layer_activations, _rows_meta = {}, None
+            for li in per_doc:
+                layer_activations[li], _rows_meta = select_rows(
+                    per_doc[li], self.TOKEN_POLICY, keep=_keep)
+            _mid_docs = per_doc[sorted(per_doc)[len(per_doc) // 2]]
+            _diag = {**sink_meta(_sink_info), **_rows_meta.as_meta(),
+                     "_meta_massive_token_share": massive_token_share(_mid_docs),
+                     "_meta_position0_share": position0_share(_mid_docs)}
 
         if not layer_activations:
             return {"error": "No hidden states available for MP analysis"}
@@ -542,4 +558,5 @@ class MPBulkDeviationTask(DiagnosticTask):
                 float(np.mean(finite)) if finite.size else float("nan")
             )
         results["_meta_mp_edge_tol"] = float(edge_tol)
+        results.update(_diag)
         return results
