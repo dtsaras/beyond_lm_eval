@@ -135,7 +135,7 @@ class PositionalAttentionDecayTask(DiagnosticTask):
     TOKEN_POLICY = "exclude_pos0"
     SOURCES = {
         "paper": "arXiv:2104.09864 (RoFormer: the decay premise; no statistic of trained attention)",
-        "code": "",
+        "code": None,
         "llm_precedent": ("arXiv:2004.10102 (Kobayashi et al. 2020: weigh attention by the norm "
                           "of what a head writes); arXiv:2309.17453 (attention sinks)"),
     }

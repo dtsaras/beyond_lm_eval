@@ -87,7 +87,7 @@ class RepresentationSensitivityTask(DiagnosticTask):
     TOKEN_POLICY = "not_token_based"
     SOURCES = {
         "paper": "DOI:10.1162/089976698300017746",
-        "code": "",
+        "code": None,
         "llm_precedent": "none found; the softmax score identity is elementary (Amari 1998)",
     }
     ADAPTATION_NOTE = (

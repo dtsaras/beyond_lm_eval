@@ -75,7 +75,7 @@ class TokenizerEfficiencyTask(DiagnosticTask):
     TOKEN_POLICY = "not_token_based"
     SOURCES = {
         "paper": "arXiv:2012.15613",
-        "code": "",
+        "code": None,
         "llm_precedent": ("Dagan et al. 2024 arXiv:2402.01035 (bytes per token, NSL); "
                           "Zouhar et al. 2023 arXiv:2306.16842 (token entropy); "
                           "Ali et al. 2024 arXiv:2310.08754"),
