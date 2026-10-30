@@ -50,7 +50,10 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
     """
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Unembedding Diagnostics...")
-        n_sample = self.config.get("num_samples", 2000)
+        # Purity query cap, decoupled from the harness-wide num_samples (a
+        # 24-document run used to subsample the queries to 24). None = every
+        # labelled token.
+        n_sample = self.config.get("purity_num_queries", None)
         k = self.config.get("k", 20)
         categories_path = self.config.get("categories_path", None)
         
@@ -111,6 +114,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
 
         cat_labels: dict[int, str] = {}
         purity_mean = float("nan")
+        n_queries = 0
         n_category_tokens = 0
         if (
             categories_path and os.path.exists(categories_path)
@@ -152,6 +156,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                         )
                         scores.append(match_count / k)
 
+                    n_queries = len(scores)
                     if scores:
                         purity_mean = float(np.mean(scores))
             except Exception as e:
@@ -193,6 +198,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             # _meta_: the task itself flags purity as not comparable across
             # models (which words map to single tokens is a tokenizer property).
             "_meta_unembedding_purity_mean": float(purity_mean),
+            "_meta_purity_n_queries": int(n_queries),
             # A tokenizer property (single-token category words), not geometry.
             "_meta_unembedding_n_category_tokens": int(n_category_tokens),
             # Describes the purity field only.

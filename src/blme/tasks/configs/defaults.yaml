@@ -89,7 +89,9 @@ geometry_cka:
   num_samples: 100
 
 geometry_unembedding:
-  num_samples: 2000
+  # Purity queries (category tokens); null = all of them. Not num_samples,
+  # which the harness sets for every task.
+  purity_num_queries: null
   k: 20
   categories_path: null
 
