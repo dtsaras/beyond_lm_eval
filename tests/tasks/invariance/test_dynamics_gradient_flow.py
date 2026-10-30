@@ -96,14 +96,66 @@ def test_profile_summaries_move_under_identity_blocks_and_are_meta():
         assert k not in base and f"_meta_{k}" in base, k
 
 
-def test_norms_exclude_position0():
-    """The per-layer token pool drops position 0; the loss and the inclusive
-    profile (as _meta_) keep it."""
+def test_norms_exclude_sink_rows():
+    """The per-layer token pool drops position 0 and the massive rows; the
+    loss and the inclusive profile (as _meta_) keep them."""
     tok = tokenizer()
     out = _run(tiny_gpt2(), tok)
     n_tokens = sum(len(tok(d["text"])["input_ids"]) for d in dataset()[:CFG["num_samples"]])
-    assert GradientFlowTask.TOKEN_POLICY == "exclude_pos0"
-    assert out["_meta_rows_n_rows"] == n_tokens - CFG["num_samples"]
+    assert GradientFlowTask.TOKEN_POLICY == "exclude_sinks"
+    assert out["_meta_rows_policy"] == "exclude_sinks"
+    assert out["_meta_rows_n_rows"] == (n_tokens - CFG["num_samples"]
+                                        - out["_meta_sink_n_massive_dropped"])
     excl = out["gradient_norm_per_layer"]
     incl = out["_meta_gradient_norm_per_layer_incl_pos0"]
     assert all(e < i for e, i in zip(excl, incl))
+
+
+@pytest.fixture(scope="module")
+def gpt2():
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    try:
+        tok = AutoTokenizer.from_pretrained("gpt2")
+        model = AutoModelForCausalLM.from_pretrained(
+            "gpt2", attn_implementation="eager", dtype=torch.float32).eval()
+    except OSError as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"gpt2 not cached: {e}")
+    return model, tok
+
+
+def _run_policy(model, tok, monkeypatch, policy=None, hook=None):
+    from _sinks import massive_row_hook
+    from blme.tasks.common import get_layers
+    with monkeypatch.context() as m:
+        if policy is not None:
+            m.setattr(GradientFlowTask, "TOKEN_POLICY", policy)
+        if hook is None:
+            return _run(model, tok)
+        with massive_row_hook(model, len(get_layers(model)) // 2, *hook):
+            return _run(model, tok)
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_point(gpt2, monkeypatch):
+    """gpt2 with a first-period-style sink: block L/2's output at position 3 of
+    every passage x1000 in every forward (the mask pass and the backward
+    passes alike). exclude_pos0 keeps the sink token's gradient at every point
+    and its end-to-end log ratio moves 2.835 -> 3.033; exclude_sinks drops that
+    token at every point (one mask, from the middle depths) and moves a fifth
+    as much -- what is left is the sink's effect on the other tokens through
+    attention. With no massive row the two policies agree bit for bit."""
+    model, tok = gpt2
+    key = "gradient_flow_log_ratio_in_out"
+    new, old = _run_policy(model, tok, monkeypatch), _run_policy(model, tok, monkeypatch,
+                                                                  "exclude_pos0")
+    assert new["_meta_sink_n_massive_dropped"] == 0
+    inv.assert_invariant(old, new, [key, "gradient_norm_per_layer"], rtol=0.0)
+    new_inj = _run_policy(model, tok, monkeypatch, hook=(3, 1000.0))
+    old_inj = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(3, 1000.0))
+    assert new_inj["_meta_sink_n_massive_dropped"] == CFG["num_samples"]
+    assert new_inj["_meta_massive_token_share"] > 0.5 > new["_meta_massive_token_share"]
+    # One mask for every point: the token is gone from every pool.
+    assert new_inj["_meta_rows_n_rows"] == old_inj["_meta_rows_n_rows"] - CFG["num_samples"]
+    d_old = abs(old_inj[key] - old[key])
+    d_new = abs(new_inj[key] - new[key])
+    assert d_old > 0.1, d_old
+    assert d_new < 0.5 * d_old, (d_new, d_old)

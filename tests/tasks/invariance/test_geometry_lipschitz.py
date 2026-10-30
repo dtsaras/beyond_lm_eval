@@ -60,8 +60,34 @@ def test_position0_is_excluded(states):
                         "embedding_relative_change") if k in base]
     assert len(keys) >= 2
     inv.assert_invariant(base, sunk, keys, rtol=0.0)
-    assert base["_meta_rows_policy"] == "exclude_pos0"
+    assert base["_meta_rows_policy"] == "exclude_sinks"
     inv.assert_moves(base, sunk, "_meta_relative_change_mean_incl_pos0", min_rel=1e-3)
+
+
+@pytest.fixture(scope="module")
+def gpt2_states():
+    try:
+        tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            "gpt2", dtype=torch.float32).eval()
+    except OSError as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"gpt2 not cached: {e}")
+    return inv.states_from_model(model, tok, TEXTS)
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2_states, monkeypatch):
+    """A first-period-style sink (row 3 of every document x1000 at one middle
+    block only, the one the shares are read on) dominates two per-update means
+    and moves exclude_pos0's relative_change_max; exclude_sinks drops that
+    token at every layer, embedding included, giving the row-deleted corpus's
+    value bit for bit, and with no massive row it equals exclude_pos0 exactly."""
+    from _sinks import check_state_task
+    from blme.tasks.geometry.lipschitz import LipschitzContinuityTask
+    # Entry n // 2 of [embedding, block 0, ..., block L-1] is block (L+1)//2 - 1.
+    block = (gpt2_states.n_layers + 1) // 2 - 1
+    check_state_task(TASK, LipschitzContinuityTask, gpt2_states, monkeypatch,
+                     "relative_change_max", block=block,
+                     keys=list(LipschitzContinuityTask.HEADLINE_KEYS))
 
 
 def test_embedding_transition_is_reported_separately(states):

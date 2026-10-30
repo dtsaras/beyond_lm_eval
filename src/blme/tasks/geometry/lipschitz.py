@@ -8,13 +8,15 @@ is reported on its own (it reads the embedding-scale convention, and it was
 the maximum on every model measured). This is not an operator
 Lipschitz constant (Scaman & Virmaux 2018 bound Jacobian norms); it measures
 how much each block rewrites the residual stream relative to its size.
-Position 0 is excluded (``TOKEN_POLICY``): the attention-sink transition
-dominates single layers.
+Sink rows are excluded (``TOKEN_POLICY``): position 0 and every
+massive-activation token, one mask from the middle depths for every layer --
+the attention-sink transition dominates single layers.
 """
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import hidden_states_for_task, massive_token_share, position0_share, select_rows
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 from ..common import get_num_layers
 from .utils import as_numpy
 import numpy as np
@@ -102,14 +104,14 @@ def _depth_additive(rows, block_indices):
 class LipschitzContinuityTask(DiagnosticTask):
     """Relative layer-wise change ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||.
 
-    The per-update value is the mean over tokens (position 0 excluded);
+    The per-update value is the mean over tokens (sink rows excluded);
     ``relative_change_max`` is the maximum of those per-update means over the
     block-to-block updates, and ``embedding_relative_change`` is the
     embedding -> block 0 update. The deepest entry is the hooked raw block output (the post-ln_f
     entry is trimmed when the hook does not fire).
     """
 
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:1805.10965",
         "code": "avirmaux/lipEstimation@336b6ccfecec6d965fda1798da8f9e204998766b",
@@ -123,8 +125,9 @@ class LipschitzContinuityTask(DiagnosticTask):
         "BLME construct, not a Lipschitz estimate: Scaman and Virmaux bound Jacobian "
         "operator norms, which needs per-layer power iterations and is not defined on "
         "observed token states. ShortGPT's 1 - cos and Gromov et al.'s angular distance "
-        "are scale-free like this ratio but ignore the norm growth it captures. Position 0 "
-        "is excluded because the attention-sink transition dominates single layers, and "
+        "are scale-free like this ratio but ignore the norm growth it captures. Sink rows "
+        "(position 0 and massive-activation tokens) are excluded at every layer because "
+        "the attention-sink transition dominates single layers, and "
         "the embedding -> block 0 update is reported on its own because it reads the "
         "embedding-scale convention. Since any uniform mean over blocks falls as L/(L+n) "
         "under n inserted identity blocks, the headlines are the depth-additive "
@@ -184,17 +187,21 @@ class LipschitzContinuityTask(DiagnosticTask):
         if n_layers < 2:
             return {"error": "Need at least 2 layers for Lipschitz analysis"}
 
-        # Rows under the token policy (the same rows at every layer), and every
-        # row for the inclusive provenance value.
+        block_indices = layer_indices[1:] if has_embedding else layer_indices
+        # Rows under the token policy, and every row for the inclusive
+        # provenance value. The sink mask comes from the middle depths of the
+        # block outputs (the embedding is not a depth, so the mask matches the
+        # cross-layer tasks') and applies at every layer, embedding included.
         # The class policy goes to select_rows as is (an unknown name raises),
         # so a central policy change reaches this task.
         policy = self.TOKEN_POLICY
+        _keys = middle_depth_layers({k: all_layers[k] for k in block_indices})
+        masks, sink_info = sink_keep_masks([all_layers[k] for k in _keys])
         rows, row_meta = {}, None
         for k in layer_indices:
-            rows[k], row_meta = select_rows(all_layers[k], policy)
+            rows[k], row_meta = select_rows(all_layers[k], policy, keep=masks)
         every = {k: select_rows(all_layers[k], "all")[0] for k in layer_indices}
 
-        block_indices = layer_indices[1:] if has_embedding else layer_indices
         if len(block_indices) < 2:
             return {"error": "Need at least 2 block outputs for Lipschitz analysis"}
         lipschitz_means, contraction_rates, _paper_eps_mean = _transitions(rows, block_indices)
@@ -269,4 +276,5 @@ class LipschitzContinuityTask(DiagnosticTask):
             **row_meta.as_meta(),
             "_meta_position0_share": position0_share(mid),
             "_meta_massive_token_share": massive_token_share(mid),
+            **sink_meta(sink_info),
         }

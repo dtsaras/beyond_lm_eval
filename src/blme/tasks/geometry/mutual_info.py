@@ -1,7 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .._tokens import (hidden_states_for_task, massive_token_share,
-                       position0_share, select_rows)
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 from .utils import collected_layer_count
 import torch
 import numpy as np
@@ -86,11 +86,12 @@ class HSICDependenceTask(DiagnosticTask):
 
     The anchor ("input") is the first block's output: the layer set comes from
     the cache, which does not include the embedding output hs[0]. Rows follow
-    ``TOKEN_POLICY``: position 0 is dropped (Kornblith App. F.1 drops special
-    tokens; the sink otherwise dominates every Gram matrix,
-    tests/tasks/invariance/test_hsic.py).
+    ``TOKEN_POLICY``: position 0 and the massive-activation rows are dropped,
+    one mask per token from the middle depths shared by every layer (Kornblith
+    App. F.1 drops special tokens; sink rows otherwise dominate every Gram
+    matrix, tests/tasks/invariance/test_hsic.py).
     """
-    TOKEN_POLICY = "exclude_pos0"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "DOI:10.1007/11564089_7 (Gretton et al. 2005); arXiv:1905.00414 "
                  "(Kornblith et al. 2019, the CKA normalisation)",
@@ -152,13 +153,18 @@ class HSICDependenceTask(DiagnosticTask):
             rng.manual_seed(seed)
             return torch.randperm(n_rows, generator=rng)[:max_tokens]
 
+        # One keep mask per token from the middle depths of the analysed
+        # layers, used at every layer (tests/tasks/invariance/test_hsic.py).
+        _keys = middle_depth_layers({k: per_doc[k] for k in layers})
+        masks, _sink_info = sink_keep_masks([per_doc[k] for k in _keys])
+
         def _gram(idx, policy, perm):
-            X = select_rows(per_doc[idx], policy)[0].float()
+            X = select_rows(per_doc[idx], policy, keep=masks)[0].float()
             if perm is not None:
                 X = X[perm]
             return _centered_linear_gram(X).cpu()
 
-        _rows0, _rows_meta = select_rows(per_doc[layers[0]], self.TOKEN_POLICY)
+        _rows0, _rows_meta = select_rows(per_doc[layers[0]], self.TOKEN_POLICY, keep=masks)
         shared_perm = _shared_perm(int(_rows0.shape[0]))
         del _rows0
 
@@ -251,6 +257,7 @@ class HSICDependenceTask(DiagnosticTask):
             "_meta_incl_pos0_hsic_compression_ratio": float(_incl_ratio),
             "_meta_incl_pos0_hsic_compression_ratio_raw": float(_incl_raw),
             "_meta_n_tokens_used": int(gram_matrices[layers[0]].shape[0]),
+            **sink_meta(_sink_info),
         }
         out.update(_rows_meta.as_meta())
         return out

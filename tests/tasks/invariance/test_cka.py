@@ -49,8 +49,20 @@ def test_position0_and_massive_shares_are_derived(tiny_states, gpt2_states):
     sunk = inv.run_task_on_states(TASK, scale_position0(tiny_states, 1e3))
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
     inv.assert_moves(base, sunk, "_meta_incl_pos0_early_late_cka", 1e-3)
-    assert base["_meta_rows_policy"] == "exclude_pos0"
-    assert base["_meta_rows_n_rows"] == sum(tiny_states.lengths) - tiny_states.n_docs
+    # exclude_sinks keeps every row but position 0 and the massive ones.
+    assert base["_meta_rows_policy"] == "exclude_sinks"
+    assert base["_meta_rows_n_rows"] == (sum(tiny_states.lengths) - tiny_states.n_docs
+                                         - base["_meta_sink_n_massive_dropped"])
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2_states, monkeypatch):
+    """A first-period-style sink (row 3 of every document x1000 at block L/2
+    only) moves exclude_pos0's adjacent minimum; exclude_sinks drops that token
+    at every layer, giving the row-deleted corpus's value bit for bit, and with
+    no massive row it equals exclude_pos0 exactly."""
+    from _sinks import check_state_task
+    check_state_task(TASK, CKATask, gpt2_states, monkeypatch, "min_adjacent_cka",
+                     keys=list(CKATask.HEADLINE_KEYS))
 
 
 def test_max_offdiag_duplicate_is_not_emitted(tiny_states):
@@ -148,6 +160,6 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_state
 
 
 def test_declarations():
-    assert CKATask.TOKEN_POLICY == "exclude_pos0"
+    assert CKATask.TOKEN_POLICY == "exclude_sinks"
     assert set(CKATask.SIZE_INVARIANT) <= set(CKATask.HEADLINE_KEYS)
     assert {"paper", "code", "llm_precedent"} <= set(CKATask.SOURCES)

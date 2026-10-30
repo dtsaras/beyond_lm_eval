@@ -33,7 +33,9 @@ Reported metrics:
 Implementation: registers forward pre-hooks on each transformer block to
 capture the residual-stream input, calls `.retain_grad()`, then
 backpropagates the shifted next-token cross-entropy loss (result key
-``loss: 'cross_entropy'``).
+``loss: 'cross_entropy'``). The token pool of every norm drops the sink rows
+(position 0 and massive-activation tokens): one mask per token, from a no-grad
+pass over the same passages before the backward passes, used at every point.
 """
 
 import contextlib
@@ -47,7 +49,8 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._precision import effective_dtype_meta, fp32_compute
-from .._tokens import select_rows
+from .._sink_norms import SinkNormCollector
+from .._tokens import massive_token_share, position0_share, select_rows, sink_meta
 from ..common import get_final_norm, get_layers
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -58,9 +61,10 @@ logger = logging.getLogger("blme")
 class GradientFlowTask(DiagnosticTask):
     """Per-layer gradient norm profile."""
 
-    # The per-layer Frobenius norm pools over tokens; position 0 is dropped from
-    # that pool (non-LLM origin), the loss keeps every position.
-    TOKEN_POLICY = "exclude_pos0"
+    # The per-layer Frobenius norm pools over tokens; the sink rows (position 0
+    # and massive-activation tokens) are dropped from that pool (non-LLM
+    # origin), the loss keeps every position.
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:1211.5063",
         "code": None,
@@ -71,7 +75,7 @@ class GradientFlowTask(DiagnosticTask):
         "Pascanu et al. (2013) study how the training-loss gradient shrinks or grows as it "
         "is propagated back through time in an RNN; BLME maps time to depth. It "
         "backpropagates the model's own next-token cross-entropy on held-out text and "
-        "records ||dL/dh||_F, over every position but the first, at the input of every "
+        "records ||dL/dh||_F, over every position but the sink rows, at the input of every "
         "block and at the final residual (the input of the final norm). Activation "
         "gradients are used instead of the parameter-gradient norms of Xiong et al. (2020), "
         "because they are defined for a frozen pretrained model and do not depend on block "
@@ -125,21 +129,37 @@ class GradientFlowTask(DiagnosticTask):
         all_norms_incl = []
         n_rows = 0
 
+        encodings = []
+        for i, sample in enumerate(dataset):
+            if i >= num_samples:
+                break
+            text = sample["text"] if isinstance(sample, dict) else str(sample)
+            enc = tokenizer(text, return_tensors="pt",
+                            truncation=True, max_length=64).to(device)
+            if enc["input_ids"].shape[1] < 2:
+                continue
+            encodings.append(enc)
+
         # fp32 arithmetic on a bf16/fp16 model, at every size: bf16 forward and
         # backward double the slope on pythia-160m even with fp32 logits
         # (tests/tasks/invariance/test_dynamics_gradient_flow.py).
         _stack = contextlib.ExitStack()
         try:
             _prec = _stack.enter_context(fp32_compute(model))
-            for i, sample in enumerate(dataset):
-                if i >= num_samples:
-                    break
-                text = sample["text"] if isinstance(sample, dict) else str(sample)
-                enc = tokenizer(text, return_tensors="pt",
-                                truncation=True, max_length=64).to(device)
-                if enc["input_ids"].shape[1] < 2:
-                    continue
+            # The sink threshold is a median over every passage, so the masks
+            # come from a no-grad pass over all of them first, in the same
+            # arithmetic as the backward passes; the same mask then applies at
+            # every profile point (tests/tasks/invariance/
+            # test_dynamics_gradient_flow.py).
+            # post-final-norm: unused. The mask reads the middle depths only
+            # (0.1L-0.9L); HF's post-norm last entry is never one of them.
+            _sinks = SinkNormCollector()
+            with torch.no_grad():
+                for enc in encodings:
+                    _sinks.add(model(**enc, output_hidden_states=True).hidden_states[1:])
+            masks, sink_info = _sinks.masks()
 
+            for d, enc in enumerate(encodings):
                 captured: Dict[int, torch.Tensor] = {}
 
                 def make_hook(li):
@@ -193,7 +213,8 @@ class GradientFlowTask(DiagnosticTask):
                         g = captured[li].grad.detach().float()
                         # Scale-exact norm: `.norm()` underflows long before the data.
                         norms_incl[li] = _safe_norm(g)
-                        rows, row_meta = select_rows([g[0]], self.TOKEN_POLICY)
+                        rows, row_meta = select_rows([g[0]], self.TOKEN_POLICY,
+                                                     keep=[masks[d]])
                         norms[li] = _safe_norm(rows)
                 all_norms.append(norms)
                 all_norms_incl.append(norms_incl)
@@ -272,6 +293,9 @@ class GradientFlowTask(DiagnosticTask):
             "_meta_gradient_norm_per_layer_incl_pos0": mean_norms_incl.tolist(),
             "_meta_rows_policy": self.TOKEN_POLICY,
             "_meta_rows_n_rows": int(n_rows),
+            **sink_meta(sink_info),
+            "_meta_position0_share": position0_share(_sinks.mid_docs),
+            "_meta_massive_token_share": massive_token_share(_sinks.mid_docs),
             "_meta_final_endpoint": _endpoint[0],
             "_meta_n_profile_points": n_points,
             "_meta_gradient_norm_mean": float(mean_norms.mean()),

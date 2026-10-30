@@ -35,7 +35,8 @@ import torch
 
 from ...registry import register_task
 from .._precision import effective_dtype_meta, fp32_compute
-from .._tokens import select_rows
+from .._tokens import (massive_token_share, middle_depth_layers, position0_share,
+                       select_rows, sink_keep_masks, sink_meta)
 from ..geometry.utils import block_output_count, safe_unit_rows_torch
 from ...tasks.base import DiagnosticTask
 
@@ -79,9 +80,10 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
 class PerturbationGrowthTask(DiagnosticTask):
     """Seeded input-embedding perturbation; per-layer divergence growth."""
 
-    # The token mean of the divergence drops position 0 (a non-LLM
-    # dynamical-systems construct); the inclusive value is _meta_.
-    TOKEN_POLICY = "exclude_pos0"
+    # The token mean of the divergence drops the sink rows -- position 0 and
+    # massive-activation tokens (a non-LLM dynamical-systems construct); the
+    # inclusive value is _meta_.
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:2503.13530",
         "code": None,
@@ -92,7 +94,7 @@ class PerturbationGrowthTask(DiagnosticTask):
         "The quasi-Lyapunov exponent of Li et al. (2025) perturbs one element of one "
         "intermediate-layer row and tracks per-position divergence. BLME instead perturbs "
         "every input embedding by a seeded isotropic direction of norm rel_eps * ||e_t|| "
-        "and tracks the token-mean divergence (position 0 excluded) through every block, "
+        "and tracks the token-mean divergence (sink rows excluded) through every block, "
         "which costs two forward passes per passage; per-element QLE would need d x T x L "
         "passes and Jacobian spectra are infeasible at 34B. The headline is the end-to-end "
         "amplification growth_log_ratio = log(d_L / d_0), which identity-block insertion "
@@ -219,12 +221,20 @@ class PerturbationGrowthTask(DiagnosticTask):
         if not n_used:
             return {"error": "No usable samples for perturbation growth"}
 
-        # The same rows are selected from the clean and perturbed states of each
-        # document, so the divergence is taken row by row as before.
+        # One keep mask per token from the middle depths of the CLEAN block
+        # outputs (entry 0 is the embedding), applied to the clean and the
+        # perturbed states at every entry: the divergence is taken row by row
+        # on the same tokens throughout (tests/tasks/invariance/
+        # test_dynamics_perturbation_growth.py).
         policy = self.TOKEN_POLICY
-        clean_layers = [select_rows(c, policy)[0] for c in clean_acc]
-        pert_layers = [select_rows(c, policy)[0] for c in pert_acc]
-        row_meta = select_rows(clean_acc[0], policy)[1]
+        _blocks_seen = list(range(1, len(clean_acc)))
+        if not _blocks_seen:
+            return {"error": "Degenerate divergence profile"}
+        _keys = middle_depth_layers({k: clean_acc[k] for k in _blocks_seen})
+        masks, sink_info = sink_keep_masks([clean_acc[k] for k in _keys])
+        clean_layers = [select_rows(c, policy, keep=masks)[0] for c in clean_acc]
+        pert_layers = [select_rows(c, policy, keep=masks)[0] for c in pert_acc]
+        row_meta = select_rows(clean_acc[0], policy, keep=masks)[1]
         results = _growth_profile(clean_layers, pert_layers)
         if not results:
             return {"error": "Degenerate divergence profile"}
@@ -233,6 +243,10 @@ class PerturbationGrowthTask(DiagnosticTask):
         results["_meta_growth_log_ratio_incl_pos0"] = incl.get(
             "growth_log_ratio", float("nan"))
         results.update(row_meta.as_meta())
+        results.update(sink_meta(sink_info))
+        _mid = clean_acc[_blocks_seen[len(_blocks_seen) // 2]]
+        results["_meta_position0_share"] = position0_share(_mid)
+        results["_meta_massive_token_share"] = massive_token_share(_mid)
         results["rel_eps"] = rel_eps
         _rz = float(np.mean(_realized)) if _realized else float("nan")
         results["_meta_realized_rel_eps"] = _rz

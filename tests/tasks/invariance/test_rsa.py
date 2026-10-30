@@ -33,7 +33,26 @@ def test_headline_ignores_position0_rows(tiny_states):
     assert keys
     inv.assert_invariant(base, sunk, keys, rtol=1e-9)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
-    assert base["_meta_rows_policy"] == "exclude_pos0"
+    assert base["_meta_rows_policy"] == "exclude_sinks"
+
+
+@pytest.fixture(scope="module")
+def gpt2_states():
+    return inv.states_from_model(*load("gpt2"), TEXTS[:6])
+
+
+def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2_states, monkeypatch):
+    """A first-period-style sink at block L/2 only: row 3 of every document
+    gains 1000 x its norm on one coordinate (a massive activation; a pure
+    rescale is invisible to correlation distance). It moves exclude_pos0's
+    adjacent minimum; exclude_sinks drops that token from every RDM, giving the
+    row-deleted corpus's value bit for bit, and with no massive row it equals
+    exclude_pos0 exactly."""
+    from _sinks import check_state_task
+    from blme.tasks.geometry.rsa import RepresentationalSimilarityTask
+    check_state_task(TASK, RepresentationalSimilarityTask, gpt2_states, monkeypatch,
+                     "rsa_adjacent_min_corrdist", spike_dim=0,
+                     keys=list(RepresentationalSimilarityTask.HEADLINE_KEYS))
 
 
 def test_headline_is_angular_not_norm_driven(tiny_states):
@@ -112,7 +131,7 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
 
 def test_declarations():
     R = RepresentationalSimilarityTask
-    assert R.TOKEN_POLICY == "exclude_pos0"
+    assert R.TOKEN_POLICY == "exclude_sinks"
     assert set(R.SIZE_INVARIANT) <= set(R.HEADLINE_KEYS)
     assert {"paper", "code", "llm_precedent"} <= set(R.SOURCES)
     assert R.ADAPTATION_NOTE and R.ADAPTATION_NOTE.count(". ") <= 8

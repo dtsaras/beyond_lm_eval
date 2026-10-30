@@ -155,6 +155,12 @@ def _hook_counts(model):
     return total
 
 
+# Unhooked forwards a task runs before it registers its first hook, on the
+# default dataset (4 passages): gradient_flow's no-grad sink-mask pass. The
+# failure is injected after them, inside the hooked region.
+_FORWARDS_BEFORE_FIRST_HOOK = {"dynamics_gradient_flow": 4}
+
+
 @pytest.mark.parametrize("task_name,TaskCls", HOOKING_TASKS,
                          ids=[n for n, _ in HOOKING_TASKS])
 def test_hooks_are_removed_when_the_forward_raises(
@@ -169,10 +175,11 @@ def test_hooks_are_removed_when_the_forward_raises(
 
     calls = {"n": 0}
     real_forward = model.forward
+    n_ok = 1 + _FORWARDS_BEFORE_FIRST_HOOK.get(task_name, 0)
 
     def _explode(*a, **k):
         calls["n"] += 1
-        if calls["n"] >= 2:      # let one forward succeed, then fail
+        if calls["n"] > n_ok:    # let one hooked forward succeed, then fail
             raise _Boom("simulated CUDA failure mid-collection")
         return real_forward(*a, **k)
 
