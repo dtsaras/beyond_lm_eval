@@ -35,3 +35,40 @@ def test_paper_protocol_keeps_position0_and_reports_it(tiny_states):
     inv.assert_invariant(base, sunk, ["_meta_isoscore_effective_dims_excl_pos0"], rtol=1e-9)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
     assert 0.0 <= base["_meta_massive_token_share"] <= 1.0
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.isotropy import IsoScoreTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.mark.parametrize("key", sorted(IsoScoreTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states):
+    """iso*(d-1)+1 is the participation ratio of the covariance spectrum: it
+    does not move under zero-padding, a random isometric embedding (x2) or a
+    rescale, while the raw IsoScore it corrects falls by (d-1)/(kd-1)."""
+    transforms, node = IsoScoreTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    base = inv.run_task_on_states(TASK, tiny_states)
+    d = tiny_states.d
+    for t in transforms:
+        other = inv.run_task_on_states(TASK, _WIDTH[t](tiny_states))
+        inv.assert_invariant(base, other, [key], rtol=1e-6)
+        if t in ("zero_pad", "isometry"):
+            assert other["isoscore"] / base["isoscore"] == pytest.approx(
+                (d - 1) / (2 * d - 1), rel=1e-5)
+
+
+def test_declarations(tiny_states):
+    cls = IsoScoreTask
+    assert cls.TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    r = inv.run_task_on_states(TASK, tiny_states)
+    assert set(cls.HEADLINE_KEYS) <= set(r)

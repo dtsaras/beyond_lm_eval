@@ -101,3 +101,39 @@ def test_layer_profiles_are_meta(tiny_states, tiny_identity_states):
                                      "avg_cosine_similarity"], rtol=1e-9)
     assert inv.rel_change(inv.uniform_layer_mean(base["_meta_layer_participation_ratio"]),
                           inv.uniform_layer_mean(ins["_meta_layer_participation_ratio"])) > 1e-4
+
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.isotropy import SVDIsotropyTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.mark.parametrize("key", sorted(SVDIsotropyTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states):
+    """Zero-padding, a random isometric embedding (x2) and a rescale leave the
+    key in place; the explained-variance AUC (integrated over its own
+    unpadded length) moves under zero-padding (known negative)."""
+    transforms, node = SVDIsotropyTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    base = inv.run_task_on_states(TASK, tiny_states)
+    for t in transforms:
+        other = inv.run_task_on_states(TASK, _WIDTH[t](tiny_states))
+        inv.assert_invariant(base, other, [key], rtol=1e-6)
+        if t == "zero_pad":
+            inv.assert_moves(base, other, "_meta_svd_auc", 1e-2)
+
+
+def test_declarations(tiny_states):
+    cls = SVDIsotropyTask
+    assert cls.TOKEN_POLICY == "exclude_sinks"
+    assert cls.COSINE_TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    assert set(cls.HEADLINE_KEYS) <= set(inv.run_task_on_states(TASK, tiny_states))

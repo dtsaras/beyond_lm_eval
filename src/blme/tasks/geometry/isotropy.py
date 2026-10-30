@@ -220,6 +220,20 @@ class IsoScoreTask(DiagnosticTask):
         isoscore: float in [0, 1]
     """
     TOKEN_POLICY = "paper_protocol:Rudman2022 every token, position 0 included"
+    SOURCES = {
+        "paper": "arXiv:2108.07344 (Rudman et al. 2022, Algorithm 1)",
+        "code": "bcbi-edu/p_eickhoff_isoscore@1edad0b7f6d30099687a851ee150d3b02f50c217 "
+                "(IsoScore/IsoScore.py)",
+        "llm_precedent": "arXiv:2108.07344 (token clouds of GPT/GPT-2/BERT layers); "
+                         "arXiv:2305.19358 (I-STAR: every position kept)",
+    }
+    HEADLINE_KEYS = ("isoscore", "isoscore_effective_dims")
+    # Raw IsoScore is the paper's number but a capacity ratio, (PR-1)/(d-1):
+    # zero-padding divides it by ~2, so only the effective-dims twin is listed.
+    SIZE_INVARIANT = {"isoscore_effective_dims": (
+        ("zero_pad", "isometry", "rescale"),
+        "tests/tasks/invariance/test_isoscore.py::test_size_invariant_entry"
+        "[isoscore_effective_dims]")}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running IsoScore Analysis...")
@@ -309,6 +323,33 @@ class SVDIsotropyTask(DiagnosticTask):
     TOKEN_POLICY = "exclude_sinks"
     # The cosine anisotropy is LLM-native and keeps every token, as Ethayarajh.
     COSINE_TOKEN_POLICY = "paper_protocol:Ethayarajh2019 Eq. 4, every token"
+    SOURCES = {
+        "paper": "arXiv:1909.00512 (Ethayarajh 2019, Eq. 4); doi:10.5281/zenodo.40328 "
+                 "(Roy & Vetterli 2007, Eq. 1, Def. 1)",
+        "code": "kawine/contextual@c10c992a20d09660bcbac1e84466a3004374317c (analyze.py, "
+                "pytorch_pretrained/modeling_gpt2.py:562-565)",
+        "llm_precedent": "arXiv:1909.00512 (anisotropy of GPT-2 layers); arXiv:2401.17139 "
+                         "(Roy-Vetterli erank of LLM token states)",
+    }
+    ADAPTATION_NOTE = (
+        "Effective rank and participation ratio are spectra of one centred cloud that pools "
+        "every token of every document at a layer (HF's post-norm last entry; every layer in "
+        "layerwise mode). Alternatives were a per-sentence spectrum averaged over sentences "
+        "(Wei et al. 2024) and a one-token-per-document cloud (Ethayarajh); pooling was kept "
+        "because it measures the population the other cloud metrics use. Position 0 and "
+        "massive-norm rows are dropped with one mask from the middle depths, because in a "
+        "pooled cloud the sink carries up to 99% of the centred variance and turns these "
+        "keys into sink detectors (gpt2 middle-layer PR 1.05-1.17 -> 60-122). The cosine "
+        "anisotropy keeps every token, as Ethayarajh does, and is computed exactly over all "
+        "distinct pairs rather than from 1000 sampled pairs. cond_number has no published "
+        "LLM protocol and moves with N, so it is _meta_. The pooled spectra grow with the "
+        "token count up to min(N-1, d), so models are compared at one document count."
+    )
+    HEADLINE_KEYS = ("avg_cosine_similarity", "effective_rank", "participation_ratio")
+    # Width and scale only: erank and PR grow with N up to min(N-1, d).
+    SIZE_INVARIANT = {k: (("zero_pad", "isometry", "rescale"),
+                          "tests/tasks/invariance/test_svd.py::test_size_invariant_entry"
+                          f"[{k}]") for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running SVD Analysis...")
