@@ -32,7 +32,7 @@ def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokeni
 
     captured = {}
 
-    def spy(model, tokenizer, samples, max_length):
+    def spy(model, tokenizer, samples, max_length, n_stripped=None):
         captured["max_length"] = max_length
         # (per_layer, post_norm_last) since 2026-09-05: the fresh collector
         # returns BOTH tensors, because the profile is hooked and the headline
@@ -292,10 +292,10 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "_meta_svd_auc" in results
-    assert "cond_number" in results
+    assert "_meta_cond_number" in results
     assert results["_meta_svd_auc"] > 0
     assert results["_meta_svd_auc"] <= 1.0
-    assert results["cond_number"] >= 1.0
+    assert results["_meta_cond_number"] >= 1.0
 
 
 def test_isoscore_matches_rudman_formula_on_known_spectrum():
@@ -391,7 +391,7 @@ def test_unembedding(mock_model, mock_tokenizer):
 
     assert "unembedding_is_tied" in results
     assert "unembedding_eff_rank" in results
-    assert "unembedding_purity_mean" in results
+    assert "_meta_unembedding_purity_mean" in results
 
 
 def test_unembedding_purity_nonzero_when_vocab_large_vs_labels(tmp_path):
@@ -447,7 +447,7 @@ def test_unembedding_purity_nonzero_when_vocab_large_vs_labels(tmp_path):
     assert "error" not in results
     # With clustered rows the within-cluster top-5 NNs should almost
     # entirely match the query's category.
-    assert results["unembedding_purity_mean"] > 0.5, (
+    assert results["_meta_unembedding_purity_mean"] > 0.5, (
         f"purity still collapses on large vocab: "
         f"{results['unembedding_purity_mean']}"
     )
@@ -610,7 +610,7 @@ def test_spectral_gpt2_covers_conv1d():
     # attention, c_fc, c_proj in MLP) plus the lm_head nn.Linear. With
     # 2 layers we expect at least 4 Conv1Ds + 1 Linear = 5 matrices → the
     # per-matrix alpha values cannot all be identical.
-    assert results["std_alpha"] > 0.0, (
+    assert results["_meta_std_alpha"] > 0.0, (
         "std_alpha=0 means only a single weight matrix was analysed — "
         "GPT-2 Conv1D projections are being skipped."
     )
@@ -910,10 +910,10 @@ def test_matrix_entropy(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     assert "error" not in results, f"matrix_entropy failed: {results}"
-    assert "mean_matrix_entropy" in results
+    assert "_meta_mean_matrix_entropy" in results
     # Von Neumann entropy must be finite and non-negative. NaN/0 means
     # the covariance collapsed (single row / all-zero) — the historic bug.
-    me = results["mean_matrix_entropy"]
+    me = results["_meta_mean_matrix_entropy"]
     assert np.isfinite(me), f"mean_matrix_entropy is not finite: {me}"
     assert me > 0.0, f"mean_matrix_entropy collapsed to zero: {me}"
 
@@ -1042,7 +1042,7 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     assert 0 <= res["matrix_entropy"] <= 1.01, (
         f"H_normalized out of [0, 1]: {res['matrix_entropy']}"
     )
-    assert 0 <= res["mean_matrix_entropy"] <= 1.01
+    assert 0 <= res["_meta_mean_matrix_entropy"] <= 1.01
     assert "_meta_matrix_entropy_normalized" not in res
     assert res["matrix_entropy_raw"] >= 0.0
 
@@ -1053,7 +1053,7 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     # published 0.7003 matches the normalised 0.6659 (-4.9%), against a raw
     # H of 4.1542 (+493%). The raw value is retained under a _meta_ key.
     last_key = max(
-        res["layer_matrix_entropies"].keys(),
+        res["_meta_layer_matrix_entropies"].keys(),
         key=lambda k: int(k.split("_")[1]),
     )
     # THE HEADLINE IS NO LONGER THE PROFILE'S LAST ENTRY, deliberately.
@@ -1069,8 +1069,8 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     # The profile's deepest entry is the HOOKED one, so it must differ from the
     # headline on any model with a real final norm -- if these ever coincide,
     # the substitution silently stopped happening.
-    assert res["matrix_entropy"] != res["layer_matrix_entropies_normalized"][last_key]
-    assert res["matrix_entropy_raw"] != res["layer_matrix_entropies"][last_key]
+    assert res["matrix_entropy"] != res["_meta_layer_matrix_entropies_normalized"][last_key]
+    assert res["matrix_entropy_raw"] != res["_meta_layer_matrix_entropies"][last_key]
     # The headline must be the normalised one, not the raw one.
     assert 0 <= res["matrix_entropy"] <= 1.01
 
@@ -1126,7 +1126,7 @@ def test_matrix_entropy_uses_per_sample_cache():
                              dataset=[{"text": "x"}] * n_samples, cache=cache)
 
     assert "error" not in results
-    me = results["mean_matrix_entropy"]
+    me = results["_meta_mean_matrix_entropy"]
     assert np.isfinite(me), f"cache path produced non-finite matrix entropy: {me}"
     assert me > 0.0, "cache path collapsed hidden states to a single row"
 
@@ -1386,14 +1386,14 @@ def test_mp_bulk_integration(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     assert "error" not in results, f"mp_bulk_deviation failed: {results}"
     for tag in ("first", "mid", "last"):
-        for stem in ("mp_outlier_frac", "mp_spike_energy", "mp_ks_distance"):
+        for stem in ("_meta_mp_outlier_frac", "_meta_mp_spike_energy", "_meta_mp_ks_distance"):
             key = f"{stem}_{tag}"
             assert key in results, f"missing {key}"
             assert np.isfinite(results[key]), f"{key} not finite"
-        assert 0.0 <= results[f"mp_outlier_frac_{tag}"] <= 1.0
+        assert 0.0 <= results[f"_meta_mp_outlier_frac_{tag}"] <= 1.0
         assert results[f"_meta_mp_gamma_{tag}"] > 0
         assert results[f"_meta_mp_n_tokens_{tag}"] > 0
-    assert np.isfinite(results["mp_ks_distance_mean"])
+    assert np.isfinite(results["_meta_mp_ks_distance_mean"])
 
 
 # ---------------------------------------------------------------------------
@@ -1530,7 +1530,7 @@ def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
     out = task.evaluate(_HeadModel(), _Tok(), dataset=None)
 
     assert out["_meta_unembedding_n_category_tokens"] == 8
-    assert out["unembedding_purity_mean"] == 1.0
+    assert out["_meta_unembedding_purity_mean"] == 1.0
 
 
 def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):

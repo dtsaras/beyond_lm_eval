@@ -56,7 +56,8 @@ geometry_matrix_entropy:
 
 geometry_schatten:
   num_samples: 10
-  max_length: 128
+  # Full text, as MNN.py: null = up to the model's context.
+  max_length: null
 
 interpretability_activation_sinks:
   num_samples: 10
@@ -94,7 +95,9 @@ geometry_cka:
   num_samples: 100
 
 geometry_unembedding:
-  num_samples: 2000
+  # Purity queries (category tokens); null = all of them. Not num_samples,
+  # which the harness sets for every task.
+  purity_num_queries: null
   k: 20
   categories_path: null
 
@@ -144,7 +147,9 @@ geometry_trajectory_curvature:
   skip_first_tokens: 1  # drop BOS — its hidden state is an extreme outlier
 
 geometry_mp_bulk_deviation:
-  num_samples: 100
+  # The fixed-gamma headline needs 4d+1 tokens: 400 documents (~40k tokens)
+  # cover d up to 8192. max_tokens caps only the gamma-matched _meta_ family.
+  num_samples: 400
   layers: first_mid_last  # bound eigvalsh cost to 3 layers
   # REVERTED to 20000 (2026-09-06). The 32000 change was aimed at the `*_g25`
   # fixed-gamma family -- the only width-comparable one -- which needs

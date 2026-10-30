@@ -153,8 +153,10 @@ def test_schatten_task_registers_and_returns_expected_fields():
     assert "_meta_row_normalized_schatten_1_last" in result
     assert "_meta_row_normalized_schatten_4_last" in result
     # The undivided, width-neutral keys ARE features.
-    assert "schatten_1_last" in result
-    assert "schatten_4_last" in result
+    assert "_meta_schatten_1_last" in result
+    assert "_meta_schatten_4_last" in result
+    # Yusupov's MLP-activation keys exist (NaN: this stub has no MLP blocks).
+    assert "schatten_1" in result and result["_meta_schatten_mlp_layers_found"] == 0
     assert "row_normalized_schatten_inf_last" in result
     assert "row_normalized_matrix_nuclear_norm_last" in result
     assert "rankme_last" in result
@@ -163,7 +165,7 @@ def test_schatten_task_registers_and_returns_expected_fields():
     # Per-layer lists
     assert "_meta_row_normalized_schatten_1_per_layer" in result
     assert len(result["_meta_row_normalized_schatten_1_per_layer"]) == 3  # 3 blocks after embedding
-    assert len(result["schatten_1_per_layer"]) == 3
+    assert len(result["_meta_schatten_1_per_layer"]) == 3
 
 
 def test_schatten_2_not_exposed_after_row_l2_normalization():

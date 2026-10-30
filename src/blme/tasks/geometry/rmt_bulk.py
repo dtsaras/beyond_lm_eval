@@ -51,6 +51,7 @@ Cross-model comparability:
 
 import logging
 import math
+import re
 from typing import Optional
 
 import numpy as np
@@ -58,14 +59,13 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 
 logger = logging.getLogger("blme")
 
-# EXACTLY zero variance only. The correlation matrix is invariant to any
-# positive global rescale, so an ABSOLUTE std cutoff is not: on one N=1200,
-# D=80 cloud scales 1..1e-11 kept all 80 dimensions at KS=0.024919, while
-# 1e-12 kept 38/80 and moved KS to 0.039532 and 1e-13 errored outright
-# (adversarial review, 2026-09-04). A dimension is constant or it is not.
+# Exactly zero variance only: an absolute cutoff breaks the correlation
+# matrix's invariance to a global rescale (tests/test_scale_invariance.py).
 _ZERO_VAR_EPS = 0.0
 
 
@@ -159,32 +159,11 @@ def _estimate_sigma2(eigs: np.ndarray, gamma: float, edge_tol: float,
 
         sigma^2_hat = median(lambda) / median(MP_gamma)
 
-    where median(MP_gamma) is the median of the standard (sigma^2 = 1)
-    Marchenko-Pastur law at this aspect ratio. A median is a 50%-breakdown
-    statistic, so it is unmoved by a minority of spiked directions.
-
-    This replaces an iterative trimmed mean built on "mean of all D eigenvalues
-    = sigma^2". That identity holds only for an ISOTROPIC population, and the
-    iteration DIVERGED when it did not: on diagonal lognormal per-dimension
-    variances with sd_log = 1.5 and ZERO low-rank spikes, the true mean
-    variance is 45.0 while the iteration ran 45.29 -> 3.46 -> 0.96 -> ... ->
-    0.00037, monotonically, so the shipped n_iter=12 cutoff returned a value
-    13.3x above its own fixed point -- an iteration-count-dependent number, not
-    a statistic. On real gpt2 activations it underestimated sigma^2 by 66-240x
-    and declared 69-91% of all dimensions supercritical spikes (adversarial
-    review, 2026-09-03).
-
-    What quantile matching actually recovers is the bulk's MEDIAN scale, which
-    is the right anchor for placing the MP edge. It is NOT the mean population
-    variance, and an earlier version of this docstring claimed it "recovers
-    0.95-1.00 of the truth" against exactly that mean -- measured, it recovers
-    0.07-0.92 of the mean on heteroscedastic bulks. The claim is retracted; the
-    estimator is a median matcher and is documented as such (adversarial review,
-    2026-09-03). On genuinely isotropic bulks, where mean and median coincide,
-    it is within 2.4% across the whole gamma range and 28 orders of magnitude of
-    scale.
-
-    ``n_iter`` and ``edge_tol`` are unused and kept for signature stability.
+    A median is a 50%-breakdown statistic, so a minority of spiked directions
+    does not move it. It recovers the bulk's MEDIAN scale (the anchor for the
+    MP edge), not the mean population variance; on isotropic bulks the two
+    coincide (within 2.4% over the gamma range). ``n_iter`` and ``edge_tol``
+    are unused and kept for signature stability.
     """
     eigs = np.asarray(eigs, dtype=np.float64)
     if eigs.size == 0:
@@ -203,23 +182,12 @@ def _estimate_sigma2(eigs: np.ndarray, gamma: float, edge_tol: float,
         mp_median = float(grid[j])
     emp_median = float(np.median(eigs))
     if not np.isfinite(mp_median) or mp_median <= 1e-12:
-        # gamma > 1: more than half the eigenvalues are the zero atom, so the
-        # median carries no scale information. Fall back to the mean over the
-        # NONZERO part, which is sigma^2 / min(1, 1/gamma) in expectation.
-        # RELATIVE zero test. An absolute 1e-12 makes the estimator
-        # scale-dependent: at sigma^2 >= 1e3 it misclassified bulk eigenvalues
-        # (-42% to -67% error), and at sigma^2 <= 1e-13 every eigenvalue looked
-        # like the zero atom and the result was all-NaN.
+        # gamma > 1: the zero atom holds more than half the eigenvalues, so
+        # quantile-match the NONZERO part (relative zero test, scale-free).
         top = float(np.max(eigs)) if eigs.size else 0.0
         nz = eigs[eigs > top * 1e-12] if top > 0 else eigs[:0]
         if nz.size == 0:
             return float("nan")
-        # Quantile-match on the NONZERO part rather than taking its mean. A mean
-        # has 0% breakdown, so this fallback -- which fires at exactly gamma >= 2
-        # -- was 5.9x wrong there while the median branch above was fine
-        # (adversarial review, 2026-09-03). Conditioned on being nonzero, the MP
-        # law is the same shape rescaled, so the same quantile match applies to
-        # the surviving mass.
         grid_nz = np.linspace(lo, hi, 4096)
         cdf_nz = _mp_cdf(grid_nz, gamma)
         atom = max(0.0, 1.0 - 1.0 / gamma)
@@ -240,23 +208,10 @@ def _permutation_spike_metrics(X: np.ndarray, n_perm: int = 12,
                               seed: int = 0, q: float = 99.0) -> dict:
     """Spike content against a COLUMN-PERMUTATION null.
 
-    Independently shuffling each column destroys all cross-dimension structure
-    while preserving every column's own marginal distribution exactly. So the
-    permuted spectrum is the right null for "how much of this covariance is
-    genuine shared structure", and unlike Marchenko-Pastur it does not assume
-    the population is isotropic.
-
-    That assumption is why the MP-based `*_cov` statistics cannot be read as
-    spike content: on N=4000, D=256 data with lognormal per-dimension variances
-    and ZERO low-rank structure, `outlier_frac_cov` reads 0.32-0.38 and
-    `spike_energy_cov` 0.72-0.88 -- pure heteroscedasticity, scored as spikes.
-    The permutation null on that same data returns exactly 0.0000, and still
-    recovers all 5 planted spikes on a mixed case (adversarial review,
-    2026-09-03). Real gpt2 activations read 0.976 under MP, i.e. inside that
-    synthetic false-positive regime.
-
-    Returns the fraction of eigenvalues above the permuted null's upper
-    envelope, and the share of total variance they carry.
+    Shuffling each column independently keeps every marginal and destroys all
+    cross-dimension structure, so unlike MP it does not assume an isotropic
+    population. Returns the fraction of eigenvalues above the null's upper
+    envelope and the share of total variance they carry.
     """
     X = np.asarray(X, dtype=np.float64)
     n, d = X.shape
@@ -305,15 +260,7 @@ def _mp_layer_metrics(
     fewer than ceil(D / fixed_gamma) tokens are available.
     """
     if isinstance(X, torch.Tensor):
-        # `.double()`, not `.float()`. The very next line promotes to float64
-        # anyway, so narrowing first is a pointless round trip that can only
-        # lose data — and does: a float64 cloud at 1e6 with 1/64-scale structure
-        # keeps 7 distinct values through `.double()` and only 5 through
-        # `.float()`, because float32's ULP at 1e6 is 0.0625.
-        #
-        # Promoting is exact for the float32/bf16 tensors every shipped route
-        # produces, so no shipped number moves; it only stops a float64 caller's
-        # data being discarded on the way to a float64 computation.
+        # Straight to float64 (narrowing first could only lose data).
         X = X.detach().double().cpu().numpy()
     X = np.asarray(X, dtype=np.float64)
     if X.ndim != 2 or X.shape[0] < 4 or X.shape[1] < 2:
@@ -321,18 +268,17 @@ def _mp_layer_metrics(
 
     rng = np.random.default_rng(seed)
 
-    # GLOBAL RESCALE, once, before ANY second moment is formed anywhere
-    # downstream. Every statistic this task reports is invariant to a positive
-    # global rescale, but the arithmetic is not -- second moments square, so a
-    # cloud at 1e-162 underflowed out of the estimator and one at 1e154
-    # overflowed the permutation null's Gram (adversarial review round 2,
-    # 2026-09-04). Dividing by the largest magnitude only shifts exponents.
+    # Global rescale before any second moment (exact; every statistic here is
+    # invariant to it, the arithmetic is not).
     _gmax = float(np.max(np.abs(X))) if X.size else 0.0
     if _gmax > 0 and np.isfinite(_gmax):
         X = X / _gmax
 
     # Drop non-finite rows, then cap tokens with a seeded subsample.
     X = X[np.all(np.isfinite(X), axis=1)]
+    # The fixed-gamma draw needs 4d+1 rows and uses the UNCAPPED cloud;
+    # max_tokens caps only the gamma-matched family.
+    X_full = X
     if max_tokens is not None and X.shape[0] > max_tokens:
         idx = rng.choice(X.shape[0], size=max_tokens, replace=False)
         X = X[idx]
@@ -352,11 +298,8 @@ def _mp_layer_metrics(
         "n_dims_dropped": core["n_dims_dropped"],
     }
 
-    # COVARIANCE variant. The correlation matrix above is exactly invariant to
-    # per-dimension rescaling, so on its own it cannot see rogue dimensions.
-    # These `_cov` keys use the centered-only second moment with sigma^2 fit
-    # from the bulk, and are the ones that respond to outlier features.
-    # Permutation null: the statistic to actually trust for spike content.
+    # Covariance and permutation-null variants (see _key_prefix for why they
+    # are _meta_).
     out.update(_permutation_spike_metrics(X, seed=seed))
 
     cov = _mp_metrics_core(X, edge_tol, standardize=False)
@@ -369,36 +312,26 @@ def _mp_layer_metrics(
     # MP reference is identical across models.
     if fixed_gamma:
         suffix = f"g{int(round(fixed_gamma * 100))}"
-        # gamma must be computed from the dimensions the core will actually
-        # KEEP, not from the raw width. Appending 64 all-zero columns to an
-        # unchanged D=64 representation left the geometry identical but moved
-        # the realised g25 gamma from 64/255=0.250980 to 64/511=0.125245 and
-        # its KS from 0.367195 to 0.503734 -- the whole point of the fixed-
-        # gamma variant is that the MP reference is the same across models
-        # (adversarial review, 2026-09-04).
-        _n_const = int(np.count_nonzero(np.ptp(X, axis=0) == 0))
-        _d_eff = X.shape[1] - _n_const
+        # gamma from the dimensions the core KEEPS (constant columns are
+        # dropped), re-sized against the subsample's own constants.
+        _n_const = int(np.count_nonzero(np.ptp(X_full, axis=0) == 0))
+        _d_eff = X_full.shape[1] - _n_const
         n_fixed = int(math.ceil(_d_eff / fixed_gamma)) + 1
-        if X.shape[0] >= n_fixed:
-            idx = rng.choice(X.shape[0], size=n_fixed, replace=False)
-            # RE-SIZE against the SUBSAMPLE's own constants. A column that
-            # varies over the full cloud can be constant within a drawn subset,
-            # and the core drops it -- so gamma is set by dimensions the
-            # sizing step never saw (adversarial review round 2, 2026-09-04).
-            # One corrective iteration is enough: the second draw is sized from
-            # a realised count, and the loop stops as soon as the realised
-            # width matches what the size assumed.
+        out["n_tokens_available"] = int(X_full.shape[0])
+        out["fixed_n_tokens_needed"] = n_fixed
+        if X_full.shape[0] >= n_fixed:
+            idx = rng.choice(X_full.shape[0], size=n_fixed, replace=False)
             for _ in range(4):
-                _d_sub = int(np.count_nonzero(np.ptp(X[idx], axis=0) > 0))
+                _d_sub = int(np.count_nonzero(np.ptp(X_full[idx], axis=0) > 0))
                 if _d_sub == _d_eff:
                     break
                 _d_eff = _d_sub
                 n_fixed = int(math.ceil(_d_eff / fixed_gamma)) + 1
-                if X.shape[0] < n_fixed:
+                if X_full.shape[0] < n_fixed:
                     break
-                idx = rng.choice(X.shape[0], size=n_fixed, replace=False)
-            fixed = _mp_metrics_core(X[idx], edge_tol)
-            fixed_cov = _mp_metrics_core(X[idx], edge_tol, standardize=False)
+                idx = rng.choice(X_full.shape[0], size=n_fixed, replace=False)
+            fixed = _mp_metrics_core(X_full[idx], edge_tol)
+            fixed_cov = _mp_metrics_core(X_full[idx], edge_tol, standardize=False)
             out[f"outlier_frac_{suffix}"] = fixed.get("outlier_frac", float("nan"))
             out[f"spike_energy_{suffix}"] = fixed.get("spike_energy", float("nan"))
             out[f"ks_distance_{suffix}"] = fixed.get("ks_distance", float("nan"))
@@ -423,49 +356,24 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float,
     ``standardize=False`` only centers, giving the COVARIANCE matrix, and
     estimates sigma^2 from the bulk.
 
-    Both are reported, because the correlation matrix is EXACTLY invariant to
-    per-dimension rescaling and therefore structurally blind to rogue/outlier
-    dimensions -- a documented and functionally important property of
-    transformer activations (Timkey & van Schijndel 2021; Kovaleva et al.
-    2021; Dettmers et al. 2022). Measured (adversarial review, 2026-09-02) on
-    N=4000, D=256 iid Gaussian with one dimension's variance multiplied by
-    100, the correlation-matrix outputs are BIT-IDENTICAL to the unspiked
-    null -- outlier_frac 0.000000, spike_energy 0.000000, ks 0.0099 in both
-    cases. The covariance variant sees it.
+    Both are reported: the correlation matrix is exactly invariant to
+    per-dimension rescaling and therefore blind to rogue dimensions, which the
+    covariance variant sees.
     """
     n_tokens = X.shape[0]
-    # GLOBAL RESCALE before any second moment is formed. Both the correlation
-    # matrix and the KS statistic are exactly invariant to a positive global
-    # rescale, but the ARITHMETIC is not: std squares, so at scale 1e-160 the
-    # KS drifted 0.02491931 -> 0.02492674, at 1e-162 fewer than 2 dimensions
-    # survived, and at 1e154 the covariance overflowed (adversarial review
-    # round 2, 2026-09-04). Dividing by the largest magnitude only shifts
-    # exponents, so it is exact and it centres the dynamic range.
+    # Global rescale before any second moment (exact).
     _gmax = float(np.max(np.abs(X))) if X.size else 0.0
     if _gmax > 0 and np.isfinite(_gmax):
         X = X / _gmax
     mean = X.mean(axis=0)
     std = X.std(axis=0)
-    # EXACT constancy is `max == min`, not `std > 0`. A computed std can be a
-    # tiny nonzero for a column whose entries are all bit-identical (the
-    # repository's own N=1000, D=100 fixture has such a column at 3.14), and it
-    # can also underflow to 0 for a column that genuinely varies. ptp answers
-    # the question being asked (adversarial review round 2, 2026-09-04).
+    # Exact constancy is max == min (a computed std can be a tiny nonzero).
     keep = np.ptp(X, axis=0) > 0
     n_dropped = int(np.size(keep) - np.count_nonzero(keep))
     if np.count_nonzero(keep) < 2:
         return {"error": "Fewer than 2 non-constant dimensions"}
 
-    # PER-COORDINATE rescale, not just the global one.
-    #
-    # The task-level pre-rescale divides by the GLOBAL maximum, which does
-    # nothing for a single column that is many orders below the rest: one
-    # column scaled by 2^-535 moved KS by +8.53%, and 2^-540 raised
-    # LinAlgError, because that column's own mean and std underflow while every
-    # other column is fine (independent Opus review, 2026-09-04). Rescaling
-    # each retained column by its own largest magnitude before centring is
-    # exact -- the correlation matrix is invariant to per-dimension scaling by
-    # construction, and for the covariance branch the factor is restored below.
+    # Per-column rescale before centring (exact; restored for the covariance).
     _Xk = X[:, keep]
     _cmax = np.max(np.abs(_Xk), axis=0)
     _cmax = np.where(_cmax > 0, _cmax, 1.0)
@@ -481,13 +389,7 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float,
         Z = (_Xs - _mean_s) * _cmax
     Xc = Z if not standardize else (_Xs - _mean_s) * _cmax
     D = Z.shape[1]
-    # gamma = D / (N - 1), not D / N. Centering removes one degree of freedom,
-    # so the centered matrix has rank at most N - 1 and the MP ratio that
-    # actually governs the spectrum is D/(N-1). Using D/N silently misplaces
-    # the bulk edge, and just below gamma = 2 the off-by-one produced a ~2x
-    # error in the fitted sigma^2 (0.49 for a truth of 1.0) because the zero
-    # atom's mass, 1 - 1/gamma, is what the quantile estimator reads
-    # (adversarial review, 2026-09-03).
+    # gamma = D / (N - 1): centring removes one degree of freedom.
     gamma = D / max(1, n_tokens - 1)
 
     C = (Z.T @ Z) / n_tokens
@@ -507,11 +409,8 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float,
     outliers = eigs[eigs > threshold]
     trace = float(np.sum(eigs))
 
-    # LOWER spectral edge (campaign-4 B8, after Staats, Thamm & Rosenow,
-    # arXiv:2410.17770: deviations at the SMALL-eigenvalue edge also carry
-    # learned information). Only meaningful for gamma < 1, where the MP
-    # lower edge (1 - sqrt(gamma))^2 is strictly positive; for gamma >= 1
-    # the bulk touches 0 / has an atom there, so the statistic is NaN.
+    # Lower spectral edge, defined only for gamma < 1 (the MP lower edge is
+    # 0 / an atom otherwise).
     if gamma < 1.0:
         lo_threshold = _mp_lower_edge(gamma) * (1.0 - edge_tol)
         lower_outliers = eigs[eigs < lo_threshold]
@@ -536,37 +435,19 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float,
 
 
 def _key_prefix(name: str) -> str:
-    """`mp_` for the trustworthy family, `_meta_mp_` for the two that are not.
+    """`mp_` for the FIXED-GAMMA correlation family, `_meta_mp_` for the rest.
 
-    Only the CORRELATION family (`outlier_frac`, `spike_energy`, `ks_distance`
-    with no suffix) supports a BBP spike reading. The other two are demoted OUT
-    of the analysis feature matrix:
+    The gamma-matched statistics drift with N at fixed d (more spikes clear the
+    BBP edge as gamma = d/(N-1) falls: dossier gpt2 L12 KS 0.20 -> 0.47 from
+    N = 1000 to 6474), so only the fixed-gamma (N = 4d+1) family is headline.
 
-    * `*_cov` reports deviation from an ISOTROPIC MP null, not spike content.
-      With an ORACLE sigma^2 on purely diagonal heteroscedastic data carrying NO
-      low-rank structure at all, outlier_frac_cov still reads 0.09-0.18 and
-      spike_energy_cov 0.50-0.86 -- it scores heteroscedasticity as spikes, and
-      real activations are strongly heteroscedastic.
-
-    * `perm_*` was added as the trustworthy replacement and is not one: a SINGLE
-      massive-activation dimension destroys it. Holding 5 planted directions
-      fixed and raising one dimension's variance 1 -> 1e2 -> 1e4 -> 1e6,
-      `perm_outlier_frac` collapses 5/256 -> 1/256 -> 1/256 -> 1/256 and
-      `perm_top_ratio` 16.85 -> 1.36 -> 1.004 -> 1.000, while the correlation
-      variant is EXACTLY invariant (5/256 throughout). Real gpt2 has a
-      max/median marginal variance ratio of 1.4e4-1.7e4, so `perm_outlier_frac`
-      sits at the 1/D floor in 7 of 9 layers. It is also ~redundant with the
-      correlation family (identical on 9 of 10 synthetic controls, worse on the
-      10th) (adversarial review, 2026-09-04).
-
-    Both remain emitted for audit, under `_meta_`.
+    `*_cov` measures deviation from an ISOTROPIC MP null and scores
+    heteroscedasticity as spikes; `perm_*` collapses to the 1/D floor under a
+    single massive-activation dimension; `lower_*` is collinear with the KS
+    distance. All stay emitted for audit.
     """
-    return "_meta_mp_" if (name.endswith("_cov") or name.startswith("perm_")
-                           or "_cov_" in name
-                           # `lower_*` duplicates `ks_distance`: Pearson 0.997
-                           # and Spearman 1.0 over 9 real layers, i.e. two
-                           # collinear columns carrying one signal.
-                           or name.startswith("lower_")) else "mp_"
+    return ("mp_" if re.fullmatch(r"(outlier_frac|spike_energy|ks_distance)_g\d+", name)
+            else "_meta_mp_")
 
 
 @register_task("geometry_mp_bulk_deviation")
@@ -582,52 +463,81 @@ class MPBulkDeviationTask(DiagnosticTask):
     ``mp_gamma_*`` / ``mp_n_tokens_*`` / ``mp_dropped_dims_*`` metadata.
     """
 
+    TOKEN_POLICY = "exclude_sinks"
+    SOURCES = {
+        "paper": "doi:10.1070/SM1967v001n04ABEH001994 (Marchenko & Pastur 1967); "
+                 "arXiv:math/0403022 (Baik, Ben Arous & Peche 2005)",
+        "code": "none (BLME construct; the MP CDF is cross-checked against scikit-rmt)",
+        "llm_precedent": "none verified for activation correlation spectra "
+                         "(arXiv:2410.17770 applies MP to weight matrices)",
+    }
+    ADAPTATION_NOTE = (
+        "The eigenvalue spectrum of the per-dimension correlation matrix of a pooled token "
+        "cloud is compared with the Marchenko-Pastur law, and eigenvalues above the BBP edge "
+        "are counted. The correlation matrix (not the covariance) is used because MP needs "
+        "a known scale and the covariance variant scores heteroscedasticity as spikes; the "
+        "covariance and permutation-null variants stay in _meta_. Position 0 and "
+        "massive-norm rows are dropped with one mask from the middle depths, because the "
+        "iid null has no place for a handful of sink rows. The number of spikes that clear "
+        "the edge grows with N/d, so the headline is the fixed-gamma family, evaluated on "
+        "a seeded subsample of N = 4d+1 tokens of the whole cloud; the gamma-matched "
+        "family is _meta_. Tokens from one document are correlated, which the iid null "
+        "ignores (within-document centring moves the spike energy by up to 10%). "
+        "Per-coordinate z-scoring presumes a privileged basis, so an isometric embedding "
+        "moves every key."
+    )
+    HEADLINE_KEYS = tuple(f"mp_{m}_g25_{t}" for m in ("outlier_frac", "spike_energy",
+                                                       "ks_distance")
+                          for t in ("first", "mid", "last", "mean"))
+    # Zero-padding (constant columns are dropped before gamma is set) and
+    # rescaling. Not isometry (basis-dependent z-scoring); N-stable only in
+    # expectation (a seeded random draw), so N is not declared.
+    SIZE_INVARIANT = {k: (("zero_pad", "rescale"),
+                          "tests/tasks/invariance/test_mp_bulk_deviation.py::"
+                          f"test_size_invariant_entry[{k}]") for k in HEADLINE_KEYS}
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Marchenko-Pastur Bulk Deviation Analysis...")
 
-        num_samples = self.config.get("num_samples", 100)
+        # 400 documents (~40k tokens) supply the 4d+1 rows the fixed-gamma
+        # headline needs up to d = 8192.
+        num_samples = self.config.get("num_samples", 400)
         use_cache = self.config.get("use_cache", True)
         max_tokens = self.config.get("max_tokens", 20000)
         edge_tol = self.config.get("edge_tol", 0.05)
         fixed_gamma = self.config.get("fixed_gamma", 0.25)
         layer_select = self.config.get("layers", "first_mid_last")
 
-        # The unordered flattened token cloud is exactly what RMT wants
-        # (per_sample=False) — row order is irrelevant to the spectrum.
-        # POST-FINAL-NORM: `layer_idx="all"` builds a PER-LAYER PROFILE, and
-        # HF's last entry is `ln_f(b_{L-1})`. One LayerNorm output inside a
-        # profile of block outputs is a category error under either
-        # convention -- the profile's slope, extremes and quantiles all
-        # compare it against entries of a different kind. Repo-wide sweep,
-        # 2026-09-05: 24 of 39 call sites were missing this opt-in.
-        _rmt_status = {}
-        layer_activations = None
-        if cache is not None and cache.is_populated and use_cache:
-            layer_activations = cache.get_hidden_states(
-                layer_idx="all", num_samples=num_samples,
-                replace_final_norm=True,
-            )
-            _rmt_status["last_is_block"] = bool(
-                getattr(cache, "_last_block_substituted", False))
-            if layer_activations is None:
-                # A POPULATED CACHE IS NOT NECESSARILY A USABLE ONE. This task ran c
-                # orrectly with NO cache and returned an error with an attention-onl
-                # y one, i.e. it refused rather than self-collecting -- the defect a
-                # stra RED-flagged on geometry_vendi_score. Found by EXECUTING the c
-                # heck across all 51 tasks: the class is 15 sites, not the 5 a read-
-                # only sweep reported (2026-09-09).
-                logger.info("  shared cache is populated but carries no hidden states; self-collecting.")
-        if layer_activations is None:
-            from .utils import collect_hidden_states
+        # Block outputs (deepest entry = the hooked raw block), per document,
+        # pooled into one unordered cloud per layer (RMT is about rows, not
+        # trajectories).
+        per_doc, _info = hidden_states_for_task(
+            model, tokenizer, dataset, cache, num_samples=num_samples,
+            layer_idx="all", use_cache=use_cache, replace_final_norm=True,
+            per_sample=True, fallback="none", min_cached_docs=int(num_samples))
+        if per_doc is None:
             from ...cache import load_default_corpus
-
             if dataset is None:
                 dataset = load_default_corpus(num_samples)
-            layer_activations = collect_hidden_states(
-                model, tokenizer, dataset, num_samples=num_samples,
-                layer_idx="all", replace_final_norm=True,
-                status=_rmt_status,
-            )
+            per_doc, _info = hidden_states_for_task(
+                model, tokenizer, dataset, None, num_samples=num_samples,
+                layer_idx="all", use_cache=False, replace_final_norm=True,
+                per_sample=True)
+        # TOKEN_POLICY: an iid-row null on a pooled cloud, so position 0 and
+        # massive rows (Sun et al. 2024) are dropped with one mask from the
+        # middle depths, the same rows at every layer.
+        layer_activations, _diag = None, {}
+        if per_doc:
+            _keep, _sink_info = sink_keep_masks(
+                [per_doc[k] for k in middle_depth_layers(per_doc)])
+            layer_activations, _rows_meta = {}, None
+            for li in per_doc:
+                layer_activations[li], _rows_meta = select_rows(
+                    per_doc[li], self.TOKEN_POLICY, keep=_keep)
+            _mid_docs = per_doc[sorted(per_doc)[len(per_doc) // 2]]
+            _diag = {**sink_meta(_sink_info), **_rows_meta.as_meta(),
+                     "_meta_massive_token_share": massive_token_share(_mid_docs),
+                     "_meta_position0_share": position0_share(_mid_docs)}
 
         if not layer_activations:
             return {"error": "No hidden states available for MP analysis"}
@@ -641,40 +551,12 @@ class MPBulkDeviationTask(DiagnosticTask):
             return {"error": f"No layers selected for MP analysis: {layer_select}"}
 
         suffix = f"g{int(round(fixed_gamma * 100))}" if fixed_gamma else None
-        # The `_cov` family was computed by _mp_layer_metrics but NEVER
-        # listed here, so it never reached the output -- the task paid ~2x to
-        # discard it (adversarial review, 2026-09-03). The correlation matrix
-        # alone is exactly blind to rogue dimensions, which is the whole reason
-        # the covariance variant exists, so it must be emitted.
+        # Correlation family (headline), covariance and permutation-null
+        # families (_meta_, see _key_prefix), lower-edge statistics (_meta_).
         _BASE = ("outlier_frac", "spike_energy", "ks_distance")
-        # The covariance variant reports DEVIATION FROM AN ISOTROPIC MP NULL,
-        # not BBP spike content. Real transformer activations are strongly
-        # heteroscedastic, and standard MP after a single scalar rescaling is
-        # not the right law for a non-trivial population spectrum -- with an
-        # ORACLE sigma^2 on purely diagonal heteroscedastic data with NO
-        # low-rank spikes at all, outlier_frac still reads 0.09-0.18 and
-        # spike_energy 0.50-0.86 (adversarial review, 2026-09-03). So these
-        # are isotropy-deviation statistics; the BBP reading applies only to
-        # the correlation variant's spikes.
-        #
-        # All three are kept. spike_energy_cov was briefly dropped on the
-        # theory that it was pinned near 1 and uninformative; across 9 models
-        # it is in fact the WIDEST-ranging of the three (0.259 vs 0.106 and
-        # 0.100), has the highest CV, and is the only one that is size-neutral
-        # (Spearman vs gamma = +0.07, p = 0.71, against -0.64 and -0.70 for the
-        # other two). The other two are also ~0.98 redundant with each other.
-        # Dropping it was exactly backwards (adversarial review, 2026-09-03).
         _COV = _BASE
-        # perm_* is the permutation-null family. Prefer it over the MP `*_cov`
-        # statistics for any claim about spike content: MP assumes an isotropic
-        # population, and real activations are strongly heteroscedastic, so the
-        # MP statistics score heteroscedasticity as spikes (0.37 outlier_frac
-        # and 0.88 spike_energy on data with ZERO shared structure). The
-        # permutation null returns 0.0000 there and recovers exactly 5/256 and
-        # 3/256 when 5 and 3 shared directions are planted.
         _PERM = ("perm_outlier_frac", "perm_spike_energy", "perm_top_ratio")
         metric_names = (list(_BASE) + [f"{m}_cov" for m in _COV] + list(_PERM)
-                        # lower_* were computed but never listed here either.
                         + ["lower_outlier_frac", "lower_energy",
                            "lower_outlier_frac_cov", "lower_energy_cov"])
         if suffix:
@@ -706,12 +588,14 @@ class MPBulkDeviationTask(DiagnosticTask):
                 val = float(m.get(name, float("nan")))
                 results[f"{_key_prefix(name)}{name}_{tag}"] = val
                 collected[name].append(val)
-            # _meta_ prefix => excluded from the analysis feature matrix. gamma=D/N
-            # is a d_model proxy and n_tokens/dropped_dims are sampling diagnostics,
-            # none of which are intrinsic representational properties (Audit-V2).
+            # gamma, token count and dropped dimensions are sampling diagnostics.
             results[f"_meta_mp_gamma_{tag}"] = float(m["gamma"])
             results[f"_meta_mp_n_tokens_{tag}"] = int(m["n_tokens"])
             results[f"_meta_mp_dropped_dims_{tag}"] = int(m["n_dims_dropped"])
+            if suffix:
+                results[f"_meta_mp_n_tokens_available_{tag}"] = int(m["n_tokens_available"])
+                results[f"_meta_mp_{suffix}_n_tokens_needed_{tag}"] = int(
+                    m["fixed_n_tokens_needed"])
 
         for name in metric_names:
             vals = np.asarray(collected[name], dtype=np.float64)
@@ -719,7 +603,6 @@ class MPBulkDeviationTask(DiagnosticTask):
             results[f"{_key_prefix(name)}{name}_mean"] = (
                 float(np.mean(finite)) if finite.size else float("nan")
             )
-        # _meta_: a CONFIG constant, identical for every model, so as a
-        # feature column it is pure noise with zero variance.
         results["_meta_mp_edge_tol"] = float(edge_tol)
+        results.update(_diag)
         return results

@@ -573,10 +573,10 @@ def test_weight_norms_normalized_stable_rank_moves_under_zero_padding(tiny_gpt2)
     padded = inv.zero_pad_weight_matrices(model, 2)
     base = WeightNormProfileTask({}).evaluate(model, None, None)
     pad = WeightNormProfileTask({}).evaluate(padded, None, None)
-    inv.assert_moves(base, pad, "mean_stable_rank_normalized", min_rel=0.4)
-    assert pad["mean_stable_rank_normalized"] / base["mean_stable_rank_normalized"] == \
+    inv.assert_moves(base, pad, "_meta_mean_stable_rank_normalized", min_rel=0.4)
+    assert pad["_meta_mean_stable_rank_normalized"] / base["_meta_mean_stable_rank_normalized"] == \
         pytest.approx(0.5, rel=1e-12)
-    inv.assert_invariant(base, pad, ["_meta_mean_stable_rank", "stable_rank_per_layer",
+    inv.assert_invariant(base, pad, ["mean_stable_rank", "stable_rank_per_layer",
                                      "mean_frobenius_norm", "mean_spectral_norm"], rtol=1e-12)
     with pytest.raises(RuntimeError, match="weight-only"):
         padded(input_ids=torch.zeros(1, 2, dtype=torch.long))
@@ -594,7 +594,7 @@ def test_weight_norms_does_not_fabricate_zeros_for_unmeasured_blocks():
             self.model.layers = torch.nn.ModuleList([torch.nn.LayerNorm(8) for _ in range(3)])
     from blme.tasks.geometry.weight_norms import WeightNormProfileTask
     r = WeightNormProfileTask({}).evaluate(NoMatrices(), None, None)
-    assert "error" in r or math.isnan(r["mean_stable_rank_normalized"]), r
+    assert "error" in r or math.isnan(r["mean_stable_rank"]), r
 
 
 def test_compare_helpers_detect_movement():
@@ -636,6 +636,6 @@ def test_weight_norms_zero_padding_on_gpt2(gpt2):
     model, _ = gpt2
     base = WeightNormProfileTask({}).evaluate(model, None, None)
     pad = WeightNormProfileTask({}).evaluate(inv.zero_pad_weight_matrices(model, 2), None, None)
-    assert pad["mean_stable_rank_normalized"] / base["mean_stable_rank_normalized"] == \
+    assert pad["_meta_mean_stable_rank_normalized"] / base["_meta_mean_stable_rank_normalized"] == \
         pytest.approx(0.5, rel=1e-12)
-    inv.assert_invariant(base, pad, ["_meta_mean_stable_rank"], rtol=1e-12)
+    inv.assert_invariant(base, pad, ["mean_stable_rank"], rtol=1e-12)

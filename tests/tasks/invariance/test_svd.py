@@ -1,0 +1,139 @@
+"""geometry_svd: route-independent schema, token policies, key hygiene and size
+invariance, driven through the real ``evaluate()``."""
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from _family_c import TEXTS, inv, load
+
+TASK = "geometry_svd"
+
+
+@pytest.fixture(scope="module")
+def tiny():
+    return load("hf-internal-testing/tiny-random-gpt2")
+
+
+@pytest.fixture(scope="module")
+def tiny_states(tiny):
+    return inv.states_from_model(*tiny, TEXTS)
+
+
+def _run_model(model, tok, **cfg):
+    from blme.tasks.geometry.isotropy import SVDIsotropyTask
+    return SVDIsotropyTask({"num_samples": len(TEXTS), **cfg}).evaluate(
+        model, tok, dataset=[{"text": t} for t in TEXTS], cache=None)
+
+
+def test_layerwise_without_a_cache_collects_every_layer(tiny, tiny_states):
+    """layerwise: true with no usable cache used to fall through to the
+    single-layer branch, so the per-layer keys vanished on that route. It now
+    collects every layer and reproduces the cache route."""
+    model, tok = tiny
+    r = _run_model(model, tok, layerwise=True, use_cache=False)
+    assert "_meta_layer_effective_rank" in r
+    assert r["_meta_svd_mode"] == "layerwise"
+    assert r["_meta_svd_source"] == "self_collected"
+    cached = inv.run_task_on_states(TASK, tiny_states, {"layerwise": True})
+    assert cached["_meta_svd_mode"] == "layerwise"
+    assert cached["_meta_svd_source"] == "shared_cache"
+    lw = [k for k in cached if "layer" in k and not k.startswith("_meta_svd")]
+    assert lw and set(lw) <= set(r)
+    single = _run_model(model, tok, layerwise=False, use_cache=False)
+    assert single["_meta_svd_mode"] == "single_layer"
+
+
+def _map(S, fn):
+    return S.map(lambda x: fn(np.asarray(x, dtype=np.float64)))
+
+
+def _sink(y):
+    y = y.copy()
+    y[0] *= 1e3
+    y[3] *= 1e3
+    return y
+
+
+@pytest.mark.parametrize("mode", [{}, {"layerwise": True}], ids=["single", "layerwise"])
+def test_spectra_drop_sinks_and_the_cosine_keeps_every_token(tiny_states, mode):
+    """A 1e3 position-0 row and a 1e3 row at position 3 in every entry: the
+    effective rank and participation ratio equal those of the same documents
+    with those rows absent (exclude_sinks), while the cosine anisotropy keeps
+    every token as Ethayarajh's protocol does, so it moves."""
+    sunk = inv.run_task_on_states(TASK, _map(tiny_states, _sink), mode)
+    absent = inv.run_task_on_states(TASK, _map(tiny_states, lambda y: np.delete(y, 3, 0)), mode)
+    keys = ["effective_rank", "participation_ratio"]
+    if mode:
+        keys += ["_meta_layer_effective_rank", "_meta_layer_participation_ratio"]
+    inv.assert_invariant(absent, sunk, keys, rtol=1e-9)
+    assert sunk["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
+    assert sunk["_meta_rows_policy"] == "exclude_sinks"
+    inv.assert_moves(absent, sunk, "avg_cosine_similarity", 1e-2)
+    inv.assert_moves(absent, sunk, "_meta_effective_rank_all_tokens", 1e-2)
+
+
+def test_cond_number_is_meta_and_moves_with_n(tiny_states):
+    """cond_number has no defining source and is driven by the smallest
+    retained singular value: fewer documents move it, so it is _meta_."""
+    full = inv.run_task_on_states(TASK, tiny_states)
+    assert "cond_number" not in full
+    half = inv.run_task_on_states(TASK, inv.subsample_docs(tiny_states, 6, seed=0))
+    inv.assert_moves(full, half, "_meta_cond_number", 1e-3)
+
+
+@pytest.fixture(scope="module")
+def tiny_identity_states(tiny):
+    """tiny-random-gpt2 with exact identity blocks after blocks 1 and 3."""
+    model, tok = tiny
+    return inv.states_from_model(inv.insert_identity_blocks(model, [1, 3]), tok, TEXTS)
+
+
+def test_layer_profiles_are_meta(tiny_states, tiny_identity_states):
+    """P4/P7: the layerwise lists' uniform mean moves under identity blocks and
+    the per-layer dict is keyed by absolute layer index, so both are _meta_;
+    the last-layer headline does not move."""
+    lw = {"layerwise": True}
+    base = inv.run_task_on_states(TASK, tiny_states, lw)
+    assert not {"layer_effective_rank", "layer_participation_ratio", "layer_metrics"} & set(base)
+    ins = inv.run_task_on_states(TASK, tiny_identity_states, lw)
+    inv.assert_invariant(base, ins, ["effective_rank", "participation_ratio",
+                                     "avg_cosine_similarity"], rtol=1e-9)
+    assert inv.rel_change(inv.uniform_layer_mean(base["_meta_layer_participation_ratio"]),
+                          inv.uniform_layer_mean(ins["_meta_layer_participation_ratio"])) > 1e-4
+
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.isotropy import SVDIsotropyTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "isometry": lambda S: inv.embed_isometric_docs(S, 2, 3),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.mark.parametrize("key", sorted(SVDIsotropyTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny_states):
+    """Zero-padding, a random isometric embedding (x2) and a rescale leave the
+    key in place; the explained-variance AUC (integrated over its own
+    unpadded length) moves under zero-padding (known negative)."""
+    transforms, node = SVDIsotropyTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    base = inv.run_task_on_states(TASK, tiny_states)
+    for t in transforms:
+        other = inv.run_task_on_states(TASK, _WIDTH[t](tiny_states))
+        inv.assert_invariant(base, other, [key], rtol=1e-6)
+        if t == "zero_pad":
+            inv.assert_moves(base, other, "_meta_svd_auc", 1e-2)
+
+
+def test_declarations(tiny_states):
+    cls = SVDIsotropyTask
+    assert cls.TOKEN_POLICY == "exclude_sinks"
+    assert cls.COSINE_TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS)
+    assert set(cls.HEADLINE_KEYS) <= set(inv.run_task_on_states(TASK, tiny_states))

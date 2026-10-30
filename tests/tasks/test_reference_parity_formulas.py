@@ -603,8 +603,13 @@ def test_collapse_task_reports_roy_vetterli_convention():
     # Match the task's layer set: the deepest profile point is the hooked RAW
     # last-block output, not HF's ln_f(b_{L-1}) entry. Without this the
     # reference differs from the task in exactly one element -- the last.
-    acts = collect_hidden_states(model, tok, dataset, num_samples=3,
-                                 layer_idx="all", replace_final_norm=True)
+    # TOKEN_POLICY exclude_sinks; this random model has no massive row, so the
+    # policy drops row 0 of every document.
+    acts_docs = collect_hidden_states(model, tok, dataset, num_samples=3,
+                                      layer_idx="all", replace_final_norm=True,
+                                      per_sample=True)
+    assert out["_meta_sink_n_massive_dropped"] == 0
+    acts = {li: torch.cat([x[1:] for x in docs]) for li, docs in acts_docs.items()}
 
     def ref(M, square):
         M = np.asarray(M, dtype=np.float64)
@@ -616,9 +621,9 @@ def test_collapse_task_reports_roy_vetterli_convention():
         return float(np.exp(-(q * np.log(q)).sum()))
 
     keys = sorted(acts.keys())
-    assert out["erank_per_layer"] == pytest.approx(
+    assert out["_meta_erank_per_layer"] == pytest.approx(
         [ref(acts[i].numpy(), False) for i in keys], rel=1e-6)
-    assert out["erank_sigma2_per_layer"] == pytest.approx(
+    assert out["_meta_erank_sigma2_per_layer"] == pytest.approx(
         [ref(acts[i].numpy(), True) for i in keys], rel=1e-6)
     # The legacy misnamed key must be gone.
     assert "erank_rawsigma_per_layer" not in out

@@ -105,6 +105,18 @@ def wide_dynamic_range():
     yield "1e6 + tiny diag", np.vstack([np.diag(d), -np.diag(d)]) + 1e6
 
 
+def wide_row_magnitude_span():
+    """Rows spanning ~50 orders of magnitude. Yields (label, X, exact H / ln d).
+
+    Every row of a row-normalising statistic (Wei et al. matrix entropy) is
+    unit after normalisation, so a global rescale cannot serve both ends: the
+    1e-25 rows are flushed to zero by a float32 cast after a rescale sized for
+    the 1e25 rows. Centred row-normalised covariance here is exactly I_2 / 2.
+    """
+    a, b = 1e-25, 1e25
+    yield "pm 1e-25 e1, pm 1e25 e2", np.array([[a, 0.0], [-a, 0.0], [0.0, b], [0.0, -b]]), 1.0
+
+
 def centring_is_safe(X):
     """True when subtracting the mean will not destroy resolution.
 

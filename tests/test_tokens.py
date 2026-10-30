@@ -344,7 +344,9 @@ def _route_cache(route, model, tok, docs):
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_accessor_reproduces_geometry_collapse(tiny, route, monkeypatch):
-    import blme.tasks.geometry.collapse as mod
+    # The task calls the accessor itself (per document), which collects
+    # through geometry.utils.
+    import blme.tasks.geometry.utils as mod
     model, tok, docs = tiny
     n = 6
     cfg = {"num_samples": n, "use_cache": route != "use_cache_false"}
@@ -353,7 +355,7 @@ def test_accessor_reproduces_geometry_collapse(tiny, route, monkeypatch):
                              monkeypatch, [mod])
     got, info = hidden_states_for_task(
         model, tok, docs, cache, num_samples=n, layer_idx="all",
-        use_cache=cfg["use_cache"], replace_final_norm=True)
+        use_cache=cfg["use_cache"], replace_final_norm=True, per_sample=True)
     assert _equal(got, used)
     assert info["source"] == ("shared_cache" if route == "shared_cache" else "self_collected")
     assert info["last_is_block"] == result["_meta_last_entry_is_block_output"]
@@ -361,7 +363,8 @@ def test_accessor_reproduces_geometry_collapse(tiny, route, monkeypatch):
 
 @pytest.mark.parametrize("route", ROUTES + ["undersized_cache"])
 def test_accessor_reproduces_geometry_isoscore(tiny, route, monkeypatch):
-    import blme.tasks.geometry.isotropy as mod
+    # The task calls the accessor itself, which collects through geometry.utils.
+    import blme.tasks.geometry.utils as mod
     model, tok, docs = tiny
     n = 6
     cfg = {"num_samples": n, "use_cache": route != "use_cache_false"}
@@ -372,7 +375,7 @@ def test_accessor_reproduces_geometry_isoscore(tiny, route, monkeypatch):
     got, info = hidden_states_for_task(
         model, tok, docs, cache, num_samples=n, layer_idx=-1,
         use_cache=cfg["use_cache"], replace_final_norm=False,
-        min_cached_docs=n, max_tokens_per_doc=None)
+        min_cached_docs=n, max_tokens_per_doc=None, per_sample=True)
     assert _equal(got, used)
     assert info["source"] == ("shared_cache" if route == "shared_cache" else "self_collected")
     if route == "undersized_cache":
@@ -381,7 +384,7 @@ def test_accessor_reproduces_geometry_isoscore(tiny, route, monkeypatch):
         # the 3-document cache and no longer matches the task.
         ungated, _ = hidden_states_for_task(
             model, tok, docs, cache, num_samples=n, layer_idx=-1,
-            replace_final_norm=False, max_tokens_per_doc=None)
+            replace_final_norm=False, max_tokens_per_doc=None, per_sample=True)
         assert not _equal(ungated, used)
 
 

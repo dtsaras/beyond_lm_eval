@@ -2990,15 +2990,22 @@ def test_geometry_collapse():
     task = RepresentationCollapseTask(config={"num_samples": 3, "use_cache": False})
     out = task.evaluate(model, tok, dataset, cache=None)
 
-    assert set(["erank_per_layer", "max_erank", "min_erank",
+    assert set(["_meta_erank_per_layer", "max_erank", "min_erank",
                 "collapse_ratio"]).issubset(out.keys())
 
     # Recompute from the SAME activations with an INDEPENDENT implementation.
     # Match the task's layer set: its deepest profile point is the hooked RAW
     # last-block output, since HF's final entry is ln_f(b_{L-1}) -- including
     # it contaminates the profile, and deleting it drops the deepest block.
-    acts = collect_hidden_states(model, tok, dataset, num_samples=3,
-                                 layer_idx="all", replace_final_norm=True)
+    # TOKEN_POLICY exclude_sinks: position 0 and massive rows are dropped. This
+    # random model has no massive row (asserted), so the reference drops row 0
+    # of every document.
+    acts_docs = collect_hidden_states(model, tok, dataset, num_samples=3,
+                                      layer_idx="all", replace_final_norm=True,
+                                      per_sample=True)
+    assert out["_meta_sink_n_massive_dropped"] == 0
+    acts = {li: torch.cat([x[1:] for x in docs]) for li, docs in acts_docs.items()}
+    acts_all = {li: torch.cat(list(docs)) for li, docs in acts_docs.items()}
 
     def _erank_from(sv):
         sv = sv[sv > 0]
@@ -3026,12 +3033,15 @@ def test_geometry_collapse():
     ref_sq = [ref_erank(acts[i].numpy(), square=True)
               for i in sorted(acts.keys())]
     # The squared spectrum is exposed under a name that says what it is.
-    assert out["erank_sigma2_per_layer"] == pytest.approx(ref_sq, rel=1e-6)
+    assert out["_meta_erank_sigma2_per_layer"] == pytest.approx(ref_sq, rel=1e-6)
     assert "erank_rawsigma_per_layer" not in out
     # Squaring strictly reduces entropy: sigma^2 erank < Roy-Vetterli erank.
     assert all(sq < rv for sq, rv in zip(ref_sq, ref))
-    assert len(ref) == 2 and len(out["erank_per_layer"]) == 2
-    assert out["erank_per_layer"] == pytest.approx(ref, rel=1e-6)
+    assert len(ref) == 2 and len(out["_meta_erank_per_layer"]) == 2
+    assert out["_meta_erank_per_layer"] == pytest.approx(ref, rel=1e-6)
+    # The every-token profile is kept under its own _meta_ name.
+    assert out["_meta_erank_per_layer_all_tokens"] == pytest.approx(
+        [ref_erank(acts_all[i].numpy()) for i in sorted(acts_all.keys())], rel=1e-6)
 
     # collapse_ratio derived from the independent eranks.
     mx, mn = max(ref), min(ref)
@@ -3044,14 +3054,14 @@ def test_geometry_collapse():
     # the whole suite). max_drop = most NEGATIVE adjacent erank change;
     # max_drop_layer = 1-based index of the layer where it lands.
     diffs = np.diff(np.asarray(ref, dtype=np.float64))
-    assert out["max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
+    assert out["_meta_max_drop"] == pytest.approx(float(np.min(diffs)), rel=1e-6)
     assert out["_meta_max_drop_layer"] == int(np.argmin(diffs)) + 1
 
     # ---- Determinism: same input twice -> identical output ----------------
     out2 = RepresentationCollapseTask(
         config={"num_samples": 3, "use_cache": False}
     ).evaluate(model, tok, dataset, cache=None)
-    assert out2["erank_per_layer"] == out["erank_per_layer"]
+    assert out2["_meta_erank_per_layer"] == out["_meta_erank_per_layer"]
     assert out2["collapse_ratio"] == out["collapse_ratio"]
 
 # === geometry_correlation_dimension  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===
@@ -4197,9 +4207,9 @@ def test_geometry_spectral():
     analytic_sr = 385.0 / 100.0                             # = 3.85
     analytic_alpha = 1.0 + 2.0 / np.log(10.0 / 9.0)         # = 19.98244...
     assert out_diag["avg_stable_rank"] == pytest.approx(analytic_sr, abs=1e-4)
-    assert out_diag["avg_alpha"] == pytest.approx(analytic_alpha, abs=1e-3)
+    assert out_diag["_meta_avg_alpha"] == pytest.approx(analytic_alpha, abs=1e-3)
     # there is exactly one scanned matrix, so min==max==avg
-    assert out_diag["std_alpha"] == pytest.approx(0.0, abs=1e-6)
+    assert out_diag["_meta_std_alpha"] == pytest.approx(0.0, abs=1e-6)
 
     # =================================================================
     # (B) Independent-SVD parity on a tiny real GPT-2.
@@ -4239,12 +4249,12 @@ def test_geometry_spectral():
                 ref_alphas_nohead.append(alpha)
 
     assert len(ref_alphas) > 1                              # multiple matrices scanned
-    assert out["avg_alpha"] == pytest.approx(float(np.mean(ref_alphas)), abs=1e-4)
+    assert out["_meta_avg_alpha"] == pytest.approx(float(np.mean(ref_alphas)), abs=1e-4)
     assert out["avg_stable_rank"] == pytest.approx(float(np.mean(ref_srs)), abs=1e-3)
-    assert out["std_alpha"] == pytest.approx(float(np.std(ref_alphas)), abs=1e-4)
-    assert out["median_alpha"] == pytest.approx(float(np.median(ref_alphas)), abs=1e-3)
-    assert out["min_alpha"] == pytest.approx(float(np.min(ref_alphas)), abs=1e-4)
-    assert out["max_alpha"] == pytest.approx(float(np.max(ref_alphas)), abs=1e-4)
+    assert out["_meta_std_alpha"] == pytest.approx(float(np.std(ref_alphas)), abs=1e-4)
+    assert out["_meta_median_alpha"] == pytest.approx(float(np.median(ref_alphas)), abs=1e-3)
+    assert out["_meta_min_alpha"] == pytest.approx(float(np.min(ref_alphas)), abs=1e-4)
+    assert out["_meta_max_alpha"] == pytest.approx(float(np.max(ref_alphas)), abs=1e-4)
     if ref_alphas_nohead:
         assert out["_meta_avg_alpha_no_head"] == pytest.approx(
             float(np.mean(ref_alphas_nohead)), abs=1e-4)
@@ -4333,7 +4343,7 @@ def test_geometry_svd():
     nrank_ref = int(np.sum(S > rel_tol))
     assert m["_meta_numerical_rank"] == nrank_ref
     cond_ref = float(S[0] / S[nrank_ref - 1])
-    assert m["cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
+    assert m["_meta_cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
 
     # For this well-conditioned full-rank N>D matrix, numerical rank == D.
     assert nrank_ref == D
@@ -4401,7 +4411,7 @@ def test_geometry_svd():
 
     expected_keys = {
         "_meta_svd_auc",
-        "cond_number",
+        "_meta_cond_number",
         "_meta_numerical_rank",
         "avg_cosine_similarity",
         "effective_rank",
@@ -4688,7 +4698,7 @@ def test_geometry_weight_norms():
     )
     assert blme["mean_frobenius_norm"] == pytest.approx(ref_frob.mean(), **TOL)
     assert blme["mean_spectral_norm"] == pytest.approx(ref_spec.mean(), **TOL)
-    assert blme["_meta_mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
+    assert blme["mean_stable_rank"] == pytest.approx(ref_srank.mean(), **TOL)
     assert blme["norm_uniformity"] == pytest.approx(ref_uniformity, **TOL)
     assert blme["_meta_n_layers"] == 2
 
@@ -4710,7 +4720,7 @@ def test_geometry_weight_norms():
     for k in (
         "mean_frobenius_norm",
         "mean_spectral_norm",
-        "_meta_mean_stable_rank",
+        "mean_stable_rank",
         "norm_uniformity",
     ):
         assert blme[k] == pytest.approx(blme2[k], abs=1e-12)
