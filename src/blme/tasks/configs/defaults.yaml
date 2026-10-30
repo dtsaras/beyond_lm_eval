@@ -129,7 +129,7 @@ geometry_tokenizer_efficiency:
 
 geometry_trajectory_curvature:
   num_samples: 100
-  skip_first_tokens: 1  # drop BOS — its hidden state is an extreme outlier
+  skip_first_tokens: auto  # drop the first row only where the tokenizer prepends a BOS
 
 geometry_mp_bulk_deviation:
   num_samples: 100

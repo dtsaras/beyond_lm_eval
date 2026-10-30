@@ -40,3 +40,28 @@ def test_last_layer_is_hfs_post_norm_state(tiny):
     assert res["curvature_mean_last_layer"] == want
     assert want != _pooled_layer_curvature(raw[max(raw)], skip_first=skip)
     assert res["_meta_last_entry_is_block_output"] is False
+
+
+def test_no_real_token_is_dropped_on_a_bos_less_tokenizer(tiny):
+    """The reference keeps every token (no special tokens added). The task
+    dropped the first row of every document, a real word on GPT-2/Pythia/Qwen."""
+    model, tok, cache = tiny
+    assert tok("a")["input_ids"][0] != tok.bos_token_id or tok.bos_token_id is None
+    res = TrajectoryCurvatureTask({"num_samples": N}).evaluate(model, tok, fd.dataset(), cache)
+    assert res["_meta_skip_first_tokens"] == 0 and res["_meta_tokenizer_adds_bos"] is False
+    hs = cache.get_hidden_states(layer_idx="all", num_samples=N, per_sample=True,
+                                 replace_final_norm=False)
+    assert res["curvature_mean_first_layer"] == _pooled_layer_curvature(hs[0], skip_first=0)
+    assert res["curvature_mean_first_layer"] != _pooled_layer_curvature(hs[0], skip_first=1)
+
+
+def test_a_tokenizer_added_bos_is_skipped():
+    from blme.tasks.geometry.trajectory_curvature import _tokenizer_adds_bos
+
+    class _BosTok:
+        bos_token_id = 1
+
+        def __call__(self, text):
+            return {"input_ids": [1, 7]}
+    assert _tokenizer_adds_bos(_BosTok()) is True
+    assert _tokenizer_adds_bos(fd.tokenizer()) is False

@@ -36,10 +36,11 @@ Implementation notes:
       contextualized layer L0", and the official curvature_utils.py
       likewise baselines curvature change at hs[1]. (An earlier note
       here claimed the paper uses the input embedding; it does not.)
-    * The BOS token is skipped (``skip_first_tokens``, default 1)
-      because the BOS hidden state is an extreme outlier in most
-      architectures and the first difference vector through it would
-      dominate the angle statistics.
+    * The reference tokenises without special tokens and keeps every token
+      (analyze_the_curvature_in_bert_and_gpt2.py:56-59). The cache adds the
+      tokenizer's special tokens, so ``skip_first_tokens`` ("auto") drops the
+      first row only when the tokenizer prepends a BOS; on BOS-less
+      tokenizers (GPT-2, Pythia, Qwen) no real token is dropped.
     * Angles are computed in float64 with the cosine clamped to
       [-1, 1]; zero-norm difference vectors (repeated identical hidden
       states) are skipped rather than propagated as NaN.
@@ -147,6 +148,18 @@ def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
     return float(np.mean(per_sentence_means))
 
 
+def _tokenizer_adds_bos(tokenizer) -> bool:
+    """Whether ``tokenizer(text)`` starts with a BOS it added itself."""
+    bos = getattr(tokenizer, "bos_token_id", None)
+    if bos is None:
+        return False
+    try:
+        ids = tokenizer("a")["input_ids"]
+    except Exception:  # noqa: BLE001 - a tokenizer that cannot encode adds nothing we can see
+        return False
+    return bool(len(ids) > 0 and int(ids[0]) == int(bos))
+
+
 @register_task("geometry_trajectory_curvature")
 class TrajectoryCurvatureTask(DiagnosticTask):
     """
@@ -167,7 +180,9 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         logger.info("Running Trajectory Curvature Analysis...")
 
         num_samples = self.config.get("num_samples", 100)
-        skip_first = int(self.config.get("skip_first_tokens", 1))
+        _bos = _tokenizer_adds_bos(tokenizer)
+        _skip_cfg = self.config.get("skip_first_tokens", "auto")
+        skip_first = int(_bos) if _skip_cfg == "auto" else int(_skip_cfg)
         use_cache = self.config.get("use_cache", True)
 
         # Per-sample (T_i, D) chunks in trajectory order: the shared cache when
@@ -239,4 +254,6 @@ class TrajectoryCurvatureTask(DiagnosticTask):
             # Counts, not features.
             "_meta_n_layers": int(n_layers),
             "_meta_n_samples_used": int(n_samples_used),
+            "_meta_skip_first_tokens": int(skip_first),
+            "_meta_tokenizer_adds_bos": bool(_bos),
         }
