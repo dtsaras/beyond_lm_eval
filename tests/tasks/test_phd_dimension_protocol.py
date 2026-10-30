@@ -95,3 +95,21 @@ def test_first_and_last_token_are_dropped():
     assert base["phd_dimension"] == moved["phd_dimension"]
     assert base["phd_dimension_std"] == moved["phd_dimension_std"]
     assert base["_meta_phd_n_end_rows_dropped"] == 2 * CFG["num_samples"]
+
+
+def test_per_text_grid_is_the_notebook_grid():
+    """GPTID's notebook grid on a 120-token text: mx = 118 rows, step =
+    (118 - 40) // 7 = 11, sizes range(40, 107, 11) -> 7 sizes, 9 subsamples
+    each. The value equals the kernel run on exactly that grid. (The old fixed
+    range(50, n, 40) grid gave 2 sizes.)"""
+    from blme.tasks.geometry.phd_dimension import _phd_dimension
+    out = _run(_CloudModel())
+    assert out["_meta_phd_fit_points_min"] == 7 and out["_meta_phd_fit_points_median"] == 7
+    model = _CloudModel()
+    vals = []
+    for i in range(CFG["num_samples"]):
+        ids = torch.full((1, T_TOK), i, dtype=torch.long)
+        h = model(input_ids=ids).hidden_states[-1][0].numpy()[1:-1]
+        vals.append(_phd_dimension(h, n_reruns=1, n_points=9, n_points_min=3, min_points=40,
+                                   max_points=118 - 11, point_jump=11, seed=42))
+    assert out["phd_dimension"] == pytest.approx(float(np.mean(vals)), rel=1e-12)

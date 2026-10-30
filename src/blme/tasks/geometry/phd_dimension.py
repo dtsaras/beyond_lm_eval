@@ -346,6 +346,11 @@ class PHDimensionTask(DiagnosticTask):
         min_points = int(cfg.get("min_points", 50))
         phd_max_points = int(cfg.get("phd_max_points", 512))
         point_jump = int(cfg.get("point_jump", 40))
+        # Per-text grid: GPTID example.ipynb (cells 4 and 6) @8c8759e.
+        min_subsample = int(cfg.get("min_subsample", 40))
+        intermediate_points = int(cfg.get("intermediate_points", 7))
+        text_n_points = int(cfg.get("text_n_points", 9))
+        min_text_tokens = int(cfg.get("min_text_tokens", 50))
 
         X = _gather_point_cloud(
             model, tokenizer, dataset, num_samples, max_length,
@@ -413,23 +418,26 @@ class PHDimensionTask(DiagnosticTask):
                 if _doc is None:
                     continue
                 _n_seen += 1
-                if _doc.shape[0] < min_points:
+                # The notebook's adaptive grid (cell 6): with mx = n_tokens - 2
+                # rows, step = (mx - 40) // 7 and sizes range(40, mx - step,
+                # step), 9 subsamples per size; texts under 50 tokens are
+                # filtered (paper App. G).
+                _mxp = int(_doc.shape[0])
+                if _mxp + 2 < min_text_tokens:
                     _n_short += 1
                     continue
-                # A document longer than min_points can still have a one-point
-                # grid (no slope): counted as ungriddable, not dropped silently.
-                _mx = min(max_points, _doc.shape[0])
-                _npts = len(range(min_points, _mx, point_jump))
+                _step = (_mxp - min_subsample) // intermediate_points
+                _npts = len(range(min_subsample, _mxp - _step, _step)) if _step >= 1 else 0
                 if _npts < 2:
+                    # Too short for a slope: counted, not dropped silently.
                     _n_ungriddable += 1
                     continue
                 _fit_pts.append(_npts)
                 _dd = _phd_dimension(
                     _doc, alpha=alpha, metric="euclidean", n_reruns=n_reruns,
-                    n_points=n_points, n_points_min=n_points_min,
-                    min_points=min_points,
-                    max_points=_mx,
-                    point_jump=point_jump, seed=seed,
+                    n_points=text_n_points, n_points_min=n_points_min,
+                    min_points=min_subsample, max_points=_mxp - _step,
+                    point_jump=_step, seed=seed,
                 )
                 if np.isfinite(_dd):
                     per_text.append(float(_dd))
