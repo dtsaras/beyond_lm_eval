@@ -48,7 +48,9 @@ import pathlib
 import pytest
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "blme"
-COLLECTORS = {"get_hidden_states", "collect_hidden_states"}
+# hidden_states_for_task (blme/tasks/_tokens.py) is the shared gate over both,
+# with replace_final_norm a required keyword.
+COLLECTORS = {"get_hidden_states", "collect_hidden_states", "hidden_states_for_task"}
 
 # The two functions that IMPLEMENT the option, plus the cache's own internals.
 IMPLEMENTATION_SITES = {
