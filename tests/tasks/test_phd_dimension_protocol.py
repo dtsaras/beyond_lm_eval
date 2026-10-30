@@ -1,4 +1,6 @@
 """geometry_phd_dimension: precision of the private forward and the GPTID protocol."""
+import types
+
 import numpy as np
 import pytest
 import torch
@@ -39,3 +41,57 @@ def test_private_forward_keeps_float64_states(tiny64):
     pooled = _gather_point_cloud(model, tok, data, num_samples=2, max_length=64, layer_idx=-1,
                                  pooling="all_tokens", cache=None, use_cache=False)
     assert np.array_equal(pooled, np.concatenate(ref))
+
+
+# ── A stub model with a fixed per-text cloud ─────────────────────────────
+# Text "doc i" is T_TOK tokens whose final hidden states are a fixed random
+# cloud for document i; ``ends`` rescales the first and last row only.
+T_TOK = 120
+
+
+class _Tok:
+    eos_token_id = None
+    sep_token_id = None
+
+    def __call__(self, text, return_tensors="pt", truncation=True, max_length=None, **kw):
+        i = int(str(text).split()[-1])
+        T = T_TOK if max_length is None else min(T_TOK, int(max_length))
+        ids = torch.full((1, T), i, dtype=torch.long)
+        return transformers.BatchEncoding({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
+
+
+class _CloudModel(torch.nn.Module):
+    def __init__(self, ends=1.0, d=24):
+        super().__init__()
+        self.ends, self.d = ends, d
+        self._anchor = torch.nn.Parameter(torch.zeros(1, dtype=torch.float64))
+
+    def forward(self, input_ids=None, attention_mask=None, output_hidden_states=True, **kw):
+        i, T = int(input_ids[0, 0]), input_ids.shape[1]
+        g = torch.Generator().manual_seed(7 + i)
+        # A curved low-dimensional cloud in R^d, so PHD is well defined.
+        z = torch.rand(T, 3, generator=g, dtype=torch.float64)
+        h = torch.cat([z, torch.sin(3 * z), torch.zeros(T, self.d - 6, dtype=torch.float64)], 1)
+        h[0] *= self.ends
+        h[-1] *= self.ends
+        h = h.unsqueeze(0)
+        return types.SimpleNamespace(hidden_states=(0.5 * h, h))
+
+
+CFG = {"documents": "dataset", "num_samples": 6, "max_length": 512, "n_reruns": 1}
+
+
+def _run(model, cfg=CFG):
+    from blme.tasks.geometry.phd_dimension import PHDimensionTask
+    data = [{"text": f"doc {i}"} for i in range(int(cfg["num_samples"]))]
+    return PHDimensionTask(dict(cfg)).evaluate(model, _Tok(), data, cache=None)
+
+
+def test_first_and_last_token_are_dropped():
+    """GPTID's notebook estimates each text on outp[0][0][1:-1]: rescaling the
+    first and last row of every text leaves the per-text PHD unchanged."""
+    base, moved = _run(_CloudModel()), _run(_CloudModel(ends=50.0))
+    assert np.isfinite(base["phd_dimension"])
+    assert base["phd_dimension"] == moved["phd_dimension"]
+    assert base["phd_dimension_std"] == moved["phd_dimension_std"]
+    assert base["_meta_phd_n_end_rows_dropped"] == 2 * CFG["num_samples"]

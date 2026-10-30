@@ -70,6 +70,7 @@ from scipy.spatial.distance import cdist
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
 
@@ -259,8 +260,14 @@ def _gather_point_cloud(
 
 
 def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
-                              max_length: int, layer_idx: int, pooling: str):
+                              max_length: int, layer_idx: int, pooling: str,
+                              drop_ends: bool = False, stats=None):
     """Yield one ``(T_i, D)`` token cloud PER DOCUMENT.
+
+    ``drop_ends`` slices ``[1:-1]`` as GPTID's notebook does (it drops the
+    artificial <CLS>/<SEP>); for a decoder that is position 0 and the last
+    content token, after any tokenizer-appended EOS/SEP is stripped. ``stats``
+    (a dict) receives the number of rows dropped.
 
     The pooled path concatenates documents, which mixes manifolds and inflates
     the dimension estimate. Tulchinskii et al. estimate one PHD per text and
@@ -279,6 +286,7 @@ def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
             enc = tokenizer(text, return_tensors="pt", truncation=True,
                             max_length=max_length)
             enc = {k: v.to(device) for k, v in enc.items()}
+            enc, _ = strip_trailing_special(enc, tokenizer)
             if enc["input_ids"].shape[1] < 1:
                 continue
             # post-final-norm=False, DELIBERATELY: the same single-layer
@@ -291,6 +299,10 @@ def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
             idx = (layer_idx + 1) if layer_idx >= 0 else len(hs) + layer_idx
             idx = max(1, min(idx, len(hs) - 1))
             h = hs[idx][0].detach().double().cpu().numpy()   # no float32 narrowing
+            if drop_ends:
+                if stats is not None:
+                    stats["rows_dropped"] = stats.get("rows_dropped", 0) + min(2, h.shape[0])
+                h = h[1:-1]
             if pooling == "mean":
                 h = np.asarray(h, dtype=np.float64).mean(axis=0, keepdims=True)
             elif pooling == "last":
@@ -391,9 +403,13 @@ class PHDimensionTask(DiagnosticTask):
             # ungriddable, non-finite), and the buckets sum to _n_seen.
             _n_seen = _n_short = _n_ungriddable = _n_nonfinite = 0
             _fit_pts = []
+            # GPTID's per-text protocol drops the first and last token ([1:-1]):
+            # the sink at position 0 and the final token
+            # (test_phd_dimension_protocol.py::test_first_and_last_token_are_dropped).
+            _slice_stats = {}
             for _doc in _iter_per_document_clouds(
                     model, tokenizer, dataset, num_samples, max_length,
-                    layer_idx, pooling):
+                    layer_idx, pooling, drop_ends=True, stats=_slice_stats):
                 if _doc is None:
                     continue
                 _n_seen += 1
@@ -426,6 +442,7 @@ class PHDimensionTask(DiagnosticTask):
             out["phd_dimension"] = float(np.mean(per_text))
             out["phd_dimension_std"] = float(np.std(per_text))
             out["_meta_phd_n_texts"] = int(len(per_text))
+            out["_meta_phd_n_end_rows_dropped"] = int(_slice_stats.get("rows_dropped", 0))
             out["_meta_phd_n_texts_seen"] = int(_n_seen)
             out["_meta_phd_n_texts_too_short"] = int(_n_short)
             out["_meta_phd_n_texts_ungriddable"] = int(_n_ungriddable)
