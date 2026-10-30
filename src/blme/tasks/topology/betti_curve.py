@@ -38,6 +38,19 @@ except ImportError:
     HAS_RIPSER = False
 
 
+def _knn_k(n: int, n_neighbors="auto") -> int:
+    """The kNN degree for an n-point cloud. k COUNTS THE POINT ITSELF, as the
+    released loader's NearestNeighbors(n_neighbors=k).kneighbors_graph(X) does
+    (X passed explicitly, betti_calc_parallel.py:60-66): k - 1 true neighbours,
+    k capped at n. "auto" is max(14, ceil(log2 N)); 14 is the paper's
+    calibrated k for its hollow-torus example (Fig. 3(e))."""
+    if isinstance(n_neighbors, str) and n_neighbors == "auto":
+        k = int(max(14, math.ceil(math.log2(max(n, 2)))))
+    else:
+        k = int(n_neighbors)
+    return int(max(1, min(k, n)))
+
+
 def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
                  return_persistence=False, hop_metric=True,
                  hop_radius=2.0):
@@ -89,20 +102,14 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
         _b0 = 1 if n >= 1 else 0
         return ((_b0, 0, 0.0, 0.0) if return_persistence else (_b0, 0))
 
-    # "auto": max(14, ceil(log2 N)); 14 is the paper's calibrated k for its
-    # hollow-torus example (Fig. 3(e)), which reads beta_1 = 2 there.
-    if isinstance(n_neighbors, str) and n_neighbors == "auto":
-        k = int(max(14, math.ceil(math.log2(max(n, 2)))))
-    else:
-        k = int(n_neighbors)
-    k = int(min(k, n - 1))
+    k = _knn_k(n, n_neighbors)
     tree = cKDTree(X)
     # Column 0 is the point itself (with exact duplicates removed above).
-    dists, idx = tree.query(X, k=k + 1)
-    dists = np.atleast_2d(dists)
-    idx = np.atleast_2d(idx)
+    dists, idx = tree.query(X, k=k)
+    dists = np.asarray(dists).reshape(n, k)
+    idx = np.asarray(idx).reshape(n, k)
 
-    rows = np.repeat(np.arange(n), k)
+    rows = np.repeat(np.arange(n), k - 1)
     cols = idx[:, 1:].ravel()
     # csgraph reads an explicit zero as "no edge", so distances are floored.
     vals = np.maximum(dists[:, 1:].ravel(), 1e-12)
@@ -260,4 +267,7 @@ class BettiCurveTask(DiagnosticTask):
             float(np.argmax(h1_maxpers_curve)) / float(max(1, num_layers - 1)))
         results["max_betti_1"] = int(np.max(betti_1_curve))
         results.update(point_meta(pinfo, pts[num_layers // 2]))
+        _n_mid = int(len(np.unique(np.asarray(pts[num_layers // 2]), axis=0)))
+        results["_meta_knn_k"] = _knn_k(_n_mid, n_neighbors)
+        results["_meta_knn_true_neighbours"] = results["_meta_knn_k"] - 1
         return results

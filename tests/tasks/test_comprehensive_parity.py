@@ -6732,23 +6732,27 @@ def test_topology_betti_curve():
     from blme.tasks.topology.betti_curve import _count_betti
 
     def ref_beta0_networkx(X, n_neighbors):
-        """Independent beta_0: connected components of the symmetric kNN graph,
-        built with cKDTree (same construction as BLME) but counted by networkx
-        rather than scipy.sparse.csgraph."""
+        """Independent beta_0: connected components of the symmetric kNN graph
+        of the RELEASED loader (topnn_framework@8779aea
+        transformers/betti_calc_parallel.py find_neighbors: n_neighbors capped
+        at N, NearestNeighbors(n_neighbors).fit(X).kneighbors_graph(X), which
+        counts each point as its own neighbour), counted by networkx. The pin
+        was re-derived from that code when BLME aligned its k convention to it;
+        it previously re-used BLME's own k-excludes-self cKDTree construction."""
+        from sklearn.neighbors import NearestNeighbors
         X = np.asarray(X, dtype=np.float64)
         X = X[np.all(np.isfinite(X), axis=1)]
         n = len(X)
         if n < 3:
             return max(n, 0)
-        k = int(min(n_neighbors, n - 1))
-        tree = cKDTree(X)
-        _, idx = tree.query(X, k=k + 1)
-        idx = np.atleast_2d(idx)
+        k = n if n < n_neighbors + 1 else n_neighbors
+        A = NearestNeighbors(n_neighbors=k, algorithm="ball_tree").fit(X).kneighbors_graph(X)
+        A = A.toarray()
         G = nx.Graph()
         G.add_nodes_from(range(n))
-        for i in range(n):
-            for j in idx[i, 1:]:
-                G.add_edge(i, int(j))  # undirected == BLME's graph.maximum(graph.T)
+        for i, j in zip(*np.nonzero(A)):
+            if i != j:
+                G.add_edge(int(i), int(j))  # undirected == BLME's graph.maximum(graph.T)
         return nx.number_connected_components(G)
 
     # ---- beta_0 numeric parity across randomized cluster configurations -----
