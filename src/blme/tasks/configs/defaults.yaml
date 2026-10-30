@@ -51,7 +51,8 @@ geometry_matrix_entropy:
 
 geometry_schatten:
   num_samples: 10
-  max_length: 128
+  # Full text, as MNN.py: null = up to the model's context.
+  max_length: null
 
 interpretability_activation_sinks:
   num_samples: 10

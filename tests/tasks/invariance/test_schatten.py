@@ -58,3 +58,16 @@ def test_schatten_is_yusupov_mlp_layer_mean(tiny):
             _yusupov_reference(model, tok, TEXTS, p), rel=1e-6)
     assert r["_meta_schatten_mlp_layers_found"] == len(model.transformer.h)
     assert "schatten_1_last" not in r and "_meta_schatten_1_last" in r
+
+
+def test_full_text_not_a_128_token_window(tiny):
+    """MNN.py scores every token of the text: a ~330-token document is read in
+    full (up to the model's context), not cut at 128."""
+    model, tok = tiny
+    long_text = " ".join(TEXTS)
+    assert tok(long_text, return_tensors="pt")["input_ids"].shape[-1] > 128
+    full = _run(model, tok, [long_text])
+    cut = _run(model, tok, [long_text], max_length=128)
+    assert full["_meta_schatten_n_docs_truncated"] == 0
+    assert cut["_meta_schatten_n_docs_truncated"] == 1
+    assert full["row_normalized_matrix_nuclear_norm_last"] != cut["row_normalized_matrix_nuclear_norm_last"]

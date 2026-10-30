@@ -359,7 +359,8 @@ class SchattenNormTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Schatten-p norms + MNN + RankMe...")
         num_samples = int(self.config.get("num_samples", 10))
-        _ml = self.config.get("max_length", 128)
+        # Full text, as MNN.py (no truncation): None = the model's context.
+        _ml = self.config.get("max_length", None)
         max_length = int(_ml) if _ml is not None else None
 
         # The MLP-internal activations are not in the shared cache, so this
