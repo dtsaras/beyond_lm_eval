@@ -140,3 +140,22 @@ def test_texts_are_long_documents_preprocessed_as_the_notebook(monkeypatch):
     assert seen and not any(t.startswith("passage") for t in seen)
     # text.replace('\n', ' ').replace('  ', ' '), verbatim (one pass).
     assert all("\n" not in t for t in seen) and "Title  body of doc 0" in seen
+
+
+def test_window_is_clamped_to_the_model_context():
+    """The notebook's 512-token window exceeds a 64-position model; the task
+    truncates at the model's context instead of indexing off its position
+    table (which raised IndexError on CPU and a device assert on CUDA)."""
+    from transformers import GPT2Config, GPT2LMHeadModel, GPT2TokenizerFast
+    from blme.tasks.geometry.phd_dimension import PHDimensionTask
+    tok = GPT2TokenizerFast.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    model = GPT2LMHeadModel(GPT2Config(n_layer=2, n_head=2, n_embd=32, vocab_size=tok.vocab_size,
+                                       n_positions=64, n_ctx=64)).eval()
+    text = " ".join(f"word{i} and more text" for i in range(60))
+    assert len(tok(text)["input_ids"]) > 64
+    data = [{"text": f"{i} {text}"} for i in range(3)]
+    out = PHDimensionTask({"documents": "dataset", "num_samples": 3, "n_reruns": 1}).evaluate(
+        model, tok, data, cache=None)
+    assert out["_meta_phd_max_length"] == 64 and out["_meta_phd_max_length_clamped"] is True
+    assert out["_meta_phd_n_texts"] == 3 and np.isfinite(out["phd_dimension"])

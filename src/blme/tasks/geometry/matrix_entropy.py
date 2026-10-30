@@ -181,6 +181,9 @@ def _collect_per_sample_layer_tokens_fresh(model, tokenizer, samples, max_length
                 out = model(**inputs, output_hidden_states=True)
                 if not getattr(out, "hidden_states", None):
                     continue
+                # post-final-norm: BOTH. `per_layer` is substituted (homogeneous
+                # profile); `post_norm_last` keeps the untouched `ln_f` entry,
+                # which is the headline the released reference defines.
                 hs = list(out.hidden_states)
                 post_norm_last.append(hs[-1][0].detach().float())
                 _h_raw = _sink.get("h")

@@ -355,6 +355,13 @@ class PHDimensionTask(DiagnosticTask):
         num_samples = int(cfg.get("num_samples", 100))
         # The notebook truncates every text at 512 tokens (cell 6).
         max_length = int(cfg.get("max_length", 512))
+        # A window past the model's context indexes off its position table
+        # (test_phd_dimension_protocol.py::test_window_is_clamped_to_the_model_context).
+        _ctx = (getattr(getattr(model, "config", None), "max_position_embeddings", None)
+                or getattr(getattr(model, "config", None), "n_positions", None))
+        max_length_clamped = isinstance(_ctx, int) and 0 < _ctx < max_length
+        if max_length_clamped:
+            max_length = _ctx
         layer_idx = int(cfg.get("layer_idx", -1))
         pooling = cfg.get("pooling", "all_tokens")
         max_points = int(cfg.get("max_points", 2000))
@@ -441,6 +448,8 @@ class PHDimensionTask(DiagnosticTask):
             "_meta_phd_dimension_pooled": float(d),
             "_meta_num_points": int(n_cloud),
             "_meta_layer_idx": int(layer_idx),
+            "_meta_phd_max_length": int(max_length),
+            "_meta_phd_max_length_clamped": bool(max_length_clamped),
         }
 
         # Per-text protocol, as Tulchinskii et al. measure: one PHD per text,

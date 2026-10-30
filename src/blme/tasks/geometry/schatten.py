@@ -303,6 +303,9 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
                 _sink.pop("h", None)
                 _act.clear()
                 out = model(**inputs, output_hidden_states=True)
+                # post-final-norm: BOTH. `per_layer` is substituted (homogeneous
+                # profile); `post_norm_last` keeps HF's post-norm last entry for
+                # the `*_last` keys, as MNN.py:184 reads last_hidden_state.
                 hs = getattr(out, "hidden_states", None)
                 if not hs:
                     continue

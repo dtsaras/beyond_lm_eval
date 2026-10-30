@@ -98,10 +98,13 @@ def test_every_hidden_state_collector_call_declares_replace_final_norm():
 
 def test_the_sweep_still_sees_every_call_site():
     """A guard on the guard: if the collectors are renamed, the test above
-    silently passes on an empty set. 39 sites existed at the sweep; the bar is
-    deliberately loose, it only has to catch "the AST walk found nothing"."""
-    n = sum(1 for _ in _call_sites())
-    assert n >= 30, f"only {n} collector call sites found; did they get renamed?"
+    silently passes on an empty set. The shared gates absorbed most of the 39
+    original sites (28 remain), so the bar is loose and per name: it only has
+    to catch "the AST walk found nothing"."""
+    sites = list(_call_sites())
+    assert len(sites) >= 20, f"only {len(sites)} collector call sites found; did they get renamed?"
+    unseen = COLLECTORS - {name for _, _, name, _ in sites}
+    assert not unseen, f"no call site found for {sorted(unseen)}; renamed?"
 
 
 # ── Direct `out.hidden_states[...]` indexing ──────────────────────────────
