@@ -292,10 +292,10 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "_meta_svd_auc" in results
-    assert "cond_number" in results
+    assert "_meta_cond_number" in results
     assert results["_meta_svd_auc"] > 0
     assert results["_meta_svd_auc"] <= 1.0
-    assert results["cond_number"] >= 1.0
+    assert results["_meta_cond_number"] >= 1.0
 
 
 def test_isoscore_matches_rudman_formula_on_known_spectrum():

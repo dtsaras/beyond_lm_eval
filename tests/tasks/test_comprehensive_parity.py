@@ -4339,7 +4339,7 @@ def test_geometry_svd():
     nrank_ref = int(np.sum(S > rel_tol))
     assert m["_meta_numerical_rank"] == nrank_ref
     cond_ref = float(S[0] / S[nrank_ref - 1])
-    assert m["cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
+    assert m["_meta_cond_number"] == pytest.approx(cond_ref, rel=1e-9, abs=1e-9)
 
     # For this well-conditioned full-rank N>D matrix, numerical rank == D.
     assert nrank_ref == D
@@ -4407,7 +4407,7 @@ def test_geometry_svd():
 
     expected_keys = {
         "_meta_svd_auc",
-        "cond_number",
+        "_meta_cond_number",
         "_meta_numerical_rank",
         "avg_cosine_similarity",
         "effective_rank",

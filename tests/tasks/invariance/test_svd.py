@@ -71,3 +71,12 @@ def test_spectra_drop_sinks_and_the_cosine_keeps_every_token(tiny_states, mode):
     assert sunk["_meta_rows_policy"] == "exclude_sinks"
     inv.assert_moves(absent, sunk, "avg_cosine_similarity", 1e-2)
     inv.assert_moves(absent, sunk, "_meta_effective_rank_all_tokens", 1e-2)
+
+
+def test_cond_number_is_meta_and_moves_with_n(tiny_states):
+    """cond_number has no defining source and is driven by the smallest
+    retained singular value: fewer documents move it, so it is _meta_."""
+    full = inv.run_task_on_states(TASK, tiny_states)
+    assert "cond_number" not in full
+    half = inv.run_task_on_states(TASK, inv.subsample_docs(tiny_states, 6, seed=0))
+    inv.assert_moves(full, half, "_meta_cond_number", 1e-3)

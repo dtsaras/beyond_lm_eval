@@ -122,7 +122,9 @@ def _svd_metrics_for_layer(X, source_dtype=None):
         # _meta_: the explained-variance AUC is integrated over its own
         # unpadded length, so zero-padding moves it; it has no defining source.
         "_meta_svd_auc": float(auc),
-        "cond_number": cond_number,
+        # _meta_: no published source, and it follows the smallest retained
+        # singular value, which moves with N and with the padded width.
+        "_meta_cond_number": cond_number,
         "_meta_numerical_rank": effective_rank_num,
         # At the model's precision (sqrt(max(N, D)) factor).
         "_meta_numerical_rank_source_precision": _rank_src,

@@ -30,9 +30,9 @@ def test_float32_tensor_matches_float32_numpy():
     r_np = _svd_metrics_for_layer(X.astype(np.float32))
     r_t = _svd_metrics_for_layer(torch.from_numpy(X).float())
     assert r_t["_meta_numerical_rank"] == 3
-    assert r_t["cond_number"] == pytest.approx(4.0, rel=1e-12)
+    assert r_t["_meta_cond_number"] == pytest.approx(4.0, rel=1e-12)
     assert r_t["_meta_numerical_rank"] == r_np["_meta_numerical_rank"]
-    assert r_t["cond_number"] == pytest.approx(r_np["cond_number"], rel=1e-12)
+    assert r_t["_meta_cond_number"] == pytest.approx(r_np["_meta_cond_number"], rel=1e-12)
 
 
 def test_float64_tensor_keeps_its_own_resolution():
@@ -40,7 +40,7 @@ def test_float64_tensor_keeps_its_own_resolution():
     X = _exact_fixture()
     r = _svd_metrics_for_layer(torch.from_numpy(X).double())
     assert r["_meta_numerical_rank"] == 5
-    assert r["cond_number"] == pytest.approx(2.0 ** 28, rel=1e-12)
+    assert r["_meta_cond_number"] == pytest.approx(2.0 ** 28, rel=1e-12)
 
 
 def test_promotion_does_not_move_scale_free_metrics():
@@ -76,9 +76,9 @@ def test_bfloat16_tolerance_does_not_discard_everything():
     r16 = _svd_metrics_for_layer(torch.from_numpy(X).to(torch.bfloat16))
     r32 = _svd_metrics_for_layer(torch.from_numpy(X).float())
     assert r16["_meta_numerical_rank"] > 0, "bf16 tolerance discarded everything"
-    assert np.isfinite(r16["cond_number"])
+    assert np.isfinite(r16["_meta_cond_number"])
     # It should land near the float32 answer, not at a degenerate extreme.
-    assert r16["cond_number"] == pytest.approx(r32["cond_number"], rel=0.05)
+    assert r16["_meta_cond_number"] == pytest.approx(r32["_meta_cond_number"], rel=0.05)
 
 
 def test_float32_tolerance_is_unchanged_by_the_bf16_guard():
