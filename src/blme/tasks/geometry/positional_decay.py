@@ -22,6 +22,7 @@ import torch
 import numpy as np
 from scipy.stats import spearmanr
 
+from .._precision import effective_dtype_meta, fp32_compute
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 import logging
@@ -79,21 +80,13 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         _n_nonfinite_rows = 0
         _n_flat_rows = 0
 
-        # The attention probabilities must be PRODUCED in fp32: bf16's 8-bit
-        # mantissa makes about a fifth of pythia-70m's rows exactly flat, and
-        # upcasting afterwards cannot recover them. Promoted at the call site
-        # and restored afterwards.
-        _lowp = {torch.float16, torch.bfloat16}
-        _saved_dtypes = None
-        _n_params = sum(p_.numel() for p_ in model.parameters())
-        if (getattr(model, "dtype", None) in _lowp) and _n_params <= 2_000_000_000:
-            try:
-                _saved_dtypes = [(p_, p_.dtype) for p_ in model.parameters()]
-                model.float()
-            except Exception as e:  # pragma: no cover - defensive
-                logger.info(f"positional_decay: fp32 promotion failed ({e})")
-                _saved_dtypes = None
-
+        # The attention probabilities must be PRODUCED in fp32 (P5): bf16's
+        # 8-bit mantissa makes about a fifth of pythia-70m's rows exactly flat.
+        # fp32_compute promotes at every model size (the old <= 2e9-parameter
+        # gate made the dtype a function of size) and restores parameters AND
+        # buffers (tests/tasks/test_positional_decay_protocol.py).
+        _dtype_ctx = fp32_compute(model)
+        _dtype_info = _dtype_ctx.__enter__()
         try:
           with torch.no_grad():
             for s in samples:
@@ -170,9 +163,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                                     layer_correlations_pooled[li].append(_rho)
 
         finally:
-            if _saved_dtypes is not None:
-                for p_, dt in _saved_dtypes:
-                    p_.data = p_.data.to(dt)
+            # Restores on every exit, including the early error return above.
+            _dtype_ctx.__exit__(None, None, None)
 
         if not layer_correlations:
             return {"error": "Could not compute positional correlations (sequences too short or nan)."}
@@ -210,5 +202,6 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         out["_meta_n_nonfinite_attn_rows"] = int(_n_nonfinite_rows)
         out["_meta_n_flat_attn_rows"] = int(_n_flat_rows)
         out["_meta_model_dtype"] = str(getattr(model, "dtype", "unknown"))
-        out["_meta_promoted_to_fp32"] = bool(_saved_dtypes is not None)
+        out["_meta_promoted_to_fp32"] = bool(_dtype_info["promoted"])
+        out.update(effective_dtype_meta(_dtype_info))
         return out
