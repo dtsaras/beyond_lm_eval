@@ -464,6 +464,37 @@ class MPBulkDeviationTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "exclude_sinks"
+    SOURCES = {
+        "paper": "doi:10.1070/SM1967v001n04ABEH001994 (Marchenko & Pastur 1967); "
+                 "arXiv:math/0403022 (Baik, Ben Arous & Peche 2005)",
+        "code": "none (BLME construct; the MP CDF is cross-checked against scikit-rmt)",
+        "llm_precedent": "none verified for activation correlation spectra "
+                         "(arXiv:2410.17770 applies MP to weight matrices)",
+    }
+    ADAPTATION_NOTE = (
+        "The eigenvalue spectrum of the per-dimension correlation matrix of a pooled token "
+        "cloud is compared with the Marchenko-Pastur law, and eigenvalues above the BBP edge "
+        "are counted. The correlation matrix (not the covariance) is used because MP needs "
+        "a known scale and the covariance variant scores heteroscedasticity as spikes; the "
+        "covariance and permutation-null variants stay in _meta_. Position 0 and "
+        "massive-norm rows are dropped with one mask from the middle depths, because the "
+        "iid null has no place for a handful of sink rows. The number of spikes that clear "
+        "the edge grows with N/d, so the headline is the fixed-gamma family, evaluated on "
+        "a seeded subsample of N = 4d+1 tokens of the whole cloud; the gamma-matched "
+        "family is _meta_. Tokens from one document are correlated, which the iid null "
+        "ignores (within-document centring moves the spike energy by up to 10%). "
+        "Per-coordinate z-scoring presumes a privileged basis, so an isometric embedding "
+        "moves every key."
+    )
+    HEADLINE_KEYS = tuple(f"mp_{m}_g25_{t}" for m in ("outlier_frac", "spike_energy",
+                                                       "ks_distance")
+                          for t in ("first", "mid", "last", "mean"))
+    # Zero-padding (constant columns are dropped before gamma is set) and
+    # rescaling. Not isometry (basis-dependent z-scoring); N-stable only in
+    # expectation (a seeded random draw), so N is not declared.
+    SIZE_INVARIANT = {k: (("zero_pad", "rescale"),
+                          "tests/tasks/invariance/test_mp_bulk_deviation.py::"
+                          f"test_size_invariant_entry[{k}]") for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Marchenko-Pastur Bulk Deviation Analysis...")

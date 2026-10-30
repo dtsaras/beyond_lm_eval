@@ -49,3 +49,45 @@ def test_fixed_gamma_family_is_the_headline_and_is_not_capped(tiny_states):
     assert r["_meta_mp_g25_n_tokens_needed_mid"] == 4 * d + 1
     assert r["_meta_mp_n_tokens_available_mid"] > 100
     assert "mp_ks_distance_mid" not in r and "_meta_mp_ks_distance_mid" in r
+
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.rmt_bulk import MPBulkDeviationTask  # noqa: E402
+
+_WIDTH = {"zero_pad": lambda S: inv.zero_pad_docs(S, 2),
+          "rescale": lambda S: inv.rescale_docs(S, 2.0)}
+
+
+@pytest.fixture(scope="module")
+def base(tiny_states):
+    return inv.run_task_on_states(TASK, tiny_states)
+
+
+@pytest.fixture(scope="module")
+def transformed(tiny_states):
+    return {t: inv.run_task_on_states(TASK, f(tiny_states)) for t, f in _WIDTH.items()}
+
+
+@pytest.mark.parametrize("key", sorted(MPBulkDeviationTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, base, transformed, tiny_states):
+    """Zero-padding and rescaling leave the fixed-gamma key in place; the
+    gamma-matched form it replaced moves with the token count (known
+    negative: half the documents)."""
+    transforms, node = MPBulkDeviationTask.SIZE_INVARIANT[key]
+    assert node.endswith(f"test_size_invariant_entry[{key}]")
+    assert np.isfinite(base[key])
+    for t in transforms:
+        inv.assert_invariant(base, transformed[t], [key], rtol=1e-6)
+    half = inv.run_task_on_states(TASK, inv.subsample_docs(tiny_states, 6, seed=0))
+    inv.assert_moves(base, half, "_meta_mp_ks_distance_mid", 1e-3)
+
+
+def test_declarations(base):
+    cls = MPBulkDeviationTask
+    assert cls.TOKEN_POLICY == "exclude_sinks"
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS) <= set(base)
