@@ -46,6 +46,28 @@ def test_base_model_gets_nan_and_a_reason(mock_model, mock_tokenizer):
         assert np.isnan(res[k]), k
 
 
+def test_declared_base_model_with_a_chat_template_is_skipped(tiny):
+    """Qwen2.5 base tokenizers ship a chat template, so the template alone
+    would run a base model; a declared is_instruct=False wins."""
+    model, _ = tiny
+    tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+    tok.chat_template = CHAT
+    res = _Loose({"is_instruct": False}).evaluate(model, tok, None)
+    assert res["_meta_is_instruct"] is False and res["_meta_has_chat_template"] is True
+    assert res["_meta_instruct_detected_by"] == "config.is_instruct"
+    assert "config.is_instruct" in res["_meta_refusal_skipped_reason"]
+    assert all(np.isnan(res[k]) for k in RefusalDirectionTask.HEADLINE_KEYS)
+
+
+def test_declared_instruct_without_a_template_is_skipped(mock_model, mock_tokenizer):
+    res = RefusalDirectionTask({"is_instruct": True}).evaluate(mock_model, mock_tokenizer, None)
+    if "error" in res:
+        pytest.skip(f"task declined: {res['error']}")
+    assert res["_meta_is_instruct"] is True and res["_meta_has_chat_template"] is False
+    assert "no chat template" in res["_meta_refusal_skipped_reason"]
+    assert all(np.isnan(res[k]) for k in RefusalDirectionTask.HEADLINE_KEYS)
+
+
 def test_instruct_model_is_read_below_0_8L(tiny):
     model, tok = tiny
     tok = transformers.AutoTokenizer.from_pretrained("gpt2")

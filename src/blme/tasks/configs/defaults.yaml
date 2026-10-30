@@ -382,7 +382,10 @@ repe_steering_effectiveness:
   steering_alpha: 1.0
   steering_threshold: 0.01
 
-repe_refusal_direction: {}
+repe_refusal_direction:
+  # true / false declares the checkpoint instruct or base; null falls back to
+  # "the tokenizer has a chat template", which base Qwen2.5 tokenizers also pass.
+  is_instruct: null
 
 # ---- Campaign-2 additions (2026-06): new methods, official-code parity-verified ----
 geometry_vendi_score:

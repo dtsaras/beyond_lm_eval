@@ -116,8 +116,14 @@ def _prompt_sets(dataset, config):
             harmless[-n_val_n:], source)
 
 
-def _instruct_detection(tokenizer):
-    """Instruct models are detected by the tokenizer carrying a chat template."""
+def _instruct_detection(tokenizer, declared=None):
+    """Whether the model is instruction-tuned, and what decided it.
+
+    A declared ``is_instruct`` wins: base tokenizers can ship a chat template
+    (Qwen2.5 base checkpoints do), so the template is only the fallback.
+    """
+    if declared is not None:
+        return bool(declared), "config.is_instruct"
     return bool(getattr(tokenizer, "chat_template", None)), "tokenizer.chat_template"
 
 
@@ -384,16 +390,24 @@ class RefusalDirectionTask(DiagnosticTask):
         if layers is None:
             return {"error": "Could not detect model layers"}
 
-        is_instruct, how = _instruct_detection(tokenizer)
+        is_instruct, how = _instruct_detection(tokenizer, self.config.get("is_instruct"))
+        has_template = bool(getattr(tokenizer, "chat_template", None))
         meta = {"_meta_is_instruct": bool(is_instruct), "_meta_instruct_detected_by": how,
+                "_meta_has_chat_template": has_template,
                 "_meta_prompt_source": source,
                 "_meta_n_harmful": len(h_tr) + len(h_va), "_meta_n_harmless": len(n_tr) + len(n_va),
                 "_meta_n_train_per_class": [len(h_tr), len(n_tr)],
                 "_meta_n_val_per_class": [len(h_va), len(n_va)]}
         if not is_instruct:
+            why = ("config.is_instruct is false" if how == "config.is_instruct"
+                   else "the tokenizer has no chat template")
             return self._nan_result(
-                "base model: the tokenizer has no chat template; the paper protocol "
-                "needs an instruct model's template and post-instruction tokens", meta)
+                f"base model: {why}; the paper protocol needs an instruct model's "
+                "template and post-instruction tokens", meta)
+        if not has_template:
+            return self._nan_result(
+                "declared instruct, but the tokenizer has no chat template to format "
+                "the instructions with", meta)
         # fp32 arithmetic at every size: the selection compares refusal scores
         # and KLs under small interventions (tests/tasks/test_refusal_direction_zero_final.py).
         with fp32_compute(model) as prec:
