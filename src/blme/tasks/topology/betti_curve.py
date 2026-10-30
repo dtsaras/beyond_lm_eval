@@ -172,6 +172,15 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
     return betti_0, int(betti_1), max_pers, total_pers
 
 
+_HEADLINES = ("simplification_ratio", "betti_0_last", "max_betti_1", "h1_max_persistence")
+# A kNN graph and its hop metric depend on neighbour order only.
+_SIZE_INVARIANT = {
+    k: (("embed_isometric", "zero_pad", "rescale"),
+        "tests/tasks/invariance/test_topology_betti_curve.py::"
+        "test_hop_metric_keys_are_width_and_scale_free")
+    for k in _HEADLINES}
+
+
 @register_task("topology_betti_curve")
 class BettiCurveTask(DiagnosticTask):
     """
@@ -184,6 +193,26 @@ class BettiCurveTask(DiagnosticTask):
     - Rate of topological simplification
     """
     TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": "arXiv:2004.06093",
+        "code": "topnn/topnn_framework@8779aea55ac89abcf15fbfc8214f1a35b12c074b",
+        "llm_precedent": ("none found for hop-metric Betti numbers of LLM states; the LLM "
+                          "precedent for last-token point clouds is arXiv:2505.20435"),
+    }
+    ADAPTATION_NOTE = (
+        "Naitzat et al. compute Betti numbers of one class's point cloud at every layer of small "
+        "trained classifiers, on the hop metric of a kNN graph, with k and the radius calibrated "
+        "so that the input cloud reproduces its known topology. BLME reads the same hop-metric "
+        "Betti numbers at every block on one point per sequence (its last token, the LLM "
+        "precedent's cloud) with N = 1000 sequences; there is no class and no ground truth, so "
+        "k = max(14, ceil(log2 N)) (counting the point itself, as the released loader does) and "
+        "the 2-hop radius are carried over uncalibrated. Euclidean VR persistence and kNN zigzag "
+        "are the LLM alternatives and are topology_homology and topology_zigzag_persistence. The "
+        "hop metric depends on neighbour order only, so every key is unchanged by a rescale or a "
+        "width change; at a few dozen points every key is constant."
+    )
+    HEADLINE_KEYS = _HEADLINES
+    SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Betti Curve (Topological Complexity Trajectory)...")
@@ -252,7 +281,7 @@ class BettiCurveTask(DiagnosticTask):
             results["betti_0_decay_rate"] = 0.0
 
         # Layer with the most loops, absolute and as a depth fraction.
-        results["max_betti_1_layer"] = int(np.argmax(betti_1_curve))
+        results["_meta_max_betti_1_layer"] = int(np.argmax(betti_1_curve))
         results["max_betti_1_layer_frac"] = (
             float(np.argmax(betti_1_curve)) / float(max(1, num_layers - 1)))
 

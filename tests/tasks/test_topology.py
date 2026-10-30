@@ -137,7 +137,7 @@ def test_betti_curve(mock_model, mock_tokenizer):
             assert results["betti_0_decay_rate"] == pytest.approx(
                 expected_slope, abs=1e-9
             )
-        assert results["max_betti_1_layer"] == int(np.argmax(curve1))
+        assert results["_meta_max_betti_1_layer"] == int(np.argmax(curve1))
         assert results["max_betti_1"] == int(np.max(curve1))
 
 
