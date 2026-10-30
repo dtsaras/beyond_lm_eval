@@ -1,6 +1,6 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import get_embeddings
+from ..common import get_embeddings, get_lm_head
 import torch
 import numpy as np
 from scipy.stats import skew
@@ -136,17 +136,38 @@ class GlobalHubnessTask(DiagnosticTask):
             return {"error": f"hubness: k_values must be positive integers, got {_k_raw}"}
         batch_size = self.config.get("batch_size", 2000)
 
-        E = get_embeddings(model)
-        if E is None:
+        # The unembedding (output projection) rows, as Nielsen et al. 2025
+        # measure vocabulary hubness; the input-embedding table is _meta_. For
+        # tied models the two are one matrix and are scored once.
+        E_in = get_embeddings(model)
+        head = get_lm_head(model)
+        W = head.weight.detach() if head is not None else None
+        matrix = "unembedding"
+        if W is None:
+            W, matrix = E_in, "input_embedding"
+        if W is None:
             return {"error": "Could not extract embeddings"}
 
-        if E.is_cuda:
-            device = E.device
+        if W.is_cuda:
+            device = W.device
         elif torch.cuda.is_available():
             device = torch.device("cuda:0")
         else:
             device = torch.device("cpu")
 
+        results = self._score(W, k_values, batch_size, device)
+        tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
+        if E_in is not None and matrix == "unembedding":
+            inp = results if tied else self._score(E_in, k_values, batch_size, device)
+            results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()
+                            if k.startswith("hubness_")})
+        results["_meta_hubness_matrix"] = matrix
+        results["_meta_tied_embeddings"] = bool(tied)
+        results["_meta_k_values_duplicates_dropped"] = len(_k_raw) - len(k_values)
+        return results
+
+    @staticmethod
+    def _score(E, k_values, batch_size, device):
         E_norm, _n_zero, _n_nonfinite, _dir = _unit_rows(E, device)
         # Rows without a direction are not ranked: a zero vector sits at chord
         # distance exactly 1 from every unit row (cosine 0.5), nearer than most
@@ -154,14 +175,11 @@ class GlobalHubnessTask(DiagnosticTask):
         # near-universal hub (test_hubness_protocol.py::test_zero_rows_are_not_ranked).
         E_norm = E_norm[_dir.to(E_norm.device)]
         occ = _k_occurrences(E_norm, k_values, batch_size)
-
         results = {
             "_meta_n_zero_rows": _n_zero,
             "_meta_n_nonfinite_rows": _n_nonfinite,
             "_meta_n_rows_ranked": int(E_norm.shape[0]),
-            "_meta_k_values_duplicates_dropped": len(_k_raw) - len(k_values),
         }
         for k in k_values:
             results.update(_hubness_stats_from_occurrences(occ[k], k))
-
         return results

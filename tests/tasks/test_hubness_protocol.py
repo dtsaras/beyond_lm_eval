@@ -53,3 +53,17 @@ def test_zero_rows_are_not_ranked():
     zero = GlobalHubnessTask(dict(K)).evaluate(_Tables(Wz), _Tok(len(Wz)), None)
     assert _feature(zero) == _feature(clean)
     assert zero["_meta_n_zero_rows"] == 8 and zero["_meta_n_rows_ranked"] == len(W)
+
+
+def test_headline_is_the_unembedding():
+    """Nielsen et al. 2025 measure hubness on the unembedding rows: with
+    untied tables the headline equals the unembedding's own hubness and the
+    input-embedding table is reported under _meta_input_embedding_*."""
+    W_in, W_out = _table(seed=1), _table(seed=2) ** 3
+    untied = GlobalHubnessTask(dict(K)).evaluate(_Tables(W_in, W_out), _Tok(len(W_in)), None)
+    on_out = GlobalHubnessTask(dict(K)).evaluate(_Tables(W_out), _Tok(len(W_in)), None)
+    on_in = GlobalHubnessTask(dict(K)).evaluate(_Tables(W_in), _Tok(len(W_in)), None)
+    assert _feature(untied) == _feature(on_out) != _feature(on_in)
+    assert untied["_meta_input_embedding_hubness_k10_skew"] == on_in["hubness_k10_skew"]
+    assert untied["_meta_hubness_matrix"] == "unembedding" and not untied["_meta_tied_embeddings"]
+    assert on_in["_meta_tied_embeddings"]
