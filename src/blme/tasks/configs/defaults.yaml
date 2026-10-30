@@ -134,7 +134,9 @@ geometry_trajectory_curvature:
   skip_first_tokens: 1  # drop BOS — its hidden state is an extreme outlier
 
 geometry_mp_bulk_deviation:
-  num_samples: 100
+  # The fixed-gamma headline needs 4d+1 tokens: 400 documents (~40k tokens)
+  # cover d up to 8192. max_tokens caps only the gamma-matched _meta_ family.
+  num_samples: 400
   layers: first_mid_last  # bound eigvalsh cost to 3 layers
   # REVERTED to 20000 (2026-09-06). The 32000 change was aimed at the `*_g25`
   # fixed-gamma family -- the only width-comparable one -- which needs

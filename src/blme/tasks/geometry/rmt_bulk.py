@@ -51,6 +51,7 @@ Cross-model comparability:
 
 import logging
 import math
+import re
 from typing import Optional
 
 import numpy as np
@@ -275,6 +276,9 @@ def _mp_layer_metrics(
 
     # Drop non-finite rows, then cap tokens with a seeded subsample.
     X = X[np.all(np.isfinite(X), axis=1)]
+    # The fixed-gamma draw needs 4d+1 rows and uses the UNCAPPED cloud;
+    # max_tokens caps only the gamma-matched family.
+    X_full = X
     if max_tokens is not None and X.shape[0] > max_tokens:
         idx = rng.choice(X.shape[0], size=max_tokens, replace=False)
         X = X[idx]
@@ -310,22 +314,24 @@ def _mp_layer_metrics(
         suffix = f"g{int(round(fixed_gamma * 100))}"
         # gamma from the dimensions the core KEEPS (constant columns are
         # dropped), re-sized against the subsample's own constants.
-        _n_const = int(np.count_nonzero(np.ptp(X, axis=0) == 0))
-        _d_eff = X.shape[1] - _n_const
+        _n_const = int(np.count_nonzero(np.ptp(X_full, axis=0) == 0))
+        _d_eff = X_full.shape[1] - _n_const
         n_fixed = int(math.ceil(_d_eff / fixed_gamma)) + 1
-        if X.shape[0] >= n_fixed:
-            idx = rng.choice(X.shape[0], size=n_fixed, replace=False)
+        out["n_tokens_available"] = int(X_full.shape[0])
+        out["fixed_n_tokens_needed"] = n_fixed
+        if X_full.shape[0] >= n_fixed:
+            idx = rng.choice(X_full.shape[0], size=n_fixed, replace=False)
             for _ in range(4):
-                _d_sub = int(np.count_nonzero(np.ptp(X[idx], axis=0) > 0))
+                _d_sub = int(np.count_nonzero(np.ptp(X_full[idx], axis=0) > 0))
                 if _d_sub == _d_eff:
                     break
                 _d_eff = _d_sub
                 n_fixed = int(math.ceil(_d_eff / fixed_gamma)) + 1
-                if X.shape[0] < n_fixed:
+                if X_full.shape[0] < n_fixed:
                     break
-                idx = rng.choice(X.shape[0], size=n_fixed, replace=False)
-            fixed = _mp_metrics_core(X[idx], edge_tol)
-            fixed_cov = _mp_metrics_core(X[idx], edge_tol, standardize=False)
+                idx = rng.choice(X_full.shape[0], size=n_fixed, replace=False)
+            fixed = _mp_metrics_core(X_full[idx], edge_tol)
+            fixed_cov = _mp_metrics_core(X_full[idx], edge_tol, standardize=False)
             out[f"outlier_frac_{suffix}"] = fixed.get("outlier_frac", float("nan"))
             out[f"spike_energy_{suffix}"] = fixed.get("spike_energy", float("nan"))
             out[f"ks_distance_{suffix}"] = fixed.get("ks_distance", float("nan"))
@@ -429,16 +435,19 @@ def _mp_metrics_core(X: np.ndarray, edge_tol: float,
 
 
 def _key_prefix(name: str) -> str:
-    """`mp_` for the correlation family, `_meta_mp_` for the others.
+    """`mp_` for the FIXED-GAMMA correlation family, `_meta_mp_` for the rest.
+
+    The gamma-matched statistics drift with N at fixed d (more spikes clear the
+    BBP edge as gamma = d/(N-1) falls: dossier gpt2 L12 KS 0.20 -> 0.47 from
+    N = 1000 to 6474), so only the fixed-gamma (N = 4d+1) family is headline.
 
     `*_cov` measures deviation from an ISOTROPIC MP null and scores
     heteroscedasticity as spikes; `perm_*` collapses to the 1/D floor under a
     single massive-activation dimension; `lower_*` is collinear with the KS
     distance. All stay emitted for audit.
     """
-    return "_meta_mp_" if (name.endswith("_cov") or name.startswith("perm_")
-                           or "_cov_" in name
-                           or name.startswith("lower_")) else "mp_"
+    return ("mp_" if re.fullmatch(r"(outlier_frac|spike_energy|ks_distance)_g\d+", name)
+            else "_meta_mp_")
 
 
 @register_task("geometry_mp_bulk_deviation")
@@ -459,7 +468,9 @@ class MPBulkDeviationTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Marchenko-Pastur Bulk Deviation Analysis...")
 
-        num_samples = self.config.get("num_samples", 100)
+        # 400 documents (~40k tokens) supply the 4d+1 rows the fixed-gamma
+        # headline needs up to d = 8192.
+        num_samples = self.config.get("num_samples", 400)
         use_cache = self.config.get("use_cache", True)
         max_tokens = self.config.get("max_tokens", 20000)
         edge_tol = self.config.get("edge_tol", 0.05)
@@ -472,7 +483,7 @@ class MPBulkDeviationTask(DiagnosticTask):
         per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
             layer_idx="all", use_cache=use_cache, replace_final_norm=True,
-            per_sample=True, fallback="none")
+            per_sample=True, fallback="none", min_cached_docs=int(num_samples))
         if per_doc is None:
             from ...cache import load_default_corpus
             if dataset is None:
@@ -550,6 +561,10 @@ class MPBulkDeviationTask(DiagnosticTask):
             results[f"_meta_mp_gamma_{tag}"] = float(m["gamma"])
             results[f"_meta_mp_n_tokens_{tag}"] = int(m["n_tokens"])
             results[f"_meta_mp_dropped_dims_{tag}"] = int(m["n_dims_dropped"])
+            if suffix:
+                results[f"_meta_mp_n_tokens_available_{tag}"] = int(m["n_tokens_available"])
+                results[f"_meta_mp_{suffix}_n_tokens_needed_{tag}"] = int(
+                    m["fixed_n_tokens_needed"])
 
         for name in metric_names:
             vals = np.asarray(collected[name], dtype=np.float64)

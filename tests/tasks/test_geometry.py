@@ -1385,14 +1385,14 @@ def test_mp_bulk_integration(mock_model, mock_tokenizer):
     assert isinstance(results, dict)
     assert "error" not in results, f"mp_bulk_deviation failed: {results}"
     for tag in ("first", "mid", "last"):
-        for stem in ("mp_outlier_frac", "mp_spike_energy", "mp_ks_distance"):
+        for stem in ("_meta_mp_outlier_frac", "_meta_mp_spike_energy", "_meta_mp_ks_distance"):
             key = f"{stem}_{tag}"
             assert key in results, f"missing {key}"
             assert np.isfinite(results[key]), f"{key} not finite"
-        assert 0.0 <= results[f"mp_outlier_frac_{tag}"] <= 1.0
+        assert 0.0 <= results[f"_meta_mp_outlier_frac_{tag}"] <= 1.0
         assert results[f"_meta_mp_gamma_{tag}"] > 0
         assert results[f"_meta_mp_n_tokens_{tag}"] > 0
-    assert np.isfinite(results["mp_ks_distance_mean"])
+    assert np.isfinite(results["_meta_mp_ks_distance_mean"])
 
 
 # ---------------------------------------------------------------------------

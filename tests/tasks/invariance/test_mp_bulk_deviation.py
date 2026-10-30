@@ -29,8 +29,23 @@ def test_position0_and_massive_rows_are_dropped(tiny_states):
         return y
     sunk = inv.run_task_on_states(TASK, _map(tiny_states, sink))
     absent = inv.run_task_on_states(TASK, _map(tiny_states, lambda y: np.delete(y, 3, 0)))
-    keys = [k for k in absent if k.startswith("_meta_mp_") is False and k.startswith("mp_")]
+    keys = [k for k in absent if k.startswith(("mp_", "_meta_mp_outlier", "_meta_mp_spike",
+                                               "_meta_mp_ks"))]
     assert keys
     inv.assert_invariant(absent, sunk, keys, rtol=1e-9)
     assert sunk["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
     assert sunk["_meta_rows_policy"] == "exclude_sinks"
+
+
+
+def test_fixed_gamma_family_is_the_headline_and_is_not_capped(tiny_states):
+    """The gamma-matched statistics drift with N (gamma = d/(N-1)), so the
+    fixed-gamma (N = 4d+1) family is the headline. Its draw comes from the
+    whole cloud: a max_tokens cap below 4d+1 used to make it NaN (every
+    d >= 5000 model under the 20000 cap)."""
+    r = inv.run_task_on_states(TASK, tiny_states, {"max_tokens": 100})
+    d = tiny_states.d
+    assert np.isfinite(r["mp_ks_distance_g25_mid"])
+    assert r["_meta_mp_g25_n_tokens_needed_mid"] == 4 * d + 1
+    assert r["_meta_mp_n_tokens_available_mid"] > 100
+    assert "mp_ks_distance_mid" not in r and "_meta_mp_ks_distance_mid" in r
