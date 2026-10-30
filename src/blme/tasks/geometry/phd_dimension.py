@@ -242,7 +242,8 @@ def _gather_point_cloud(
             # Cache convention: layer 0 = first block output.
             li = (layer_idx + 1) if layer_idx >= 0 else len(hs) + layer_idx
             li = max(1, min(li, len(hs) - 1))
-            h = hs[li][0].detach().float().cpu().numpy()  # (T, D)
+            # .double(): exact for half and float32 states, keeps float64 ones.
+            h = hs[li][0].detach().double().cpu().numpy()  # (T, D)
             if h.ndim != 2 or h.shape[0] == 0:
                 continue
             if pooling == "mean":
@@ -289,7 +290,7 @@ def _iter_per_document_clouds(model, tokenizer, dataset, num_samples: int,
             # Cache convention: layer 0 = first block output (tuple index 1).
             idx = (layer_idx + 1) if layer_idx >= 0 else len(hs) + layer_idx
             idx = max(1, min(idx, len(hs) - 1))
-            h = hs[idx][0].detach().float().cpu().numpy()
+            h = hs[idx][0].detach().double().cpu().numpy()   # no float32 narrowing
             if pooling == "mean":
                 h = np.asarray(h, dtype=np.float64).mean(axis=0, keepdims=True)
             elif pooling == "last":
