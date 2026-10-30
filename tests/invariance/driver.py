@@ -49,7 +49,6 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_cka": {},
     "geometry_cknna": {},
     "geometry_collapse": {},
-    "geometry_correlation_dimension": {},
     "geometry_hsic": {},
     # The default (non-layerwise) mode measures the embedding matrix.
     "geometry_intrinsic_dim": {"layerwise": True},
@@ -71,7 +70,7 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
 # Tasks the stub cache cannot drive, grouped by reason.
 NOT_STATE_DRIVABLE: Dict[str, str] = {
     **{t: "runs its own forward pass to collect hidden states" for t in (
-        "geometry_contextualization",
+        "geometry_contextualization", "geometry_correlation_dimension",
         "geometry_effective_depth", "geometry_mahalanobis",
         "geometry_neural_collapse", "geometry_representation_sensitivity",
         "topology_betti_curve", "topology_homology",
