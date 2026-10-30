@@ -71,3 +71,13 @@ def test_full_text_not_a_128_token_window(tiny):
     assert full["_meta_schatten_n_docs_truncated"] == 0
     assert cut["_meta_schatten_n_docs_truncated"] == 1
     assert full["row_normalized_matrix_nuclear_norm_last"] != cut["row_normalized_matrix_nuclear_norm_last"]
+
+
+
+def test_declarations(tiny):
+    from blme.tasks.geometry.schatten import SchattenNormTask as cls
+    assert cls.TOKEN_POLICY.startswith("paper_protocol:")
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert cls.SIZE_INVARIANT == {}
+    r = _run(*tiny, TEXTS[:3])
+    assert set(cls.HEADLINE_KEYS) <= set(r)

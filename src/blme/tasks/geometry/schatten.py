@@ -355,6 +355,36 @@ class SchattenNormTask(DiagnosticTask):
       - Per-layer residual lists (``*_per_layer``); Schatten-2 is omitted
         (content-free under row-L2 normalisation).
     """
+    TOKEN_POLICY = ("paper_protocol:Yusupov2025 / Li2024 every token of the text "
+                    "(MNN.py keeps the tokenizer defaults)")
+    SOURCES = {
+        "paper": "arXiv:2509.25359v1 (Yusupov et al. 2025, Sec. 4.1, Eq. 5-6); "
+                 "arXiv:2410.10672 (Li et al. 2024, MNN Eq. 11, Algorithm 1); "
+                 "arXiv:2210.02885 (Garrido et al. 2023, RankMe Eq. 1-2)",
+        "code": "MLGroupJLU/MatrixNuclearNorm@e7a9188eb30c146896e8cbc043caa7eb71a460ee "
+                "(code/MNN.py:32-50, 180-189)",
+        "llm_precedent": "arXiv:2509.25359 (per-text Schatten norm and ERank of LLM MLP "
+                         "states, averaged over layers)",
+    }
+    ADAPTATION_NOTE = (
+        "Yusupov et al. take states 'from MLP blocks after activation functions and before "
+        "residual connections'; this is read as the down-projection's input (the "
+        "MLP-internal activation), and its raw Schatten-1 and Schatten-4 norms per text are "
+        "averaged over all layers and then over texts. The paper does not state p in the "
+        "text read, so p = 1 and 4 are kept. The Matrix Nuclear-Norm follows the released "
+        "MNN.py on HF's post-norm last entry, full text, divided by the token count. RankMe "
+        "is applied per text to the raw last-layer matrix, following Yusupov et al.'s "
+        "per-text ERank, instead of to one dataset-level matrix as Garrido et al. do. Every "
+        "key grows with the token count, which Yusupov et al. report as the dominant "
+        "confound, so models are compared on one corpus."
+    )
+    HEADLINE_KEYS = ("schatten_1", "schatten_4", "rankme_last", "row_normalized_rankme_last",
+                     "row_normalized_matrix_nuclear_norm_last",
+                     "row_normalized_schatten_inf_last")
+    # None declared: every key grows with the token count T (dossier T-law,
+    # Yusupov's length confound), and MNN's column-norm sum is basis-dependent
+    # (it moves under an isometric embedding).
+    SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Schatten-p norms + MNN + RankMe...")
