@@ -151,6 +151,8 @@ class GradientFlowTask(DiagnosticTask):
             # arithmetic as the backward passes; the same mask then applies at
             # every profile point (tests/tasks/invariance/
             # test_dynamics_gradient_flow.py).
+            # post-final-norm: unused. The mask reads the middle depths only
+            # (0.1L-0.9L); HF's post-norm last entry is never one of them.
             _sinks = SinkNormCollector()
             with torch.no_grad():
                 for enc in encodings:

@@ -65,6 +65,8 @@ def _sink_masks(model, tokenizer, dataset, cache, num_samples, from_cache):
                                max_length=512).to(device)
             if inputs["input_ids"].shape[1] < 2:
                 continue
+            # post-final-norm: unused. The mask reads the middle depths only
+            # (0.1L-0.9L); HF's post-norm last entry is never one of them.
             col.add(model(**inputs, output_hidden_states=True).hidden_states[1:])
     masks, info = col.masks()
     return masks, info, col.mid_docs, "forward_pass"
