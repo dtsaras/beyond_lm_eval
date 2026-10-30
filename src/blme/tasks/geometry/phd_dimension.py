@@ -327,10 +327,26 @@ class PHDimensionTask(DiagnosticTask):
     ``E(n) ~ n^{(d-1)/d}`` (alpha=1), ``d = 1/(1-slope)``.
 
     Outputs (flat floats):
-        phd_dimension            — estimated intrinsic dimension d
-        _meta_num_points         — cloud size fed to the estimator
+        phd_dimension            — mean per-text PHD (GPTID notebook protocol)
+        phd_dimension_std        — its standard deviation over texts
+        _meta_phd_dimension_pooled — PHD of a pooled multi-text token cloud
         _meta_layer_idx          — layer the cloud was drawn from
     """
+    # GPTID per-text protocol: each text's tokens [1:-1] (read in evaluate).
+    TOKEN_POLICY = "paper_protocol:Tulchinskii2023 per-text tokens [1:-1]"
+    SOURCES = {
+        "paper": "arXiv:2306.04723",
+        "code": "ArGintum/GPTID@8c8759ef94c8769e2f40f3e507f270e4c948a562",
+        "llm_precedent": ("Tulchinskii et al. 2023 arXiv:2306.04723 (PHD of LM token "
+                          "embeddings, one estimate per text)"),
+    }
+    HEADLINE_KEYS = ("phd_dimension", "phd_dimension_std")
+    # Distance-only per text; the per-text point count is pinned by truncating
+    # >= 300-token articles at 512 tokens. Depth: one (output) layer.
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("zero_pad", "embed_isometric", "rescale"),
+         "tests/tasks/invariance/test_geometry_phd_dimension.py::test_per_text_phd_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistent-Homology Dimension (PHD) Estimation...")
@@ -442,7 +458,7 @@ class PHDimensionTask(DiagnosticTask):
             _slice_stats = {}
             for _doc in _iter_per_document_clouds(
                     model, tokenizer, dataset, num_samples, max_length,
-                    layer_idx, pooling, drop_ends=True, stats=_slice_stats):
+                    layer_idx, pooling, drop_ends=self.TOKEN_POLICY.startswith("paper_protocol:"), stats=_slice_stats):
                 if _doc is None:
                     continue
                 _n_seen += 1
