@@ -84,6 +84,13 @@ def last_token_points(model, tokenizer, dataset, cache=None, *, num_samples: int
     ``policy`` is passed to :func:`blme.tasks._tokens.select_rows` on the cache
     route; the private route implements ``"last"`` only.
     """
+    pts, info = _last_token_points(model, tokenizer, dataset, cache, num_samples=num_samples,
+                                   layers=layers, policy=policy, use_cache=use_cache)
+    return pts, dict(info, n_requested=int(num_samples))
+
+
+def _last_token_points(model, tokenizer, dataset, cache, *, num_samples, layers, policy,
+                       use_cache):
     from .._tokens import hidden_states_for_task, select_rows
 
     states, ginfo = hidden_states_for_task(
@@ -169,6 +176,7 @@ def point_meta(info: Dict, cloud: np.ndarray) -> Dict[str, object]:
     pos = [torch.tensor([int(p)]) for p in info["positions"][:len(docs)]]
     out = {
         "_meta_n_points": int(len(cloud)),
+        "_meta_n_points_requested": int(info.get("n_requested", 0)),
         "_meta_points_source": info["source"],
         "_meta_points_cache_rejected": info["cache_rejected"],
         "_meta_rows_policy": "last",

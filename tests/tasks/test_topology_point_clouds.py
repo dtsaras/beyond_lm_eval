@@ -142,3 +142,13 @@ def test_a_smaller_cache_is_not_silently_accepted(tiny):
                                   num_samples=len(fd.TEXTS), layers=role_layers)
     assert info["source"] == "self_collected" and info["cache_rejected"] == "too_few_docs"
     assert all(len(X) == len(fd.TEXTS) for X in pts.values())
+
+
+@pytest.mark.parametrize("task", sorted(TASKS))
+def test_a_short_dataset_is_recorded_against_the_requested_n(task, tiny):
+    """A caller dataset smaller than N caps the cloud; the result says so
+    (the study once passed a 500-passage corpus to N = 1000 tasks)."""
+    model, tok, _ = tiny
+    n = len(fd.TEXTS)
+    res = _cls(task)({"num_samples": 1000}).evaluate(model, tok, fd.dataset(), cache=None)
+    assert res["_meta_n_points"] == n and res["_meta_n_points_requested"] == 1000
