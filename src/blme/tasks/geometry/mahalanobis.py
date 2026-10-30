@@ -33,6 +33,8 @@ except ImportError:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._tokens import (massive_token_share, middle_depth_layers, position0_share,
+                       sink_keep_masks, sink_meta, strip_trailing_special)
 import logging
 logger = logging.getLogger("blme")
 
@@ -150,10 +152,22 @@ def _compute_mahalanobis_distances(X_train, X_test, diag=None):
         return []
 
 
+# Documents whose middle-layer token rows feed the sink-share diagnostics.
+_SHARE_DOCS = 200
+
+
 def _collect_mean_pooled_hidden_states(
-    model, tokenizer, dataset, num_samples: int, max_length: int = 128,
+    model, tokenizer, dataset, num_samples: int, max_length: int = 128, stats=None,
 ) -> torch.Tensor:
-    """Collect one final-layer mean-pooled representation per text sample."""
+    """One final-layer vector per text: the float64 mean over its kept rows.
+
+    Sink policy (non-LLM-origin point cloud): position 0 and every massive
+    row -- norm > 10x the median at any middle depth, masks from
+    ``sink_keep_masks`` over this collection -- are left out of the mean
+    (``mean_excl_sinks``); a text with no kept row falls back to all its rows.
+    Tokenizer-appended EOS/SEP are stripped before the forward. ``stats``
+    receives the sink-mask info and the share diagnostics.
+    """
     samples = list(dataset)[:num_samples]
     if not samples:
         return torch.empty(0)
@@ -163,7 +177,8 @@ def _collect_mean_pooled_hidden_states(
     except Exception:
         device = torch.device("cpu")
 
-    reps = []
+    finals, norms, mid_rows = [], {}, []
+    depth = None
     with torch.no_grad():
         for sample in samples:
             # Pre-tokenized ids (the shuffled OOD set) go to the model as ids:
@@ -182,6 +197,7 @@ def _collect_mean_pooled_hidden_states(
                     truncation=True,
                     max_length=max_length,
                 )
+            inputs, _ = strip_trailing_special(inputs, tokenizer)
             if hasattr(inputs, "to") and callable(inputs.to):
                 inputs = inputs.to(device)
             else:
@@ -196,18 +212,36 @@ def _collect_mean_pooled_hidden_states(
                 continue
 
             # post-final-norm: DELIBERATELY post-norm -- the features the LM
-            # head consumes, as Lee et al. fit the classifier's input.
-            h = hidden_states[-1][0].detach().float().cpu()
-            attention_mask = inputs.get("attention_mask") if isinstance(inputs, dict) else None
-            if attention_mask is not None and hasattr(attention_mask, "detach"):
-                mask = attention_mask[0].detach().cpu().bool()
-                if mask.numel() == h.shape[0] and bool(mask.any()):
-                    h = h[mask]
-            if h.numel() > 0:
-                # float64 mean, kept in float64.
-                reps.append(h.double().mean(dim=0))
+            # head consumes, as Lee et al. fit the classifier's input. The
+            # block outputs hidden_states[1:] only set the sink masks.
+            h = hidden_states[-1][0].detach().cpu()
+            if h.shape[0] == 0:
+                continue
+            blocks = hidden_states[1:]
+            if depth is None:
+                depth = middle_depth_layers({k: None for k in range(len(blocks))})
+            for k in depth:
+                norms.setdefault(k, []).append(torch.linalg.vector_norm(
+                    blocks[k][0].detach().to("cpu", torch.float64), dim=1).reshape(-1, 1))
+            if len(mid_rows) < _SHARE_DOCS:
+                mid_rows.append(blocks[len(blocks) // 2][0].detach().cpu().float())
+            finals.append(h)
 
-    return torch.stack(reps, dim=0) if reps else torch.empty(0)
+    if not finals:
+        return torch.empty(0)
+    keep, info = sink_keep_masks([norms[k] for k in depth])
+    reps, n_fallback = [], 0
+    for h, m in zip(finals, keep):
+        rows = h[m] if bool(m.any()) else h
+        n_fallback += int(not bool(m.any()))
+        # float64 mean, kept in float64.
+        reps.append(rows.double().mean(dim=0))
+    if stats is not None:
+        stats.update(sink_meta(info))
+        stats["_meta_sink_n_docs_all_rows_fallback"] = int(n_fallback)
+        stats["_meta_position0_share"] = position0_share(mid_rows)
+        stats["_meta_massive_token_share"] = massive_token_share(mid_rows)
+    return torch.stack(reps, dim=0)
 
 
 @register_task("geometry_mahalanobis")
@@ -295,8 +329,10 @@ class MahalanobisOODTask(DiagnosticTask):
             return {"error": "Need at least 5 ID and 5 OOD samples to compute stable covariance."}
 
         # One mean-pooled final-layer vector per text (not per token).
+        _sink_stats = {}
         X_id = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_id, num_samples=len(dataset_id), max_length=max_length,
+            stats=_sink_stats,
         )
         # float64 before the fit: in float32 the scores reorder at a +1e6
         # offset, and every reported number depends on their order. Not
@@ -438,6 +474,9 @@ class MahalanobisOODTask(DiagnosticTask):
             result["_meta_n_cov_fit"] = int(_n)
         if "shrinkage" in _diag:
             result["_meta_ledoit_wolf_shrinkage"] = _diag["shrinkage"]
+        # Sink policy of the ID collection (position 0 + massive rows out of
+        # every mean; test_mahalanobis_protocol.py).
+        result.update(_sink_stats)
 
         if auroc is not None:
             result["auroc"] = auroc
