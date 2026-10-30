@@ -219,6 +219,8 @@ class IsoScoreTask(DiagnosticTask):
     Returns:
         isoscore: float in [0, 1]
     """
+    TOKEN_POLICY = "paper_protocol:Rudman2022 every token, position 0 included"
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running IsoScore Analysis...")
         if dataset is None:
@@ -230,13 +232,19 @@ class IsoScoreTask(DiagnosticTask):
         # The shared cache only if it holds the configured population (the
         # N/d regime must not depend on which tasks co-ran); HF's post-norm
         # last entry, every token.
-        X, _info = hidden_states_for_task(
+        per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
             layer_idx=-1, use_cache=use_cache, replace_final_norm=False,
-            min_cached_docs=int(num_samples), max_tokens_per_doc=None)
+            min_cached_docs=int(num_samples), max_tokens_per_doc=None,
+            per_sample=True)
         _source = _info["source"]
         _cached_docs = _info["cached_docs"]
-        X = X.float().numpy()
+        # TOKEN_POLICY: every token, position 0 included (the paper and the
+        # I-STAR code keep all positions); the position-0-free value is _meta_.
+        _policy = "exclude_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "all"
+        X = select_rows(per_doc, _policy)[0].float().numpy()
+        X_x0 = select_rows(per_doc, "exclude_pos0")[0].float().numpy()
+        X_x0 = X_x0[np.all(np.isfinite(X_x0), axis=1)]
         finite_mask = np.all(np.isfinite(X), axis=1)
         if not np.all(finite_mask):
             logger.info(f"  Filtered {(~finite_mask).sum()} non-finite rows out of {len(X)}")
@@ -267,9 +275,17 @@ class IsoScoreTask(DiagnosticTask):
                         f"rank-deficient by construction. Reported with "
                         f"_meta_isoscore_rank_deficient=True.")
 
+        iso_x0 = _isoscore(X_x0) if len(X_x0) >= 10 else float("nan")
         return {
             "isoscore": iso,
             "isoscore_effective_dims": iso_dims,
+            "_meta_isoscore_excl_pos0": iso_x0,
+            "_meta_isoscore_effective_dims_excl_pos0": (
+                float(iso_x0) * (d - 1) + 1.0 if d > 1 else float("nan")),
+            # Shares of the scored cloud's centred SS held by position 0 and by
+            # massive non-initial rows.
+            "_meta_position0_share": position0_share(per_doc),
+            "_meta_massive_token_share": massive_token_share(per_doc),
             # /d re-imports the width factor (Pearson 0.99997 with isoscore).
             "_meta_isoscore_effective_dims_frac": (iso_dims / d) if d > 0 else float("nan"),
             "_meta_isoscore_rank_deficient": _rank_deficient,
