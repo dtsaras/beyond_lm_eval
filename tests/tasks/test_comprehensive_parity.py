@@ -3682,7 +3682,7 @@ def test_geometry_positional_decay():
     task = PositionalAttentionDecayTask({"num_samples": 1})
     res = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in res, res
-    assert set(res) >= {"mean_positional_decay_correlation", "layer_positional_decay"}
+    assert set(res) >= {"_meta_mean_positional_decay_correlation", "layer_positional_decay"}
 
     # Independent recomputation from the SAME attention tensors.
     inputs = tok(text, return_tensors="pt", truncation=True, max_length=256)
@@ -3744,7 +3744,7 @@ def test_geometry_positional_decay():
     # because pooling triangular causal entries confounds distance with row
     # normalisation. The manuscript's pooled quantity is still emitted, and
     # still pinned, under its own name.
-    assert res["mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
+    assert res["_meta_mean_positional_decay_correlation"] == pytest.approx(ref_mean, abs=1e-9), (
         f"rowwise: BLME={res['mean_positional_decay_correlation']} ref={ref_mean}"
     )
     assert res["mean_positional_decay_correlation_pooled"] == pytest.approx(
@@ -3757,12 +3757,12 @@ def test_geometry_positional_decay():
             f"layer {k}: BLME={res['layer_positional_decay'][k]} ref={v}"
         )
     # The correlation is bounded by Spearman's range.
-    assert -1.0 <= res["mean_positional_decay_correlation"] <= 1.0
+    assert -1.0 <= res["_meta_mean_positional_decay_correlation"] <= 1.0
 
     # Determinism: identical output on a re-run.
     res2 = task.evaluate(model, tok, dataset, cache=None)
-    assert res2["mean_positional_decay_correlation"] == pytest.approx(
-        res["mean_positional_decay_correlation"], abs=1e-12
+    assert res2["_meta_mean_positional_decay_correlation"] == pytest.approx(
+        res["_meta_mean_positional_decay_correlation"], abs=1e-12
     )
 
 # === geometry_prediction_alignment  [NUMERIC_PARITY / strong_independent_numeric / ref=pip_package] ===

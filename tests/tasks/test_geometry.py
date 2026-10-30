@@ -872,7 +872,7 @@ def test_positional_decay_uniform_causal_attention_is_null():
 
     assert "error" not in result, result
     # The HEADLINE (rowwise) must be exactly 0 on this null.
-    assert result["mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
+    assert result["_meta_mean_positional_decay_correlation"] == pytest.approx(0.0, abs=1e-12)
     # And the MANUSCRIPT'S pooled estimand must NOT be, which is why the
     # headline is the rowwise one. Pinned so the evidence for overriding the
     # paper survives: the pooled null bias converges to about -0.467 as the

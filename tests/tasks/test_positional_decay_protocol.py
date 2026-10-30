@@ -51,6 +51,17 @@ def test_fp32_at_every_model_size():
     assert res["_meta_compute_dtype"] == "float32"
 
 
+def test_headline_excludes_the_sink_key():
+    """Decision 3b: the feature is the Spearman over keys 1..q-1; the inclusive
+    value (keys 0..q-1) and the sink mass are _meta_."""
+    res = _run(fd.tiny_llama(n_layers=2))
+    feats = {k for k in res if not k.startswith("_meta_")}
+    assert "mean_positional_decay_correlation" not in feats
+    assert "_meta_mean_positional_decay_correlation" in res
+    assert "_meta_attention_sink_mass" in res
+    assert any("nosink" in k for k in feats), feats
+
+
 def test_buffers_are_handed_back_in_their_dtype():
     """model.float() promoted the bf16 buffers too and only the parameters were
     restored, so later tasks saw an fp32 RoPE table."""

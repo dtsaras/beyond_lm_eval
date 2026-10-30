@@ -181,20 +181,23 @@ class PositionalAttentionDecayTask(DiagnosticTask):
             # The ROWWISE statistic: exactly 0 under uniform causal attention
             # at every length, where the pooled one reads -0.43 to -0.47
             # (test_positional_decay_uniform_causal_attention_is_null).
-            "mean_positional_decay_correlation": float(np.mean(all_corrs)),
+            # Inclusive of the position-0 sink: _meta_ (decision 3b).
+            "_meta_mean_positional_decay_correlation": float(np.mean(all_corrs)),
             "mean_positional_decay_correlation_pooled": (
                 float(np.mean(_pooled_all)) if _pooled_all else float("nan")),
             "layer_positional_decay": layer_means,
         }
 
-        # Sink-excluded twin: the same Spearman over keys 1..q.
+        # HEADLINE (decision 3b): the same Spearman over keys 1..q-1. RoPE's
+        # decay premise concerns relative distance; the sink is distance-
+        # independent mass parked on the farthest key of every row.
         if layer_correlations_nosink:
             _ns_layer = {
                 f"layer_{li}": float(np.mean(layer_correlations_nosink[li]))
                 for li in sorted(layer_correlations_nosink)
             }
             _ns_all = [c for v in layer_correlations_nosink.values() for c in v]
-            out["_meta_mean_positional_decay_correlation_nosink"] = float(np.mean(_ns_all))
+            out["mean_positional_decay_correlation_nosink"] = float(np.mean(_ns_all))
             out["_meta_layer_positional_decay_nosink"] = _ns_layer
         if sink_mass:
             out["_meta_attention_sink_mass"] = float(np.mean(sink_mass))
