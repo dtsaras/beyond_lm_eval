@@ -185,6 +185,7 @@ _SHARE_DOCS = 200
 
 def _collect_mean_pooled_hidden_states(
     model, tokenizer, dataset, num_samples: int, max_length: int = 128, stats=None,
+    policy: str = "exclude_sinks",
 ) -> torch.Tensor:
     """One final-layer vector per text: the float64 mean over its kept rows.
 
@@ -257,6 +258,8 @@ def _collect_mean_pooled_hidden_states(
     if not finals:
         return torch.empty(0)
     keep, info = sink_keep_masks([norms[k] for k in depth])
+    if policy != "exclude_sinks":           # every row ("all")
+        keep = [torch.ones_like(m) for m in keep]
     reps, n_fallback = [], 0
     for h, m in zip(finals, keep):
         rows = h[m] if bool(m.any()) else h
@@ -286,6 +289,40 @@ class MahalanobisOODTask(DiagnosticTask):
     Reports the average ID distance vs OOD distance, the separation gap,
     and AUROC.
     """
+    # Mean-pool over the rows kept by the sink masks (position 0 + massive).
+    TOKEN_POLICY = "exclude_sinks"
+    SOURCES = {
+        "paper": "arXiv:1807.03888",
+        "code": "pokaxpoka/deep_Mahalanobis_detector@90c2105e78c6f76a2801fc4c1cb1b84f4ff9af63",
+        "llm_precedent": ("Ren et al. 2022 arXiv:2209.15558 (one Gaussian on mean-pooled "
+                          "final-layer states of a language model)"),
+    }
+    ADAPTATION_NOTE = (
+        "BLME scores each text's mean-pooled final-layer state by its Mahalanobis distance to a "
+        "single Gaussian fitted on other texts, the single-Gaussian, mean-pooled form Ren et "
+        "al. (2022) use for language models; Lee et al.'s (2018) class-conditional form needs "
+        "labels. The out-of-distribution set is BLME's own: each held-out text with its tokens "
+        "shuffled in place, so the task measures how far the model moves a text's "
+        "representation when word order is destroyed, at matched vocabulary. The covariance is "
+        "Ledoit-Wolf, fitted on 1000 texts (2000 drawn from WikiText-103 in a nested order, "
+        "half held out), averaged over 5 random splits. Position 0 and massive rows are left "
+        "out of every mean (sink policy). Raw distances grow with sqrt(d) when n_fit < d, so "
+        "AUROC, the distance ratio and the dist^2/d forms are the cross-model comparable "
+        "outputs."
+    )
+    HEADLINE_KEYS = ("auroc", "ood_separation_ratio", "mean_mahalanobis_id",
+                     "mean_mahalanobis_ood", "ood_separation_gap", "mahalanobis_sq_per_dim_id",
+                     "mahalanobis_sq_per_dim_ood", "ood_separation_gap_per_dim")
+    # Width: approximate (< 5%) only while n_fit << d; as n_fit nears d the
+    # isotropic Ledoit-Wolf target moves with the width (pinned by
+    # test_per_dim_width_invariance_needs_n_fit_below_d). Rescale is exact. The
+    # raw distances and gap are not claimed (they grow as sqrt(d)).
+    SIZE_INVARIANT = dict.fromkeys(
+        ("auroc", "ood_separation_ratio", "mahalanobis_sq_per_dim_id",
+         "mahalanobis_sq_per_dim_ood", "ood_separation_gap_per_dim"),
+        (("zero_pad", "embed_isometric", "rescale"),
+         "tests/tasks/invariance/test_geometry_mahalanobis.py::test_per_dim_forms_invariant"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Mahalanobis OOD Detection...")
         # Q3: the fit should not be 25 points in 768-5120 dimensions; the
@@ -377,7 +414,7 @@ class MahalanobisOODTask(DiagnosticTask):
         _sink_stats = {}
         X_id = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_id, num_samples=len(dataset_id), max_length=max_length,
-            stats=_sink_stats,
+            stats=_sink_stats, policy=self.TOKEN_POLICY,
         )
         # float64 before the fit: in float32 the scores reorder at a +1e6
         # offset, and every reported number depends on their order. Not
@@ -386,6 +423,7 @@ class MahalanobisOODTask(DiagnosticTask):
 
         X_ood = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_ood, num_samples=len(dataset_ood), max_length=max_length,
+            policy=self.TOKEN_POLICY,
         )
         X_ood = X_ood.double().numpy()   # see the note above
 
