@@ -88,3 +88,27 @@ def test_layer_aggregates_are_meta(tiny_states, tiny_identity_states):
     ins = inv.run_task_on_states(TASK, tiny_identity_states)
     inv.assert_invariant(base, ins, ["matrix_entropy", "matrix_entropy_raw"], rtol=1e-9)
     inv.assert_moves(base, ins, "_meta_mean_matrix_entropy_raw", 1e-4)
+
+
+def test_own_forward_drops_an_appended_eos(tiny):
+    """A tokenizer that appends EOS to every sequence (OLMo-1B's does): the
+    task's own forward strips it, as the shared cache does, so the result
+    equals the plain tokenizer's."""
+    model, tok = tiny
+
+    class AppendEOS:
+        eos_token_id, sep_token_id = tok.eos_token_id, None
+
+        def __call__(self, text, **kw):
+            enc = tok(text, **kw)
+            enc["input_ids"] = torch.cat([enc["input_ids"],
+                                          torch.tensor([[tok.eos_token_id]])], 1)
+            enc["attention_mask"] = torch.ones_like(enc["input_ids"])
+            return enc
+
+    cfg = {"use_cache": False}
+    plain = inv.run_task_on_model(TASK, model, tok, TEXTS, cfg, use_cache=False)
+    eos = inv.run_task_on_model(TASK, model, AppendEOS(), TEXTS, cfg, use_cache=False)
+    assert eos["matrix_entropy"] == plain["matrix_entropy"]
+    assert eos["_meta_n_trailing_special_stripped"] == len(TEXTS)
+    assert plain["_meta_n_trailing_special_stripped"] == 0

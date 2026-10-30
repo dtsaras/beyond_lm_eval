@@ -20,7 +20,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from .._tokens import hidden_states_for_task, massive_token_share, position0_share
+from .._tokens import (hidden_states_for_task, massive_token_share, position0_share,
+                       strip_trailing_special)
 from .utils import pow2_rescale as _pow2_rescale
 
 logger = logging.getLogger("blme")
@@ -138,7 +139,8 @@ def _collect_per_sample_layer_tokens(cache, num_samples, use_cache,
     return {li: chunks for li, chunks in hs.items() if chunks}
 
 
-def _collect_per_sample_layer_tokens_fresh(model, tokenizer, samples, max_length):
+def _collect_per_sample_layer_tokens_fresh(model, tokenizer, samples, max_length,
+                                           n_stripped=None):
     """Fallback path: run our own forward pass sample-by-sample and
     return ``{layer_idx: List[Tensor(T_i, D)]}``.
 
@@ -147,6 +149,7 @@ def _collect_per_sample_layer_tokens_fresh(model, tokenizer, samples, max_length
     untouched post-norm last entry, which is the headline.
     """
     device = next(model.parameters()).device
+    n_stripped = n_stripped if n_stripped is not None else [0]
     per_layer: dict[int, list[torch.Tensor]] = {}
     post_norm_last: list[torch.Tensor] = []
     _sink = {}
@@ -168,7 +171,12 @@ def _collect_per_sample_layer_tokens_fresh(model, tokenizer, samples, max_length
                 inputs = tokenizer(
                     text, return_tensors="pt",
                     truncation=True, max_length=max_length,
-                ).to(device)
+                )
+                # Drop a tokenizer-appended EOS/SEP, as the shared cache does.
+                inputs, _n_strip = strip_trailing_special(inputs, tokenizer)
+                n_stripped[0] += _n_strip
+                inputs = {k: (v.to(device) if hasattr(v, "to") else v)
+                          for k, v in inputs.items()}
                 _sink.pop("h", None)
                 out = model(**inputs, output_hidden_states=True)
                 if not getattr(out, "hidden_states", None):
@@ -214,6 +222,7 @@ class MatrixEntropyTask(DiagnosticTask):
             max_length=max_length,
         )
         _postnorm_tokens = None
+        _n_stripped = [0]
         _source = "shared_cache" if per_layer_tokens is not None else "self_collected"
 
         if per_layer_tokens is None:
@@ -225,7 +234,7 @@ class MatrixEntropyTask(DiagnosticTask):
                 return {"error": "Need at least 1 sample."}
             per_layer_tokens, _postnorm_tokens = (
                 _collect_per_sample_layer_tokens_fresh(
-                    model, tokenizer, samples, max_length))
+                    model, tokenizer, samples, max_length, n_stripped=_n_stripped))
         else:
             # Same cache, same documents, the untouched deepest entry.
             _pn = _collect_per_sample_layer_tokens(
@@ -306,6 +315,7 @@ class MatrixEntropyTask(DiagnosticTask):
             # (document, layer) matrices that needed the float64 row path.
             "_meta_n_matrices_float64_rownorm": int(_n_rescued_docs),
             "_meta_matrix_entropy_max_length": int(max_length),
+            "_meta_n_trailing_special_stripped": int(_n_stripped[0]),
             "matrix_entropy": headline_norm,
             # Raw H: unchanged by zero-padding / isometric embedding, while the
             # 1/log d of the headline is a width factor.
