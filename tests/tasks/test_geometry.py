@@ -32,7 +32,7 @@ def test_matrix_entropy_default_max_length_matches_cache(mock_model, mock_tokeni
 
     captured = {}
 
-    def spy(model, tokenizer, samples, max_length):
+    def spy(model, tokenizer, samples, max_length, n_stripped=None):
         captured["max_length"] = max_length
         # (per_layer, post_norm_last) since 2026-09-05: the fresh collector
         # returns BOTH tensors, because the profile is hooked and the headline
