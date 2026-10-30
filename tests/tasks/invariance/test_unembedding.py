@@ -43,3 +43,44 @@ def test_purity_query_count_does_not_follow_num_samples(tiny, base):
     assert small_run["_meta_purity_n_queries"] == base["_meta_unembedding_n_category_tokens"]
     capped = _run(*tiny, purity_num_queries=5)
     assert capped["_meta_purity_n_queries"] == 5
+
+
+
+# --------------------------------------------------------------------------
+# Declarations and their direct tests
+# --------------------------------------------------------------------------
+
+from blme.tasks.geometry.unembedding import UnembeddingDiagnosticsTask  # noqa: E402
+
+
+def _width_padded_head(model, k=2):
+    """An untied copy whose lm_head is W_out zero-padded to (V, k*m)."""
+    import copy
+    new = copy.deepcopy(model)
+    W = model.get_output_embeddings().weight.detach()
+    head = torch.nn.Linear(k * W.shape[1], W.shape[0], bias=False)
+    with torch.no_grad():
+        head.weight.zero_()
+        head.weight[:, : W.shape[1]] = W
+    new.lm_head = head
+    return new
+
+
+@pytest.mark.parametrize("key", sorted(UnembeddingDiagnosticsTask.SIZE_INVARIANT))
+def test_size_invariant_entry(key, tiny, base):
+    """Zero-padding W_out's width keeps its nonzero spectrum, so the erank does
+    not move; erank / width (the refuted /d form) halves (known negative)."""
+    transforms, node = UnembeddingDiagnosticsTask.SIZE_INVARIANT[key]
+    assert transforms == ("zero_pad",) and node.endswith(f"[{key}]")
+    model, tok = tiny
+    pad = _run(_width_padded_head(model), tok)
+    inv.assert_invariant(base, pad, [key], rtol=1e-6)
+    m = model.get_output_embeddings().weight.shape[1]
+    assert (pad[key] / (2 * m)) == pytest.approx(0.5 * base[key] / m, rel=1e-6)
+
+
+def test_declarations(base):
+    cls = UnembeddingDiagnosticsTask
+    assert cls.TOKEN_POLICY == "not_token_based"
+    assert {"paper", "code", "llm_precedent"} <= set(cls.SOURCES)
+    assert set(cls.SIZE_INVARIANT) <= set(cls.HEADLINE_KEYS) <= set(base)

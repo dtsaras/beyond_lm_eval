@@ -100,6 +100,25 @@ def _welch_bound(V: int, m: int) -> float:
 class SuperpositionStrengthTask(DiagnosticTask):
     """Welch-bound-normalized packing of the unembedding rows (weights-only)."""
 
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "arXiv:2505.10465 (Liu, Liu & Gore 2025, Sec. 3.2-3.3)",
+        "code": "liuyz0/SuperpositionScaling@771670329ae948550ccfa0160edeb614f31d092b "
+                "(LLMs/overlap-0.py:68-130)",
+        "llm_precedent": "arXiv:2505.10465 (mean squared overlap of open LLMs' LM-head rows)",
+    }
+    HEADLINE_KEYS = ("mean_squared_overlap", "mean_squared_overlap_centered",
+                     "superposition_ratio", "superposition_ratio_centered",
+                     "row_norm_cv", "frac_norm_above_half_max")
+    # Width (zero-padding W's hidden dimension keeps every cosine and norm) and
+    # vocabulary (unused rows past len(tokenizer)). The Welch ratios carry
+    # kappa^2 ~ 1/m, a capacity ratio, so only the vocabulary test applies.
+    SIZE_INVARIANT = {k: ((("V_unused_rows",) if k.startswith("superposition_ratio")
+                           else ("zero_pad", "V_unused_rows")),
+                          "tests/tasks/invariance/test_superposition_strength.py::"
+                          f"test_size_invariant_entry[{k}]")
+                      for k in HEADLINE_KEYS}
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Superposition Strength (Liu-Liu-Gore 2025)...")
         max_pairs = int(self.config.get("max_pairs", 200_000))

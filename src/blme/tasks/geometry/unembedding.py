@@ -48,6 +48,35 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
     Analyzes the output embedding matrix (unembedding).
     Checks if weights are tied and measures effective rank and category purity of the unembedding space.
     """
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "doi:10.5281/zenodo.40328 (Roy & Vetterli 2007, Eq. 1, Def. 1: effective rank)",
+        "code": "none (category purity and embedding alignment are BLME diagnostics)",
+        "llm_precedent": "none verified for the unembedding (the logit-lens convention "
+                         "of reading rows through the final norm is followed)",
+    }
+    ADAPTATION_NOTE = (
+        "The unembedding is summarised by the Roy-Vetterli effective rank of its raw rows, "
+        "a centred variant, a category-purity score (the share of each category word's 20 "
+        "nearest unembedding rows in its category) and the cosine between each row and its "
+        "final-normed input embedding. No published LLM protocol defines these; they "
+        "describe how the output vocabulary is laid out. The raw erank follows Roy and "
+        "Vetterli exactly; centring is not in their definition and stays a separate key. "
+        "Purity depends on which words the tokenizer maps to single tokens, so it is a "
+        "within-tokenizer _meta_ diagnostic, scored on every labelled token unless "
+        "purity_num_queries caps it. On a tied model the alignment compares a row with its "
+        "own final-normed copy, so it measures the final norm. Unused padded rows enter "
+        "the erank and the alignment and move them slightly."
+    )
+    HEADLINE_KEYS = ("unembedding_eff_rank", "unembedding_eff_rank_centered",
+                     "embedding_alignment_mean", "embedding_alignment_std",
+                     "embedding_high_alignment_frac")
+    # Width: zero-padding the hidden dimension of W_out keeps its spectrum. The
+    # alignment keys have no size-free form (the final norm re-centres over
+    # padded coordinates; unused rows move them).
+    SIZE_INVARIANT = {k: (("zero_pad",), "tests/tasks/invariance/test_unembedding.py::"
+                                         f"test_size_invariant_entry[{k}]")
+                      for k in ("unembedding_eff_rank", "unembedding_eff_rank_centered")}
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Unembedding Diagnostics...")
         # Purity query cap, decoupled from the harness-wide num_samples (a
