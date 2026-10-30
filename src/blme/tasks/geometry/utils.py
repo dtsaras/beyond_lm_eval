@@ -288,10 +288,13 @@ def _offload_bytes(t):
 
 
 def _offload_view(path, tag, shape):
+    """A writable view of an offloaded tensor (copy-on-write: mode="r" pages
+    segfault on an in-place op, and the file must never change;
+    test_offload_cow.py)."""
     if tag == "bfloat16":
-        return torch.from_numpy(np.memmap(path, dtype=np.int16, mode="r",
+        return torch.from_numpy(np.memmap(path, dtype=np.int16, mode="c",
                                           shape=shape)).view(torch.bfloat16)
-    return torch.from_numpy(np.memmap(path, dtype=np.dtype(tag), mode="r", shape=shape))
+    return torch.from_numpy(np.memmap(path, dtype=np.dtype(tag), mode="c", shape=shape))
 
 
 def safe_svdvals(M):
@@ -768,9 +771,9 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
         f_labels.close()
         f_hidden.close()
         if c_logits > 0:
-            m_logits = np.memmap(p_logits, dtype=np.float32, mode='r', shape=(c_logits, D_logits))
-            m_labels = np.memmap(p_labels, dtype=np.int64, mode='r', shape=(c_labels,))
-            m_hidden = np.memmap(p_hidden, dtype=np.float32, mode='r', shape=(c_hidden, D_hidden))
+            m_logits = np.memmap(p_logits, dtype=np.float32, mode="c", shape=(c_logits, D_logits))
+            m_labels = np.memmap(p_labels, dtype=np.int64, mode="c", shape=(c_labels,))
+            m_hidden = np.memmap(p_hidden, dtype=np.float32, mode="c", shape=(c_hidden, D_hidden))
             # SPLIT BACK INTO DOCUMENTS. Returning one tensor for the whole
             # corpus silently redefined the statistic: `consistency.py` builds
             # WITHIN-document controls and treats every list element as one
