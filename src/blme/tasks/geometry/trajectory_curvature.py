@@ -171,14 +171,16 @@ class TrajectoryCurvatureTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
 
         # Per-sample (T_i, D) chunks in trajectory order: the shared cache when
-        # it is populated, else a private ModelOutputCache.
+        # it is populated, else a private ModelOutputCache. replace_final_norm
+        # =False, DELIBERATELY: the released curvature_utils.py:22-23 keeps HF's
+        # hidden_states as returned, so the last entry is the post-norm state.
         if dataset is None and not (cache is not None and getattr(cache, "is_populated", False)
                                     and use_cache):
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
         per_layer_chunks, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
-            replace_final_norm=True, layer_idx="all", use_cache=use_cache,
+            replace_final_norm=False, layer_idx="all", use_cache=use_cache,
             per_sample=True, fallback="private_cache")
         _last_is_block = bool(_info["last_is_block"])
 

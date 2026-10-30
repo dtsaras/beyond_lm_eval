@@ -395,7 +395,7 @@ def test_accessor_reproduces_geometry_trajectory_curvature(tiny, route, monkeypa
                         cache, monkeypatch, [])
     got, info = hidden_states_for_task(
         model, tok, docs, cache, num_samples=n, layer_idx="all", per_sample=True,
-        use_cache=cfg["use_cache"], replace_final_norm=True, fallback="private_cache")
+        use_cache=cfg["use_cache"], replace_final_norm=False, fallback="private_cache")
     assert _equal(got, used)
     assert info["fallback"] == (None if route == "shared_cache" else "private_cache")
 
