@@ -172,10 +172,10 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
     return betti_0, int(betti_1), max_pers, total_pers
 
 
-_HEADLINES = ("simplification_ratio", "betti_0_last", "max_betti_1", "h1_max_persistence")
+_HEADLINES = ("max_betti_1", "h1_max_persistence")
 # A kNN graph and its hop metric depend on neighbour order only.
 _SIZE_INVARIANT = {
-    k: (("embed_isometric", "zero_pad", "rescale"),
+    k: (("embed_isometric", "zero_pad", "rescale", "insert_identity_blocks"),
         "tests/tasks/invariance/test_topology_betti_curve.py::"
         "test_hop_metric_keys_are_width_and_scale_free")
     for k in _HEADLINES}
@@ -209,9 +209,13 @@ class BettiCurveTask(DiagnosticTask):
         "the 2-hop radius are carried over uncalibrated. Euclidean VR persistence and kNN zigzag "
         "are the LLM alternatives and are topology_homology and topology_zigzag_persistence. The "
         "hop metric depends on neighbour order only, so every key is unchanged by a rescale or a "
-        "width change; at a few dozen points every key is constant."
+        "width change. At N = 1000, beta_0 is 1 at nearly every layer of gpt2 and pythia-160m/410m "
+        "(its first/last values and their ratio are _meta_); the loop count and the reciprocal hop "
+        "diameter vary, and as maxima over layers they ignore inserted identity blocks."
     )
-    HEADLINE_KEYS = _HEADLINES
+    # N = 1000, three models, 800-point draws: max_betti_1 between/within SD
+    # 2.46; h1_max_persistence 0.60 (kept as a feature, not a headline).
+    HEADLINE_KEYS = ("max_betti_1",)
     SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -261,15 +265,18 @@ class BettiCurveTask(DiagnosticTask):
         results = {
             "betti_0_curve": betti_0_curve,
             "betti_1_curve": betti_1_curve,
-            "betti_0_first": betti_0_curve[0],
-            "betti_0_last": betti_0_curve[-1],
+            # beta_0 of a last-token kNN graph is 1 at almost every layer: at
+            # N = 1000 the first/last values and their ratio were 1 on gpt2,
+            # pythia-160m and pythia-410m (full cloud and 800-point draws). _meta_.
+            "_meta_betti_0_first": betti_0_curve[0],
+            "_meta_betti_0_last": betti_0_curve[-1],
         }
 
         # Topological simplification ratio
         if betti_0_curve[0] > 0:
-            results["simplification_ratio"] = float(betti_0_curve[-1] / betti_0_curve[0])
+            results["_meta_simplification_ratio"] = float(betti_0_curve[-1] / betti_0_curve[0])
         else:
-            results["simplification_ratio"] = 1.0
+            results["_meta_simplification_ratio"] = 1.0
 
         # Slope of beta_0 against normalised depth x in [0, 1].
         if len(betti_0_curve) > 1:

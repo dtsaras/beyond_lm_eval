@@ -123,11 +123,11 @@ def test_betti_curve(mock_model, mock_tokenizer):
         curve0 = results["betti_0_curve"]
         curve1 = results["betti_1_curve"]
         L = len(curve0)
-        assert results["betti_0_first"] == curve0[0]
-        assert results["betti_0_last"] == curve0[-1]
+        assert results["_meta_betti_0_first"] == curve0[0]
+        assert results["_meta_betti_0_last"] == curve0[-1]
         # simplification_ratio = last/first (1.0 fallback when first == 0)
         expected_ratio = curve0[-1] / curve0[0] if curve0[0] > 0 else 1.0
-        assert results["simplification_ratio"] == pytest.approx(
+        assert results["_meta_simplification_ratio"] == pytest.approx(
             expected_ratio, abs=1e-12
         )
         # decay rate = degree-1 polyfit SLOPE on normalized depth in [0, 1]

@@ -38,6 +38,13 @@ def test_hop_metric_keys_are_width_and_scale_free(states):
               inv.embed_isometric_docs(states, 2, 1)):
         inv.assert_invariant(base, _run(T, S), keys + ["betti_0_curve", "betti_1_curve"],
                              rtol=0.0)
+    # Maxima over layers: an inserted identity block repeats a layer's cloud.
+    model, tok = fd.tiny_gpt2(), fd.tokenizer()
+    ids = [tok(t, return_tensors="pt")["input_ids"] for t in fd.TEXTS[:3]]
+    deep = inv.insert_identity_blocks(model, [0, 2], verify_on=ids)
+    ins = _run(T, inv.states_from_model(deep, tok, fd.TEXTS))
+    assert len(ins["betti_1_curve"]) == len(base["betti_1_curve"]) + 2
+    inv.assert_invariant(base, ins, keys, rtol=0.0)
 
 
 def test_a_euclidean_summary_of_the_same_clouds_moves(states):
