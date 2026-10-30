@@ -92,6 +92,14 @@ def test_fit_size_is_half_of_2000_texts_from_an_extended_corpus(monkeypatch):
     assert out["_meta_n_cov_fit"] == 1000 and out["_meta_id_corpus"] == "wikitext"
 
 
+def test_sample_counts_are_meta():
+    """P7: n_id_fit / n_id_score / n_ood_score are config echoes and
+    insufficient_holdout a constant on every real run: _meta_."""
+    out = _run(1.0)
+    for k in ("n_id_fit", "n_id_score", "n_ood_score", "insufficient_holdout"):
+        assert k not in out and "_meta_" + k in out
+
+
 def test_extended_corpus_nests_and_starts_with_the_default_corpus():
     from blme.cache import default_corpus_size, load_default_corpus
     from blme.tasks.geometry.mahalanobis import _wikitext_passages_extended

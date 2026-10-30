@@ -415,16 +415,16 @@ class MahalanobisOODTask(DiagnosticTask):
             if not dists_ood:
                 return {
                     "error": "Failed to compute Mahalanobis distance (likely covariance singularity).",
-                    "insufficient_holdout": True,
-                    "n_id_fit": int(X_id_fit.shape[0]),
-                    "n_id_score": int(X_id_score.shape[0]),
-                    "n_ood_score": int(X_ood.shape[0]),
+                    "_meta_insufficient_holdout": True,
+                    "_meta_n_id_fit": int(X_id_fit.shape[0]),
+                    "_meta_n_id_score": int(X_id_score.shape[0]),
+                    "_meta_n_ood_score": int(X_ood.shape[0]),
                 }
             return {
-                "insufficient_holdout": True,
-                "n_id_fit": int(X_id_fit.shape[0]),
-                "n_id_score": int(X_id_score.shape[0]),
-                "n_ood_score": int(X_ood.shape[0]),
+                "_meta_insufficient_holdout": True,
+                "_meta_n_id_fit": int(X_id_fit.shape[0]),
+                "_meta_n_id_score": int(X_id_score.shape[0]),
+                "_meta_n_ood_score": int(X_ood.shape[0]),
                 "mean_mahalanobis_ood": float(np.mean(dists_ood)),
                 "ood_separation_gap": float("nan"),
                 "ood_separation_ratio": float("nan"),
@@ -492,15 +492,15 @@ class MahalanobisOODTask(DiagnosticTask):
             _auroc_pooled = None
 
         result = {
-            "insufficient_holdout": False,
+            "_meta_insufficient_holdout": False,
             "mean_mahalanobis_id": mean_id,
             "mean_mahalanobis_ood": mean_ood,
             "ood_separation_gap": mean_ood - mean_id,
             "ood_separation_ratio": mean_ood / max(mean_id, 1e-10),
-            "n_id_fit": int(X_id_fit.shape[0]),
-            "n_id_score": int(X_id_score.shape[0]),
+            "_meta_n_id_fit": int(X_id_fit.shape[0]),
+            "_meta_n_id_score": int(X_id_score.shape[0]),
             "_meta_n_splits": int(_n_splits),
-            "n_ood_score": int(X_ood.shape[0]),
+            "_meta_n_ood_score": int(X_ood.shape[0]),
         }
 
         # dist^2/d: dist^2 ~ chi2(d) under a correctly specified Gaussian, so

@@ -784,7 +784,7 @@ def test_mahalanobis(mock_model, mock_tokenizer):
     if "error" not in results:
         assert (
             "mean_mahalanobis_id" in results
-            or results.get("insufficient_holdout") is True
+            or results.get("_meta_insufficient_holdout") is True
         )
 
 
