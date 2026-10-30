@@ -391,7 +391,7 @@ def test_unembedding(mock_model, mock_tokenizer):
 
     assert "unembedding_is_tied" in results
     assert "unembedding_eff_rank" in results
-    assert "unembedding_purity_mean" in results
+    assert "_meta_unembedding_purity_mean" in results
 
 
 def test_unembedding_purity_nonzero_when_vocab_large_vs_labels(tmp_path):
@@ -447,7 +447,7 @@ def test_unembedding_purity_nonzero_when_vocab_large_vs_labels(tmp_path):
     assert "error" not in results
     # With clustered rows the within-cluster top-5 NNs should almost
     # entirely match the query's category.
-    assert results["unembedding_purity_mean"] > 0.5, (
+    assert results["_meta_unembedding_purity_mean"] > 0.5, (
         f"purity still collapses on large vocab: "
         f"{results['unembedding_purity_mean']}"
     )
@@ -1529,7 +1529,7 @@ def test_unembedding_purity_exact_on_orthogonal_clusters(tmp_path):
     out = task.evaluate(_HeadModel(), _Tok(), dataset=None)
 
     assert out["_meta_unembedding_n_category_tokens"] == 8
-    assert out["unembedding_purity_mean"] == 1.0
+    assert out["_meta_unembedding_purity_mean"] == 1.0
 
 
 def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):

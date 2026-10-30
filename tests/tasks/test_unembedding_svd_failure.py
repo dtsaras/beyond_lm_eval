@@ -38,4 +38,4 @@ def test_task_survives_an_svd_failure(monkeypatch, mock_model_tokenizer, exc):
     assert math.isnan(out["unembedding_eff_rank_centered"])
     # ...and everything that does NOT depend on the SVD still arrives.
     assert "unembedding_is_tied" in out
-    assert "unembedding_purity_mean" in out
+    assert "_meta_unembedding_purity_mean" in out

@@ -190,7 +190,9 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             "unembedding_is_tied": is_tied,
             "unembedding_eff_rank": float(eff_rank),
             "unembedding_eff_rank_centered": float(eff_rank_centered),
-            "unembedding_purity_mean": float(purity_mean),
+            # _meta_: the task itself flags purity as not comparable across
+            # models (which words map to single tokens is a tokenizer property).
+            "_meta_unembedding_purity_mean": float(purity_mean),
             # A tokenizer property (single-token category words), not geometry.
             "_meta_unembedding_n_category_tokens": int(n_category_tokens),
             # Describes the purity field only.
