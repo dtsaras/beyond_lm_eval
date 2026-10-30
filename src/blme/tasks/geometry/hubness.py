@@ -141,6 +141,36 @@ class GlobalHubnessTask(DiagnosticTask):
     standard Gini coefficient of the same self-excluded N_k vector.
     The k-NN search runs on GPU when one is available.
     """
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "https://www.jmlr.org/papers/v11/radovanovic10a.html (JMLR 11:2487-2531)",
+        "code": "VarIr/scikit-hubness@c36a058e67c34696182d3b8c5da089e287eb60bf",
+        "llm_precedent": ("Nielsen, Macocco, Baroni 2025 arXiv:2502.10201 (k-occurrence "
+                          "hubness of the unembedding rows, k=10)"),
+    }
+    ADAPTATION_NOTE = (
+        "Hubness is the skewness S_Nk of the k-occurrence distribution (Radovanovic et al. "
+        "2010): how unevenly points appear in each other's k-nearest-neighbour lists. BLME "
+        "measures it on the unembedding rows, as Nielsen et al. (2025) do for LLM vocabularies, "
+        "with cosine distance (unit rows, chord ranking), at the paper's k=10 plus k=50 and "
+        "k=100; the input-embedding table is _meta_. The Gini coefficient and the top-1% mass "
+        "of N_k are BLME additions: bounded inequality summaries that are less driven by a "
+        "single hub than the skew. Only rows the tokenizer can emit are ranked, rows without a "
+        "direction are left out, and a seeded draw of 32000 rows (the smallest study "
+        "vocabulary) is used because S_Nk grows with the number of rows."
+    )
+    HEADLINE_KEYS = (
+        "hubness_k10_skew", "hubness_k10_max", "hubness_k10_top1pct", "hubness_k10_gini",
+        "hubness_k50_skew", "hubness_k50_max", "hubness_k50_top1pct", "hubness_k50_gini",
+        "hubness_k100_skew", "hubness_k100_max", "hubness_k100_top1pct", "hubness_k100_gini",
+    )
+    # Width/scale: cosine ranking; V: unused rows are never ranked and the row
+    # count is pinned. Depth: weights only.
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("zero_pad", "embed_isometric", "rescale", "pad_vocabulary"),
+         "tests/tasks/invariance/test_geometry_hubness.py::test_width_scale_and_vocabulary_invariant"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Global Hubness Analysis...")
         # De-duplicate k in order: a repeated k would add its neighbours twice.
