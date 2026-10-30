@@ -24,8 +24,8 @@ def test_atomic_measure_gives_zero_through_evaluate(mock_model, mock_tokenizer,
         return out
 
     monkeypatch.setattr(mock_model, "forward", constant_states)
-    task = CorrelationDimensionTask(config={"num_samples": 10,
-                                            "pooling": "all_tokens"})
+    # One point per document (Q1): 30 documents, every hidden state identical.
+    task = CorrelationDimensionTask(config={"num_samples": 30})
     res = task.evaluate(mock_model, mock_tokenizer, dataset=None)
     if "error" in res:
         pytest.skip(f"task declined: {res['error']}")
@@ -67,8 +67,8 @@ def test_mixed_atom_continuous_population_gives_zero_through_evaluate(
         return out
 
     monkeypatch.setattr(mock_model, "forward", mixed_population)
-    task = CorrelationDimensionTask(config={"num_samples": 64,
-                                            "pooling": "all_tokens"})
+    # One point per document (Q1): each document's last token is one draw.
+    task = CorrelationDimensionTask(config={"num_samples": 64})
     res = task.evaluate(mock_model, mock_tokenizer, dataset=None)
     if "error" in res:
         pytest.skip(f"task declined: {res['error']}")

@@ -33,18 +33,23 @@ geometry_collapse:
 
 geometry_lid:
   k: 20
-  num_samples: 50
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # the token cloud of the first 200 (20000 rows) is _meta_.
+  num_samples: 1000
   layerwise: false
+  token_cloud_docs: 200
+  token_cloud_points: 20000
 
 geometry_representation_sensitivity:
   num_samples: 20
 
 geometry_correlation_dimension:
-  num_samples: 100
-  max_length: 128
+  # One point per sequence (last content token of the whole document), N
+  # pinned at 1000 documents; the mean-pooled cloud of the first 200 is _meta_.
+  num_samples: 1000
   num_radii: 30
-  pooling: mean  # "mean", "all_tokens", or "last"
   max_points: 2000
+  token_cloud_docs: 200
 
 geometry_matrix_entropy:
   num_samples: 10
@@ -95,7 +100,10 @@ geometry_unembedding:
 
 geometry_intrinsic_dim:
   layerwise: false
-  num_samples: 100
+  # Layerwise mode: one point per sequence (last content token), N pinned at
+  # 1000 documents for every model; the token cloud of the first 200 is _meta_.
+  num_samples: 1000
+  token_cloud_docs: 200
 
 geometry_hsic:
   num_samples: 100
@@ -119,7 +127,11 @@ geometry_neural_collapse:
   n_sentences_per_topic: null
 
 geometry_mahalanobis:
-  num_samples: 50
+  # 2000 ID texts: a Ledoit-Wolf fit on 1000, 1000 held out and scored against
+  # their own token shuffles (Q3). The corpus extends past WikiText-103
+  # validation (test, then train) in a nested order: id_corpus: wikitext.
+  num_samples: 2000
+  id_corpus: wikitext
   ood_strategy: shuffle  # "shuffle" or "random"
 
 geometry_weight_norms: {}
@@ -372,14 +384,27 @@ repe_refusal_direction: {}
 
 # ---- Campaign-2 additions (2026-06): new methods, official-code parity-verified ----
 geometry_vendi_score:
-  num_samples: 100
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # the token cloud of the first 200 (512 rows per layer) is _meta_.
+  num_samples: 1000
   kernel: cosine
   gamma: null
   max_points: 512
   seed: 0
+  token_cloud_docs: 200
 
 geometry_phd_dimension:
   num_samples: 100
+  # GPTID protocol: whole WikiText-103 articles of >= 300 tokens (train split,
+  # nested order), truncated at 512 tokens, each estimated on tokens [1:-1]
+  # with the notebook's adaptive grid (min 40, 7 steps, 9 subsamples per size).
+  documents: long_documents
+  doc_split: train
+  min_doc_tokens: 300
+  min_subsample: 40
+  intermediate_points: 7
+  text_n_points: 9
+  min_text_tokens: 50
   # Pin the window: without it the code-level fallback max_length=128 fires on
   # the uncached path while the shared cache truncates at 512, so a cached and
   # an uncached run of the same model on the same corpus built DIFFERENT point
@@ -406,10 +431,14 @@ geometry_cknna:
   use_cache: true
 
 geometry_magnitude:
-  num_samples: 100
+  # One point per sequence (last content token), N pinned at 1000 documents;
+  # 100 token rows of the first 200 documents are the _meta_ token cloud.
+  num_samples: 1000
   n_scales: 10
   scale_span: 10.0
   layer_idx: -1
+  token_cloud_docs: 200
+  token_cloud_points: 100
 
 geometry_procrustes_linearity:
   num_samples: 100

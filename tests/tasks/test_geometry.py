@@ -736,12 +736,13 @@ def test_correlation_dimension_reframes_hidden_state_gp_method():
     _a = result["_meta_hidden_state_correlation_dimension"]
     _b = result["correlation_dimension"]
     assert (_a == _b) or (np.isnan(_a) and np.isnan(_b)), (_a, _b)
-    # The primary key is now the SCALING-REGION fit -- the old 5th-95th
-    # percentile window sat in the saturation region and missed GP 1983's
-    # published D2 = 2.05 by -27.7% on a Lorenz attractor.
-    assert result["correlation_dimension_method"] == (
-        "hidden_state_grassberger_procaccia_scaling_region")
-    assert result["correlation_dimension_point_space"] == "mean_pooled_hidden_states"
+    # The method and point space are constant strings, so _meta_ (P7); the
+    # headline is the fixed Du & Tanaka-Ishii window on last-token points.
+    assert result["_meta_correlation_dimension_method"] == (
+        "hidden_state_grassberger_procaccia_fixed_window")
+    assert result["_meta_correlation_dimension_point_space"] == "last_token_hidden_states"
+    assert "correlation_dimension_method" not in result
+    assert "correlation_dimension_point_space" not in result
 
 
 def test_information_geometry(mock_model, mock_tokenizer):
@@ -783,7 +784,7 @@ def test_mahalanobis(mock_model, mock_tokenizer):
     if "error" not in results:
         assert (
             "mean_mahalanobis_id" in results
-            or results.get("insufficient_holdout") is True
+            or results.get("_meta_insufficient_holdout") is True
         )
 
 

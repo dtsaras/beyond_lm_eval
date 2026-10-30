@@ -3091,7 +3091,7 @@ def test_geometry_correlation_dimension():
     # ---- Stub model: sample i -> fixed final-hidden-state point P[i] ----
     class _Out:
         def __init__(self, h):
-            self.hidden_states = [h]
+            self.hidden_states = [h, h]   # (embedding, last), as HF returns
 
     class _Enc(dict):
         def to(self, device):  # BLME calls tokenizer(...).to(device)
@@ -3126,7 +3126,7 @@ def test_geometry_correlation_dimension():
         })
         out = task.evaluate(_StubModel(pts), _StubTok(), ds)
         assert "error" not in out, out
-        assert out["correlation_dimension_method"] == "hidden_state_grassberger_procaccia_scaling_region"
+        assert out["_meta_correlation_dimension_method"] == "hidden_state_grassberger_procaccia_fixed_window"
         return out
 
     def ref_gp_dim(P):
@@ -3200,18 +3200,22 @@ def test_geometry_correlation_dimension():
         # bit-identical value, i.e. perfectly collinear feature columns.
         assert out["_meta_hidden_state_correlation_dimension"] == out["correlation_dimension"]
         assert "hidden_state_correlation_dimension" not in out
-        assert out["_meta_fit_r_squared"] > 0.95
-        # STRONGER anchor for the new primary: these clouds have ANALYTIC
-        # dimensions (circle 1, torus 2, cube3d 3), which the percentile fit
-        # could not be held to.
+        # The scaling-region (plateau) fit these anchors were written for is
+        # now _meta_correlation_dimension_plateau; the headline is the fixed
+        # Du & Tanaka-Ishii window, which on the regular circle/torus lattices
+        # sits below the sample spacing and is only anchored on the random cube.
+        assert out["_meta_correlation_dimension_scaling_r2"] > 0.95
         _analytic = {"circle": 1.0, "torus": 2.0, "cube3d": 3.0}[name]
-        _prim = out["correlation_dimension"]
-        if np.isfinite(_prim):
-            assert abs(_prim - _analytic) < 0.35, (
-                f"{name}: scaling-region fit {_prim} vs analytic {_analytic}")
+        _plat = out["_meta_correlation_dimension_plateau"]
+        if np.isfinite(_plat):
+            assert abs(_plat - _analytic) < 0.35, (
+                f"{name}: scaling-region fit {_plat} vs analytic {_analytic}")
+        if name == "cube3d":
+            assert abs(out["correlation_dimension"] - 3.0) < 0.35, out["correlation_dimension"]
+        blme_dims[name] = _plat
 
     # ---- (B) Determinism: same input twice -> identical output ----
-    again = blme_dim(circle)["correlation_dimension"]
+    again = blme_dim(circle)["_meta_correlation_dimension_plateau"]
     assert again == blme_dims["circle"]
 
     # ---- (C) Analytic invariant (GP power law C(r) ~ r^D) ----

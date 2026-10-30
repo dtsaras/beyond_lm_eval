@@ -1,6 +1,6 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from ..common import get_embeddings
+from ..common import get_embeddings, get_lm_head
 import torch
 import numpy as np
 from scipy.stats import skew
@@ -25,27 +25,15 @@ def _hubness_stats_from_occurrences(n_occ, k: int) -> dict:
     if n_occ_cpu.size == 0:
         hub_skew = float("nan")
     elif n_occ_cpu.std() == 0:
-        # NaN, not 0.0. S_Nk is the standardized third moment, so a constant
-        # occurrence vector makes it 0/0 -- undefined -- and scipy.stats.skew
-        # returns NaN there. Reporting 0.0 says "perfectly symmetric", which is
-        # a measurement the data does not support: 20 equal counts returned
-        # 0.000000 (adversarial review round 2, 2026-09-04).
+        # NaN, not 0.0: a constant occurrence vector makes S_Nk 0/0, as
+        # scipy.stats.skew reports (test_hubness_parity.py).
         hub_skew = float("nan")
     else:
         hub_skew = float(skew(n_occ_cpu))
     hub_max = int(n_occ_cpu.max()) if n_occ_cpu.size else 0
     denom = n_occ_cpu.sum()
-    # Mass of the top 1% of points, taken as EXACTLY the m = ceil(0.01 n)
-    # largest occurrence counts.
-    #
-    # The previous form selected everything >= percentile(counts, 99), which
-    # over-selects whenever counts tie -- and k-NN occurrence counts are small
-    # integers, so ties are the norm, not an edge case. Measured over-selection
-    # on real tables: gpt2 540 of 50257 points selected instead of 503
-    # (+0.77% mass), pythia-70m 599 vs 504 (+16.0%), pythia-160m 602 vs 504
-    # (+16.6%), Qwen2.5-0.5B 1528 vs 1520 (+0.24%). Degenerate case: 100 nodes
-    # all with the same count selected all 100 and reported mass 1.0 for what
-    # is a perfectly uniform, hub-free distribution.
+    # Mass of the top 1% of points: exactly the m = ceil(0.01 n) largest
+    # counts. A >= percentile(99) cut over-selects on tied integer counts.
     n_pts = int(n_occ_cpu.size)
     if denom > 0 and n_pts > 0:
         m = int(np.ceil(0.01 * n_pts))
@@ -63,6 +51,79 @@ def _hubness_stats_from_occurrences(n_occ, k: int) -> dict:
     }
 
 
+# Rows ranked per table: the smallest vocabulary in the study zoo.
+_N_ROWS = 32000
+
+
+def _n_emittable(tokenizer, n_rows: int) -> int:
+    """Rows the tokenizer can emit: ids below len(tokenizer) (added tokens
+    included), capped at the table's row count; all rows without a length."""
+    try:
+        n_tok = int(len(tokenizer))
+    except TypeError:
+        n_tok = 0
+    return min(n_tok, int(n_rows)) if n_tok > 0 else int(n_rows)
+
+
+def _unit_rows(E, device):
+    """float64 unit rows on ``device``; exactly-zero rows stay zero.
+
+    Each row is first divided by its largest-magnitude coordinate so the norm
+    cannot underflow, then by its norm (clamped at the smallest positive
+    value, never offset by an epsilon). Returns ``(U, n_zero, n_nonfinite,
+    has_direction)``; rows without a direction (zero or non-finite) must not be
+    ranked -- see :func:`_k_occurrences`.
+    """
+    U = E.detach().to(device=device, dtype=torch.float64)
+    _rmax = U.abs().amax(dim=1, keepdim=True)
+    U = U / _rmax.clamp_min(torch.finfo(U.dtype).tiny)
+    _n = U.norm(dim=1, keepdim=True)
+    U = U / _n.clamp_min(torch.finfo(U.dtype).tiny)
+    # Counted on the row max: a zero row and a non-finite row are different
+    # conditions (a NaN row fails `> 0` too and is zeroed below).
+    _rm = _rmax.squeeze(-1)
+    n_zero = int((_rm == 0).sum().item())
+    n_nonfinite = int((~torch.isfinite(_rm)).sum().item())
+    if n_zero or n_nonfinite:
+        logger.warning(
+            "hubness: %d zero-norm and %d non-finite embedding rows; "
+            "they have no direction and their neighbour ranks are not "
+            "meaningful", n_zero, n_nonfinite)
+    has_direction = ((_rm > 0) & torch.isfinite(_rm)).cpu()
+    U = torch.where(_rmax > 0, U, torch.zeros_like(U))
+    return U, n_zero, n_nonfinite, has_direction
+
+
+def _k_occurrences(U, k_values, batch_size):
+    """k-occurrence counts N_k of every row of ``U`` (self excluded).
+
+    Neighbours are ranked by DIRECT chord distance on unit rows (the
+    dot-product ranking cancels two ~1 sums on anisotropic vocabularies), in
+    float64, with a stable index tie-break so the result does not depend on
+    the batch or on which other k were requested (test_hubness_parity.py).
+    """
+    device = U.device
+    n_vocab = U.shape[0]
+    max_k = max(k_values)
+    # Cap the batch so the float64 (B, V) slice stays inside 512 MB; the
+    # stable tie rule makes the result batch-invariant.
+    _bytes = U.element_size() * max(1, n_vocab)
+    batch_size = max(1, min(int(batch_size), (512 << 20) // _bytes))
+    n_occ = {k: torch.zeros(n_vocab, dtype=torch.int64, device=device) for k in k_values}
+    with torch.no_grad():
+        for i in tqdm(range(0, n_vocab, batch_size), desc="Hubness"):
+            end = min(i + batch_size, n_vocab)
+            sims = torch.cdist(U[i:end], U, compute_mode="donot_use_mm_for_euclid_dist")
+            rows = torch.arange(end - i, device=device)
+            cols = torch.arange(i, end, device=device)
+            sims[rows, cols] = float("inf")          # self is never a neighbour
+            top_idx_sorted = torch.argsort(sims, dim=1, descending=False, stable=True)[:, :max_k]
+            for k in k_values:
+                flat = top_idx_sorted[:, :k].reshape(-1)
+                n_occ[k].scatter_add_(0, flat, torch.ones_like(flat))
+    return {k: v.cpu().numpy().astype(np.int64) for k, v in n_occ.items()}
+
+
 @register_task("geometry_hubness")
 class GlobalHubnessTask(DiagnosticTask):
     """
@@ -70,220 +131,120 @@ class GlobalHubnessTask(DiagnosticTask):
     of k-nearest neighbor occurrences.
 
     References:
-      * Tomašev, Radovanović, Mladenić, Ivanović 2014 — "The Role of
-        Hubness in Clustering High-Dimensional Data", IEEE TKDE 26 (3),
-        IEEE TKDE 26(3):739-751, 2014 (DOI 10.1109/TKDE.2013.25; no arXiv).
-        Formalises the k-NN occurrence-skewness measure S_Nk used here.
-
-        NOT the source of the Gini variant. Both cited papers define hubness
-        through N_k and S_Nk; neither mentions a Gini coefficient (searched
-        both PDFs, 0 occurrences -- codex round 9, 2026-09-07). The docstring
-        previously credited them with "the k-NN skewness / Gini hubness
-        measures", which is a citation to a thing they do not contain.
-        ``hubness_k*_gini`` is a BLME add-on: the standard Gini coefficient
-        applied to the same self-excluded N_k vector. It is internally
-        correct (0.5146666666666668 against the independent pairwise
-        definition's 0.5146666666666667 on the pinned vector), but it is ours
-        to defend, not Tomasev's.
       * Radovanović, Nanopoulos, Ivanović 2010 — "Hubs in Space: Popular
         Nearest Neighbors in High-Dimensional Data", JMLR 11. The
-        originator paper for k-NN hubness in high-D.
+        originator paper for k-NN hubness S_Nk.
+      * Tomašev, Radovanović, Mladenić, Ivanović 2014 — "The Role of
+        Hubness in Clustering High-Dimensional Data", IEEE TKDE 26(3):739-751.
 
-    ``hubness_k10_gini`` is BLME's top-7 partial predictor of composite
-    benchmark capability beyond scale (+0.74 partial ρ; see
-    `docs/TOP_PREDICTORS.md` §2).
-
-    Implementation runs the k-NN search on GPU. Neither ``torch.topk`` nor the
-    similarity matmul this docstring used to describe survives: ``topk`` left
-    exact ties unordered (making the answer depend on which k values were also
-    requested) and was replaced by a stable full argsort, and the normalized
-    dot product lost neighbour resolution on anisotropic vocabularies and was
-    replaced by direct chord distances -- see the two long notes in
-    ``evaluate``. The numpy-on-CPU original was infeasible for VLM-scale vocabs
-    (Gemma 4's 262k tokens × 6k hidden, ~hours on CPU); the GPU version is
-    ~26 s for gpt2's 50257.
+    ``hubness_k*_gini`` is a BLME add-on (neither paper defines it): the
+    standard Gini coefficient of the same self-excluded N_k vector.
+    The k-NN search runs on GPU when one is available.
     """
+    TOKEN_POLICY = "not_token_based"
+    SOURCES = {
+        "paper": "https://www.jmlr.org/papers/v11/radovanovic10a.html (JMLR 11:2487-2531)",
+        "code": "VarIr/scikit-hubness@c36a058e67c34696182d3b8c5da089e287eb60bf",
+        "llm_precedent": ("Nielsen, Macocco, Baroni 2025 arXiv:2502.10201 (k-occurrence "
+                          "hubness of the unembedding rows, k=10)"),
+    }
+    ADAPTATION_NOTE = (
+        "Hubness is the skewness S_Nk of the k-occurrence distribution (Radovanovic et al. "
+        "2010): how unevenly points appear in each other's k-nearest-neighbour lists. BLME "
+        "measures it on the unembedding rows, as Nielsen et al. (2025) do for LLM vocabularies, "
+        "with cosine distance (unit rows, chord ranking), at the paper's k=10 plus k=50 and "
+        "k=100; the input-embedding table is _meta_. The Gini coefficient and the top-1% mass "
+        "of N_k are BLME additions: bounded inequality summaries that are less driven by a "
+        "single hub than the skew. Only rows the tokenizer can emit are ranked, rows without a "
+        "direction are left out, and a seeded draw of 32000 rows (the smallest study "
+        "vocabulary) is used because S_Nk grows with the number of rows."
+    )
+    HEADLINE_KEYS = (
+        "hubness_k10_skew", "hubness_k10_max", "hubness_k10_top1pct", "hubness_k10_gini",
+        "hubness_k50_skew", "hubness_k50_max", "hubness_k50_top1pct", "hubness_k50_gini",
+        "hubness_k100_skew", "hubness_k100_max", "hubness_k100_top1pct", "hubness_k100_gini",
+    )
+    # Width/scale: cosine ranking; V: unused rows are never ranked and the row
+    # count is pinned. Depth: weights only.
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("zero_pad", "embed_isometric", "rescale", "pad_vocabulary"),
+         "tests/tasks/invariance/test_geometry_hubness.py::test_width_scale_and_vocabulary_invariant"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Global Hubness Analysis...")
-        # De-duplicate in order. The occurrence counters are keyed by k while
-        # the scatter loop runs once per LIST ENTRY, so a repeated k added its
-        # neighbours twice into one counter and doubled every count.
+        # De-duplicate k in order: a repeated k would add its neighbours twice.
         _k_raw = [int(k) for k in self.config.get("k_values", [10, 50, 100])]
         k_values = list(dict.fromkeys(_k_raw))
         if not k_values or min(k_values) < 1:
             return {"error": f"hubness: k_values must be positive integers, got {_k_raw}"}
         batch_size = self.config.get("batch_size", 2000)
 
-        E = get_embeddings(model)
-        if E is None:
+        # The unembedding (output projection) rows, as Nielsen et al. 2025
+        # measure vocabulary hubness; the input-embedding table is _meta_. For
+        # tied models the two are one matrix and are scored once.
+        E_in = get_embeddings(model)
+        head = get_lm_head(model)
+        W = head.weight.detach() if head is not None else None
+        matrix = "unembedding"
+        if W is None:
+            W, matrix = E_in, "input_embedding"
+        if W is None:
             return {"error": "Could not extract embeddings"}
 
-        # Choose a CUDA device when available; the embedding's own device is
-        # ideal because the weights are already there. Fall back to CPU.
-        if E.is_cuda:
-            device = E.device
+        if W.is_cuda:
+            device = W.device
         elif torch.cuda.is_available():
             device = torch.device("cuda:0")
         else:
             device = torch.device("cpu")
 
-        # Cast to float32 for the cosine similarity (bf16 has too little
-        # precision for the small differences between top-k similarities) and
-        # normalize for cosine similarity in one shot. We materialise this on
-        # the chosen device.
-        # float64, NOT float32. The ranking below differences nearly-identical
-        # unit rows; float32 normalisation injects a ~6e-8 relative error into
-        # each row, and when the vocabulary shares a strong common direction
-        # that error is LARGER than the row-to-row separation being ranked.
-        # Upcasting from a float32/bf16 checkpoint is exact, so this only ever
-        # removes error -- it never invents precision the checkpoint lacks.
-        E_norm = E.detach().to(device=device, dtype=torch.float64)
-        # DIVIDE by the norm; do not ADD to it.
-        #
-        # `norm + 1e-10` is not cosine normalisation for small nonzero rows --
-        # it shrinks them toward the origin and changes the neighbour geometry.
-        # TinyLlama-intermediate has 111 such rows, where current-vs-exact k100
-        # skew differs by -0.345%, and a direct 1e-12 row-rescaling test moved
-        # k50 skew by 3.19814 (adversarial review, 2026-09-04). Only an exactly
-        # zero row has no direction; clamp the divisor at the smallest positive
-        # value instead of biasing every row.
-        # TWO-STAGE rescale: divide each row by its own largest-magnitude
-        # coordinate BEFORE norming. `finfo.tiny` guards the divisor but not
-        # the norm's own arithmetic -- the norm squares in float32, so at
-        # alpha = 1e-23 all 24 stored coordinates were still nonzero while the
-        # norm underflowed to 0.0, changing 77 of 257 k50 occurrence counts and
-        # moving skew 0.393048896 -> 7.301942076 (adversarial review round 2,
-        # 2026-09-04).
-        #
-        # This used to claim "scaling by the row max is exact in binary
-        # floating point and yields the identical unit vector". It is NOT
-        # exact -- only a POWER-OF-TWO divisor leaves the mantissas alone, and
-        # an arbitrary row max re-rounds every coordinate. Measured on a
-        # 2000x256 standard normal: 0 of 2000 unit rows are bit-identical to
-        # the power-of-two-scaled result, with max coordinate deviation
-        # 5.960e-08. It is kept anyway because what this task CONSUMES is the
-        # k-NN ranking, and that is unchanged: 2000 of 2000 rows have identical
-        # k=10 neighbour lists under both scalings. The same false "only shifts
-        # exponents" claim WAS load-bearing in intrinsic_dim, where Two-NN
-        # compares radii for exact equality -- see the power-of-two rescale
-        # there (codex round 12, 2026-09-08).
-        _rmax = E_norm.abs().amax(dim=1, keepdim=True)
-        E_norm = E_norm / _rmax.clamp_min(torch.finfo(E_norm.dtype).tiny)
-        _n = E_norm.norm(dim=1, keepdim=True)
-        E_norm = E_norm / _n.clamp_min(torch.finfo(E_norm.dtype).tiny)
-        # A row that was exactly zero stays exactly zero (0/tiny = 0), which is
-        # what "no direction" means.
-        #
-        # This comment used to end "it is reported below, not silently ranked"
-        # -- and nothing was reported (codex round 9, 2026-09-07). The counts
-        # below make the sentence true. Note `_rmax > 0` is False for NaN, so
-        # a NaN row also lands here and is counted separately: a NaN row and a
-        # zero row are NOT the same condition, and collapsing both to the zero
-        # vector without saying so hides a corrupt checkpoint.
-        # Counted on the row max BEFORE the where(), so the two conditions
-        # stay distinguishable. `+inf` is deliberately counted here too: it
-        # PASSES `> 0`, so it is not zeroed, and inf/inf leaves NaN in the
-        # ranked row -- a silently different failure from an all-zero row.
-        _rm = _rmax.squeeze(-1)
-        _n_zero = int((_rm == 0).sum().item())
-        _n_nonfinite = int((~torch.isfinite(_rm)).sum().item())
-        if _n_zero or _n_nonfinite:
-            logger.warning(
-                "hubness: %d zero-norm and %d non-finite embedding rows; "
-                "they have no direction and their neighbour ranks are not "
-                "meaningful", _n_zero, _n_nonfinite)
-        E_norm = torch.where(_rmax > 0, E_norm, torch.zeros_like(E_norm))
-        n_vocab = E_norm.shape[0]
-        max_k = max(k_values)
+        # Only rows the tokenizer can emit (P7): rows past len(tokenizer) are
+        # untrained padding (pythia: 27 rows of norm 0.007; Qwen3-4B: 267) and
+        # change the counts (test_hubness_protocol.py::test_unused_rows_are_excluded).
+        n_emit = _n_emittable(tokenizer, W.shape[0])
+        # The row count is pinned (seeded draw of n_rows emittable ids, the same
+        # ids in both tables; default 32000, the smallest study vocabulary):
+        # S_Nk grows with the number of rows, which is otherwise the vocabulary
+        # size (test_hubness_protocol.py::test_row_count_is_pinned).
+        n_rows = int(self.config.get("n_rows", _N_ROWS))
+        idx = None
+        if 0 < n_rows < n_emit:
+            rng = np.random.default_rng(int(self.config.get("seed", 0)))
+            idx = torch.from_numpy(np.sort(rng.choice(n_emit, n_rows, replace=False)))
 
-        # Cap the batch so the float64 (B, V) distance slice stays inside a
-        # 512 MB budget. At gpt2's V=50257 the configured 2000 would ask for
-        # 804 MB in one allocation; this trims it to 1336 rows. Purely a
-        # memory guard -- the stable tie rule makes the result batch-invariant,
-        # so trimming cannot change any number.
-        _bytes = E_norm.element_size() * max(1, n_vocab)
-        batch_size = max(1, min(int(batch_size), (512 << 20) // _bytes))
+        def rows(T):
+            T = T[:n_emit]
+            return T if idx is None else T[idx.to(T.device)]
 
-        # Per-token occurrence counters, one per k-value, kept on the same
-        # device so the topk results can be scattered without round-trips.
-        n_occ = {k: torch.zeros(n_vocab, dtype=torch.int64, device=device)
-                 for k in k_values}
+        results = self._score(rows(W), k_values, batch_size, device)
+        results["_meta_n_emittable_rows"] = int(n_emit)
+        results["_meta_n_unused_rows"] = int(W.shape[0] - n_emit)
+        results["_meta_rows_subsampled"] = idx is not None
+        tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
+        if E_in is not None and matrix == "unembedding":
+            inp = results if tied else self._score(rows(E_in), k_values, batch_size, device)
+            results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()
+                            if k.startswith("hubness_")})
+        results["_meta_hubness_matrix"] = matrix
+        results["_meta_tied_embeddings"] = bool(tied)
+        results["_meta_k_values_duplicates_dropped"] = len(_k_raw) - len(k_values)
+        return results
 
-        with torch.no_grad():
-            for i in tqdm(range(0, n_vocab, batch_size), desc="Hubness"):
-                end = min(i + batch_size, n_vocab)
-                # (B, V) slice ranked by DIRECT chord distance, not by the
-                # dot product.
-                #
-                # For unit rows ||u-v||^2 = 2 - 2*u.v, so the two orderings are
-                # mathematically identical -- but not numerically. When the
-                # vocabulary shares a common direction every u.v sits just
-                # below 1, and the quantity that actually separates neighbours
-                # is 1 - u.v, obtained by cancelling two ~1.0 sums. Differencing
-                # the coordinates first is exact for nearby floats (Sterbenz),
-                # so the common component cancels before anything is squared.
-                #
-                # Measured on a 257x24 fixture given a common offset of 1e3:
-                # the dot-product ranking left only 41 distinct off-diagonal
-                # similarities out of 32888 and put 212/257 occupancy bins wrong
-                # (L1=1172, k10 skew 1.854701 -> 2.905081). At offset 1e6 only
-                # 10 distinct similarities survived (242/257 bins, L1=3288).
-                # Direct differencing gives 0 wrong bins at both offsets.
-                # Upcasting the DOT PRODUCT to float64 does not fix it (186 and
-                # 242 bins still wrong): the cancellation destroys the signal
-                # regardless of accumulator width, so the differencing -- not
-                # the precision -- is the load-bearing half of this fix.
-                #
-                # Real numbers DO move, slightly. Measured end-to-end on the
-                # full gpt2 vocabulary (V=50257, k=10/50/100), worst relative
-                # change 3.602e-05:
-                #     hubness_k10_skew   34.0717888947 -> 34.0705616505
-                #     hubness_k100_max   41027         -> 41028
-                #     hubness_k50_max    30325         -> 30326
-                #     hubness_k100_top1pct 0.531816861333 -> 0.531816065424
-                # The new values are the accurate ones. gpt2 is mildly
-                # anisotropic (mean/spread 0.605), enough to cost the float32
-                # dot product a few digits even without an artificial offset.
-                # Any archived hubness field is stale at the 1e-5 level; no
-                # qualitative claim depends on it. Verified 2026-09-07.
-                #
-                # Cost: 1.1 s -> 26.1 s for the full gpt2 vocabulary. float64
-                # is load-bearing -- normalising in float64 but ranking in
-                # float32 is exact at offset 1e3 yet wrong in 89 bins at 1e6,
-                # for a saving of ~7 s per model. Correctness wins.
-                sims = torch.cdist(
-                    E_norm[i:end], E_norm,
-                    compute_mode="donot_use_mm_for_euclid_dist")
-                # Mask self-distance (i+j is the diagonal entry of row j)
-                rows = torch.arange(end - i, device=device)
-                cols = torch.arange(i, end, device=device)
-                sims[rows, cols] = float("inf")
-                # STABLE ordering over the FULL row, ranked by
-                # (-similarity, index). `topk` leaves exact ties unordered, so
-                # which tied neighbour landed inside k depended on max_k -- the
-                # SAME k=10 skew on gpt2 read 34.070209318 / 34.070394611 /
-                # 34.070093558 for max_k = 10 / 100 / 101, and an all-identical
-                # 12-row fixture moved by 1.29 (adversarial review round 2,
-                # 2026-09-04). A stable descending argsort breaks ties by index,
-                # so the answer no longer depends on which k values were also
-                # requested. It costs V log V per row instead of V; `sims` is
-                # already materialised, so no extra memory.
-                # ASCENDING now: nearest neighbour = smallest distance. The
-                # stable tie rule is unchanged -- ties still resolve by index,
-                # so the result stays batch- and max_k-invariant.
-                top_idx_sorted = torch.argsort(
-                    sims, dim=1, descending=False, stable=True)[:, :max_k]
-                for k in k_values:
-                    flat = top_idx_sorted[:, :k].reshape(-1)
-                    n_occ[k].scatter_add_(0, flat, torch.ones_like(flat))
-
+    @staticmethod
+    def _score(E, k_values, batch_size, device):
+        E_norm, _n_zero, _n_nonfinite, _dir = _unit_rows(E, device)
+        # Rows without a direction are not ranked: a zero vector sits at chord
+        # distance exactly 1 from every unit row (cosine 0.5), nearer than most
+        # true neighbours in a near-isotropic table, so it became a
+        # near-universal hub (test_hubness_protocol.py::test_zero_rows_are_not_ranked).
+        E_norm = E_norm[_dir.to(E_norm.device)]
+        occ = _k_occurrences(E_norm, k_values, batch_size)
         results = {
             "_meta_n_zero_rows": _n_zero,
             "_meta_n_nonfinite_rows": _n_nonfinite,
-            "_meta_k_values_duplicates_dropped": len(_k_raw) - len(k_values),
+            "_meta_n_rows_ranked": int(E_norm.shape[0]),
         }
         for k in k_values:
-            n_occ_cpu = n_occ[k].cpu().numpy().astype(np.int64)
-            results.update(_hubness_stats_from_occurrences(n_occ_cpu, k))
-
+            results.update(_hubness_stats_from_occurrences(occ[k], k))
         return results

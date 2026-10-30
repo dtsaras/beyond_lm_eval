@@ -355,3 +355,29 @@ def test_duplicate_cloud_magnitude_matches_magnipy():
     if ref is None:
         pytest.skip("magnipy API changed; update reference call")
     assert got == pytest.approx(ref, rel=1e-9)
+
+
+@pytest.mark.parametrize("shape", [(40, 16), (60, 8), (120, 32)])
+def test_tconv_protocol_matches_live_magnipy(shape):
+    """The headline protocol == the Magnipy class defaults with metric="cosine":
+    t_conv (|tX| = 0.95 n, toms748), 30 evenly spaced scales on [0, t_conv],
+    mag_area(scale=True) and get_magnitude_dimension(). Measured agreement is
+    <= 1e-14 relative on these distinct-point clouds."""
+    # The class module, not the package: this file registers magnipy's
+    # compute/weights modules without running magnipy/__init__.py.
+    magnipy = pytest.importorskip("magnipy.magnipy")
+    fo = pytest.importorskip("magnipy.magnitude.function_operations")
+    import contextlib
+    import io
+    from blme.tasks.geometry.magnitude import _cosine_distance_matrix, _magnipy_protocol
+
+    X = np.random.default_rng(0).standard_normal(shape) + 0.5
+    with contextlib.redirect_stdout(io.StringIO()):
+        M = magnipy.Magnipy(X, n_ts=30, metric="cosine")
+        mag, ts = M.get_magnitude()
+        ref = {"t": M.get_t_conv(), "area": fo.mag_area(mag, ts),
+               "dim": M.get_magnitude_dimension()}
+    got = _magnipy_protocol(_cosine_distance_matrix(X))
+    assert got["_meta_magnitude_t_conv"] == pytest.approx(ref["t"], rel=1e-10)
+    assert got["magnitude_area_tconv"] == pytest.approx(ref["area"], rel=1e-10)
+    assert got["magnitude_dimension_tconv"] == pytest.approx(ref["dim"], rel=1e-10)

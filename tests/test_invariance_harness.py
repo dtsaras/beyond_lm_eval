@@ -235,11 +235,16 @@ def test_stub_model_reports_depth_and_width():
     assert m.forward_calls.n == 2
 
 
+# geometry_lid takes one point per document, and its k=20 neighbours need
+# more than the 12 documents here.
+_DRIVER_CONFIG = {"geometry_lid": {"k": 5}}
+
+
 @pytest.mark.parametrize("task", sorted(inv.STATE_DRIVABLE_TASKS))
 def test_driver_reproduces_a_real_cache_bit_for_bit(task, tiny_gpt2, tiny_states):
     """The stub path and a real populated cache give identical results."""
-    stub = inv.run_task_on_states(task, tiny_states)
-    real = inv.run_task_on_model(task, *tiny_gpt2, TEXTS)
+    stub = inv.run_task_on_states(task, tiny_states, _DRIVER_CONFIG.get(task))
+    real = inv.run_task_on_model(task, *tiny_gpt2, TEXTS, _DRIVER_CONFIG.get(task))
     assert _same(stub, real), _diff(stub, real)
 
 
@@ -329,7 +334,7 @@ def test_dict_input_with_final_norm_slot(tiny_states):
     assert as_dict == inv.run_task_on_states("geometry_isoscore", S)
     no_final = inv.run_task_on_states("geometry_isoscore", S.blocks)
     assert no_final["isoscore"] != as_dict["isoscore"]
-    lw = {"layerwise": True}
+    lw = {"layerwise": True, "k": 5}
     assert (inv.run_task_on_states("geometry_lid", S, lw)["lid_mean"]
             == inv.run_task_on_states("geometry_lid", S.blocks, lw)["lid_mean"])
 
@@ -352,17 +357,19 @@ def test_isoscore_effective_dims_invariant_under_zero_padding(gpt2_states, k):
     inv.assert_moves(base, pad, "isoscore", min_rel=0.4)
 
 
-@pytest.mark.parametrize("mode", [{}, {"layerwise": True}], ids=["single", "layerwise"])
+@pytest.mark.parametrize("mode", [{"k": 4}, {"layerwise": True, "k": 4}],
+                         ids=["single", "layerwise"])
 @pytest.mark.parametrize("k", [2, 4])
 def test_lid_bit_identical_under_zero_padding(gpt2_states, k, mode):
     base = inv.run_task_on_states("geometry_lid", gpt2_states, mode)
     pad = inv.run_task_on_states("geometry_lid", inv.zero_pad_docs(gpt2_states, k), mode)
     keys = [key for key in base if key.startswith("lid_") or key == "layer_lid_mean"]
-    assert len(keys) >= 5
+    assert len(keys) >= 4
     inv.assert_invariant(base, pad, keys, rtol=0.0)
 
 
-@pytest.mark.parametrize("mode", [{}, {"layerwise": True}], ids=["single", "layerwise"])
+@pytest.mark.parametrize("mode", [{"k": 4}, {"layerwise": True, "k": 4}],
+                         ids=["single", "layerwise"])
 def test_lid_invariant_under_random_orthogonal_embedding(gpt2_states, mode):
     """Random-orthogonal embedding changes the float32 rounding the task's own
     cast applies, so equality is to rounding (measured <= 7.6e-8). Position 0 is
@@ -546,7 +553,7 @@ def test_layer_profile_under_identity_insertion(tiny_gpt2, tiny_states):
     model, tok = tiny_gpt2
     after = [0, 0, 3]
     S_new = inv.states_from_model(inv.insert_identity_blocks(model, after), tok, TEXTS)
-    lw = {"layerwise": True}
+    lw = {"layerwise": True, "k": 5}
     base = inv.run_task_on_states("geometry_lid", tiny_states, lw)
     ins = inv.run_task_on_states("geometry_lid", S_new, lw)
     expected = [base["layer_lid_mean"][i]

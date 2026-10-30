@@ -77,7 +77,7 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
         def decode(self, ids):
             return "decoded"
 
-    task = MahalanobisOODTask({"num_samples": 30, "ood_strategy": "shuffle"})
+    task = MahalanobisOODTask({"num_samples": 30, "ood_strategy": "shuffle", "id_corpus": "dataset"})
     result = task.evaluate(model=None, tokenizer=StubTok(), dataset=dataset, cache=None)
     # Must not report the degenerate zero-ID case.
     assert "mean_mahalanobis_id" in result, result
@@ -88,7 +88,7 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
         f"ID mean {mean_id:.3f} too small — suggests in-sample bias not removed"
     )
     # Must expose the n_id_fit and n_id_score splits for transparency.
-    assert "n_id_fit" in result or "n_id_score" in result, (
+    assert "_meta_n_id_fit" in result or "_meta_n_id_score" in result, (
         "Task should report how many ID samples were used for fitting vs scoring"
     )
 
@@ -141,21 +141,21 @@ def test_task_scores_mean_pooled_sample_representations():
             return Out()
 
     dataset = [{"text": f"sample {i}"} for i in range(20)]
-    result = MahalanobisOODTask({"num_samples": 10, "ood_strategy": "shuffle"}).evaluate(
+    result = MahalanobisOODTask({"num_samples": 10, "ood_strategy": "shuffle", "id_corpus": "dataset"}).evaluate(
         Model(), Tokenizer(), dataset=dataset, cache=None,
     )
 
     assert "error" not in result, result
-    assert result["n_id_fit"] + result["n_id_score"] == 10
+    assert result["_meta_n_id_fit"] + result["_meta_n_id_score"] == 10
     # PAIRED design: each held-out ID text is scored against a shuffle of
     # THAT SAME text, so the OOD scored set is the same held-out index range
     # as the ID scored set -- not the whole shuffled corpus. (The unpaired
     # split mixed the shuffle effect with content differences and inflated
     # pythia-70m AUROC 0.598 -> 0.824.)
-    assert result["n_ood_score"] == result["n_id_score"]
+    assert result["_meta_n_ood_score"] == result["_meta_n_id_score"]
     # The point of this test: one vector PER TEXT, not one per token. Each
     # stub text is 4 tokens, so a token-flattened collector would report 20.
-    assert result["n_ood_score"] == 5
+    assert result["_meta_n_ood_score"] == 5
 
 
 def test_fit_split_preserves_id_scoring_holdout_for_small_n():

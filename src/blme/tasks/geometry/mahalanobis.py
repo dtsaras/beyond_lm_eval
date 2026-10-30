@@ -33,6 +33,8 @@ except ImportError:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._tokens import (massive_token_share, middle_depth_layers, position0_share,
+                       sink_keep_masks, sink_meta, strip_trailing_special)
 import logging
 logger = logging.getLogger("blme")
 
@@ -77,6 +79,33 @@ _DEFAULT_ID_TEXTS = [
 ]
 
 
+# WikiText-103 splits in the order the extended corpus walks them.
+_SPLITS = ("validation", "test", "train")
+
+
+def _wikitext_passages_extended(n: int) -> list:
+    """``n`` stripped WikiText-103 passages beyond the validation split.
+
+    The default corpus (``load_default_corpus``) holds only the validation
+    split (about 1,700 passages of >= 64 characters). This walks validation,
+    then test, then train, each in its own ``nested_order`` with the same
+    filter and stripping, so draws nest and the first passages ARE the default
+    corpus. Raises ``ValueError`` if the three splits hold fewer than ``n``.
+    """
+    from ...cache import (MIN_PASSAGE_CHARS, WIKITEXT_DATASET, _load_split,  # noqa: F401
+                          _stripped_texts, nested_order)
+    path, name, _ = WIKITEXT_DATASET
+    out = []
+    for split in _SPLITS:
+        if len(out) >= n:
+            break
+        passages = _stripped_texts(_load_split(path, name, split), "text")
+        out.extend({"text": passages[i]} for i in nested_order(len(passages))[:n - len(out)])
+    if len(out) < n:
+        raise ValueError(f"{n} passages requested, WikiText-103 holds {len(out)}")
+    return out
+
+
 def _default_id_dataset(num_samples: int):
     """Distinct in-distribution samples for the dataset=None fallback.
 
@@ -103,6 +132,32 @@ def _as_id_list(x) -> list:
     return [int(v) for v in x]
 
 
+def _fit_gaussian(X_train, diag=None):
+    """Centroid and precision of ``X_train``: Ledoit-Wolf shrinkage (the
+    empirical covariance is rank-deficient at n_fit << d), else a ridge-
+    regularised sample covariance. ``diag`` receives the realised shrinkage
+    (it differs by an order of magnitude across models), d and n_fit."""
+    mu = np.mean(X_train, axis=0)
+    if HAS_SKLEARN:
+        lw = LedoitWolf()
+        lw.fit(X_train)
+        inv_cov = lw.precision_
+        if diag is not None:
+            diag["shrinkage"] = float(getattr(lw, "shrinkage_", float("nan")))
+    else:
+        cov = np.cov(X_train, rowvar=False)
+        cov_reg = cov + np.eye(cov.shape[0]) * 1e-6
+        inv_cov = np.linalg.pinv(cov_reg)
+    if diag is not None:
+        diag["d"] = int(X_train.shape[1])
+        diag["n_fit"] = int(X_train.shape[0])
+    return mu, inv_cov
+
+
+def _mahalanobis_scores(X_test, mu, inv_cov):
+    return [mahalanobis(x, mu, inv_cov) for x in X_test]
+
+
 def _compute_mahalanobis_distances(X_train, X_test, diag=None):
     """
     Computes Mahalanobis distances for X_test relative to the distribution of X_train.
@@ -117,49 +172,30 @@ def _compute_mahalanobis_distances(X_train, X_test, diag=None):
         List of distances for each sample in X_test.
     """
     try:
-        # Centroid
-        mu = np.mean(X_train, axis=0)
-
-        # Covariance estimation
-        if HAS_SKLEARN:
-            # Ledoit-Wolf shrinkage covariance estimator
-            lw = LedoitWolf()
-            lw.fit(X_train)
-            inv_cov = lw.precision_  # already the inverse covariance
-            # Surface the REALISED shrinkage. Shrinking toward an isotropic
-            # target trades affine invariance -- the property that makes a
-            # Mahalanobis distance meaningful -- for conditioning, and the
-            # amount differs by an order of magnitude across the zoo
-            # (0.068 gpt2 vs 0.606 pythia-70m on the same protocol), so
-            # models are NOT scored by the same function. Reporting it makes
-            # that visible instead of silent.
-            if diag is not None:
-                diag["shrinkage"] = float(getattr(lw, "shrinkage_", float("nan")))
-        else:
-            # Fallback: regularized sample covariance
-            cov = np.cov(X_train, rowvar=False)
-            cov_reg = cov + np.eye(cov.shape[0]) * 1e-6
-            inv_cov = np.linalg.pinv(cov_reg)
-
-        if diag is not None:
-            diag["d"] = int(X_train.shape[1])
-            diag["n_fit"] = int(X_train.shape[0])
-
-        distances = []
-        for x in X_test:
-            dist = mahalanobis(x, mu, inv_cov)
-            distances.append(dist)
-
-        return distances
+        mu, inv_cov = _fit_gaussian(X_train, diag)
+        return _mahalanobis_scores(X_test, mu, inv_cov)
     except Exception as e:
         logger.info(f"Error computing Mahalanobis: {e}")
         return []
 
 
+# Documents whose middle-layer token rows feed the sink-share diagnostics.
+_SHARE_DOCS = 200
+
+
 def _collect_mean_pooled_hidden_states(
-    model, tokenizer, dataset, num_samples: int, max_length: int = 128,
+    model, tokenizer, dataset, num_samples: int, max_length: int = 128, stats=None,
+    policy: str = "exclude_sinks",
 ) -> torch.Tensor:
-    """Collect one final-layer mean-pooled representation per text sample."""
+    """One final-layer vector per text: the float64 mean over its kept rows.
+
+    Sink policy (non-LLM-origin point cloud): position 0 and every massive
+    row -- norm > 10x the median at any middle depth, masks from
+    ``sink_keep_masks`` over this collection -- are left out of the mean
+    (``mean_excl_sinks``); a text with no kept row falls back to all its rows.
+    Tokenizer-appended EOS/SEP are stripped before the forward. ``stats``
+    receives the sink-mask info and the share diagnostics.
+    """
     samples = list(dataset)[:num_samples]
     if not samples:
         return torch.empty(0)
@@ -169,18 +205,12 @@ def _collect_mean_pooled_hidden_states(
     except Exception:
         device = torch.device("cpu")
 
-    reps = []
+    finals, norms, mid_rows = [], {}, []
+    depth = None
     with torch.no_grad():
         for sample in samples:
-            # A sample may carry PRE-TOKENIZED ids. The token-shuffle OOD set
-            # does, because decoding a shuffled id list and letting the model
-            # re-tokenize the string does NOT preserve the token multiset --
-            # merges recombine across the new adjacencies. Measured on 50
-            # WikiText texts, the re-tokenized multiset differed from the
-            # shuffled one in 38/50 (gpt2) and 40/50 (pythia-70m), so the
-            # docstring's "preserves vocabulary" was false for most inputs
-            # (adversarial review, 2026-09-03). Feeding ids straight to the
-            # model makes it exactly true.
+            # Pre-tokenized ids (the shuffled OOD set) go to the model as ids:
+            # decode + re-tokenize does not preserve the token multiset.
             if isinstance(sample, dict) and sample.get("input_ids") is not None:
                 ids = _as_id_list(sample["input_ids"])[:max_length]
                 inputs = {
@@ -195,6 +225,7 @@ def _collect_mean_pooled_hidden_states(
                     truncation=True,
                     max_length=max_length,
                 )
+            inputs, _ = strip_trailing_special(inputs, tokenizer)
             if hasattr(inputs, "to") and callable(inputs.to):
                 inputs = inputs.to(device)
             else:
@@ -208,29 +239,39 @@ def _collect_mean_pooled_hidden_states(
             if not hidden_states:
                 continue
 
-            # post-final-norm: DELIBERATELY post-norm. Lee et al. 2018 fit
-            # their Gaussians to THE FEATURES FEEDING THE CLASSIFIER, which for
-            # an LM is the post-`ln_f` vector the head consumes -- the same
-            # reading `geometry_neural_collapse` takes. Recorded for the
-            # record: scoring the raw block output instead separates BETTER
-            # (gpt2 AUROC 0.9296 -> 0.9904, pythia-70m 0.6448 -> 0.7616), but
-            # "separates better" is not an argument about which estimand the
-            # reference defines, and this task reports a single layer, so no
-            # per-layer profile mixes conventions.
-            h = hidden_states[-1][0].detach().float().cpu()
-            attention_mask = inputs.get("attention_mask") if isinstance(inputs, dict) else None
-            if attention_mask is not None and hasattr(attention_mask, "detach"):
-                mask = attention_mask[0].detach().cpu().bool()
-                if mask.numel() == h.shape[0] and bool(mask.any()):
-                    h = h[mask]
-            if h.numel() > 0:
-                # Narrowing straight back after a double-precision reduction discards
-                # exactly what the promotion bought. Swept as a class: the first AST query
-                # searched for a trailing `.float()` and found 7 sites; this `.to(<dtype>)`
-                # spelling hid 5 more, including this one (codex round 15, 2026-09-09).
-                reps.append(h.double().mean(dim=0))
+            # post-final-norm: DELIBERATELY post-norm -- the features the LM
+            # head consumes, as Lee et al. fit the classifier's input. The
+            # block outputs hidden_states[1:] only set the sink masks.
+            h = hidden_states[-1][0].detach().cpu()
+            if h.shape[0] == 0:
+                continue
+            blocks = hidden_states[1:]
+            if depth is None:
+                depth = middle_depth_layers({k: None for k in range(len(blocks))})
+            for k in depth:
+                norms.setdefault(k, []).append(torch.linalg.vector_norm(
+                    blocks[k][0].detach().to("cpu", torch.float64), dim=1).reshape(-1, 1))
+            if len(mid_rows) < _SHARE_DOCS:
+                mid_rows.append(blocks[len(blocks) // 2][0].detach().cpu().float())
+            finals.append(h)
 
-    return torch.stack(reps, dim=0) if reps else torch.empty(0)
+    if not finals:
+        return torch.empty(0)
+    keep, info = sink_keep_masks([norms[k] for k in depth])
+    if policy != "exclude_sinks":           # every row ("all")
+        keep = [torch.ones_like(m) for m in keep]
+    reps, n_fallback = [], 0
+    for h, m in zip(finals, keep):
+        rows = h[m] if bool(m.any()) else h
+        n_fallback += int(not bool(m.any()))
+        # float64 mean, kept in float64.
+        reps.append(rows.double().mean(dim=0))
+    if stats is not None:
+        stats.update(sink_meta(info))
+        stats["_meta_sink_n_docs_all_rows_fallback"] = int(n_fallback)
+        stats["_meta_position0_share"] = position0_share(mid_rows)
+        stats["_meta_massive_token_share"] = massive_token_share(mid_rows)
+    return torch.stack(reps, dim=0)
 
 
 @register_task("geometry_mahalanobis")
@@ -248,9 +289,54 @@ class MahalanobisOODTask(DiagnosticTask):
     Reports the average ID distance vs OOD distance, the separation gap,
     and AUROC.
     """
+    # Mean-pool over the rows kept by the sink masks (position 0 + massive).
+    TOKEN_POLICY = "exclude_sinks"
+    SOURCES = {
+        "paper": "arXiv:1807.03888",
+        "code": "pokaxpoka/deep_Mahalanobis_detector@90c2105e78c6f76a2801fc4c1cb1b84f4ff9af63",
+        "llm_precedent": ("Ren et al. 2022 arXiv:2209.15558 (one Gaussian on mean-pooled "
+                          "final-layer states of a language model)"),
+    }
+    ADAPTATION_NOTE = (
+        "BLME scores each text's mean-pooled final-layer state by its Mahalanobis distance to a "
+        "single Gaussian fitted on other texts, the single-Gaussian, mean-pooled form Ren et "
+        "al. (2022) use for language models; Lee et al.'s (2018) class-conditional form needs "
+        "labels. The out-of-distribution set is BLME's own: each held-out text with its tokens "
+        "shuffled in place, so the task measures how far the model moves a text's "
+        "representation when word order is destroyed, at matched vocabulary. The covariance is "
+        "Ledoit-Wolf, fitted on 1000 texts (2000 drawn from WikiText-103 in a nested order, "
+        "half held out), averaged over 5 random splits. Position 0 and massive rows are left "
+        "out of every mean (sink policy). Raw distances grow with sqrt(d) when n_fit < d, so "
+        "AUROC, the distance ratio and the dist^2/d forms are the cross-model comparable "
+        "outputs."
+    )
+    HEADLINE_KEYS = ("auroc", "ood_separation_ratio", "mean_mahalanobis_id",
+                     "mean_mahalanobis_ood", "ood_separation_gap", "mahalanobis_sq_per_dim_id",
+                     "mahalanobis_sq_per_dim_ood", "ood_separation_gap_per_dim")
+    # Width: approximate (< 5%) only while n_fit << d; as n_fit nears d the
+    # isotropic Ledoit-Wolf target moves with the width (pinned by
+    # test_per_dim_width_invariance_needs_n_fit_below_d). Rescale is exact. The
+    # raw distances and gap are not claimed (they grow as sqrt(d)).
+    SIZE_INVARIANT = dict.fromkeys(
+        ("auroc", "ood_separation_ratio", "mahalanobis_sq_per_dim_id",
+         "mahalanobis_sq_per_dim_ood", "ood_separation_gap_per_dim"),
+        (("zero_pad", "embed_isometric", "rescale"),
+         "tests/tasks/invariance/test_geometry_mahalanobis.py::test_per_dim_forms_invariant"))
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Mahalanobis OOD Detection...")
-        num_samples = self.config.get("num_samples", 50)
+        # Q3: the fit should not be 25 points in 768-5120 dimensions; the
+        # default 2000 ID texts give a Ledoit-Wolf fit on 1000 and 1000 held out.
+        num_samples = int(self.config.get("num_samples", 2000))
+        id_corpus = self.config.get("id_corpus", "wikitext")
+        if id_corpus == "wikitext":
+            # The default corpus stops at the validation split, below what
+            # this fit needs: an extended nested corpus (validation, test,
+            # train) is loaded here (test_mahalanobis_protocol.py).
+            try:
+                dataset = _wikitext_passages_extended(num_samples)
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"geometry_mahalanobis: WikiText passages unavailable: {e}"}
         max_length = int(self.config.get("max_length", 128))
         ood_strategy = self.config.get("ood_strategy", "shuffle")  # "shuffle" or "random"
 
@@ -299,27 +385,22 @@ class MahalanobisOODTask(DiagnosticTask):
                  dataset_ood = [_shuffle_tokens(d["text"], tokenizer, rng) for d in dataset_id]
         else:
             # For standard benchmark, we split the given dataset in half and perturb the second half
-            samples = list(dataset)[:num_samples*2]
-            mid = max(1, len(samples) // 2)
+            # Shuffle mode scores the ID texts against their own shuffles, so it
+            # needs num_samples texts; the random strategy also uses the next
+            # num_samples as its comparison set.
+            if ood_strategy == "random":
+                samples = list(dataset)[:num_samples*2]
+                mid = max(1, len(samples) // 2)
+            else:
+                samples = list(dataset)[:num_samples]
+                mid = len(samples)
             dataset_id = samples[:mid]
             if ood_strategy == "random":
                 import string
                 dataset_ood = [{"text": " ".join("".join(rng.choice(list(string.ascii_lowercase), size=rng.randint(3, 8))) for _ in range(10))} for _ in samples[mid:]]
             else:
-                # PAIRED token-level shuffling: shuffle the SAME texts that
-                # form the ID set, not a disjoint half.
-                #
-                # Shuffling a DIFFERENT half makes the comparison confounded --
-                # the OOD score then reflects both the shuffling and whatever
-                # distinguishes those particular sentences. A paired re-run
-                # moved pythia-70m's AUROC from **0.824 to 0.598**, so most of
-                # the apparent detection was the unpaired split (adversarial
-                # review, 2026-09-03).
-                #
-                # Paired also means the covariance is fit on texts that are NOT
-                # scored, which keeps the held-out property: the fit uses the
-                # second half, the scoring uses the first half and its own
-                # shuffles.
+                # PAIRED: each ID text is scored against a shuffle of itself, so
+                # the OOD score reflects the shuffle, not which texts were drawn.
                 dataset_ood = []
                 for s in dataset_id:
                     text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
@@ -329,86 +410,29 @@ class MahalanobisOODTask(DiagnosticTask):
         if len(dataset_id) < 5 or len(dataset_ood) < 5:
             return {"error": "Need at least 5 ID and 5 OOD samples to compute stable covariance."}
 
-        # Collect one final-layer representation per text sample, mean-pooled
-        # over sequence positions. Token-flattening would inflate the
-        # covariance population by sequence length and violate the sample-level
-        # OOD framing.
+        # One mean-pooled final-layer vector per text (not per token).
+        _sink_stats = {}
         X_id = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_id, num_samples=len(dataset_id), max_length=max_length,
+            stats=_sink_stats, policy=self.TOKEN_POLICY,
         )
-        # float64 BEFORE the covariance fit. A Mahalanobis distance centres by
-        # the training mean, so it is translation invariant by construction —
-        # and in float32 it is not: at a +1e6 common offset the scores REORDER,
-        # spearman 0.998123827 against the float64 baseline, while float64
-        # holds at exactly 1.000000000 (measured; the reordering appears
-        # between +1e3, which is exact, and +1e6).
-        #
-        # A reordering is worse than a shift here because every reported number
-        # — AUROC above all — depends only on the ORDER of the scores, so this
-        # corrupts the headline while leaving the distances looking plausible.
-        #
-        # Safe to promote: this task is deliberately NOT bit-pinned to a
-        # released implementation (it uses Ledoit-Wolf where Lee et al. use the
-        # empirical covariance, because at the shipped n_fit=50 / d=768 the
-        # empirical estimator has rank 49/768), so there is no parity to lose —
-        # unlike `schatten` or `task_vectors`, where an unconditional promotion
-        # was a regression.
+        # float64 before the fit: in float32 the scores reorder at a +1e6
+        # offset, and every reported number depends on their order. Not
+        # bit-pinned to a release, so promotion loses no parity.
         X_id = X_id.double().numpy()
 
         X_ood = _collect_mean_pooled_hidden_states(
             model, tokenizer, dataset_ood, num_samples=len(dataset_ood), max_length=max_length,
+            policy=self.TOKEN_POLICY,
         )
         X_ood = X_ood.double().numpy()   # see the note above
 
         if X_id.shape[0] < 5 or X_ood.shape[0] < 5:
             return {"error": "Need at least 5 ID and 5 OOD sample representations."}
 
-        # Lee et al. 2018 scores **held-out** samples against a Gaussian
-        # fitted on a distinct training split. Re-using the same ID
-        # samples for both fit and score produces in-sample Mahalanobis
-        # distances that are systematically biased downward by leverage
-        # (~ p/n in the moderate-D regime, worse under D >> n and even
-        # with Ledoit-Wolf shrinkage). Split the ID set roughly 50/50
-        # so the ID-distance baseline matches the OOD-distance statistic.
-        #
-        # NOT A PREFIX/SUFFIX CUT. The corpus is
-        # `load_default_corpus`, which returns CONSECUTIVE WikiText passages,
-        # so a contiguous split puts different ARTICLES on the two sides: at
-        # the shipped 100 samples, rows 0-24 were 24 paragraphs of one lobster
-        # article plus one of a biography, while rows 25-49 were that biography
-        # (14), a highway article (6) and a manga character (5). The
-        # "in-distribution" baseline was therefore measuring a TOPIC SHIFT, and
-        # every derived column inherited it. Re-assigning the SAME 50 passages
-        # (red-team review, 2026-09-05; the figures below are for the stride
-        # split that was the first attempt at this, superseded by the
-        # permutation described further down):
-        #
-        #                                    gpt2               pythia-70m
-        #   mahalanobis_sq_per_dim_id    1.4552 -> 0.5444    1.6878 -> 1.6387
-        #                                   (-63%)
-        #   mean_mahalanobis_id          32.35  -> 19.89     28.68  -> 28.32
-        #   ood_separation_gap_per_dim   1.7728 -> 1.4090    0.2430 -> 0.4818
-        #                                   (-21%)              (+98%)
-        #   auroc                        0.9296 -> 0.9792    0.6448 -> 0.7584
-        #
-        # The 2026-09-03 pairing note below claimed to remove "the
-        # sentence-identity confound"; it fixed the OOD arm only, and the ID
-        # arm kept a confound of its own.
-        # A SEEDED RANDOM PERMUTATION, not a stride.
-        #
-        # The stride-2 split introduced above fixed the contiguous split's topic
-        # shift and then over-corrected in the other direction: on consecutive
-        # WikiText passages, stride-2 pairs every SCORED passage with its
-        # immediate same-article NEIGHBOURS in the fit set. Five seeded random
-        # 25/25 splits of the same 50 passages give
-        # `mahalanobis_sq_per_dim_id` 0.5721 / 0.6093 / 0.6511 / 0.6606 /
-        # 0.6764 (mean 0.634); the stride gives **0.5444, below all five**,
-        # where the contiguous split gave 1.4552 (+130% vs random)
-        # (independent Opus review, 2026-09-05).
-        #
-        # A permutation is ordering-independent BY CONSTRUCTION, which neither
-        # of the other two is -- it does not matter how the corpus is sorted.
-        # Seeded so the split is reproducible.
+        # Held-out scoring (Lee et al. fit and score on distinct splits), with a
+        # seeded random permutation: a contiguous split is a topic shift on
+        # consecutive passages, a stride pairs each text with its neighbours.
         n_id = X_id.shape[0]
         fit_n = max(2, min(n_id - 2, max(5, n_id // 2)))
         _perm_rng = np.random.default_rng(int(self.config.get("seed", 42)))
@@ -417,13 +441,7 @@ class MahalanobisOODTask(DiagnosticTask):
         _score_idx = np.sort(_perm[fit_n:])
         X_id_fit = X_id[_fit_idx]
         X_id_score = X_id[_score_idx]
-        # PAIRING: when the OOD set is a per-text shuffle of the ID set, row i
-        # of X_ood is the shuffle of row i of X_id, so restricting to the same
-        # INDEX SET compares each SCORED text against its OWN shuffle. That
-        # removes the sentence-identity confound: an unpaired split moved
-        # pythia-70m's AUROC from 0.598 (paired) to 0.824 (adversarial review,
-        # 2026-09-03). The index set is now the interleaved complement rather
-        # than a suffix, but the pairing property is unchanged.
+        # Pairing: row i of X_ood is the shuffle of row i of X_id.
         _paired_ood = (X_ood.shape[0] == X_id.shape[0])
         X_ood_full = X_ood
         if _paired_ood:
@@ -435,44 +453,25 @@ class MahalanobisOODTask(DiagnosticTask):
             if not dists_ood:
                 return {
                     "error": "Failed to compute Mahalanobis distance (likely covariance singularity).",
-                    "insufficient_holdout": True,
-                    "n_id_fit": int(X_id_fit.shape[0]),
-                    "n_id_score": int(X_id_score.shape[0]),
-                    "n_ood_score": int(X_ood.shape[0]),
+                    "_meta_insufficient_holdout": True,
+                    "_meta_n_id_fit": int(X_id_fit.shape[0]),
+                    "_meta_n_id_score": int(X_id_score.shape[0]),
+                    "_meta_n_ood_score": int(X_ood.shape[0]),
                 }
             return {
-                "insufficient_holdout": True,
-                "n_id_fit": int(X_id_fit.shape[0]),
-                "n_id_score": int(X_id_score.shape[0]),
-                "n_ood_score": int(X_ood.shape[0]),
+                "_meta_insufficient_holdout": True,
+                "_meta_n_id_fit": int(X_id_fit.shape[0]),
+                "_meta_n_id_score": int(X_id_score.shape[0]),
+                "_meta_n_ood_score": int(X_ood.shape[0]),
                 "mean_mahalanobis_ood": float(np.mean(dists_ood)),
                 "ood_separation_gap": float("nan"),
                 "ood_separation_ratio": float("nan"),
             }
 
-        # AVERAGE OVER SPLITS, because one split is a coin toss at this N.
-        #
-        # With the permutation in place the estimator is unbiased, but the SPLIT
-        # ITSELF carries real variance: five seeds at the shipped
-        # `num_samples: 100` give `mahalanobis_sq_per_dim_id` 0.6545 / 0.5219 /
-        # 0.4440 / 0.9019 / 0.8116 -- mean 0.6668, sd 0.1715, a range that is
-        # 68% of the mean (measured here, 2026-09-05). Reporting whichever
-        # number seed 42 happened to produce would put a +-26% arbitrary choice
-        # into a cross-model comparison.
-        #
-        # The forward passes are already done, so the extra splits cost only a
-        # covariance fit and a scoring pass each. `n_splits: 1` recovers the
-        # single-split behaviour exactly.
+        # Average over n_splits splits (one split has a seed-to-seed range of
+        # ~68% of its mean at num_samples=100); n_splits: 1 is a single split.
         _n_splits = max(1, int(self.config.get("n_splits", 5)))
-        # ONE generator, advanced across splits -- not re-seeded.
-        #
-        # `default_rng(seed)` was created here and its FIRST permutation
-        # therefore reproduced `_perm` above exactly, so split 1 was a
-        # bit-for-bit duplicate of split 0 and `n_splits: 5` averaged FOUR
-        # distinct splits with one counted twice (verified at seeds 42/0/7;
-        # 4 distinct fit signatures across 5 calls -- independent Opus review,
-        # 2026-09-06). Advancing the same stream that produced `_perm` gives
-        # `_n_splits` genuinely distinct permutations.
+        # One generator, advanced across splits (re-seeding duplicated split 0).
         _rng_split = _perm_rng
         _diag = {}
         _acc_id, _acc_ood = [], []
@@ -483,18 +482,21 @@ class MahalanobisOODTask(DiagnosticTask):
             else:
                 _pk = _rng_split.permutation(n_id)
                 _fi, _si = np.sort(_pk[:fit_n]), np.sort(_pk[fit_n:])
-            _d_id = _compute_mahalanobis_distances(
-                X_id[_fi], X_id[_si], diag=_diag if _k == 0 else None)
+            # ONE Ledoit-Wolf fit per split scores both arms (the fit is
+            # deterministic, so this is what two separate fits returned).
             _ood_k = X_ood_full[_si] if _paired_ood else X_ood
-            _d_ood = _compute_mahalanobis_distances(X_id[_fi], _ood_k)
+            try:
+                _mu, _P = _fit_gaussian(X_id[_fi], diag=_diag if _k == 0 else None)
+                _d_id = _mahalanobis_scores(X_id[_si], _mu, _P)
+                _d_ood = _mahalanobis_scores(_ood_k, _mu, _P)
+            except Exception as e:
+                logger.info(f"Error computing Mahalanobis: {e}")
+                _d_id, _d_ood = [], []
             if _d_id and _d_ood:
                 _acc_id.append(np.asarray(_d_id, dtype=float))
                 _acc_ood.append(np.asarray(_d_ood, dtype=float))
-                # PER-SPLIT AUROC, averaged below. AUROC is rank-based and
-                # each split has its own shrunk covariance, so distances from
-                # different splits are on different scales; ranking them
-                # against each other compares numbers that were never
-                # commensurable. See the note at the pooled computation.
+                # Per-split AUROC: each split has its own covariance, so only
+                # distances from one fit are ranked against each other.
                 try:
                     from sklearn.metrics import roc_auc_score as _ras
                     _per_split_auroc.append(float(_ras(
@@ -506,38 +508,19 @@ class MahalanobisOODTask(DiagnosticTask):
 
         if not _acc_id or not _acc_ood:
             return {"error": "Failed to compute Mahalanobis distance (likely covariance singularity)."}
-        # Pool the distances across splits: every scored point appears once per
-        # split, so the pooled mean is the average over splits and the AUROC is
-        # computed on the same pooled scores rather than averaged post hoc.
+        # Distances pooled across splits for the mean distances.
         dists_id = np.concatenate(_acc_id).tolist()
         dists_ood = np.concatenate(_acc_ood).tolist()
 
         mean_id = float(np.mean(dists_id))
         mean_ood = float(np.mean(dists_ood))
 
-        # AUROC: can we distinguish ID from OOD using Mahalanobis distance?
-        #
-        # AVERAGED OVER SPLITS, not computed on the pooled scores.
-        #
-        # The previous form pooled every split's distances into one ranking and
-        # the comment above defended it as better than "averaged post hoc".
-        # That was backwards. AUROC is a RANK statistic, and each split fits its
-        # own shrunk covariance, so a distance from split 0 and a distance from
-        # split 3 are expressed in different units; interleaving them ranks
-        # incommensurable numbers. The symptom is unmistakable -- averaging is
-        # supposed to REDUCE variance, and over 20 seeds this key was the only
-        # one that got noisier, sd 0.024750 -> 0.037685 (**+52.3%**), while
-        # every other key improved 50-60% (Opus round 9, 2026-09-07).
-        #
-        # Per-split AUROC then mean is the standard cross-validated estimator:
-        # each AUROC is computed within one covariance, so only comparable
-        # distances are ever ranked against each other.
+        # AUROC = mean of the per-split AUROCs (cross-validated estimator).
         if _per_split_auroc:
             auroc = float(np.mean(_per_split_auroc))
         else:
             auroc = None
-        # Kept for continuity with archived runs, and so the two are
-        # comparable on any single-split configuration (where they coincide).
+        # The pooled-ranking AUROC, _meta_ for continuity.
         try:
             from sklearn.metrics import roc_auc_score
             labels = np.concatenate([np.zeros(len(dists_id)), np.ones(len(dists_ood))])
@@ -547,49 +530,37 @@ class MahalanobisOODTask(DiagnosticTask):
             _auroc_pooled = None
 
         result = {
-            "insufficient_holdout": False,
+            "_meta_insufficient_holdout": False,
             "mean_mahalanobis_id": mean_id,
             "mean_mahalanobis_ood": mean_ood,
             "ood_separation_gap": mean_ood - mean_id,
             "ood_separation_ratio": mean_ood / max(mean_id, 1e-10),
-            "n_id_fit": int(X_id_fit.shape[0]),
-            "n_id_score": int(X_id_score.shape[0]),
-            # How many fit/score splits the reported numbers average over. One
-            # split at num_samples=100 has a seed-to-seed range 68% of its own
-            # mean, so this is not a detail.
+            "_meta_n_id_fit": int(X_id_fit.shape[0]),
+            "_meta_n_id_score": int(X_id_score.shape[0]),
             "_meta_n_splits": int(_n_splits),
-            "n_ood_score": int(X_ood.shape[0]),
+            "_meta_n_ood_score": int(X_ood.shape[0]),
         }
 
-        # DIMENSION CALIBRATION. A raw Mahalanobis distance grows as sqrt(d)
-        # under the null, so mean_mahalanobis_* are not comparable across
-        # models of different width. dist^2 ~ chi2(d) for a correctly specified
-        # Gaussian, so dist^2/d removes the leading d-dependence.
-        #
-        # It does NOT land at exactly 1. Measured on an iid null sweeping
-        # d = 64..1024 at the shipped fit size, the raw distance grows 4.11x
-        # while dist^2/d moves only 1.1018 -> 1.1575: the d-scaling is removed,
-        # but the level sits at ~1.10-1.16 because the covariance is fitted on
-        # n << d with Ledoit-Wolf shrinkage, not estimated exactly. Read it as
-        # a width-invariant statistic, not as a calibrated chi-square whose
-        # null is 1.0. It also does not make models commensurable on its own:
-        # at IDENTICAL d = 1024, gpt2-medium reads 0.0237 against pythia-410m's
-        # 2.1219, a 90x gap (adversarial review, 2026-09-03).
+        # dist^2/d: dist^2 ~ chi2(d) under a correctly specified Gaussian, so
+        # the per-dimension form removes the sqrt(d) growth of the raw distance
+        # (approximately, under Ledoit-Wolf at n_fit << d).
         _d = _diag.get("d")
         if _d:
             result["mahalanobis_sq_per_dim_id"] = float(np.mean(np.square(dists_id)) / _d)
             result["mahalanobis_sq_per_dim_ood"] = float(np.mean(np.square(dists_ood)) / _d)
             result["ood_separation_gap_per_dim"] = (
                 result["mahalanobis_sq_per_dim_ood"] - result["mahalanobis_sq_per_dim_id"])
-            # d/n_fit records how rank-deficient the covariance is: at the
-            # shipped defaults the fit is n=25 in d=768, i.e. a rank-24
-            # empirical covariance, which is why shrinkage is doing the work.
+            # d/n_fit records how rank-deficient the covariance is.
             _n = _diag.get("n_fit") or 0
             result["_meta_d_over_n_fit"] = float(_d / _n) if _n else float("nan")
             result["_meta_d_model"] = int(_d)
             result["_meta_n_cov_fit"] = int(_n)
+            result["_meta_id_corpus"] = str(id_corpus)
         if "shrinkage" in _diag:
             result["_meta_ledoit_wolf_shrinkage"] = _diag["shrinkage"]
+        # Sink policy of the ID collection (position 0 + massive rows out of
+        # every mean; test_mahalanobis_protocol.py).
+        result.update(_sink_stats)
 
         if auroc is not None:
             result["auroc"] = auroc
