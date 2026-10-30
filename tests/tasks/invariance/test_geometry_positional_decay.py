@@ -40,3 +40,14 @@ def test_weighted_mean_is_invariant_under_identity_blocks(arch):
     # Known negative: the uniform layer means count the identity blocks' rows.
     inv.assert_moves(base, ins, "_meta_mean_positional_decay_correlation_nosink", min_rel=1e-3)
     inv.assert_moves(base, ins, "_meta_mean_positional_decay_correlation", min_rel=1e-3)
+    # The same test, under the residual gauge: every write scales by c.
+    for c in (4.0, 0.25):
+        g = _run(inv.residual_scale_gauge(model, c, rescale_eps=True, verify_on=_ids()))
+        inv.assert_invariant(base, g, list(WEIGHTED), rtol=0.0)
+
+
+def test_declared_entries_are_the_weighted_headline():
+    S = PositionalAttentionDecayTask.SIZE_INVARIANT
+    assert set(S) == {"positional_decay_nosink_write_weighted"}
+    assert S["positional_decay_nosink_write_weighted"][1].endswith(
+        "test_weighted_mean_is_invariant_under_identity_blocks")

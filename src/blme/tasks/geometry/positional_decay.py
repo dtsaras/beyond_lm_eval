@@ -130,8 +130,39 @@ class PositionalAttentionDecayTask(DiagnosticTask):
     and attention probability to measure the structural integrity of
     positional encodings.
     """
+    # The key at position 0 (the attention sink) is dropped from every row of
+    # the headline correlation; the inclusive value is _meta_.
+    TOKEN_POLICY = "exclude_pos0"
+    SOURCES = {
+        "paper": "arXiv:2104.09864 (RoFormer: the decay premise; no statistic of trained attention)",
+        "code": "",
+        "llm_precedent": ("arXiv:2004.10102 (Kobayashi et al. 2020: weigh attention by the norm "
+                          "of what a head writes); arXiv:2309.17453 (attention sinks)"),
+    }
+    ADAPTATION_NOTE = (
+        "Positional decay is a BLME construct: for every causal query row, the Spearman "
+        "correlation between key distance and attention probability, negative when nearer keys "
+        "receive more attention. RoFormer motivates the premise (RoPE's logit bound decays with "
+        "relative distance) but defines no statistic of trained attention. The rowwise form is "
+        "used because one pooled Spearman per head reads -0.43 to -0.47 on exactly uniform causal "
+        "attention. Position 0 is dropped from the keys: the attention sink is distance-"
+        "independent mass on the farthest key of every row; the inclusive value and the sink "
+        "mass are _meta_. Rows are aggregated over heads and layers with weights equal to the "
+        "norm of each head's write into the residual stream (after Kobayashi et al. 2020), "
+        "normalised by the model total, which is exactly unchanged by identity blocks and by a "
+        "residual rescale, where a uniform layer mean is not; the attention is computed in fp32."
+    )
+    HEADLINE_KEYS = ("positional_decay_nosink_write_weighted",)
+    SIZE_INVARIANT = {
+        "positional_decay_nosink_write_weighted": (
+            ("insert_identity_blocks", "residual_scale_gauge"),
+            "tests/tasks/invariance/test_geometry_positional_decay.py::"
+            "test_weighted_mean_is_invariant_under_identity_blocks"),
+    }
+
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Positional Attention Decay Analysis...")
+        _drop = 1 if self.TOKEN_POLICY == "exclude_pos0" else 0
         num_samples = self.config.get("num_samples", 5)
 
         # We need reasonably long sequences to measure positional decay gracefully
@@ -241,7 +272,7 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                                 _rs = float(_row.sum())
                                 if _rs > 0:
                                     sink_mass.append(float(_row[0]) / _rs)
-                                corr_ns = _row_distance_correlation(_row[1:])
+                                corr_ns = _row_distance_correlation(_row[_drop:])
                                 if corr_ns is not None:
                                     layer_correlations_nosink[li].append(corr_ns)
                                     if _wn is not None:
