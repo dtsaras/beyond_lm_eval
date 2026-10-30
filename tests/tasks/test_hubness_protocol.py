@@ -67,3 +67,14 @@ def test_headline_is_the_unembedding():
     assert untied["_meta_input_embedding_hubness_k10_skew"] == on_in["hubness_k10_skew"]
     assert untied["_meta_hubness_matrix"] == "unembedding" and not untied["_meta_tied_embeddings"]
     assert on_in["_meta_tied_embeddings"]
+
+
+def test_unused_rows_are_excluded():
+    """Rows past len(tokenizer) are never emitted (untrained padding): 40
+    init-like rows appended to a 400-row table leave every key unchanged."""
+    W = _table()
+    pad = (0.02 * np.random.default_rng(9).standard_normal((40, W.shape[1]))).astype(np.float32)
+    base = GlobalHubnessTask(dict(K)).evaluate(_Tables(W), _Tok(len(W)), None)
+    padded = GlobalHubnessTask(dict(K)).evaluate(_Tables(np.concatenate([W, pad])), _Tok(len(W)), None)
+    assert _feature(padded) == _feature(base)
+    assert padded["_meta_n_unused_rows"] == 40 and padded["_meta_n_emittable_rows"] == len(W)

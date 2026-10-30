@@ -51,6 +51,16 @@ def _hubness_stats_from_occurrences(n_occ, k: int) -> dict:
     }
 
 
+def _n_emittable(tokenizer, n_rows: int) -> int:
+    """Rows the tokenizer can emit: ids below len(tokenizer) (added tokens
+    included), capped at the table's row count; all rows without a length."""
+    try:
+        n_tok = int(len(tokenizer))
+    except TypeError:
+        n_tok = 0
+    return min(n_tok, int(n_rows)) if n_tok > 0 else int(n_rows)
+
+
 def _unit_rows(E, device):
     """float64 unit rows on ``device``; exactly-zero rows stay zero.
 
@@ -155,10 +165,17 @@ class GlobalHubnessTask(DiagnosticTask):
         else:
             device = torch.device("cpu")
 
-        results = self._score(W, k_values, batch_size, device)
+        # Only rows the tokenizer can emit (P7): rows past len(tokenizer) are
+        # untrained padding (pythia: 27 rows of norm 0.007; Qwen3-4B: 267) and
+        # change the counts (test_hubness_protocol.py::test_unused_rows_are_excluded).
+        n_emit = _n_emittable(tokenizer, W.shape[0])
+        results = self._score(W[:n_emit], k_values, batch_size, device)
+        results["_meta_n_emittable_rows"] = int(n_emit)
+        results["_meta_n_unused_rows"] = int(W.shape[0] - n_emit)
         tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
         if E_in is not None and matrix == "unembedding":
-            inp = results if tied else self._score(E_in, k_values, batch_size, device)
+            inp = results if tied else self._score(
+                E_in[:_n_emittable(tokenizer, E_in.shape[0])], k_values, batch_size, device)
             results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()
                             if k.startswith("hubness_")})
         results["_meta_hubness_matrix"] = matrix
