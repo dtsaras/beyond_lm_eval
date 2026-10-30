@@ -114,7 +114,17 @@ class SuperpositionStrengthTask(DiagnosticTask):
                 return {"error": "Could not find lm_head or embeddings"}
 
         W = W.float().cpu()
-        V, m = W.shape
+        V_all, m = W.shape
+        # Rows the tokenizer can emit (ids < len(tokenizer)): matrices are
+        # padded past the tokenizer (pythia 27 rows, Qwen3 267) and those rows
+        # are not tokens; on Qwen3-4B they move the centred keys by 7%. The
+        # released overlap-0.py's every-row MSO stays as _meta_.
+        from .categories import _n_emittable
+        n_emit = _n_emittable(tokenizer, V_all) if tokenizer is not None else V_all
+        mso_all_rows = (_mean_squared_overlap(W, max_pairs=max_pairs, seed=seed)
+                        if n_emit < V_all else None)
+        W = W[:n_emit]
+        V = n_emit
         # The kernel's zero-row predicate (max-abs, exact at every scale).
         V_eff = int((W.abs().amax(dim=1) > 0).sum().item())
 
@@ -152,6 +162,10 @@ class SuperpositionStrengthTask(DiagnosticTask):
             "_meta_overlap_vs_random_centered": mso_centered * m,
             "row_norm_cv": norm_cv,
             "frac_norm_above_half_max": frac_half,
-            "_meta_vocab_size": int(V),
+            "_meta_vocab_size": int(V_all),
+            "_meta_n_emittable_rows": int(n_emit),
+            "_meta_n_unused_rows": int(V_all - n_emit),
+            "_meta_mean_squared_overlap_all_rows": (
+                mso if mso_all_rows is None else mso_all_rows),
             "_meta_hidden_dim": int(m),
         }
