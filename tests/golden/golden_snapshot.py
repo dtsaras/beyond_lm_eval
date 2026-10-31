@@ -299,6 +299,44 @@ def compare(a_path, b_path, max_show=40, tolerate_from=None):
     return diffs
 
 
+def headlines(path, toy_prefix="hf-internal-testing/"):
+    """Every declared HEADLINE_KEY of a paper-core task must be IN its result.
+
+    Returns the (model, task, key) triples missing from an ``ok`` entry of a
+    real model; toy-model gaps and non-finite headline values are printed but
+    do not fail, since a key can legitimately be NaN (e.g. refusal on a base
+    model, an estimator below its minimum N).
+    """
+    import re
+    sys.path.insert(0, SRC_DIR)
+    from blme.core import _register_all_tasks
+    from blme.registry import get_task
+    _register_all_tasks()
+    with open(os.path.join(os.path.dirname(__file__), "..", "fixtures",
+                           "paper_core_tasks.json")) as fh:
+        core = set(json.load(fh))
+    entries = json.load(open(path))["entries"]
+    missing, toy, nonfinite = [], [], []
+    for name, e in sorted(entries.items()):
+        model, task = name.split("|")
+        if task not in core or e["status"] != "ok":
+            continue
+        res = e["result"]
+        for key in get_task(task).HEADLINE_KEYS:
+            pat = re.compile(re.sub(r"\\\{\w+\\\}", r"[^.]+", re.escape(key)))
+            hits = [k for k in res if pat.fullmatch(k)]
+            if not hits:
+                (toy if model.startswith(toy_prefix) else missing).append((model, task, key))
+            nonfinite += [(model, task, k) for k in hits
+                          if isinstance(res[k], dict) and "__float__" in res[k]]
+    for label, rows in (("MISSING", missing), ("missing on a toy model", toy),
+                        ("non-finite", nonfinite)):
+        print(f"{label}: {len(rows)}")
+        for r in rows:
+            print("  " + " | ".join(r))
+    return missing
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -321,6 +359,8 @@ def main():
     c.add_argument("--tolerate-from", nargs=2, metavar=("BASE0", "BASE1"),
                    help="two baseline runs of the same code; leaves that differ "
                         "between them are compared within 10x their spread")
+    h = sub.add_parser("headlines")
+    h.add_argument("snap")
     w = sub.add_parser("_worker")
     w.add_argument("spec")
     args = ap.parse_args()
@@ -328,6 +368,8 @@ def main():
         snapshot(args)
     elif args.cmd == "compare":
         sys.exit(1 if compare(args.a, args.b, tolerate_from=args.tolerate_from) else 0)
+    elif args.cmd == "headlines":
+        sys.exit(1 if headlines(args.snap) else 0)
     else:
         spec = json.load(open(args.spec))
         print("GOLDEN_RESULT " + json.dumps(_worker(spec)), flush=True)
