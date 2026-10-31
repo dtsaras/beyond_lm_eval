@@ -28,7 +28,10 @@ _FALLBACK_PAIRS = [
 
 
 def _contrastive_samples(dataset, num_samples):
-    """The caller's contrastive pairs, else the bundled set cycled to ``num_samples``.
+    """The caller's contrastive pairs, else the first ``num_samples`` bundled pairs.
+
+    The bundle is never cycled: a repeated pair weights the means without
+    adding information.
 
     The dataset is materialised once, so a generator is not exhausted by a
     preview (tests/tasks/test_repe.py).
@@ -45,7 +48,10 @@ def _contrastive_samples(dataset, num_samples):
         ):
             need_fallback = True
     if need_fallback:
-        samples = (_FALLBACK_PAIRS * ((num_samples // len(_FALLBACK_PAIRS)) + 1))[:num_samples]
+        samples = list(_FALLBACK_PAIRS[:num_samples])
+        if num_samples > len(_FALLBACK_PAIRS):
+            logger.warning(f"task_vectors: {len(_FALLBACK_PAIRS)} bundled pairs, not the "
+                           f"{num_samples} requested; pass a contrastive dataset for more")
     return samples
 
 
@@ -141,6 +147,7 @@ class TaskVectorGeometryTask(DiagnosticTask):
         # The pair count the estimates actually rest on.
         out["_meta_n_pairs"] = len(samples)
         out["_meta_n_distinct_pairs"] = len(uniq_idx)
+        out["_meta_n_requested"] = int(num_samples)
         return out
 
     @staticmethod

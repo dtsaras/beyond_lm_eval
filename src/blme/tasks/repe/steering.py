@@ -136,13 +136,16 @@ def _probe_samples(dataset, num_samples):
                 for s in preview]
     using_fallback = False
     if not preview or not any(has_keys):
-        reps = max(1, (num_samples + len(_FALLBACK_TRIPLES) - 1) // len(_FALLBACK_TRIPLES))
-        dataset = (_FALLBACK_TRIPLES * reps)[:max(num_samples, len(_FALLBACK_TRIPLES))]
+        # Never cycled: a repeated triple adds weight, not information.
+        dataset = list(_FALLBACK_TRIPLES)
         using_fallback = True
+        if num_samples > len(_FALLBACK_TRIPLES):
+            logger.warning(f"steering: {len(_FALLBACK_TRIPLES)} bundled triples, not the "
+                           f"{num_samples} requested; pass a contrastive dataset for more")
     elif not all(has_keys):
         return None, False, {"error": "Dataset mixes items with and without "
                                       "'text_pos'/'text_neg' keys."}
-    n_take = max(num_samples, len(_FALLBACK_TRIPLES)) if using_fallback else num_samples
+    n_take = len(_FALLBACK_TRIPLES) if using_fallback else num_samples
     samples = [dict(s) for s in list(dataset)[:n_take]]
     if not samples:
         return None, using_fallback, {"error": "Need at least 1 sample."}
@@ -627,6 +630,7 @@ class SteeringEffectivenessTask(DiagnosticTask):
 
         out = _summarise(rec, self.config.get("steering_threshold", 0.01), num_layers)
         out["_meta_n_probe_triples"] = int(len(samples))
+        out["_meta_n_requested"] = int(num_samples)
         out["_meta_probe_set_is_bundled"] = bool(using_fallback)
         # What the random control actually was, and how many draws it had.
         n_ctrl = {len(_matched_controls(controls[l], task_vectors[l]))

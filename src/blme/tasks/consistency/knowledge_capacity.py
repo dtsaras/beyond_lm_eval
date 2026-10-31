@@ -55,7 +55,12 @@ class KnowledgeCapacityTask(DiagnosticTask):
                     "exact": " 300,000 km/s",
                     "rephrased": " three hundred thousand kilometers per second",
                 },
-            ] * max(1, num_samples // 3 + 1)
+            ]
+            # Never cycled: a repeated fact weights the means without adding
+            # information.
+            if num_samples > len(dataset):
+                logger.warning(f"knowledge_capacity: {len(dataset)} bundled facts, not the "
+                               f"{num_samples} requested; pass a dataset for more")
 
         samples = list(dataset)[:num_samples]
         if not samples:
@@ -120,6 +125,8 @@ class KnowledgeCapacityTask(DiagnosticTask):
             "memorization_score": memorization_score,
             "generalization_score": mean_rephrased,
             "generalization_ratio": paraphrase_probability_ratio,
+            "_meta_n_samples": len(samples),
+            "_meta_n_requested": int(num_samples),
         }
 
     @staticmethod
