@@ -302,6 +302,8 @@ class BettiCurveTask(DiagnosticTask):
         results["h1_max_persistence_layer_frac"] = (
             float(np.argmax(h1_maxpers_curve)) / float(max(1, num_layers - 1)))
         results["max_betti_1"] = int(np.max(betti_1_curve))
+        # Replacement candidate for max_betti_1 (RESOLVABILITY_PREREG §6).
+        results["_meta_betti_1_curve_mean"] = float(np.mean(betti_1_curve))
         results.update(point_meta(pinfo, pts[num_layers // 2]))
         _n_mid = int(len(np.unique(np.asarray(pts[num_layers // 2]), axis=0)))
         results["_meta_knn_k"] = _knn_k(_n_mid, n_neighbors)

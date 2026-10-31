@@ -143,6 +143,9 @@ def _compute_lid_for_matrix(X, k, max_queries=500, seed: int = 0):
         # exact-duplicate query scores 0 (test_lid_protocol.py).
         "_meta_lid_min": float(np.min(lid_arr)),
         "lid_max": float(np.max(lid_arr)),
+        # Replacement candidates for lid_max (RESOLVABILITY_PREREG §6).
+        "_meta_lid_q95": float(np.quantile(lid_arr, 0.95)),
+        "_meta_lid_q99": float(np.quantile(lid_arr, 0.99)),
         "lid_median": float(np.median(lid_arr)),
         "_meta_num_estimates": len(lid_estimates),
         "_meta_num_zero_estimates": len(lid_estimates) - len(lid_positive),
