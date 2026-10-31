@@ -17,7 +17,7 @@ Usage::
     python tests/golden/golden_snapshot.py snapshot --out SNAP.json \\
         [--profile shipped|study] [--route cache|nocache|offload] \\
         [--models gpt2:float32,gpt2:bfloat16] [--tasks t1,t2] \\
-        [--num-samples 24] [--workers 24]
+        [--num-samples 24] [--no-cap] [--workers 24]
     python tests/golden/golden_snapshot.py compare A.json B.json
 """
 import argparse
@@ -114,17 +114,31 @@ def _jsonable(x):
 
 
 def task_configs_for(task, profile, n, route):
+    """The ``task_configs`` entry a snapshot passes for ``task``.
+
+    ``n`` only ever LOWERS the sample count, so a full snapshot finishes: a
+    resolved ``num_samples`` above ``n`` becomes ``n``, and one at or below it
+    is left alone. A task whose resolved config has no ``num_samples`` gets
+    none. ``n=None`` caps nothing. Everything else (layerwise, k, windows,
+    thresholds) stays as the profile sets it.
+    """
+    from blme.tasks.config_loader import resolve_task_config
     cfg = {}
     if profile == "study":
         import yaml
         with open(STUDY_TASKS_YAML) as fh:
             cfg = dict((yaml.safe_load(fh).get("task_configs") or {}).get(task) or {})
-    # Cap the sample count so a 51-task snapshot finishes; everything else
-    # (layerwise, k, windows, thresholds) stays as the profile sets it.
-    cfg["num_samples"] = min(int(cfg.get("num_samples", n)), n)
+    resolved = resolve_task_config(task, cfg).get("num_samples")
+    if n is not None and resolved is not None and int(resolved) > n:
+        cfg["num_samples"] = n
     if route == "nocache":
         cfg["use_cache"] = False
     return cfg
+
+
+def resolved_num_samples(task, config):
+    from blme.tasks.config_loader import resolve_task_config
+    return resolve_task_config(task, config).get("num_samples")
 
 
 def _worker(spec):
@@ -154,6 +168,7 @@ def _worker(spec):
     except Exception as e:  # noqa: BLE001 - a raise is a recorded outcome too
         out = {"status": "raised", "result": None, "error": f"{type(e).__name__}: {e}"[:500]}
     out["secs"] = round(time.time() - t0, 1)
+    out["num_samples"] = resolved_num_samples(spec["task"], spec["config"])
     return out
 
 
@@ -186,8 +201,9 @@ def snapshot(args):
     tasks = args.tasks.split(",") if args.tasks else sorted(_TASK_REGISTRY)
     models = args.models.split(",") if args.models else list(DEFAULT_MODELS)
     corpus = fixed_corpus(args.num_samples)
+    cap = None if args.no_cap else args.num_samples
     specs = [{"model": m, "task": t, "route": args.route, "num_samples": args.num_samples,
-              "config": task_configs_for(t, args.profile, args.num_samples, args.route),
+              "config": task_configs_for(t, args.profile, cap, args.route),
               "timeout": args.timeout}
              for m in models for t in tasks]
     t0 = time.time()
@@ -202,7 +218,10 @@ def snapshot(args):
                   f"{s['model']} {s['task']}", flush=True)
     meta = {
         "blme_file": blme.__file__, "profile": args.profile, "route": args.route,
-        "num_samples": args.num_samples, "threads": THREADS, "models": models,
+        "num_samples": args.num_samples, "cap": cap,
+        "capped_tasks": sorted(s["task"] for s in specs[:len(tasks)]
+                               if "num_samples" in s["config"]),
+        "threads": THREADS, "models": models,
         "env": {k: env.get(k) for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
                                         "OPENBLAS_NUM_THREADS", "MKL_CBWR", "MKL_DYNAMIC",
                                         "OMP_DYNAMIC", "CUDA_VISIBLE_DEVICES")},
@@ -289,7 +308,11 @@ def main():
     s.add_argument("--route", choices=("cache", "nocache", "offload"), default="cache")
     s.add_argument("--models", default="")
     s.add_argument("--tasks", default="")
-    s.add_argument("--num-samples", type=int, default=24)
+    s.add_argument("--num-samples", type=int, default=24,
+                   help="corpus size, and the cap on each task's num_samples")
+    s.add_argument("--no-cap", action="store_true",
+                   help="leave every num_samples as the profile resolves it; a task "
+                        "asking for more than --num-samples sees a shorter dataset")
     s.add_argument("--workers", type=int, default=24)
     s.add_argument("--timeout", type=int, default=1800)
     c = sub.add_parser("compare")
