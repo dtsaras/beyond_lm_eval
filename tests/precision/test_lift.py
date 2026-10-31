@@ -108,7 +108,7 @@ def f(x):
     return float((x * 1).sum())
 ''')
     _, _, cert = _run(mod.f, _values())
-    assert not cert.same_algorithm and cert.first_divergence is not None
+    assert not cert.same_algorithm and cert.first_divergence is not None and not cert.ok
 
 
 def test_library_boundaries_are_audited():
