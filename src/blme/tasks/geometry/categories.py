@@ -420,7 +420,9 @@ class CategoryGeometryTask(DiagnosticTask):
             # e.g. check max 100 analogies
             
             pair_indices = list(range(n))
-            np.random.seed(42)
+            # A local stream (RandomState draws exactly what the global one did)
+            # so this task does not reset the global RNG for the tasks after it.
+            rng = np.random.RandomState(42)
             # Generate random quartets (pair i, pair j)
             # We treat pair i as (a, b) and pair j as (c, d)
             # We want to predict d from a, b, c
@@ -435,7 +437,7 @@ class CategoryGeometryTask(DiagnosticTask):
             else:
                  # Sample 200 random pairs
                  for _ in range(200):
-                     i, j = np.random.choice(n, 2, replace=False)
+                     i, j = rng.choice(n, 2, replace=False)
                      check_indices.append((i, j))
             
             for i, j in check_indices:
@@ -505,9 +507,9 @@ class CategoryGeometryTask(DiagnosticTask):
         n_background = min(500, n_vocab - len(target_set))
         
         if n_background > 0:
-            np.random.seed(42)
+            rng = np.random.RandomState(42)
             candidates = [i for i in range(n_vocab) if i not in target_set]
-            bg_tids = np.random.choice(candidates, n_background, replace=False)
+            bg_tids = rng.choice(candidates, n_background, replace=False)
             target_tids.extend(bg_tids)
             labels.extend(["other"] * len(bg_tids))
             

@@ -248,6 +248,11 @@ class GenerationDiversityTask(DiagnosticTask):
          "test_word_unit_metrics_do_not_depend_on_the_tokenizer"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
+        from ...utils import isolated_torch_rng
+        with isolated_torch_rng(model):
+            return self._evaluate(model, tokenizer, dataset, cache)
+
+    def _evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Generation Diversity Analysis...")
 
         # Collection size: Texygen scores 500 sentences (SelfBleu sample_size), so

@@ -48,6 +48,11 @@ class SelfConsistencyTask(DiagnosticTask):
     """Sampling-stability proxy based on first generated token agreement."""
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
+        from ...utils import isolated_torch_rng
+        with isolated_torch_rng(model):
+            return self._evaluate(model, tokenizer, dataset, cache)
+
+    def _evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Self-Consistency Sampling Analysis...")
 
         n_samples_per_prompt = self.config.get("n_samples_per_prompt", 8)

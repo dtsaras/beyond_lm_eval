@@ -103,11 +103,13 @@ def _prompt_sets(dataset, config):
                     return [d["instruction"] for d in json.load(fh)]
             n_train = int(config.get("n_train", 128))
             n_val = int(config.get("n_val", 32))
-            random.seed(42 + int(config.get("seed_offset", 0)))
-            return (random.sample(load("harmful", "train"), n_train),
-                    random.sample(load("harmless", "train"), n_train),
-                    random.sample(load("harmful", "val"), n_val),
-                    random.sample(load("harmless", "val"), n_val), "reference_splits")
+            # A local Random draws exactly what the seeded global one did, and
+            # leaves the global stream alone for the tasks after this one.
+            rng = random.Random(42 + int(config.get("seed_offset", 0)))
+            return (rng.sample(load("harmful", "train"), n_train),
+                    rng.sample(load("harmless", "train"), n_train),
+                    rng.sample(load("harmful", "val"), n_val),
+                    rng.sample(load("harmless", "val"), n_val), "reference_splits")
         harmful, harmless = list(_HARMFUL_PROMPTS), list(_HARMLESS_PROMPTS)
         source = "bundled"
     n_val_h = max(1, len(harmful) // 3)
