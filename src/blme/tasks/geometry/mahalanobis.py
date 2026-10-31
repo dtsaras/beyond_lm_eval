@@ -367,7 +367,7 @@ class MahalanobisOODTask(DiagnosticTask):
                 out[pos] = v
             return {"input_ids": out, "text": tokenizer.decode(out)}
 
-        rng = np.random.RandomState(42)
+        rng = np.random.RandomState(42 + int(self.config.get("seed_offset", 0)))
 
         # We need two pseudo-datasets for structural evaluation if none provided:
         # 1. ID: Normal English

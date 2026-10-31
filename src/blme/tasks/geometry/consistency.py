@@ -144,6 +144,7 @@ class PredictionAlignmentTask(DiagnosticTask):
 
         num_samples = self.config.get("num_samples", 100)
         use_cache = self.config.get("use_cache", True)
+        seed_offset = int(self.config.get("seed_offset", 0))
 
         # Accept the cache on content (hidden states and labels), not on the
         # populated flag (tests/tasks/test_prediction_alignment_storage.py).
@@ -198,7 +199,7 @@ class PredictionAlignmentTask(DiagnosticTask):
         baseline_unif = []
         margin_tokens = []
         _coll_hits, _coll_tot = [0], [0]
-        _g = torch.Generator().manual_seed(20260903)
+        _g = torch.Generator().manual_seed(20260903 + seed_offset)
         _n_p0_dropped = [0]
         _n_massive_pairs = 0
         _vocab = embeddings.shape[0]

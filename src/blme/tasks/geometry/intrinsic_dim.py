@@ -136,9 +136,10 @@ class IntrinsicDimensionTask(DiagnosticTask):
              E_np = E.double().cpu().numpy()
              # `sample_size` subsamples the rows (None: every row).
              return self._compute_id(
-                 E_np, sample_size=self.config.get("sample_size", None))
+                 E_np, sample_size=self.config.get("sample_size", None),
+                 seed_offset=int(self.config.get("seed_offset", 0)))
 
-    def _compute_id(self, X, sample_size=None):
+    def _compute_id(self, X, sample_size=None, seed_offset=0):
         """Two-NN intrinsic dimension of the point cloud ``X``.
 
         Uses GPU-batched ``torch.cdist + torch.topk`` when CUDA is
@@ -179,7 +180,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
 
         n_vocab = X_tensor.shape[0]
         if sample_size and sample_size < n_vocab:
-            rng = np.random.default_rng(42)
+            rng = np.random.default_rng(42 + seed_offset)
             indices = rng.choice(n_vocab, sample_size, replace=False)
             X_tensor = X_tensor[torch.from_numpy(indices)]
 

@@ -116,7 +116,8 @@ class CategoryGeometryTask(DiagnosticTask):
 
         # Separation
         logger.info(" Computing Separation...")
-        sep_results = self._compute_separation(E, cat_tokens, n_emit)
+        sep_results = self._compute_separation(
+            E, cat_tokens, n_emit, seed_offset=int(self.config.get("seed_offset", 0)))
         results.update(sep_results)
         # Tokens claimed by more than one category, dropped from all of them.
         results["_meta_n_ambiguous_tokens"] = int(
@@ -241,7 +242,7 @@ class CategoryGeometryTask(DiagnosticTask):
 
         return cat_tokens, cat_labels
 
-    def _compute_separation(self, E, cat_tokens, n_emit=None):
+    def _compute_separation(self, E, cat_tokens, n_emit=None, seed_offset=0):
         n_vocab = len(E) if n_emit is None else int(n_emit)
         results = {}
 
@@ -252,7 +253,7 @@ class CategoryGeometryTask(DiagnosticTask):
         replacement_candidates = [t for t in range(n_vocab) if t not in all_tids]
         if not replacement_candidates:
             replacement_candidates = list(range(n_vocab))
-        random_tids = np.random.default_rng(42).choice(
+        random_tids = np.random.default_rng(42 + seed_offset).choice(
             np.asarray(replacement_candidates),
             size=min(_N_COMPARE, len(replacement_candidates)),
             replace=False)

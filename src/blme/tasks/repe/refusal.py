@@ -103,7 +103,7 @@ def _prompt_sets(dataset, config):
                     return [d["instruction"] for d in json.load(fh)]
             n_train = int(config.get("n_train", 128))
             n_val = int(config.get("n_val", 32))
-            random.seed(42)
+            random.seed(42 + int(config.get("seed_offset", 0)))
             return (random.sample(load("harmful", "train"), n_train),
                     random.sample(load("harmless", "train"), n_train),
                     random.sample(load("harmful", "val"), n_val),

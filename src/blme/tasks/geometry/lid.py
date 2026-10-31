@@ -206,6 +206,7 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         layerwise = self.config.get("layerwise", False)
         token_points = int(self.config.get("token_cloud_points", _TOKEN_CLOUD_POINTS))
+        seed_offset = int(self.config.get("seed_offset", 0))
         if dataset is None:
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
@@ -237,7 +238,7 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
             per_layer = {}
             lid_mean_per_layer = []
             for li in sorted(sc.last):
-                m = _compute_lid_for_matrix(sc.last[li], k)
+                m = _compute_lid_for_matrix(sc.last[li], k, seed=0 + seed_offset)
                 if m is not None:
                     per_layer[f"layer_{li}"] = m
                     lid_mean_per_layer.append(m["lid_mean"])
@@ -273,7 +274,7 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
             return result
 
         key = next(iter(sc.last))
-        m = _compute_lid_for_matrix(sc.last[key], k)
+        m = _compute_lid_for_matrix(sc.last[key], k, seed=0 + seed_offset)
         if m is None:
             return {"error": f"Too few valid samples for LID with k={k}"}
         m["_meta_lid_mode"] = "single_layer"

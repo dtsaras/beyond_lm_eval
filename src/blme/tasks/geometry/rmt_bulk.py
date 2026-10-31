@@ -507,6 +507,7 @@ class MPBulkDeviationTask(DiagnosticTask):
         edge_tol = self.config.get("edge_tol", 0.05)
         fixed_gamma = self.config.get("fixed_gamma", 0.25)
         layer_select = self.config.get("layers", "first_mid_last")
+        seed_offset = int(self.config.get("seed_offset", 0))
 
         # Block outputs (deepest entry = the hooked raw block), per document,
         # pooled into one unordered cloud per layer (RMT is about rows, not
@@ -576,7 +577,7 @@ class MPBulkDeviationTask(DiagnosticTask):
                 layer_activations[li],
                 edge_tol=edge_tol,
                 max_tokens=max_tokens,
-                seed=0,
+                seed=0 + seed_offset,
                 fixed_gamma=fixed_gamma,
             )
             if "error" in m:

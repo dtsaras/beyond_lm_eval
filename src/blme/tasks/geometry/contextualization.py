@@ -45,7 +45,8 @@ from .._tokens import massive_token_share, position0_share, sink_meta
 logger = logging.getLogger("blme")
 
 
-def _cosine_pairwise_mean(vectors: np.ndarray, max_pairs: int = 5000) -> float:
+def _cosine_pairwise_mean(vectors: np.ndarray, max_pairs: int = 5000,
+                          seed_offset: int = 0) -> float:
     """Mean cosine similarity over distinct pairs from `vectors` (n, d)."""
     n = vectors.shape[0]
     if n < 2:
@@ -57,7 +58,7 @@ def _cosine_pairwise_mean(vectors: np.ndarray, max_pairs: int = 5000) -> float:
         sim = unit @ unit.T
         triu = sim[np.triu_indices(n, k=1)]
         return float(triu.mean())
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(0 + seed_offset)
     a = rng.integers(0, n, size=max_pairs)
     b = rng.integers(0, n, size=max_pairs)
     diff = a != b
@@ -117,14 +118,15 @@ def _max_explainable_variance(vectors: np.ndarray) -> float:
     return float(eig[0] / total)
 
 
-def _baseline_anisotropy(all_vectors: np.ndarray, n_pairs: int = 2000) -> float:
+def _baseline_anisotropy(all_vectors: np.ndarray, n_pairs: int = 2000,
+                         seed_offset: int = 0) -> float:
     """Random-pair cosine similarity baseline used to anisotropy-correct."""
     n = all_vectors.shape[0]
     if n < 2:
         return 0.0
     # Scale-exact unit rows, as in `_intra_sentence_mean_cosine`.
     unit = safe_unit_rows(all_vectors)
-    rng = np.random.default_rng(1)
+    rng = np.random.default_rng(1 + seed_offset)
     a = rng.integers(0, n, size=n_pairs)
     b = rng.integers(0, n, size=n_pairs)
     diff = a != b
@@ -251,6 +253,7 @@ class ContextualizationTask(DiagnosticTask):
         min_word_occurrences = self.config.get("min_word_occurrences", 5)
         # Layers to report. None ⇒ ~5 evenly-spaced layers; "all" ⇒ all.
         layer_subset = self.config.get("layers", None)
+        seed_offset = int(self.config.get("seed_offset", 0))
 
         if dataset is None:
             # Distinct sentences reusing common words in different contexts
@@ -388,7 +391,7 @@ class ContextualizationTask(DiagnosticTask):
             order from its own stream (seeded as the reference protocol's)."""
             if policy == "all":
                 return all_states_per_layer
-            rng = np.random.default_rng(20260902)
+            rng = np.random.default_rng(20260902 + seed_offset)
             pool: Dict[int, List[np.ndarray]] = defaultdict(list)
             for doc, pos in enumerate(doc_pos):
                 cand = pos[_kept(doc, pos, policy)]
@@ -405,7 +408,7 @@ class ContextualizationTask(DiagnosticTask):
         def _layer_metrics(li, policy):
             occ_keep, pool = _keep_by_policy[policy]
             all_vecs = np.asarray(pool[li])
-            baseline = _baseline_anisotropy(all_vecs)
+            baseline = _baseline_anisotropy(all_vecs, seed_offset=seed_offset)
 
             # 1. Self-similarity per word, then average across words.
             self_sims = []
@@ -417,14 +420,16 @@ class ContextualizationTask(DiagnosticTask):
                 if len(vecs) < min_word_occurrences:
                     continue
                 arr = np.asarray(vecs)
-                self_sims.append(_cosine_pairwise_mean(arr))
+                self_sims.append(_cosine_pairwise_mean(arr, seed_offset=seed_offset))
                 mevs.append(_max_explainable_variance(arr))
                 occ_counts.append(len(vecs))
             self_sim_raw = float(np.nanmean(self_sims)) if self_sims else float("nan")
             self_sim_corr = (self_sim_raw - baseline) if not np.isnan(self_sim_raw) else float("nan")
             mev_mean = float(np.nanmean(mevs)) if mevs else float("nan")
-            mev_baseline = _baseline_mev(all_vecs, occ_counts, size_matched=True)
-            mev_baseline_1k = _baseline_mev(all_vecs, occ_counts, size_matched=False)
+            mev_baseline = _baseline_mev(all_vecs, occ_counts, seed=2 + seed_offset,
+                                         size_matched=True)
+            mev_baseline_1k = _baseline_mev(all_vecs, occ_counts, seed=2 + seed_offset,
+                                            size_matched=False)
             # Both MEV corrections are emitted and neither is privileged: they
             # disagree in sign on this corpus, so there is no unqualified
             # `mev_corrected` key.
