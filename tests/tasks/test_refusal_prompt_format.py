@@ -51,6 +51,23 @@ def test_release_family_gets_the_release_template(repo, label, template, injecte
     assert R._encode(tok, inst, "cpu")[0].tolist() == tok.encode(template.format(instruction=inst))
 
 
+# Thinking on: Qwen3 renders no think block (the model opens it), Qwen3.5+ an open
+# one; Qwen3.8's reasoning-effort system prompt is dropped as any system prompt is.
+@pytest.mark.parametrize("repo,template", [
+    ("Qwen/Qwen3-32B", QWEN),
+    ("Qwen/Qwen3.5-27B", QWEN + "<think>\n"),
+    ("Qwen/Qwen3.8-27B", QWEN + "<think>\n"),
+])
+def test_thinking_on_keeps_the_release_turn(repo, template):
+    tok = _tok(repo)
+    own = tok.apply_chat_template([{"role": "user", "content": "x"}], tokenize=False,
+                                  add_generation_prompt=True, enable_thinking=True)
+    assert not own.endswith(THINK_OFF)       # known positive: the switch reaches the template
+    fmt = R._prompt_format(tok, enable_thinking=True)
+    assert fmt.label == "refusal_direction:qwen" and fmt.template == template
+    assert R._prompt_format(tok).template == QWEN + THINK_OFF    # the default is off
+
+
 @pytest.mark.parametrize("repo", ["TinyLlama/TinyLlama-1.1B-Chat-v1.0", "microsoft/phi-4"])
 def test_other_families_keep_their_own_template(repo):
     tok = _tok(repo)
@@ -136,7 +153,7 @@ def test_filter_data_keeps_the_prompts_the_model_classifies_as_labelled(tiny):
         ["comply with g", "comply with h", "refuse to say i", "comply with j",
          "comply with k", "comply with l"])
     on = _Loose({}).evaluate(model, tok, data)
-    assert on["_meta_filter_data"] is True
+    assert on["_meta_filter_data"] is True and on["_meta_enable_thinking"] is False
     assert on["_meta_n_train_per_class"] == [4, 4]
     assert on["_meta_n_train_per_class_filtered"] == [3, 3]
     assert on["_meta_n_val_per_class_filtered"] == [2, 2]

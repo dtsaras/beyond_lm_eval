@@ -138,20 +138,21 @@ _RELEASE_FORMATS = (
 _Format = namedtuple("_Format", "template add_special_tokens refusal label")
 
 
-def _prompt_format(tokenizer):
+def _prompt_format(tokenizer, enable_thinking=False):
     """How instructions are formatted, and which tokens start a refusal.
 
     The release picks the family by model name and uses its own template, which
     has no system prompt; the tokenizer adds BOS. That template is used when it
-    occurs in the model's own rendering (thinking off), followed by whatever the
-    rendering appends after it (Qwen3's empty think block); what the rendering
-    puts before it (Llama-3.2's "Today Date", Qwen2.5's "You are Qwen", Qwen3.8's
+    occurs in the model's own rendering, followed by whatever the rendering
+    appends after it (thinking off: Qwen3's empty think block; on: nothing for
+    Qwen3, an open ``<think>`` for Qwen3.5+); what the rendering puts before it
+    (Llama-3.2's "Today Date", Qwen2.5's "You are Qwen", Qwen3.8's
     reasoning-effort prompt) is dropped. A family the release does not cover
     keeps its own rendering, which carries its own BOS.
     """
     own = tokenizer.apply_chat_template(
         [{"role": "user", "content": _MARKER}], tokenize=False,
-        add_generation_prompt=True, enable_thinking=False)
+        add_generation_prompt=True, enable_thinking=bool(enable_thinking))
     name = str(getattr(tokenizer, "name_or_path", "")).lower()
     for key, turn, refusal in _RELEASE_FORMATS:
         if key in name:
@@ -455,8 +456,10 @@ class RefusalDirectionTask(DiagnosticTask):
             return self._nan_result(
                 "declared instruct, but the tokenizer has no chat template to format "
                 "the instructions with", meta)
-        fmt = _prompt_format(tokenizer)
+        thinking = bool(self.config.get("enable_thinking", False))
+        fmt = _prompt_format(tokenizer, thinking)
         meta["_meta_prompt_format"] = fmt.label
+        meta["_meta_enable_thinking"] = thinking
         if fmt.label == "model_chat_template" and "strftime_now" in str(tokenizer.chat_template):
             return self._nan_result(
                 "the release has no template for this family and the model's own "

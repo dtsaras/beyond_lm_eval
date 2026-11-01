@@ -386,6 +386,9 @@ repe_refusal_direction:
   # true / false declares the checkpoint instruct or base; null falls back to
   # "the tokenizer has a chat template", which base Qwen2.5 tokenizers also pass.
   is_instruct: null
+  # Hybrid reasoning models (Qwen3, Qwen3.5+) render the prompt with thinking
+  # off (an empty think block) or on; the release predates thinking models.
+  enable_thinking: false
 
 # ---- Campaign-2 additions (2026-06): new methods, official-code parity-verified ----
 geometry_vendi_score:
