@@ -177,3 +177,18 @@ def test_filter_data_that_empties_a_class_gives_nan(tiny):
     assert res["_meta_refusal_token_ids"] == R._refusal_token_ids(tok)   # what was scored
     assert "filter_data" in res["_meta_refusal_skipped_reason"]
     assert all(np.isnan(res[k]) for k in R.RefusalDirectionTask.HEADLINE_KEYS)
+
+
+def test_thinking_on_returns_a_reason_not_a_filter_artefact(tiny):
+    """With a hybrid reasoning template the response opens a think block, so
+    the first-token refusal score cannot see the answer: evaluate() says so
+    instead of letting filter_data drop every prompt."""
+    cfg, _ = tiny
+    tok = _tok("Qwen/Qwen3-32B")
+    torch.manual_seed(0)
+    model = transformers.AutoModelForCausalLM.from_config(cfg).eval()
+    data = _labelled(["refuse to say a", "refuse to say b"] * 3, ["comply with c", "comply with d"] * 3)
+    r = _Loose({"enable_thinking": True}).evaluate(model, tok, data)
+    assert r["_meta_enable_thinking"] is True
+    assert "think block" in r["_meta_refusal_skipped_reason"]
+    assert all(np.isnan(r[k]) for k in R.RefusalDirectionTask.HEADLINE_KEYS)

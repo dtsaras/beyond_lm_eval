@@ -460,6 +460,15 @@ class RefusalDirectionTask(DiagnosticTask):
         fmt = _prompt_format(tokenizer, thinking)
         meta["_meta_prompt_format"] = fmt.label
         meta["_meta_enable_thinking"] = thinking
+        if thinking and _format(tokenizer, "x", fmt) != _format(
+                tokenizer, "x", _prompt_format(tokenizer, False)):
+            # A hybrid reasoning template opens a think block (Qwen3: <think>
+            # with p ~ 1; Qwen3.5+: reasoning text), so the first-token refusal
+            # score cannot see the answer: filter_data would keep no prompt.
+            return self._nan_result(
+                "enable_thinking: the response starts inside a think block, where the "
+                "release's first-token refusal score is undefined; a thinking-on "
+                "measurement needs a generation-based evaluation", meta)
         if fmt.label == "model_chat_template" and "strftime_now" in str(tokenizer.chat_template):
             return self._nan_result(
                 "the release has no template for this family and the model's own "
