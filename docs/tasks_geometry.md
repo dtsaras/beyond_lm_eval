@@ -467,3 +467,11 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Yokoi, S., et al. (2024). Zipfian Whitening.` [NeurIPS 2024, ArXiv: 2411.00680]; code cl-tohoku/zipfian-whitening.
 * **File & Function**: `src/blme/tasks/geometry/zipfian_symmetry.py` -> `ZipfianSymmetryTask`
 * **Critical Info**: Weights plus one tokenisation of the corpus; one SVD per table. The paper's experiments are on static word embeddings, not LLM tables. Sym2's division by log d moves when the width is zero-padded; `_meta_zipf_spectral_entropy_*` is the undivided entropy. Tied models give identical embedding and unembedding scores.
+
+## 48. Delta-hyperbolicity (geometry_delta_hyperbolicity)
+* **What are we measuring**: How tree-like the geometry of one prompt's token cloud is, from the input embeddings through every layer.
+* **How are we measuring**: The released estimator: Euclidean distances, Gromov products at the first point as base point, delta = max over pairs of (max_z min((x|z), (z|y)) - (x|y)), reported as 2 delta / diam and averaged over prompts. The headline input-embedding value uses the release's cloud (the embedding lookup of the prompt's tokens); the profile applies the same estimator to every hidden state without position 0. Every cloud has the first 64 tokens of a passage of at least 1000 bytes.
+* **Hypothesis**: Yang et al. find that LLM token embeddings are strongly hyperbolic (low relative delta) and use it to motivate hyperbolic fine-tuning; the Atlas reports that depth changes delta more than scale does.
+* **Citation/Paper**: `Yang, M., et al. (2025). Hyperbolic Fine-Tuning for Large Language Models.` [NeurIPS 2025, ArXiv: 2410.04010]; `Khrulkov, V., et al. (2020). Hyperbolic Image Embeddings.` [CVPR 2020, ArXiv: 1904.02239]; code marlin-codes/HypLoRA.
+* **File & Function**: `src/blme/tasks/geometry/delta_hyperbolicity.py` -> `DeltaHyperbolicityTask`
+* **Critical Info**: delta grows with the number of points, so N is pinned (64 tokens per prompt). The estimator fixes the first point as the base point, as the release does, which bounds delta only to within a factor of 2 of its four-point value. The sink row at position 0 dominates hidden-state diameters, so the profile drops it.

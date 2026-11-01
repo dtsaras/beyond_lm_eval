@@ -368,6 +368,10 @@ tasks:
 
   geometry_zipfian_symmetry: {}
 
+  geometry_delta_hyperbolicity:
+    num_samples: 200
+    n_points: 64
+
   interpretability_logit_lens_kl:
     num_samples: 100
     max_length: 512

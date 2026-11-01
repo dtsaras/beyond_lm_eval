@@ -566,6 +566,12 @@ geometry_lm_head_free_energy: {}
 
 geometry_zipfian_symmetry: {}
 
+geometry_delta_hyperbolicity:
+  # delta grows with the number of points, so every cloud has n_points tokens.
+  num_samples: 200
+  n_points: 64
+  min_bytes: 1000
+
 interpretability_logit_lens_kl:
   # The first num_samples passages of the corpus, each truncated to max_length
   # tokens; a short passage is not replaced by a later one. Every position but
