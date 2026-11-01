@@ -175,14 +175,23 @@ def _eoi_ids(tokenizer, fmt=None):
 
 
 def _refusal_token_ids(tokenizer, fmt=None):
-    """First token of each refusal string: the release's per-family set (its
-    hard-coded ids are these strings' tokens), "I" and "As" otherwise."""
+    """First token of each refusal string where the response starts: the
+    release's per-family set (its hard-coded ids are these tokens), "I" and "As"
+    otherwise. Each string is tokenised after the formatted prompt, because a
+    SentencePiece vocabulary starts a response after a newline with "I"
+    (TinyLlama-Chat: 29902), not the word-start "▁I" (306) it gives "I" alone."""
     fmt = fmt or _prompt_format(tokenizer)
+    text = _format(tokenizer, "x", fmt)
+    prompt = tokenizer.encode(text, add_special_tokens=False)
     ids = []
     for t in fmt.refusal:
-        enc = tokenizer.encode(t, add_special_tokens=False)
-        if enc and enc[0] not in ids:
-            ids.append(enc[0])
+        enc = tokenizer.encode(text + t, add_special_tokens=False)
+        if len(enc) > len(prompt) and enc[:len(prompt)] == prompt:
+            first = enc[len(prompt)]
+        else:                 # the string merged with the prompt's last token
+            first = tokenizer.encode(t, add_special_tokens=False)[0]
+        if first not in ids:
+            ids.append(first)
     return ids
 
 
@@ -478,6 +487,7 @@ class RefusalDirectionTask(DiagnosticTask):
                 scores = [_refusal_score(z, refusal_ids) for z in _last_logits(model, enc[k])]
                 enc[k] = [e for e, s in zip(enc[k], scores) if (s > 0 if refuse else s < 0)]
         filt_meta = {"_meta_filter_data": bool(self.FILTER_DATA),
+                     "_meta_refusal_token_ids": [int(i) for i in refusal_ids],
                      "_meta_n_train_per_class_filtered": [len(enc["h_tr"]), len(enc["n_tr"])],
                      "_meta_n_val_per_class_filtered": [len(enc["h_va"]), len(enc["n_va"])]}
         n_h, n_n = len(enc["h_tr"]), len(enc["n_tr"])
@@ -534,7 +544,6 @@ class RefusalDirectionTask(DiagnosticTask):
                     "_meta_refusal_score_harmless_baseline": score_n0,
                     "_meta_n_candidates": int(n_cand), "_meta_n_candidates_kept": len(kept),
                     "_meta_n_post_instruction_tokens": int(n_pos),
-                    "_meta_refusal_token_ids": [int(i) for i in refusal_ids],
                     "_meta_ablation_hooks_complete": bool(full_sites[0])}
         sel_meta.update(filt_meta)
         sel_meta.update(self._profile(last_tok))

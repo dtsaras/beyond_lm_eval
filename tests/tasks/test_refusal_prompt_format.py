@@ -66,6 +66,18 @@ def test_refusal_tokens_are_the_release_family_set():
     assert R._refusal_token_ids(_tok("Qwen/Qwen2.5-1.5B-Instruct")) == [40, 2121]  # ['I', 'As']
 
 
+def test_refusal_tokens_are_the_tokens_a_response_starts_with():
+    """TinyLlama-Chat's template ends in a newline, after which its SentencePiece
+    vocabulary starts a response with "I" (29902) and "As" (2887); "I" on its own
+    tokenises to the word-start "▁I" (306), which the model does not emit there."""
+    tok = _tok("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    assert tok.encode("I", add_special_tokens=False) == [306]     # known positive
+    assert R._refusal_token_ids(tok) == [29902, 2887]
+    # The release's Llama-2 turn ends in a space; its hard-coded refusal_toks is [306].
+    llama2 = R._Format("[INST] {instruction} [/INST] ", True, ("I",), "refusal_direction:llama")
+    assert R._refusal_token_ids(tok, llama2) == [306]
+
+
 @pytest.fixture(scope="module")
 def tiny():
     tok = transformers.AutoTokenizer.from_pretrained("gpt2")
@@ -145,5 +157,6 @@ def test_filter_data_that_empties_a_class_gives_nan(tiny):
     torch.manual_seed(0)
     res = _Loose({}).evaluate(transformers.LlamaForCausalLM(cfg).eval(), tok, None)
     assert res["_meta_n_train_per_class_filtered"][0] == 0
+    assert res["_meta_refusal_token_ids"] == R._refusal_token_ids(tok)   # what was scored
     assert "filter_data" in res["_meta_refusal_skipped_reason"]
     assert all(np.isnan(res[k]) for k in R.RefusalDirectionTask.HEADLINE_KEYS)
