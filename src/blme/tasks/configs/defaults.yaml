@@ -485,6 +485,14 @@ geometry_effective_depth:
   # window the cached tasks use (adversarial review, 2026-09-04).
   max_length: 512
 
+geometry_alpha_req:
+  # One point per sequence (last content token) at the model output state,
+  # N pinned at 1000 documents (Li et al. 2025 use 15000).
+  num_samples: 1000
+  # true adds alpha_req_per_layer / rankme_per_layer over the block outputs
+  # (a second collection pass).
+  profile: false
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

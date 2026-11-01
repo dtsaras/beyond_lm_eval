@@ -63,6 +63,7 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_svd": {},
     "geometry_trajectory_curvature": {},
     "geometry_vendi_score": {},
+    "geometry_alpha_req": {},
     "topology_betti_curve": {},
     "topology_homology": {},
     "topology_persistence_entropy": {},

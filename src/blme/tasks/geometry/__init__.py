@@ -33,3 +33,5 @@ from .procrustes_linearity import ProcrustesLinearityTask
 # Campaign-4 B8 additions (2026-07, gap-survey metrics)
 from .superposition_strength import SuperpositionStrengthTask
 from .effective_depth import EffectiveDepthTask
+# 2026-11 additions (missed-metrics surveys, beyond_benchmarks docs/2026-11-01-*)
+from .alpha_req import AlphaReQTask

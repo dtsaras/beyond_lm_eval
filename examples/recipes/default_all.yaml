@@ -323,6 +323,10 @@ tasks:
   geometry_effective_depth:
     num_samples: 20
 
+  # ---- 2026-11 additions ----
+  geometry_alpha_req:
+    num_samples: 1000
+
   dynamics_fractal:
     num_samples: 100
     holder_eps: 0.005
