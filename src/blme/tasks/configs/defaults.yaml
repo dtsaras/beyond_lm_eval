@@ -557,6 +557,11 @@ geometry_ww_randomized:
   # np.random.seed(shuffle_seed) draws the same shuffles).
   shuffle_seed: 42
 
+geometry_rogue_dimensions:
+  # replication.ipynb: the first 128 tokens of each of 150 articles.
+  num_samples: 150
+  context_length: 128
+
 interpretability_logit_lens_kl:
   # The first num_samples passages of the corpus, each truncated to max_length
   # tokens; a short passage is not replaced by a later one. Every position but
