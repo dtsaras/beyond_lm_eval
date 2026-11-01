@@ -44,6 +44,7 @@ from .rogue_dimensions import RogueDimensionsTask
 from .lm_head_free_energy import LMHeadFreeEnergyTask
 from .zipfian_symmetry import ZipfianSymmetryTask
 from .delta_hyperbolicity import DeltaHyperbolicityTask
+from .ffn_spectral import FFNSpectralUtilizationTask
 from .ww_randomized import WWRandomizedTask
 from .dime import DiMETask
 from .prompt_id import PromptIntrinsicDimTask

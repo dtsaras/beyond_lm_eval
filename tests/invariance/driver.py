@@ -92,6 +92,9 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
     "geometry_schatten": (
         "runs its own forward pass: Yusupov et al.'s Schatten norm reads the "
         "MLP-internal activations, which the cache does not hold"),
+    "geometry_ffn_spectral_utilization": (
+        "hooks the down-projection inputs (the FFN post-activations) in its own "
+        "forward passes; the cache does not hold them"),
     "geometry_phd_dimension": (
         "only the pooled _meta_ value reads the cache; the per-text headline "
         "runs its own forward pass per document"),

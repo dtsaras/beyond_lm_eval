@@ -572,6 +572,17 @@ geometry_delta_hyperbolicity:
   n_points: 64
   min_bytes: 1000
 
+geometry_ffn_spectral_utilization:
+  # Every rank depends on N, so N is pinned: the first n_tokens tokens of the
+  # library corpus, at most max_length per passage (the last passage is cut).
+  n_tokens: 32768
+  max_length: 512
+  # float64 accumulators held at once (one D x D per layer); layers run in
+  # groups that fit, one forward over the same tokens per group.
+  memory_budget_gb: 8.0
+  accumulator_device: auto
+  without_position0: true
+
 interpretability_logit_lens_kl:
   # The first num_samples passages of the corpus, each truncated to max_length
   # tokens; a short passage is not replaced by a later one. Every position but
