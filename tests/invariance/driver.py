@@ -100,7 +100,7 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
     **{t: "reads weights only; drive it with a real model" for t in (
         "geometry_weight_norms", "geometry_spectral", "geometry_unembedding",
         "geometry_hubness", "geometry_superposition_strength",
-        "geometry_categories",
+        "geometry_categories", "geometry_spectral_signature", "geometry_farms_alpha",
     )},
     **{t: "measures forward/backward dynamics or generation" for t in (
         "dynamics_coe", "dynamics_fractal", "dynamics_generation_diversity",
