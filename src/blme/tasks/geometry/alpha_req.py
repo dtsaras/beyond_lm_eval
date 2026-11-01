@@ -27,6 +27,7 @@ scikit-learn's ``PCA(svd_solver='full')`` ratios to rounding
 import logging
 
 import numpy as np
+import torch
 import scipy.linalg
 from sklearn.metrics import r2_score
 
@@ -45,6 +46,9 @@ RANKME_EPS = 1e-7
 
 def _eigenspectrum(X, max_eigenvals: int = MAX_EIGENVALS) -> np.ndarray:
     """Explained-variance ratios of the centred rows of ``X``, largest first."""
+    if isinstance(X, torch.Tensor):
+        # numpy has no bfloat16: upcast in torch first (exact).
+        X = X.detach().to(torch.float64).cpu().numpy()
     X = np.asarray(X, dtype=np.float64)
     X = X.reshape(X.shape[0], -1)
     Xc = X - X.mean(axis=0)
