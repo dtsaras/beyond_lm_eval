@@ -364,6 +364,8 @@ tasks:
     num_samples: 150
     context_length: 128
 
+  geometry_lm_head_free_energy: {}
+
   interpretability_logit_lens_kl:
     num_samples: 100
     max_length: 512

@@ -41,4 +41,5 @@ from .farms import FARMSAlphaTask
 from .dispersion import RepresentationDispersionTask
 from .predictive_information import PredictiveInformationTask
 from .rogue_dimensions import RogueDimensionsTask
+from .lm_head_free_energy import LMHeadFreeEnergyTask
 from .ww_randomized import WWRandomizedTask

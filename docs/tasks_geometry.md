@@ -443,3 +443,11 @@ efficiency diagnostics, not standalone proof of downstream quality.
 * **Citation/Paper**: `Timkey, W., & van Schijndel, M. (2021). All Bark and No Bite: Rogue Dimensions in Transformer Language Models Obscure Representational Quality.` [EMNLP 2021, ArXiv: 2109.04404]; code wtimkey/rogue-dimensions.
 * **File & Function**: `src/blme/tasks/geometry/rogue_dimensions.py` -> `RogueDimensionsTask`
 * **Critical Info**: Rogue dimensions are coordinates, so the shares change under a rotation of the basis; they are unchanged by duplicated layers, zero-padded coordinates and rescaling. The shares are unstable where the anisotropy is near 0 (NaN when it is not positive). The first token of each document is often an attention sink; `_meta_rogue_top1_share_profile_without_first_token` drops it.
+
+## 45. LM-head spectral free energy (geometry_lm_head_free_energy)
+* **What are we measuring**: How unequal the spectrum of the output unembedding is, as a Bayesian free energy of the weight matrix.
+* **How are we measuring**: The released BFE-W: e = the eigenvalues of W.T @ W of the output unembedding (float32), lambda = 1 / mean(e), BFE-W = lambda/2 mean(e) - 1/2 mean(log e) + 1/2 log(2 pi / lambda), which equals half the log ratio of the arithmetic to the geometric mean of e plus a constant.
+* **Hypothesis**: Wilson reports that within a model family BFE-W of the unembedding tracks benchmark quality (Pythia with LAMBADA, Qwen3.5 with MMLU-Pro).
+* **Citation/Paper**: `Wilson, J. (2026). Why Heavy-Tailed Weight Spectra Predict Model Quality.` [NeurIPS 2026, ArXiv: 2610.13123]; code josephwilsonmaths/heavytail.
+* **File & Function**: `src/blme/tasks/geometry/lm_head_free_energy.py` -> `LMHeadFreeEnergyTask`
+* **Critical Info**: Weights only; one d x d Gram. The float32 Gram loses the smallest eigenvalues of an ill-conditioned head, so `_meta_lm_head_bfe_w_float64` reports the float64 value. Expect a strong correlation with `geometry_unembedding`'s effective rank, which reads the same spectrum. Undefined (NaN) when the head is rank-deficient, as for a zero-padded width.

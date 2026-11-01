@@ -562,6 +562,8 @@ geometry_rogue_dimensions:
   num_samples: 150
   context_length: 128
 
+geometry_lm_head_free_energy: {}
+
 interpretability_logit_lens_kl:
   # The first num_samples passages of the corpus, each truncated to max_length
   # tokens; a short passage is not replaced by a later one. Every position but
