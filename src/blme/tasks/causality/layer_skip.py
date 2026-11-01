@@ -11,7 +11,7 @@ each t and each block s, block s is skipped (its output set to its input) on
 tokens 1..t-1 and the forward is rerun. On tokens >= t this records:
 
 * for every block l, the relative change of its contribution,
-  ||c_l - c'_l|| / max(||c_l||, 1e-6) with c_l = block output - block input,
+  ||c_l - c'_l|| / ||c_l|| with c_l = block output - block input,
   maximised over the tokens;
 * the L2 change of the output distribution, ||p - p'||_2, maximised over the
   tokens.
@@ -35,11 +35,14 @@ from ..common import get_layers
 logger = logging.getLogger("blme")
 
 # analyze_future_effects.py: positions = range(8, len(tokens)-4, 8), shuffled,
-# the first N_CHUNKS = 4 kept; no_skip_front=1; clamp(min=1e-6).
+# the first N_CHUNKS = 4 kept; no_skip_front=1.
 _STRIDE = 8
 _TAIL = 4
 _NO_SKIP_FRONT = 1
-_EPS = 1e-6
+# The release floors the contribution norm at 1e-6. The float32 tiny floor
+# gives the same ratio for every norm above 1e-6 (and 0 for a block that
+# contributes nothing, as the release does) without setting a scale.
+_EPS = torch.finfo(torch.float32).tiny
 
 
 def split_positions(n_tokens, n_positions, rng):
@@ -136,7 +139,7 @@ class LayerSkipEffectTask(DiagnosticTask):
     }
     ADAPTATION_NOTE = (
         "The intervention, the split points (4 per prompt from range(8, T-4, 8), Python "
-        "random seeded 123), the relative contribution change with its 1e-6 clamp, the L2 "
+        "random seeded 123), the relative contribution change, the L2 "
         "output-probability change, the maxima over tokens, split points and prompts, and the "
         "importance (mean effect on the later blocks) follow the release. The depth score uses "
         "the paper's 1-based layer index; the release's effect_layer_score is 0-based and "
