@@ -373,26 +373,32 @@ def test_rounding_of_the_smallest_eigenvalue_can_move_the_release_alpha(ref):
     """Known fragility of the released fit, reproduced, not fixed: gpt2's
     h.6.mlp.c_proj, measured as BLME measures it (the Linear equivalent of the
     Conv1D weight) with 512 x 512 windows, pools 115,200 eigenvalues whose two
-    highest log10-histogram bins hold 8131 and 8130. Multiplying the smallest
-    eigenvalue (1.9e-10; the largest is 166) by 1.0065, the difference between
-    the float32 SVDs of the windows of this matrix and of its transpose,
-    shifts the bin range so the other bin wins: p drops by one bin and alpha
-    goes from 3.2748 to 2.8572, in the release and in BLME. The near-tie and
-    the xmin at the 1.5 p cap are what ``_meta_n_peak_bin_near_tie`` and
-    ``_meta_n_xmin_at_candidate_cap`` count."""
+    highest log10-histogram bins hold 8131 and 8130. Scaling the smallest
+    eigenvalue (1.9e-10; the largest is 166) by under 1%, the size of the
+    difference between float32 SVDs of the windows (it depends on the BLAS
+    thread count), shifts the bin range so the other bin wins: alpha is 3.2748
+    or 2.8572, in the release and in BLME alike. Which side the measured
+    spectrum falls on is itself BLAS-dependent, so the test scans a +-2% grid
+    for both. The near-tie and the xmin at the 1.5 p cap are what
+    ``_meta_n_peak_bin_near_tie`` and ``_meta_n_xmin_at_candidate_cap`` count."""
     try:
         gpt2 = transformers.AutoModelForCausalLM.from_pretrained("gpt2", dtype=torch.float32)
     except OSError as e:  # pragma: no cover - environment dependent
         pytest.skip(f"gpt2 not cached: {e}")
     W = gpt2.transformer.h[6].mlp.c_proj.weight.detach().t()
     eigs, _ = F._pooled_window_eigs(W, 512, 1.0, 15)
-    nudged = eigs.clone()
-    nudged[0] = nudged[0] * 1.0065
-    fit, fit2 = F._xmin_peak_fit(eigs), F._xmin_peak_fit(nudged)
-    assert fit["peak_near_tie"] and fit["xmin_at_cap"] and fit2["xmin_at_cap"]
-    assert fit["alpha"] == pytest.approx(3.2748, abs=2e-3)
-    assert fit2["alpha"] == pytest.approx(2.8572, abs=2e-3)
-    for e, ours in ((eigs, fit), (nudged, fit2)):
+    branches = {}
+    for k in range(-15, 16):
+        nudged = eigs.clone()
+        nudged[0] = nudged[0] * (1 + 0.0013 * k)
+        fit = F._xmin_peak_fit(nudged)
+        assert fit["peak_near_tie"] and fit["xmin_at_cap"]
+        branches.setdefault(fit["alpha"] > 3.0, (fit["alpha"], nudged))
+    assert set(branches) == {False, True}
+    assert branches[False][0] == pytest.approx(2.857, abs=5e-3)
+    assert branches[True][0] == pytest.approx(3.275, abs=5e-3)
+    for _, e in branches.values():
+        ours = F._xmin_peak_fit(e)
         a_ref, _, i_ref = _release_fit(ref, e)
         assert ours["xmin_index"] == i_ref and ours["alpha"] == pytest.approx(a_ref, rel=1e-5)
 
