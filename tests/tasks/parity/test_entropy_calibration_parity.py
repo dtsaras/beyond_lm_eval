@@ -138,3 +138,23 @@ def test_global_rng_is_untouched():
                                    "n_bootstrap": 10}).evaluate(model, tok, docs)
     assert r["_meta_n_examples"] == 2
     assert torch.equal(torch.rand(3), before)
+
+
+def test_generation_is_cut_at_every_stop_id():
+    """A stop id from the generation config that is not the tokenizer's EOS
+    (Qwen3: <|im_end|> and <|endoftext|>) ends the continuation; the padding
+    generate() appends after it is not scored."""
+    model, tok = fd.tiny_gpt2(), fd.tokenizer()
+    stop = 7
+    model.generation_config.eos_token_id = [stop]
+    assert EC.stop_ids(model, tok) == {stop, tok.eos_token_id}
+    g = torch.Generator().manual_seed(4)
+    prompts = [torch.randint(1, 900, (8,), generator=g).tolist() for _ in range(32)]
+    with torch.no_grad(), torch.random.fork_rng():
+        torch.manual_seed(5)
+        gens = EC._sample(model, tok, prompts, 64, 8, "cpu")
+    stops = EC.stop_ids(model, tok)
+    assert any(x and x[-1] in stops for x in gens)
+    for x in gens:
+        assert all(t not in stops for t in x[:-1])      # nothing after a stop
+        assert len(x) == 64 or x[-1] in stops

@@ -73,24 +73,38 @@ def response_log_losses(model, prompt, response, device):
     return (-lp[pos, tgt]).cpu().numpy().astype(np.float64)
 
 
+def stop_ids(model, tokenizer):
+    """Every id generation stops on: the generation config's EOS ids (often a
+    list, e.g. Qwen3's <|im_end|> and <|endoftext|>) and the tokenizer's."""
+    ids = getattr(getattr(model, "generation_config", None), "eos_token_id", None)
+    ids = set(ids if isinstance(ids, (list, tuple)) else [] if ids is None else [ids])
+    if tokenizer.eos_token_id is not None:
+        ids.add(tokenizer.eos_token_id)
+    return ids
+
+
 def _sample(model, tokenizer, prompts, max_new, batch_size, device):
     """Pure sampling at temperature 1 (top_k 0, top_p 1, as vLLM's defaults),
-    left-padded batches; each continuation is cut after its first EOS."""
+    left-padded batches; each continuation is cut after its first stop id.
+    A fresh GenerationConfig keeps the model's own processors (suppress_tokens,
+    no_repeat_ngram_size, min_p, ...) out of the sampling."""
+    from transformers import GenerationConfig
+    stops = stop_ids(model, tokenizer)
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     pad = 0 if pad is None else pad
+    gen_cfg = GenerationConfig(do_sample=True, temperature=1.0, top_k=0, top_p=1.0,
+                               max_new_tokens=max_new, pad_token_id=pad,
+                               eos_token_id=sorted(stops) or None)
     out = []
     for s in range(0, len(prompts), batch_size):
         batch = prompts[s:s + batch_size]
         width = max(len(p) for p in batch)
         ids = torch.tensor([[pad] * (width - len(p)) + p for p in batch], device=device)
         mask = torch.tensor([[0] * (width - len(p)) + [1] * len(p) for p in batch], device=device)
-        seqs = model.generate(input_ids=ids, attention_mask=mask, max_new_tokens=max_new,
-                              do_sample=True, temperature=1.0, top_k=0, top_p=1.0,
-                              typical_p=1.0, repetition_penalty=1.0, pad_token_id=pad)
+        seqs = model.generate(input_ids=ids, attention_mask=mask, generation_config=gen_cfg)
         for row in seqs[:, width:].tolist():
-            if tokenizer.eos_token_id in row:
-                row = row[:row.index(tokenizer.eos_token_id) + 1]
-            out.append(row)
+            cut = next((i for i, t in enumerate(row) if t in stops), None)
+            out.append(row if cut is None else row[:cut + 1])
     return out
 
 
@@ -160,8 +174,8 @@ class EntropyCalibrationTask(DiagnosticTask):
             return {"error": "No article has a long enough human continuation"}
         device = next(model.parameters()).device
 
-        with torch.no_grad(), torch.random.fork_rng(
-                devices=[device] if device.type == "cuda" else []):
+        from ...utils import isolated_torch_rng
+        with torch.no_grad(), isolated_torch_rng(model):
             torch.manual_seed(seed)
             generations = _sample(model, tokenizer, prompts, max_new, batch_size, device)
             ents = [generation_entropies(model, p, g, device) for p, g in zip(prompts, generations)]
@@ -189,7 +203,9 @@ class EntropyCalibrationTask(DiagnosticTask):
             "_meta_n_examples": len(prompts),
             "_meta_n_generated_tokens": int(H_all.size),
             "_meta_n_generations_ended_by_eos": int(sum(
-                1 for g in generations if g and g[-1] == tokenizer.eos_token_id)),
+                1 for g in generations if g and g[-1] in stop_ids(model, tokenizer))),
+            # The batched sampler draws different samples at another batch size.
+            "_meta_batch_size": batch_size,
             "_meta_max_new_tokens": max_new,
             "_meta_generation_seed": seed,
         }
