@@ -49,7 +49,16 @@ eigenvalues (1.9e-10) by 1.0065, the difference between the SVD of W and of
 W.T, moves alpha from 3.275 to 2.857 in the release and here alike. Over
 gpt2's 48 matrices, measuring W instead of W.T moves the mean by 1.3e-4
 (relative; 2000-windows, at most 0.8% per matrix) and by 6.2e-3 (512-windows,
-at most 14% per matrix): a rounding-noise floor of each headline.
+at most 14% per matrix); running the same SVDs at 1 vs 7 torch threads moves
+it by 7.8e-4 (46 of 48 matrices change, at most 11.9%) and by 4.9e-3 (at most
+14.6%). That is the rounding-noise floor of each headline, and CPU and GPU
+runs differ the same way. Within float32 of the release, float64 window SVDs
+rounded to float32 would make it thread-stable; that is not done here.
+
+Every nn.Linear in the blocks is measured, including small gate projections
+(Qwen3.5's 16 x 1024 linear-attention ``in_proj_a`` / ``in_proj_b``: fifteen
+16 x 16 windows each, alpha 1.5-2.0 against 2.3-5.2 for the other matrices of
+the same layers), which pull the mean down; the release only ran on LLaMA.
 ``_meta_n_peak_bin_near_tie`` (runner-up bin within 1% of the peak count; 19
 and 21 of gpt2's 48) and ``_meta_n_xmin_at_candidate_cap`` (xmin within 1% of
 the range below the cap) count the matrices exposed to this.
@@ -281,11 +290,14 @@ def _farms_matrices(model):
     equivalent ``W.T``.
 
     Counted, not measured: Conv2d weights (the release has a separate conv path;
-    no LLM block in the study has one) and every other weight tensor of 2 or
-    more dimensions in the blocks (packed MoE experts, torch Conv1d kernels),
-    which the release's ``isinstance(m, nn.Linear)`` does not see either.
+    no LLM block in the study has one), packed MoE expert tensors (transformers
+    5 stores experts as 3-D parameters, which ``isinstance(m, nn.Linear)``
+    misses; under the release's pinned transformers 4.35, Mixtral's experts were
+    nn.Linear and would be measured) and every other weight tensor of 2 or more
+    dimensions in the blocks (torch Conv1d kernels).
     """
-    counts = {"conv1d_included": 0, "conv2d_skipped": 0, "other_weight_tensors_unmeasured": 0}
+    counts = {"conv1d_included": 0, "conv2d_skipped": 0, "other_weight_tensors_unmeasured": 0,
+              "packed_expert_tensors": 0}
     blocks = get_layers(model)
     if blocks is None:
         return [], [], counts
@@ -303,8 +315,11 @@ def _farms_matrices(model):
         elif isinstance(m, torch.nn.Conv2d):
             counts["conv2d_skipped"] += 1
         else:
-            counts["other_weight_tensors_unmeasured"] += sum(
-                1 for _, p in m.named_parameters(recurse=False) if p.dim() >= 2)
+            params = [p for _, p in m.named_parameters(recurse=False) if p.dim() >= 2]
+            counts["packed_expert_tensors"] += sum(1 for p in params if p.dim() >= 3
+                                                   and "expert" in rel.lower())
+            counts["other_weight_tensors_unmeasured"] += sum(1 for p in params if not (
+                p.dim() >= 3 and "expert" in rel.lower()))
     return names, mats, counts
 
 
@@ -428,4 +443,5 @@ class FARMSAlphaTask(DiagnosticTask):
         out["_meta_n_conv1d_included"] = counts["conv1d_included"]
         out["_meta_n_conv2d_skipped"] = counts["conv2d_skipped"]
         out["_meta_n_other_weight_tensors_unmeasured"] = counts["other_weight_tensors_unmeasured"]
+        out["_meta_n_packed_expert_tensors"] = counts["packed_expert_tensors"]
         return out

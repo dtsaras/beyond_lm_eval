@@ -553,8 +553,9 @@ geometry_predictive_information:
 
 geometry_ww_randomized:
   # Seed of the np.random.RandomState that shuffles each weight matrix's entries
-  # (the release shuffles with the unseeded global np.random; analyze() after
-  # np.random.seed(shuffle_seed) draws the same shuffles).
+  # (the release shuffles with the unseeded global np.random; analyze(layers=...)
+  # over the same modules after np.random.seed(shuffle_seed) draws the same
+  # shuffles).
   shuffle_seed: 42
 
 geometry_rogue_dimensions:

@@ -306,10 +306,16 @@ def _ww_matrices(model):
     targets = (torch.nn.Linear,) + ((_HFConv1D,) if _HFConv1D is not None else ())
     convs = (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
     counts = {"outside_lm": 0, "conv_kernels_skipped": 0, "below_min_evals": 0,
-              "above_max_evals": 0, "above_max_n": 0, "head_tagged": 0}
+              "above_max_evals": 0, "above_max_n": 0, "head_tagged": 0,
+              "packed_expert_tensors": 0}
     names, weights = [], []
     for name, module in model.named_modules():
         if not isinstance(module, targets + convs):
+            # transformers 5 packs MoE experts into 3-D parameters of a plain
+            # module, which WeightWatcher's layer types do not cover: counted.
+            if lm_ids is None or id(module) in lm_ids:
+                counts["packed_expert_tensors"] += sum(
+                    1 for _, p in module.named_parameters(recurse=False) if p.dim() >= 3)
             continue
         w = module._parameters.get("weight")
         if w is None:
@@ -403,10 +409,13 @@ class WWRandomizedTask(DiagnosticTask):
         "measures it without CUDA (float32 weights, float64 scipy SVDs; with CUDA the release reads "
         "float16 weights and runs float32 SVDs), over the language model's Linear and HF Conv1D "
         "weights that the release's layer_supported admits (8 <= M <= 15000, N <= 50000, so a "
-        "vocabulary head above 50000 rows is skipped as the release skips it). "
+        "vocabulary head above 50000 rows is skipped as the release skips it); unlike a plain "
+        "analyze(), nn.Embedding tables are not measured, and packed MoE expert tensors "
+        "(transformers 5) are counted in _meta_n_packed_expert_tensors. "
         "The release's unseeded global np.random shuffle is replaced by np.random.RandomState("
-        "shuffle_seed), consumed in the release's order, so analyze() after "
-        "np.random.seed(shuffle_seed) shuffles identically; one draw per model gives the nulls. "
+        "shuffle_seed), consumed in the release's order, so analyze(layers=<these modules>) after "
+        "np.random.seed(shuffle_seed) shuffles identically (a plain analyze() first spends shuffles "
+        "on the embeddings); one draw per model gives the nulls. "
         "Where the release reports -1 for a failed MP or power-law fit, and ERG_gap = detX_num + 1 "
         "after a failed power-law fit, BLME reports NaN and counts the failures. "
         "The release's detX_num multiplies float64 suffix products, which underflow on wide "
@@ -475,6 +484,7 @@ class WWRandomizedTask(DiagnosticTask):
         out["_meta_n_below_min_evals"] = counts["below_min_evals"]
         out["_meta_n_above_max_evals"] = counts["above_max_evals"]
         out["_meta_n_above_max_N"] = counts["above_max_n"]
+        out["_meta_n_packed_expert_tensors"] = counts["packed_expert_tensors"]
         out["_meta_shuffle_seed"] = seed
         errors = [f"{n}: {r['mp_fit_error']}" for n, r in zip(names, rows) if "mp_fit_error" in r]
         if errors:

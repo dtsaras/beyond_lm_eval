@@ -101,3 +101,13 @@ def test_headline_invariant_under_identity_blocks(arch):
     base = FE.LMHeadFreeEnergyTask({}).evaluate(model, tok, None)
     ins = FE.LMHeadFreeEnergyTask({}).evaluate(deep, tok, None)
     fd.inv.assert_invariant(base, ins, sorted(FE.LMHeadFreeEnergyTask.SIZE_INVARIANT), rtol=0.0)
+
+
+def test_large_heads_chunk_the_float32_gram(monkeypatch):
+    """Above the single-product limit the float32 Gram is accumulated over row
+    blocks: equal to the one product to float32 rounding."""
+    W = torch.randn(3000, 32, generator=torch.Generator().manual_seed(2))
+    one = FE.head_eigenvalues(W)
+    monkeypatch.setattr(FE, "_SINGLE_PRODUCT_MAX", 1000)
+    chunked = FE.head_eigenvalues(W, chunk=256)
+    np.testing.assert_allclose(chunked, one, rtol=1e-5)

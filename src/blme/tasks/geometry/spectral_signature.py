@@ -12,10 +12,13 @@ alphas, which needs both models, so BLME reports the per-model profile
 (``_meta_``) and its mean and median.
 
 The matrix population follows the released ``get_module_names_shapes`` and
-``net_esd_estimator`` (Ingrid-505/Spectral_Signature@d04eacd): Linear, HF
-Conv1D and Conv2d weights, Linear weights with an aspect ratio of 8 or more
+``net_esd_estimator`` (Ingrid-505/Spectral_Signature@d04eacd): Linear and HF
+Conv1D weights (the release's Conv2d branch is unreachable here, since torch
+convolutions are skipped), Linear weights with an aspect ratio of 8 or more
 skipped (the LM head), fused QKV weights of attention modules split into
-three, and packed 3-D expert weights split per expert. Two departures, each
+three contiguous row blocks, and packed 3-D expert weights split per expert.
+The row split is the release's: on GPT-NeoX, whose query_key_value is
+interleaved per head, the three blocks are head-group mixtures, not Q, K and V. Two departures, each
 counted in ``_meta_``: torch convolution kernels are skipped (the release's
 packed-expert branch would read Qwen3.5's depthwise ``conv1d`` (C, 1, 4) as C
 one-eigenvalue "experts", each with alpha = inf), and only the language model
@@ -128,8 +131,9 @@ class SpectralSignatureTask(DiagnosticTask):
     SOURCES = {
         "paper": "arXiv:2607.03377 (Zhang et al. 2026, Spectral Signatures of Large Language Models)",
         "code": "Ingrid-505/Spectral_Signature@d04eacd9689b8922074e7bc2188bdac1d52e6a85",
-        "llm_precedent": ("arXiv:2410.10912 (Lu et al. 2024, AlphaPruning: the same xmin_mid "
-                          "PL_Alpha_Hill per weight matrix of LLaMA-family LLMs)"),
+        "llm_precedent": ("arXiv:2410.10912 (Lu et al. 2024, AlphaPruning: xmin_mid PL_Alpha_Hill "
+                          "per Linear of LLaMA-family blocks, without the 1e-5 eigenvalue cut or "
+                          "the QKV / expert splits)"),
     }
     ADAPTATION_NOTE = (
         "Each weight matrix's heavy-tail exponent is the Hill estimate over the upper half of "

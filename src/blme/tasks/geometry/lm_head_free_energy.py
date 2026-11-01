@@ -29,12 +29,18 @@ from ..common import get_lm_head
 logger = logging.getLogger("blme")
 
 
+# One float32 product, as the release, up to this many head entries (1 GB).
+_SINGLE_PRODUCT_MAX = 2 ** 28
+
+
 def head_eigenvalues(W, dtype=torch.float32, chunk=16384):
     """``eigvalsh(W.T @ W)`` of the (vocab, d) head in ``dtype``, ascending.
-    float32 forms the Gram in one product, as the release does; float64
-    accumulates it over row chunks so no float64 copy of the head is made."""
+    float32 forms the Gram in one product, as the release does, for a head of
+    up to 2**28 entries (gpt2, Pythia, Qwen2.5-0.5B); a larger head, and every
+    float64 Gram, accumulates it over ``chunk``-row blocks so no full-size
+    float32/float64 copy is made (a 262144 x 5376 head is 5.6 GB in float32)."""
     W = W.detach()
-    if dtype == torch.float32:
+    if dtype == torch.float32 and W.numel() <= _SINGLE_PRODUCT_MAX:
         W32 = W.to(torch.float32)
         G = W32.T @ W32
     else:
@@ -74,7 +80,9 @@ class LMHeadFreeEnergyTask(DiagnosticTask):
         "with no jitter (pythia_ww.bfe_w; the Qwen script's 1e-20 jitter changes nothing for a "
         "full-rank head). A non-positive eigenvalue gives NaN where the release raises. The "
         "float32 Gram loses the smallest eigenvalues of an ill-conditioned head (gpt2: 12% on "
-        "the smallest, 8.8e-5 on BFE-W), so the float64 value is _meta_. BFE-W is unchanged by "
+        "the smallest, 8.8e-5 on BFE-W, and 1e-4 between thread counts), so the float64 value "
+        "is _meta_; heads above 2**28 entries form the float32 Gram over row chunks (a 262k "
+        "vocabulary would otherwise need a 5.6 GB float32 copy). BFE-W is unchanged by "
         "rescaling or rotating the head and by inserted blocks; zero-padding the width adds "
         "zero eigenvalues, where it is undefined."
     )
@@ -88,6 +96,9 @@ class LMHeadFreeEnergyTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running LM-head spectral free energy (BFE-W)...")
+        # float32 Gram of an ill-conditioned head depends on the thread count
+        # (gpt2, condition 1.5e7: 1.72666-1.72677 over 1-8 threads); the
+        # float64 value in _meta_ does not.
         head = get_lm_head(model)
         if head is None or getattr(head, "weight", None) is None:
             return {"error": "Could not find the output unembedding"}
