@@ -532,6 +532,13 @@ geometry_farms_alpha:
   q_ratio: 1.0
   sampling_ops_per_dim: 15
 
+geometry_representation_dispersion:
+  # yanhong-lbh/rep_dispersion scripts/run_global_dispersion.sh: 512-token
+  # chunks of WikiText validation, at most 10000 (sampled with seed 42).
+  chunk_len: 512
+  n_chunks: 10000
+  chunk_seed: 42
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

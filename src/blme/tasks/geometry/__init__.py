@@ -38,3 +38,4 @@ from .alpha_req import AlphaReQTask
 from .spectral_signature import SpectralSignatureTask
 from .gride import GrideProfileTask, InformationImbalanceTask
 from .farms import FARMSAlphaTask
+from .dispersion import RepresentationDispersionTask

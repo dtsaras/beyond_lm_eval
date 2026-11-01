@@ -346,6 +346,10 @@ tasks:
     q_ratio: 1.0
     sampling_ops_per_dim: 15
 
+  geometry_representation_dispersion:
+    chunk_len: 512
+    n_chunks: 10000
+
   dynamics_fractal:
     num_samples: 100
     holder_eps: 0.005
