@@ -79,9 +79,9 @@ print(results["results"]["geometry_svd"]["effective_rank"])
 
 ## Module Overview
 
-BLME organizes **90 diagnostic tasks** across 7 categories:
+BLME organizes **91 diagnostic tasks** across 7 categories:
 
-- **[Geometry](tasks_geometry.md)** (38 tasks): Manifold structure — isotropy, intrinsic dimension (Two-NN, LID, PHD), CKA/CKNNA, Schatten/MNN spectra, collapse, Lipschitz constants, trajectory curvature, Vendi score, metric magnitude, Procrustes layer-linearity, superposition strength, effective depth
+- **[Geometry](tasks_geometry.md)** (39 tasks): Manifold structure — isotropy, intrinsic dimension (Two-NN, LID, PHD), CKA/CKNNA, Schatten/MNN spectra, collapse, Lipschitz constants, trajectory curvature, Vendi score, metric magnitude, Procrustes layer-linearity, superposition strength, effective depth
 - **[Interpretability](tasks_interpretability.md)** (17 tasks): Internal mechanisms — logit lens, attention entropy/rollout, activation sinks/kurtosis, probing, sparsity, superposition index
 - **[Topology](tasks_topology.md)** (5 tasks): Manifold shape — persistent homology, Betti curves, persistence entropy/landscapes, zigzag persistence
 - **[Causality](tasks_causality.md)** (6 tasks): Information flow — causal tracing, ablation robustness, attention knockout, circuit quality

@@ -37,3 +37,4 @@ from .effective_depth import EffectiveDepthTask
 from .alpha_req import AlphaReQTask
 from .spectral_signature import SpectralSignatureTask
 from .gride import GrideProfileTask, InformationImbalanceTask
+from .farms import FARMSAlphaTask

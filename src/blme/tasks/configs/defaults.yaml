@@ -507,6 +507,17 @@ geometry_gride:
 geometry_information_imbalance:
   num_samples: 1000
 
+geometry_farms_alpha:
+  # The released FARMS LLM configuration (HUST-AI-HYZ/FARMS
+  # LLM_Pruning/scripts/llm_pruning_main.txt, alpha_peak_farms rows): windows of
+  # r = min(num_row_samples, rows, cols) rows by int(r * q_ratio) columns on a
+  # grid of at most sampling_ops_per_dim x sampling_ops_per_dim windows
+  # (sampling_ops_per_dim >= 2). These set farms_alpha_mean only;
+  # farms_alpha_mean_w512 always uses 512 x 512 windows on a 15 x 15 grid.
+  num_row_samples: 2000
+  q_ratio: 1.0
+  sampling_ops_per_dim: 15
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).
