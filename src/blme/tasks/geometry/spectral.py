@@ -12,6 +12,30 @@ try:
 except Exception:
     _HFConv1D = None
 
+# WeightWatcher's DEFAULT_MIN_EVALS (constants.py:144): a layer whose smallest
+# weight dimension is below it is not analysed (weightwatcher.py:1733). Live
+# 0.7.7 skips Qwen3.5's depthwise conv1d (C, 1, 4) this way.
+_WW_MIN_EVALS = 8
+
+
+def _language_model_modules(model, out_emb):
+    """ids of the language model's modules: ``get_decoder()`` plus the output
+    embedding for a transformers model, so a multimodal checkpoint's vision and
+    audio towers (Gemma 3: 162 SigLIP projections) are not scanned. None (scan
+    everything) for a module without ``get_decoder``."""
+    if not hasattr(model, "get_decoder"):
+        return None
+    try:
+        dec = model.get_decoder()
+    except Exception:
+        return None
+    if not isinstance(dec, torch.nn.Module):
+        return None
+    keep = {id(m) for m in dec.modules()}
+    if isinstance(out_emb, torch.nn.Module):
+        keep |= {id(m) for m in out_emb.modules()}
+    return keep
+
 
 def _pl_mle_alpha_ks(evals: "np.ndarray", min_tail: int = 2) -> tuple:
     """WeightWatcher's power-law fit of an eigenvalue spectrum lambda = sigma^2.
@@ -178,7 +202,9 @@ class WeightSpectralTask(DiagnosticTask):
         except Exception:
             _out_emb = None
         _EXCLUDE_SUFFIXES = ("lm_head", "embed_out", "output_projection")
+        _lm_ids = _language_model_modules(model, _out_emb)
         modules_to_scan, _n_excluded = [], 0
+        _n_outside_lm, _n_below_min_evals = 0, 0
         for name, module in model.named_modules():
             if isinstance(module, TARGET_MODULES):
                 if "weight" in module._parameters and module.weight is not None:
@@ -187,6 +213,12 @@ class WeightSpectralTask(DiagnosticTask):
                         (module is _out_emb)
                         or _leaf in _EXCLUDE_SUFFIXES
                         or name in _EXCLUDE_SUFFIXES)
+                    if _lm_ids is not None and id(module) not in _lm_ids and not _is_head:
+                        _n_outside_lm += 1
+                        continue
+                    if min(module.weight.shape) < _WW_MIN_EVALS:
+                        _n_below_min_evals += 1
+                        continue
                     if _is_head:
                         _n_excluded += 1
                     modules_to_scan.append((name, module, _is_head))
@@ -202,7 +234,8 @@ class WeightSpectralTask(DiagnosticTask):
         for name, module, _is_head in tqdm(modules_to_scan, desc="Analyzing Weights"):
             W = module.weight.detach().float()
 
-            # Conv kernels fold to (out, in * prod(kernel)), as WeightWatcher.
+            # A conv kernel past the min_evals gate folds to (out, in * prod(kernel)).
+            # WeightWatcher defines no matrix for it (its SVD rejects the 3-D tensor).
             if W.dim() > 2:
                 W = W.reshape(W.shape[0], -1)
             if W.dim() != 2:
@@ -319,6 +352,8 @@ class WeightSpectralTask(DiagnosticTask):
         results["_meta_tail_fraction"] = tail_fraction
 
         results["_meta_n_modules_scanned"] = int(len(modules_to_scan))
+        results["_meta_n_modules_outside_lm"] = int(_n_outside_lm)
+        results["_meta_n_modules_below_min_evals"] = int(_n_below_min_evals)
         results["_meta_n_head_modules_tagged"] = int(_n_excluded)
         # Modules above the old hard cap of 20 (censored before the clip went).
         results["_meta_n_alpha_over_old_cap"] = int(_n_alpha_over_cap[0])

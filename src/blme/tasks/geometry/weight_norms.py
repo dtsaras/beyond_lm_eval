@@ -105,7 +105,9 @@ class WeightNormProfileTask(DiagnosticTask):
         "is scale-free per matrix but moves when Q, K and V are fused into one matrix. "
         "The headline stable rank is the raw value, which zero-padding leaves unchanged; "
         "divided by min(m, n) it halves under the same padding, so that ratio is kept "
-        "only as a _meta_ fraction of capacity."
+        "only as a _meta_ fraction of capacity. Convolution kernels (Qwen3.5's depthwise "
+        "conv1d, shape (C, 1, 4)) are not linear maps between feature spaces and are "
+        "skipped, as WeightWatcher's min_evals gate skips them."
     )
     HEADLINE_KEYS = ("mean_frobenius_norm", "mean_spectral_norm", "mean_stable_rank",
                      "norm_uniformity")
@@ -125,16 +127,25 @@ class WeightNormProfileTask(DiagnosticTask):
         spec_per_layer = []
         srank_per_layer = []
         srank_norm_per_layer, rms_per_layer = [], []
+        n_conv_skipped = 0
 
         for li, layer in enumerate(layers):
             frob_vals = []
             spec_vals = []
             srank_vals = []
             srank_norm_vals, rms_vals = [], []
+            # Reshaped as a matrix stack, a (C, 1, k) kernel reads as C matrices of
+            # 1 x k (stable rank ~1): Qwen3.5-0.8B layer 0 gave 1.08 instead of 63.25.
+            conv_ids = {id(p) for m in layer.modules()
+                        if isinstance(m, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d))
+                        for p in m.parameters(recurse=False)}
 
             for name, param in layer.named_parameters():
                 if param.ndim < 2:
                     continue  # skip biases and norms
+                if id(param) in conv_ids:
+                    n_conv_skipped += 1
+                    continue
                 # Conv1D (GPT-2) stores (in, out), Linear (out, in); every
                 # statistic here is transpose-invariant. Stable rank is clipped
                 # to min(W.shape) inside the helper.
@@ -184,4 +195,5 @@ class WeightNormProfileTask(DiagnosticTask):
                 if rms_per_layer else float("nan")),
             "norm_uniformity": norm_uniformity,
             "_meta_n_layers": n_layers,
+            "_meta_n_conv_kernels_skipped": n_conv_skipped,
         }
