@@ -2,10 +2,10 @@
 
 This module contains metrics that use causal interventions or attribution proxies (ablations, tracing, knockouts, saliency, and first-order patching) to test whether specific parameters or activations influence an LLM's outputs. These diagnostics provide evidence about mechanism; they do not by themselves prove a complete causal circuit.
 
-**Current registry coverage (6 tasks)**: `causality_ablation`,
+**Current registry coverage (7 tasks)**: `causality_ablation`,
 `causality_attention_knockout`, `causality_circuit_quality`,
-`causality_edge_attribution`, `causality_knowledge_neurons`, and
-`causality_tracing`.
+`causality_edge_attribution`, `causality_knowledge_neurons`,
+`causality_layer_skip`, and `causality_tracing`.
 
 **Paper-faithful vs. BLME proxy notes**: `causality_tracing` follows the
 ROME-style causal tracing setup. `causality_edge_attribution` is a simplified
@@ -63,3 +63,11 @@ not a full implementation of ACDC or causal scrubbing.
 * **Citation/Paper**: `Dai, D., Dong, L., Hao, Y., Sui, Z., Chang, B., & Wei, F. (2022). Knowledge Neurons in Pretrained Transformers.` [ACL 2022, ArXiv: 2104.08696]
 * **File & Function**: `src/blme/tasks/causality/knowledge_neurons.py` -> `KnowledgeNeuronsTask`
 * **Critical Info**: This saliency diagnostic localizes candidate neurons; it does not implement Dai et al.'s full integrated-gradient thresholding or fact editing/validation protocol.
+
+## 7. Layer-Skip Effect Profile
+* **What are we measuring**: How much the model's later computation and its output depend on each block, and the depth at which that dependence sits (Csordas et al.'s depth score).
+* **How are we measuring**: For each prompt, 4 split points t are drawn from range(8, T-4, 8). Block s is skipped (its output set to its input) on tokens 1..t-1, and on tokens >= t we record the largest relative change of every block's contribution ||c - c'|| / ||c|| and the largest L2 change of the output distribution ||p - p'||. Both are maximised over split points and the 10 prompts. A block's importance is its mean effect on the later blocks; the depth score is d = sum_s s * e_s / sum_s e_s (s = 1..L), reported for the future-computation and the output effects, and divided by L in the `*_ratio` keys.
+* **Hypothesis**: Csordas et al. find that layers in the second half contribute little to later computation, so deeper models do not compose deeper computations; a low depth-score ratio means the model's effective depth is a small share of its nominal depth.
+* **Citation/Paper**: `Csordas, R., Manning, C. D., & Potts, C. (2025). Do Language Models Use Their Depth Efficiently?` [NeurIPS 2025, ArXiv: 2505.13898]; code robertcsordas/llm_effective_depth.
+* **File & Function**: `src/blme/tasks/causality/layer_skip.py` -> `LayerSkipEffectTask`
+* **Critical Info**: Costs 4 L forward passes per prompt (40 L at the default 10 prompts). The release uses GSM8K problems with their solutions; BLME uses corpus passages up to 512 tokens. The depth score follows the paper's 1-based layer index (the release's `effect_layer_score` is 0-based). `skip_output_effect_total` and `skip_output_effect_max` are unchanged by inserting identity blocks; the depth-score ratios are not, since an appended identity block lowers them by L0 / L. The maxima over tokens and prompts grow with the prompt length and count, so compare models at the same `num_samples` and `max_length`.

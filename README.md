@@ -10,14 +10,14 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**91 diagnostic tasks** across 7 categories:
+**92 diagnostic tasks** across 7 categories:
 
 | Category | Count | Examples | What it measures |
 |----------|-------|----------|-----------------|
 | **Geometry** | 39 | SVD isotropy, LID, CKA/CKNNA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation, Vendi, magnitude, PHD, Procrustes linearity, superposition strength, effective depth | Representation space structure |
 | **Interpretability** | 17 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
 | **Consistency** | 12 | Calibration, paraphrase / logical / contrastive invariance, ICL slope, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
-| **Causality** | 6 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons | Information flow |
+| **Causality** | 7 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons, layer skip | Information flow |
 | **Dynamics** | 8 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth | Temporal behavior |
 | **RepE** | 4 | Task vectors, concept separability, steering effectiveness, refusal direction | Concept encoding |
 | **Topology** | 5 | Persistent homology, Betti curves, persistence entropy / landscape, zigzag persistence | Manifold shape |

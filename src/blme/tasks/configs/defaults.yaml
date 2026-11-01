@@ -215,6 +215,14 @@ causality_edge_attribution:
 
 causality_knowledge_neurons: {}
 
+# Csordas et al. 2025, analyze_future_effects.py: 10 prompts, 4 split points
+# each from range(8, T-4, 8), Python random seeded 123.
+causality_layer_skip:
+  num_samples: 10
+  n_positions: 4
+  position_seed: 123
+  max_length: 512
+
 # ---- Interpretability Tasks ----
 interpretability_logit_lens:
   num_samples: 100

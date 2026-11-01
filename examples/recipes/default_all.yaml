@@ -153,7 +153,7 @@ tasks:
     n_neighbors: 5
     persistence_frac: 0.3
 
-  # ---- Causality Tasks (6) ----
+  # ---- Causality Tasks (7) ----
   causality_tracing:
     num_samples: 3
     # noise_std intentionally unset so the task computes 3 x sigma(E) per
@@ -175,6 +175,9 @@ tasks:
     num_samples: 10
 
   causality_knowledge_neurons: {}
+
+  causality_layer_skip:
+    num_samples: 10
 
   # ---- Interpretability Tasks (15) ----
   interpretability_logit_lens:

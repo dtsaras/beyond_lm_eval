@@ -4,3 +4,4 @@ from .attention_knockout import AttentionKnockoutTask
 from .circuit_quality import CircuitQualityTask
 from .knowledge_neurons import KnowledgeNeuronsTask
 from .edge_attribution import EdgeAttributionTask
+from .layer_skip import LayerSkipEffectTask
