@@ -117,10 +117,12 @@ class RepresentationDispersionTask(DiagnosticTask):
                 # state after the final norm.
                 vecs.append(out.hidden_states[-1][:, -1, :].detach().cpu().float())
         x = torch.cat(vecs, dim=0)
+        bos = getattr(tokenizer, "bos_token_id", None)
         with_bos = tokenizer("a")["input_ids"]
         return {
             "representation_dispersion": average_pairwise_cosine_distance(x),
             "_meta_n_chunks": len(chunks),
             "_meta_chunk_len": chunk_len,
-            "_meta_tokenizer_adds_bos": len(with_bos) > len(tokenizer.encode("a", add_special_tokens=False)),
+            # A BOS the tokenizer prepends (OLMo appends an EOS instead).
+            "_meta_tokenizer_adds_bos": bool(bos is not None and with_bos and with_bos[0] == bos),
         }

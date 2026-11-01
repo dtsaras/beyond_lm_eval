@@ -15,7 +15,9 @@ point, the Gromov products are (x|y)_p = (d(x,p) + d(y,p) - d(x,y)) / 2 and
     delta = max_{x,y} [ max_z min((x|z)_p, (z|y)_p) - (x|y)_p ],
 
 reported relative to the cloud's diameter as 2 delta / diam (0 for a tree
-metric, about 1 for points on a sphere of large dimension).
+metric). It also falls with dimension, since distances concentrate (64 uniform
+points on S^1: 0.58, S^767: 0.11, S^4095: 0.05; an equilateral cloud: 0), so
+a low value across widths is not by itself tree-likeness.
 """
 import logging
 
