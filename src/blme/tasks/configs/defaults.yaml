@@ -493,6 +493,8 @@ geometry_alpha_req:
   # (a second collection pass).
   profile: false
 
+geometry_spectral_signature: {}
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

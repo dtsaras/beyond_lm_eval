@@ -43,6 +43,13 @@ def ref():
     return alpha, rankme, utils
 
 
+def test_sources_pin_the_cloned_commit(ref):
+    import subprocess
+    head = subprocess.run(["git", "-C", _REPO, "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    assert A.AlphaReQTask.SOURCES["code"].endswith("@" + head)
+
+
 def _clouds():
     """Power-law clouds wider and narrower than N, and an isotropic one."""
     rng = np.random.default_rng(0)

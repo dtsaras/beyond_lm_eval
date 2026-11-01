@@ -35,3 +35,4 @@ from .superposition_strength import SuperpositionStrengthTask
 from .effective_depth import EffectiveDepthTask
 # 2026-11 additions (missed-metrics surveys, beyond_benchmarks docs/2026-11-01-*)
 from .alpha_req import AlphaReQTask
+from .spectral_signature import SpectralSignatureTask
