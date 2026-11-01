@@ -557,6 +557,16 @@ geometry_ww_randomized:
   # np.random.seed(shuffle_seed) draws the same shuffles).
   shuffle_seed: 42
 
+interpretability_logit_lens_kl:
+  # The first num_samples passages of the corpus, each truncated to max_length
+  # tokens; a short passage is not replaced by a later one. Every position but
+  # the sinks (position 0 and massive-activation rows) is decoded at every block.
+  num_samples: 100
+  max_length: 512
+  # Positions x vocabulary elements decoded at once. Memory only: values agree
+  # across settings to float32 rounding of the unembedding matmul.
+  chunk_elements: 4194304
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

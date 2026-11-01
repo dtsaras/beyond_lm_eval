@@ -17,3 +17,5 @@ from .activation_sinks import ActivationSinksTask
 from .activation_kurtosis import ActivationKurtosisTask
 # Campaign-2 Wave-2/3 addition (2026-07, Abnar rollout parity-verified)
 from .attention_rollout import AttentionRolloutTask
+# 2026-11 addition (Hu et al. 2025 logit-lens AUC / time to decision)
+from .logit_lens_kl import LogitLensKLTask

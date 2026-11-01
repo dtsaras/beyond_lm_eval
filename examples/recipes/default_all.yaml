@@ -360,6 +360,10 @@ tasks:
   geometry_ww_randomized:
     shuffle_seed: 42
 
+  interpretability_logit_lens_kl:
+    num_samples: 100
+    max_length: 512
+
   dynamics_fractal:
     num_samples: 100
     holder_eps: 0.005
