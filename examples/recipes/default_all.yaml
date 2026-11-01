@@ -318,6 +318,9 @@ tasks:
   consistency_icl_slope:
     shot_counts: [0, 1, 2, 4]
 
+  consistency_icl_score:
+    num_samples: 2000
+
   # ---- Campaign-4 B8 additions (2026-07) ----
   geometry_superposition_strength:
     max_pairs: 200000

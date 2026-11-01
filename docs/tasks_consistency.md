@@ -2,10 +2,10 @@
 
 This module evaluates the mathematical reliability and internal logical coherence of the model's likelihood representations, independent of ground-truth accuracy.
 
-**Current registry coverage (12 tasks)**: `consistency_bias_weat`,
+**Current registry coverage (13 tasks)**: `consistency_bias_weat`,
 `consistency_calibration`, `consistency_contamination`,
 `consistency_contrastive`, `consistency_format_robustness`,
-`consistency_icl_slope`, `consistency_knowledge_capacity`,
+`consistency_icl_score`, `consistency_icl_slope`, `consistency_knowledge_capacity`,
 `consistency_logical`, `consistency_membership_inference`,
 `consistency_paraphrase`, `consistency_position_sensitivity`, and
 `consistency_self_consistency`.
@@ -113,3 +113,11 @@ proxy because BLME does not know the model's actual training set.
 * **Citation/Paper**: `Brown et al. (2020). Language Models are Few-Shot Learners.` and `Min et al. (2022). Rethinking the Role of Demonstrations.`
 * **File & Function**: `src/blme/tasks/consistency/icl_slope.py` -> `ICLSlopeTask`
 * **Critical Info**: Uses a small intrinsic bundle; use task-specific datasets for paper-grade ICL claims.
+
+## 13. Olsson ICL Score
+* **What are we measuring**: How much the preceding context lowers the loss within a document.
+* **How are we measuring**: The loss of the 500th token of each context minus the loss of its 50th token, averaged over the starts of 2000 whole WikiText-103 articles (at least 4096 bytes each, so every model scores the same text). `icl_score_byte_anchored` takes the same difference at the tokens covering bytes 200 and 2000.
+* **Hypothesis**: Olsson et al. find that the score drops sharply when induction heads form during training; a more negative score means the model uses more of its context.
+* **Citation/Paper**: `Olsson, C., et al. (2022). In-context Learning and Induction Heads.` [Transformer Circuits Thread, ArXiv: 2209.11895]
+* **File & Function**: `src/blme/tasks/consistency/icl_score.py` -> `ICLScoreTask`
+* **Critical Info**: One forward pass per context (up to 1024 tokens). The 500th token of one tokenizer is a different word of the text than another's; the byte-anchored twin fixes the positions but not the per-token loss units. Single-token losses are noisy, so `_meta_icl_score_se` reports the standard error.

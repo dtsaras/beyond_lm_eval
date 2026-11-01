@@ -10,3 +10,4 @@ from .self_consistency import SelfConsistencyTask
 from .bias import WEATBiasTask
 from .membership_inference import MembershipInferenceTask
 from .icl_slope import ICLSlopeTask
+from .icl_score import ICLScoreTask

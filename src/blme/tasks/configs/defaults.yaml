@@ -374,6 +374,12 @@ consistency_membership_inference: {}
 consistency_icl_slope:
   shot_counts: [0, 1, 2, 4]
 
+# Olsson et al. 2022: NLL(token 500) - NLL(token 50) over whole-article
+# contexts of at least 4096 bytes.
+consistency_icl_score:
+  num_samples: 2000
+  max_length: 1024
+
 # ---- Representation Engineering Tasks ----
 repe_task_vectors:
   num_samples: 5
