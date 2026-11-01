@@ -53,7 +53,8 @@ def dadapy():
 
 
 @pytest.mark.parametrize("repo,task", [("DADApy", G.GrideProfileTask),
-                                        ("id-llm-abstraction", G.InformationImbalanceTask)])
+                                        ("id-llm-abstraction", G.InformationImbalanceTask),
+                                        ("DADApy", G.NeighborhoodOverlapTask)])
 def test_sources_pin_the_cloned_commits(repo, task):
     path = os.path.join(_ROOT, repo)
     if not os.path.isdir(path):
@@ -136,3 +137,28 @@ def test_evaluate_matches_dadapy_per_layer(dadapy):
     rng = np.random.default_rng(0)
     assert ii["ii_first_to_last"] == ret_imb(ref_idx[0], ref_idx[-1], rng, k=1)
     assert ii["ii_last_to_first"] == ret_imb(ref_idx[-1], ref_idx[0], rng, k=1)
+
+
+@pytest.mark.parametrize("seed,k", [(0, 30), (1, 10)])
+def test_neighbourhood_overlap_matches_dadapy(dadapy, seed, k):
+    dp, _ = dadapy
+    from dadapy import NeighborhoodOverlap
+    A = _manifold(400, 3, 24, seed)
+    B = np.tanh(A @ np.random.default_rng(seed + 7).standard_normal((24, 24)))
+    ref = NeighborhoodOverlap(A.copy(), verbose=False).return_data_overlap(B.copy(), k=k)
+    got = G._neighbourhood_overlap(G._full_rank_indices(A), G._full_rank_indices(B), k)
+    assert got == pytest.approx(ref, abs=1e-15)
+    assert G._neighbourhood_overlap(G._full_rank_indices(A), G._full_rank_indices(A), k) == 1.0
+
+
+def test_neighbourhood_overlap_evaluate_matches_dadapy(dadapy):
+    from dadapy import NeighborhoodOverlap
+    docs = _layered_states()
+    r = inv.run_task_on_states("geometry_neighborhood_overlap", docs, config={"k": 30})
+    clouds = [torch.stack([doc[-1] for doc in docs[l]]).double().numpy() for l in sorted(docs)]
+    ref = [NeighborhoodOverlap(X.copy(), verbose=False).return_data_overlap(clouds[-1].copy(), k=30)
+           for X in clouds]
+    assert r["nn_overlap_layer_to_last"] == pytest.approx(ref, abs=1e-15)
+    adj = [NeighborhoodOverlap(a.copy(), verbose=False).return_data_overlap(b.copy(), k=30)
+           for a, b in zip(clouds, clouds[1:])]
+    assert r["nn_overlap_adjacent_min"] == pytest.approx(min(adj), abs=1e-15)

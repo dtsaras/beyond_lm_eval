@@ -521,6 +521,11 @@ geometry_gride:
 geometry_information_imbalance:
   num_samples: 1000
 
+geometry_neighborhood_overlap:
+  # DADApy return_data_overlap's default k.
+  num_samples: 1000
+  k: 30
+
 geometry_farms_alpha:
   # The released FARMS LLM configuration (HUST-AI-HYZ/FARMS
   # LLM_Pruning/scripts/llm_pruning_main.txt, alpha_peak_farms rows): windows of

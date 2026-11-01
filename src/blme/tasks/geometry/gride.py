@@ -118,6 +118,14 @@ def _full_rank_indices(X):
     return np.argsort(d2, axis=1, kind="stable")
 
 
+def _neighbourhood_overlap(idx_a, idx_b, k):
+    """``NeighborhoodOverlap.return_data_overlap(k)``: the mean fraction of each
+    point's k nearest neighbours (self excluded) shared by the two spaces."""
+    a, b = idx_a[:, 1:k + 1], idx_b[:, 1:k + 1]
+    shared = [np.intersect1d(a[i], b[i]).size for i in range(a.shape[0])]
+    return float(np.mean(shared) / k)
+
+
 def _information_imbalance(idx_a, idx_b):
     """``_return_imbalance(idx_a, idx_b, k=1)`` on full-rank neighbour lists:
     every nearest neighbour has a rank in B, so the release's random rank for
@@ -254,6 +262,59 @@ class InformationImbalanceTask(DiagnosticTask):
             "ii_last_to_layer": from_last,
             "_meta_ii_mid_to_last": to_last[mid],
             "_meta_ii_last_to_mid": from_last[mid],
+            "_meta_n_points": int(sc.n_points),
+            "_meta_n_layers": len(clouds),
+        }
+
+
+@register_task("geometry_neighborhood_overlap")
+class NeighborhoodOverlapTask(DiagnosticTask):
+    """Neighbourhood overlap chi^k between layers (Doimo et al. 2020; DADApy)."""
+
+    TOKEN_POLICY = "last_per_sequence"
+    SOURCES = {
+        "paper": ("arXiv:2007.03506 (Doimo et al. 2020, NeurIPS, hierarchical nucleation); "
+                  "arXiv:2302.00294 (Valeriani et al. 2023, geometry of hidden representations "
+                  "of large transformer models)"),
+        "code": "sissa-data-science/DADApy@d729b8835e771001ec7ba6ca68938b737b96edae",
+        "llm_precedent": ("arXiv:2302.00294 (neighbourhood overlap with k = 30 between the "
+                          "layers of transformer language and protein models)"),
+    }
+    ADAPTATION_NOTE = (
+        "chi^k(A, B) is the mean fraction of each point's k = 30 nearest Euclidean neighbours "
+        "in A that are also among its k nearest in B (DADApy return_data_overlap, the default "
+        "k). BLME scores the clouds of geometry_gride and geometry_information_imbalance (the "
+        "last content token of each of 1000 documents at every HF hidden state after the "
+        "embeddings) and reports the overlap between the first and the last layer, and the "
+        "smallest overlap between adjacent layers, the largest single reorganisation of the "
+        "neighbourhoods. Identity blocks add adjacent pairs with overlap 1 and leave both "
+        "unchanged; the mean adjacent overlap rises with them and is _meta_. Neighbour ranks "
+        "are unchanged by zero-padding, isometric embedding and rescaling at fixed N."
+    )
+    HEADLINE_KEYS = ("nn_overlap_first_last", "nn_overlap_adjacent_min")
+    SIZE_INVARIANT = dict.fromkeys(
+        HEADLINE_KEYS,
+        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+         _INV + "test_headline_invariant[geometry_neighborhood_overlap-no_keys]"))
+
+    def evaluate(self, model, tokenizer, dataset, cache=None):
+        logger.info("Running neighbourhood overlap between layers...")
+        k = int(self.config.get("k", 30))
+        sc, clouds = _layer_clouds(self, model, tokenizer, dataset, cache)
+        if len(clouds) < 2:
+            return {"error": "Neighbourhood overlap needs at least two layers"}
+        if clouds[0].shape[0] <= k:
+            return {"error": f"Neighbourhood overlap needs more than k = {k} points"}
+        idx = [_full_rank_indices(X) for X in clouds]
+        to_last = [_neighbourhood_overlap(i, idx[-1], k) for i in idx]
+        adjacent = [_neighbourhood_overlap(a, b, k) for a, b in zip(idx, idx[1:])]
+        return {
+            "nn_overlap_first_last": to_last[0],
+            "nn_overlap_adjacent_min": float(min(adjacent)),
+            "nn_overlap_layer_to_last": to_last,
+            "nn_overlap_adjacent": adjacent,
+            "_meta_nn_overlap_adjacent_mean": float(np.mean(adjacent)),
+            "_meta_nn_overlap_k": k,
             "_meta_n_points": int(sc.n_points),
             "_meta_n_layers": len(clouds),
         }

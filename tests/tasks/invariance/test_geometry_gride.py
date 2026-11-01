@@ -14,6 +14,7 @@ import invariance as inv  # noqa: E402
 
 GRIDE_KEYS = ["gride_id_peak", "gride_id_last_layer"]
 II_KEYS = ["ii_first_to_last", "ii_last_to_first", "ii_asymmetry_first_last"]
+NO_KEYS = ["nn_overlap_first_last", "nn_overlap_adjacent_min"]
 
 
 @pytest.fixture(scope="module")
@@ -28,8 +29,10 @@ def states():
 
 
 @pytest.mark.parametrize("task,keys", [("geometry_gride", GRIDE_KEYS),
-                                       ("geometry_information_imbalance", II_KEYS)],
-                         ids=["geometry_gride-gride_keys", "geometry_information_imbalance-ii_keys"])
+                                       ("geometry_information_imbalance", II_KEYS),
+                                       ("geometry_neighborhood_overlap", NO_KEYS)],
+                         ids=["geometry_gride-gride_keys", "geometry_information_imbalance-ii_keys",
+                              "geometry_neighborhood_overlap-no_keys"])
 def test_headline_invariant(states, task, keys):
     """Zero-padding and a power-of-two rescale leave the neighbour distances'
     order and ratios unchanged; an isometric embedding agrees to the cache's

@@ -341,6 +341,10 @@ tasks:
   geometry_information_imbalance:
     num_samples: 1000
 
+  geometry_neighborhood_overlap:
+    num_samples: 1000
+    k: 30
+
   geometry_farms_alpha:
     num_row_samples: 2000
     q_ratio: 1.0

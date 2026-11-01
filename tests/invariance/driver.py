@@ -66,6 +66,8 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
     "geometry_alpha_req": {},
     "geometry_gride": {},
     "geometry_information_imbalance": {},
+    # k below the harness fixtures' document counts.
+    "geometry_neighborhood_overlap": {"k": 5},
     "topology_betti_curve": {},
     "topology_homology": {},
     "topology_persistence_entropy": {},
