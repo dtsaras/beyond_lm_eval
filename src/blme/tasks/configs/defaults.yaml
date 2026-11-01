@@ -574,6 +574,17 @@ interpretability_logit_lens_kl:
   # across settings to float32 rounding of the unembedding matmul.
   chunk_elements: 4194304
 
+geometry_dime:
+  # OFSkean/information_flow MTEB-Harness.py run_entropy_metrics: 1000 samples,
+  # max_sample_length 2048 (capped at the model's context), doe n_iters 10.
+  # DiME <= log N, so N is pinned; passages under 30 tokens are dropped.
+  num_samples: 1000
+  min_tokens: 30
+  max_length: 2048
+  n_iters: 10
+  augment_seed: 0
+  perm_seed: 0
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

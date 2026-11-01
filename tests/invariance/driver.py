@@ -85,6 +85,7 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "repe_steering_effectiveness", "repe_task_vectors",
         "geometry_representation_dispersion", "geometry_predictive_information",
         "geometry_rogue_dimensions",
+        "geometry_dime",
     )},
     "topology_zigzag_persistence": (
         "hooks the post-attention-norm sites and the final norm in its own forward"),

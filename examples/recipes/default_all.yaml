@@ -370,6 +370,9 @@ tasks:
     num_samples: 100
     max_length: 512
 
+  geometry_dime:
+    num_samples: 1000
+
   dynamics_fractal:
     num_samples: 100
     holder_eps: 0.005
