@@ -366,6 +366,8 @@ tasks:
 
   geometry_lm_head_free_energy: {}
 
+  geometry_zipfian_symmetry: {}
+
   interpretability_logit_lens_kl:
     num_samples: 100
     max_length: 512

@@ -564,6 +564,8 @@ geometry_rogue_dimensions:
 
 geometry_lm_head_free_energy: {}
 
+geometry_zipfian_symmetry: {}
+
 interpretability_logit_lens_kl:
   # The first num_samples passages of the corpus, each truncated to max_length
   # tokens; a short passage is not replaced by a later one. Every position but
