@@ -47,6 +47,7 @@ EXPECTED_TASKS = [
     "geometry_magnitude",
     "geometry_procrustes_linearity",
     # 2026-11 additions:
+    "geometry_prompt_id",
     "interpretability_inactive_heads",
     "geometry_delta_hyperbolicity",
     "geometry_zipfian_symmetry",
@@ -164,8 +165,8 @@ def test_task_instantiable(task_name):
 def test_task_count():
     """Registry must expose the current 82-task catalog."""
     registered = list_tasks()
-    assert len(registered) == 105, (
-        f"Expected exactly 105 registered tasks, got {len(registered)}"
+    assert len(registered) == 106, (
+        f"Expected exactly 106 registered tasks, got {len(registered)}"
     )
     assert len(registered) >= len(EXPECTED_TASKS), (
         f"Expected at least {len(EXPECTED_TASKS)} tasks, "
@@ -177,4 +178,4 @@ def test_getting_started_docs_task_count():
     """Docs drift guard: getting_started must mention the current task total."""
     from pathlib import Path
     text = Path("docs/getting_started.md").read_text(encoding="utf-8")
-    assert "105 diagnostic tasks" in text
+    assert "106 diagnostic tasks" in text

@@ -601,6 +601,20 @@ interpretability_inactive_heads:
   max_length: 512
   tau: 0.5
 
+geometry_prompt_id:
+  # token_geometry extract_id.py: the first 1024 tokens of each prompt (capped at
+  # the model's context), GRIDE return_id_scaling_gride(range_max=64) read at
+  # n2 = 4. The ID depends on the cloud's size, so a prompt short of max_length
+  # tokens is dropped (_meta_n_prompts_too_short). Articles of >= min_bytes
+  # bytes reach 1024 tokens for any tokenizer under 8 bytes per token. The
+  # release uses 2244 prompts; 256 keeps an 8B model's CPU GRIDE near an hour.
+  num_samples: 256
+  max_length: 1024
+  min_bytes: 8192
+  split: train
+  scale_n2: 4
+  range_max: 64
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

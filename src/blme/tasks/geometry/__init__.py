@@ -46,3 +46,4 @@ from .zipfian_symmetry import ZipfianSymmetryTask
 from .delta_hyperbolicity import DeltaHyperbolicityTask
 from .ww_randomized import WWRandomizedTask
 from .dime import DiMETask
+from .prompt_id import PromptIntrinsicDimTask

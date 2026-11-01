@@ -37,7 +37,18 @@ GRIDE_D0, GRIDE_D1, GRIDE_TOL = 0.001, 1000.0, 1e-7
 
 # --------------------------------------------------------------------- GRIDE
 def _unique_rows(X):
-    """``Data.remove_identical_points``: np.unique over rows (reorders them)."""
+    """``Data.remove_identical_points``: np.unique over rows (reorders them).
+
+    When the first column already separates every row, the lexicographic
+    order is that column's order and no row repeats, so its argsort returns
+    the same array as np.unique (which compares each row field by field, 0.4 s
+    for 1024 x 4096)."""
+    X = np.asarray(X)
+    if X.ndim == 2 and X.shape[0] > 1 and X.shape[1] > 0 and np.isfinite(X).all():
+        order = np.argsort(X[:, 0], kind="stable")
+        c0 = X[order, 0]
+        if np.all(c0[1:] != c0[:-1]):
+            return X[order]
     return np.unique(X, axis=0)
 
 
