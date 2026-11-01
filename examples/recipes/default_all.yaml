@@ -357,6 +357,9 @@ tasks:
   geometry_predictive_information:
     num_samples: 1000
 
+  geometry_ww_randomized:
+    shuffle_seed: 42
+
   dynamics_fractal:
     num_samples: 100
     holder_eps: 0.005

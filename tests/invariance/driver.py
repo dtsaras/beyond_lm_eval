@@ -104,6 +104,7 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "geometry_weight_norms", "geometry_spectral", "geometry_unembedding",
         "geometry_hubness", "geometry_superposition_strength",
         "geometry_categories", "geometry_spectral_signature", "geometry_farms_alpha",
+        "geometry_ww_randomized",
     )},
     **{t: "measures forward/backward dynamics or generation" for t in (
         "dynamics_coe", "dynamics_fractal", "dynamics_generation_diversity",

@@ -551,6 +551,12 @@ geometry_predictive_information:
   sigma: 1.0
   split_seed: 0
 
+geometry_ww_randomized:
+  # Seed of the np.random.RandomState that shuffles each weight matrix's entries
+  # (the release shuffles with the unseeded global np.random; analyze() after
+  # np.random.seed(shuffle_seed) draws the same shuffles).
+  shuffle_seed: 42
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

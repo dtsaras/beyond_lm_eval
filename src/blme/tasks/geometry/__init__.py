@@ -40,3 +40,4 @@ from .gride import GrideProfileTask, InformationImbalanceTask, NeighborhoodOverl
 from .farms import FARMSAlphaTask
 from .dispersion import RepresentationDispersionTask
 from .predictive_information import PredictiveInformationTask
+from .ww_randomized import WWRandomizedTask

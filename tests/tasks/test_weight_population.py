@@ -117,3 +117,29 @@ def test_spectral_ignores_the_vision_tower():
     _assert_same(_headline(r), _headline(ref))
     assert r["_meta_n_modules_outside_lm"] == n_vision
     assert ref["_meta_n_modules_outside_lm"] == 0
+
+
+def _ww_randomized(model):
+    from blme.tasks.geometry.ww_randomized import WWRandomizedTask
+    return WWRandomizedTask({}).evaluate(model, None, None)
+
+
+def test_ww_randomized_skips_the_depthwise_conv():
+    """The skipped kernel draws no shuffle, so every later matrix's null is the
+    one it gets without the kernel."""
+    model = _qwen35()
+    r, ref = _ww_randomized(model), _ww_randomized(_without_convs(model))
+    _assert_same(_headline(r), _headline(ref))
+    assert r["_meta_modules"] == ref["_meta_modules"]
+    assert r["_meta_n_conv_kernels_skipped"] == 1
+    assert ref["_meta_n_conv_kernels_skipped"] == 0
+
+
+def test_ww_randomized_ignores_the_vision_tower():
+    mm, text, n_vision = _gemma3_pair()
+    r, ref = _ww_randomized(mm), _ww_randomized(text)
+    _assert_same(_headline(r), _headline(ref))
+    assert r["_meta_n_matrices"] == ref["_meta_n_matrices"]
+    # The SigLIP Linears and the multimodal projector, which is outside get_decoder().
+    assert r["_meta_n_modules_outside_lm"] >= n_vision
+    assert ref["_meta_n_modules_outside_lm"] == 0
