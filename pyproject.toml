@@ -53,6 +53,7 @@ test = [
     "ripser",        # topology tasks
     "nltk",          # diversity (Self-BLEU) tasks
     "vendi-score",   # geometry_vendi parity tests
+    "nlpaug==1.1.11",  # geometry_dime augmentations
 ]
 benchmarks = [
     "lm-eval",
@@ -70,6 +71,11 @@ diversity = [
 sae = [
     "sae-lens",
 ]
+augment = [
+    # geometry_dime: the released code's augmentation chain; pinned because
+    # the augmented text depends on this version's RNG use
+    "nlpaug==1.1.11",
+]
 data = [
     # datasets is now a core dependency; kept for backwards compatibility
     "datasets",
@@ -86,6 +92,7 @@ all = [
     "datasets",
     "nltk",
     "vendi-score",
+    "nlpaug==1.1.11",
 ]
 
 [project.urls]
