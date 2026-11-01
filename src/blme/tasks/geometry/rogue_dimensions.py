@@ -21,6 +21,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import get_max_positions
 from .utils import safe_unit_rows_torch
 
 logger = logging.getLogger("blme")
@@ -85,6 +86,7 @@ class RogueDimensionsTask(DiagnosticTask):
         logger.info("Running Rogue Dimensions...")
         num_samples = int(self.config.get("num_samples", 150))
         context_length = int(self.config.get("context_length", 128))
+        context_length = min(context_length, get_max_positions(model, context_length))
         if self.config.get("use_dataset", False):
             texts = [d["text"] if isinstance(d, dict) else str(d) for d in list(dataset)[:num_samples]]
         else:

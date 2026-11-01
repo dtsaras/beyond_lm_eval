@@ -30,7 +30,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_layers
+from ..common import get_layers, get_max_positions
 
 logger = logging.getLogger("blme")
 
@@ -167,6 +167,7 @@ class LayerSkipEffectTask(DiagnosticTask):
         num_samples = int(self.config.get("num_samples", 10))
         n_positions = int(self.config.get("n_positions", 4))
         max_length = int(self.config.get("max_length", 512))
+        max_length = min(max_length, get_max_positions(model, max_length))
         rng = random.Random(int(self.config.get("position_seed", 123)))
 
         layers = get_layers(model)

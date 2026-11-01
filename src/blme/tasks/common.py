@@ -118,6 +118,19 @@ def get_layers(model):
     return None
 
 
+def get_max_positions(model, default=None):
+    """The model's context length (``max_position_embeddings`` / ``n_positions``
+    of its text config), or ``default`` when the config states none."""
+    cfg = getattr(model, "config", None)
+    if cfg is not None and hasattr(cfg, "get_text_config"):
+        cfg = cfg.get_text_config()
+    for name in ("max_position_embeddings", "n_positions", "n_ctx"):
+        value = getattr(cfg, name, None)
+        if isinstance(value, int) and value > 0:
+            return value
+    return default
+
+
 def get_num_layers(model):
     """Get number of transformer layers from model config or introspection.
 

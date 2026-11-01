@@ -27,6 +27,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import get_max_positions
 
 logger = logging.getLogger("blme")
 
@@ -86,9 +87,8 @@ class ICLScoreTask(DiagnosticTask):
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Olsson ICL score...")
         num_samples = int(self.config.get("num_samples", 2000))
-        ctx = (getattr(model.config, "max_position_embeddings", None)
-               or getattr(model.config, "n_positions", None) or 1024)
-        max_length = min(int(self.config.get("max_length", 1024)), int(ctx))
+        max_length = int(self.config.get("max_length", 1024))
+        max_length = min(max_length, get_max_positions(model, max_length))
         min_bytes = int(self.config.get("min_bytes", _MIN_BYTES))
         early, late = int(self.config.get("early_token", _EARLY)), int(self.config.get("late_token", _LATE))
         early_b = int(self.config.get("early_byte", _EARLY_BYTE))

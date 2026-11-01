@@ -40,7 +40,8 @@ from ...tasks.base import DiagnosticTask
 from .._precision import floating_dtype_summary, fp32_compute
 from .._tokens import (middle_depth_layers, select_rows, sink_keep_masks, sink_meta,
                        strip_trailing_special)
-from ..common import apply_lm_head, get_embeddings, get_final_norm, get_layers, get_lm_head
+from ..common import (apply_lm_head, get_embeddings, get_final_norm, get_layers, get_lm_head,
+                      get_max_positions)
 
 logger = logging.getLogger("blme")
 
@@ -206,6 +207,7 @@ class LogitLensKLTask(DiagnosticTask):
         logger.info("Running Logit-Lens KL / decision depth...")
         num_samples = int(self.config.get("num_samples", DEFAULT_NUM_SAMPLES))
         max_length = int(self.config.get("max_length", DEFAULT_MAX_LENGTH))
+        max_length = min(max_length, get_max_positions(model, max_length))
         chunk_elements = int(self.config.get("chunk_elements", DEFAULT_CHUNK_ELEMENTS))
         if dataset is None:
             from ...cache import load_default_corpus

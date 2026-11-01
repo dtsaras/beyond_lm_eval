@@ -20,6 +20,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import get_max_positions
 
 logger = logging.getLogger("blme")
 
@@ -91,7 +92,9 @@ class RepresentationDispersionTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representation Dispersion...")
+        # Capped at the model's context (the release assumes at least 512).
         chunk_len = int(self.config.get("chunk_len", 512))
+        chunk_len = min(chunk_len, get_max_positions(model, chunk_len))
         n_chunks = self.config.get("n_chunks", 10000)
         seed = int(self.config.get("chunk_seed", 42))
         batch_size = int(self.config.get("batch_size", 1))
@@ -118,5 +121,6 @@ class RepresentationDispersionTask(DiagnosticTask):
         return {
             "representation_dispersion": average_pairwise_cosine_distance(x),
             "_meta_n_chunks": len(chunks),
+            "_meta_chunk_len": chunk_len,
             "_meta_tokenizer_adds_bos": len(with_bos) > len(tokenizer.encode("a", add_special_tokens=False)),
         }

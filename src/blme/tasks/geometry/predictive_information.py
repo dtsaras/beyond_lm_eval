@@ -23,6 +23,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import get_max_positions
 from .utils import safe_unit_rows_torch
 
 logger = logging.getLogger("blme")
@@ -103,6 +104,7 @@ class PredictiveInformationTask(DiagnosticTask):
         logger.info("Running Predictive Information I(Z_l; Y)...")
         num_samples = int(self.config.get("num_samples", 1000))
         max_length = int(self.config.get("max_length", 512))
+        max_length = min(max_length, get_max_positions(model, max_length))
         sigma = float(self.config.get("sigma", 1.0))
         if dataset is None:
             from ...cache import load_default_corpus
