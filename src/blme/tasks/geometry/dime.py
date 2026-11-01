@@ -184,8 +184,12 @@ class DiMETask(DiagnosticTask):
         "Augmentation is seeded per passage and view (random and numpy restored after) and "
         "the same 10 seeded permutations serve every layer. Prompts are the first 1000 corpus "
         "passages with at least 30 tokens, not refilled, so N moves slightly with the "
-        "tokenizer and DiME <= log N. dime_peak and dime_last_layer are unchanged by identity "
-        "blocks and width padding; dime_peak_depth (argmax / L) moves by design."
+        "tokenizer and DiME <= log N (the release's WikiText run keeps 472 of the first 1000 "
+        "train rows). On a model with a BOS the all-token mean carries the BOS state / T, a "
+        "length code two views share (Llama-3.2-1B: a length-only control scores 0.32 against "
+        "0.43), so _meta_dime_profile_without_pos0 is the sink-free twin and models with and "
+        "without a BOS compare only through it. dime_peak and dime_last_layer are unchanged by "
+        "identity blocks and width padding; dime_peak_depth (argmax / L) moves by design."
     )
     HEADLINE_KEYS = ("dime_peak", "dime_last_layer", "dime_peak_depth")
     SIZE_INVARIANT = dict.fromkeys(
@@ -220,6 +224,10 @@ class DiMETask(DiagnosticTask):
         device = next(model.parameters()).device
         bos = getattr(tokenizer, "bos_token_id", None)
         views = [None] * N_VIEWS
+        # The same pool without position 0: under causal attention its state
+        # is identical for every prompt with a BOS, so in the all-token mean it
+        # adds c / T, a code for the view's length that two views share.
+        views_np = [None] * N_VIEWS
         n_changed = n_truncated = n_bos = 0
         with torch.no_grad():
             for i in keep:
@@ -238,13 +246,17 @@ class DiMETask(DiagnosticTask):
                     hs = out.hidden_states
                     if views[v] is None:
                         views[v] = [[] for _ in hs]
+                        views_np[v] = [[] for _ in hs]
                     for l, h in enumerate(hs):
                         views[v][l].append(h[0].double().mean(dim=0).cpu())
+                        views_np[v][l].append(h[0, 1:].double().mean(dim=0).cpu())
         views_a = [torch.stack(rows) for rows in views[0]]
         views_b = [torch.stack(rows) for rows in views[1]]
         n, d = views_a[0].shape
 
         profile, release, branch = dime_profiles(views_a, views_b, n_iters, perm_seed)
+        profile_np, _, _ = dime_profiles([torch.stack(r) for r in views_np[0]],
+                                         [torch.stack(r) for r in views_np[1]], n_iters, perm_seed)
         if not np.isfinite(profile).any():
             return {"error": "DiME eigendecomposition failed at every layer"}
         L = len(profile) - 1
@@ -256,6 +268,9 @@ class DiMETask(DiagnosticTask):
             "dime_last_layer": float(profile[-1]),
             "dime_peak_depth": peak / L if L else 0.0,
             "_meta_dime_peak_layer": peak,
+            "_meta_dime_profile_without_pos0": profile_np,
+            "_meta_dime_peak_without_pos0": float(np.nanmax(profile_np)),
+            "_meta_dime_last_layer_without_pos0": float(profile_np[-1]),
             "_meta_dime_profile_max_entropy": [x / norm for x in profile],
             "_meta_dime_release_profile": [x / norm for x in release],
             "_meta_dime_release_branch": branch,
