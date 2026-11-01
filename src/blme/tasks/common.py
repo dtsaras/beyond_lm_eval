@@ -240,6 +240,7 @@ _NORM_ATTRS = [
     ("gpt_neox", "final_layer_norm"),  # Pythia, GPT-NeoX
     ("model.decoder", "final_layer_norm"),  # OPT
     ("transformer", "norm_f"),    # MPT, Falcon
+    ("model", "final_layernorm"),  # Phi-1/1.5/2 (Phi-3/4 use model.norm)
 ]
 
 
