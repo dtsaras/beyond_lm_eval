@@ -208,8 +208,11 @@ def apply_lm_head(model, hidden_states):
         inherited the bug — the same shape as `safe_svdvals` being wired at 28
         sites but not at `schatten`.
         """
-        cap = getattr(getattr(model, "config", None),
-                      "final_logit_softcapping", None)
+        cfg = getattr(model, "config", None)
+        cap = getattr(cfg, "final_logit_softcapping", None)
+        if cap is None and cfg is not None and hasattr(cfg, "get_text_config"):
+            # Composite configs (Gemma 3n / 4) keep it in the text config.
+            cap = getattr(cfg.get_text_config(), "final_logit_softcapping", None)
         if cap:
             cap = float(cap)
             return torch.tanh(logits / cap) * cap

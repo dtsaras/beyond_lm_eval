@@ -35,3 +35,17 @@ def test_final_norm_is_found(cls, cfg_cls, attr):
     for part in attr.split("."):
         expected = getattr(expected, part)
     assert get_final_norm(model) is expected
+
+
+def test_softcap_is_read_from_a_composite_text_config():
+    """Gemma 3n / 4 keep final_logit_softcapping in text_config only."""
+    from types import SimpleNamespace
+    from blme.tasks.common import apply_lm_head
+
+    head = torch.nn.Linear(4, 3, bias=False)
+    torch.nn.init.constant_(head.weight, 50.0)
+    text = SimpleNamespace(final_logit_softcapping=30.0)
+    cfg = SimpleNamespace(get_text_config=lambda: text)
+    model = SimpleNamespace(config=cfg, lm_head=head, get_output_embeddings=lambda: head)
+    out = apply_lm_head(model, torch.ones(1, 4))
+    assert float(out.max()) == pytest.approx(30.0 * torch.tanh(torch.tensor(200.0 / 30.0)).item(), rel=1e-6)
