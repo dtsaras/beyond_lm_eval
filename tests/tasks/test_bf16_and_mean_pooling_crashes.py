@@ -111,11 +111,13 @@ def test_phd_mean_pooling_returns_float64_document_means(tiny_fp32):
     per_doc = list(_iter_per_document_clouds(model, tok, DOCS, num_samples=len(DOCS),
                                              max_length=64, layer_idx=-1, pooling="mean"))
     assert per_doc and all(np.asarray(c).dtype == np.float64 for c in per_doc)
-    # The pooled vector is the float64 mean of the document's token states.
+    # The pooled vector is the float64 mean of the document's token states. The
+    # two float32 forwards agree to forward rounding only (2.7e-6 seen under
+    # load, NUMERICS_BACKLOG NUM-37); a wrong pooling is off by O(0.1).
     with torch.no_grad():
         ids = tok(DOCS[0]["text"], return_tensors="pt", truncation=True, max_length=64)
         h = model(**ids, output_hidden_states=True).hidden_states[-1][0].double().numpy()
-    assert np.allclose(pooled[0], h.mean(0), rtol=0, atol=1e-6)
+    assert np.allclose(pooled[0], h.mean(0), rtol=0, atol=1e-5)
 
 
 def test_refusal_direction_reports_missing_sklearn_instead_of_raising(tiny_fp32, monkeypatch):
