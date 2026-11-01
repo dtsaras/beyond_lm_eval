@@ -423,7 +423,7 @@ class TestRegistry:
         #   NeuralCollapse, SelfConsistency, RefusalDirection (+5)
         # Future additions should bump this number (tests/test_completeness.py
         # lists every task).
-        assert len(tasks) == 104
+        assert len(tasks) == 105
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks

@@ -593,6 +593,14 @@ geometry_dime:
   augment_seed: 0
   perm_seed: 0
 
+interpretability_inactive_heads:
+  # Avg Head Output Norm (LN) of psandovalsegura/inactive-heads. The release
+  # sets tau per model on MMLU; 0.5 sits at its 1-MMLU-point operating point
+  # (median 0.54 over the 14 released models).
+  num_samples: 1000
+  max_length: 512
+  tau: 0.5
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

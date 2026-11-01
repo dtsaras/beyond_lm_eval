@@ -19,3 +19,5 @@ from .activation_kurtosis import ActivationKurtosisTask
 from .attention_rollout import AttentionRolloutTask
 # 2026-11 addition (Hu et al. 2025 logit-lens AUC / time to decision)
 from .logit_lens_kl import LogitLensKLTask
+# 2026-11 addition (psandovalsegura/inactive-heads parity-verified)
+from .inactive_heads import InactiveHeadsTask
