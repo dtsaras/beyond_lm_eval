@@ -10,7 +10,7 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**100 diagnostic tasks** across 7 categories:
+**101 diagnostic tasks** across 7 categories:
 
 | Category | Count | Examples | What it measures |
 |----------|-------|----------|-----------------|
@@ -18,7 +18,7 @@ Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME
 | **Interpretability** | 18 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
 | **Consistency** | 13 | Calibration, paraphrase / logical / contrastive invariance, ICL slope and score, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
 | **Causality** | 7 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons, layer skip | Information flow |
-| **Dynamics** | 8 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth | Temporal behavior |
+| **Dynamics** | 9 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth, entropy calibration | Temporal behavior |
 | **RepE** | 4 | Task vectors, concept separability, steering effectiveness, refusal direction | Concept encoding |
 | **Topology** | 5 | Persistent homology, Betti curves, persistence entropy / landscape, zigzag persistence | Manifold shape |
 

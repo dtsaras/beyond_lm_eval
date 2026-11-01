@@ -7,3 +7,5 @@ from .gradient_flow import GradientFlowTask
 # Campaign-4 B8 additions (2026-07, gap-survey metrics)
 from .fractal import FractalLikelihoodTask
 from .perturbation_growth import PerturbationGrowthTask
+# 2026-11 additions (missed-metrics surveys, beyond_benchmarks docs/2026-11-01-*)
+from .entropy_calibration import EntropyCalibrationTask

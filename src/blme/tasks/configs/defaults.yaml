@@ -597,3 +597,14 @@ dynamics_perturbation_growth:
   # checkpoints and 100% on fp32 ones. See the note in the task source.
   rel_eps: 0.01
   seed: 42
+
+dynamics_entropy_calibration:
+  # stevenxcao/entropy-calibration: 128-token prompts, temperature 1, human
+  # continuations of >= 1024 tokens; samples of up to 1024 tokens (the paper's
+  # limit; the code allows 2048); 500 articles where the release uses 5000.
+  num_samples: 500
+  prompt_len: 128
+  max_new_tokens: 1024
+  min_response_tokens: 1024
+  batch_size: 16
+  generation_seed: 0

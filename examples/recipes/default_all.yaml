@@ -379,6 +379,10 @@ tasks:
     rel_eps: 0.001
     seed: 42
 
+  dynamics_entropy_calibration:
+    num_samples: 500
+    max_new_tokens: 1024
+
   # ---- Representation Engineering Tasks (4) ----
   repe_task_vectors:
     num_samples: 5

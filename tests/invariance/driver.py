@@ -111,7 +111,7 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "dynamics_coe", "dynamics_fractal", "dynamics_generation_diversity",
         "dynamics_gradient_flow", "dynamics_interpolation",
         "dynamics_perturbation_growth", "dynamics_sharpness",
-        "dynamics_stability",
+        "dynamics_stability", "dynamics_entropy_calibration",
     )},
     "geometry_tokenizer_efficiency": "measures the tokenizer, not hidden states",
 }
