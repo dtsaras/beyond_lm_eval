@@ -89,6 +89,7 @@ def _refusal(extra):
         # Filters opened so a random model keeps a candidate
         # (as tests/tasks/test_refusal_direction_zero_final.py).
         KL_THRESHOLD, INDUCE_THRESHOLD = 1e9, -1e9
+        FILTER_DATA = False      # a random model refuses nothing
 
     model, _ = _tiny()
     tok = transformers.GPT2TokenizerFast.from_pretrained("gpt2")

@@ -6396,6 +6396,7 @@ def test_repe_refusal_direction():
 
     class Loose(R.RefusalDirectionTask):
         KL_THRESHOLD, INDUCE_THRESHOLD = 1e9, -1e9
+        FILTER_DATA = False      # a random model refuses nothing
 
     cv_splits, seed = 3, 42
     result = Loose({"cv_splits": cv_splits, "seed": seed}).evaluate(model, tok, None)

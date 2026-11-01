@@ -28,6 +28,7 @@ CHAT = ("{% for m in messages %}<|user|>{{ m['content'] }}<|end|>{% endfor %}"
 
 class _Loose(R.RefusalDirectionTask):
     KL_THRESHOLD, INDUCE_THRESHOLD = 1e9, -1e9
+    FILTER_DATA = False      # a random model refuses nothing
 
 
 def _energy(H, N):

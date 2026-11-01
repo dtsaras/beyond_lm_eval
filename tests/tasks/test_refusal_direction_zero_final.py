@@ -22,6 +22,7 @@ class _Loose(RefusalDirectionTask):
     """The paper's rule with the KL/induce filters opened, so a random model
     keeps candidates; the layer prune (l < 0.8 L) stays."""
     KL_THRESHOLD, INDUCE_THRESHOLD = 1e9, -1e9
+    FILTER_DATA = False      # a random model refuses nothing
 
 
 @pytest.fixture(scope="module")

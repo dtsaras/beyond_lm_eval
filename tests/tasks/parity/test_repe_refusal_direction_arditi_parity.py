@@ -103,6 +103,7 @@ def test_selection_matches_released_pipeline(ref, setup, tmp_path):
 
     class Loose(R.RefusalDirectionTask):
         KL_THRESHOLD, INDUCE_THRESHOLD = kl_t, ind_t
+        FILTER_DATA = False      # select_direction ran on the unfiltered prompts
 
     out = Loose({}).evaluate(model, tok, None)
     assert (out["_meta_selected_position"], out["_meta_selected_layer"]) == (pos, layer)
@@ -115,3 +116,43 @@ def test_selection_matches_released_pipeline(ref, setup, tmp_path):
     assert layer < int(0.8 * len(layers))
     # The selection is discriminating on this fixture (scores differ).
     assert len({round(d["refusal_score"], 6) for d in scores.values()}) > 3
+
+
+# --------------------------------------------------------------------------
+# Prompt format: the released tokenize_instructions_fn, eoi_toks and refusal_toks
+# --------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def ref_models(ref):
+    sys.path.insert(0, _REPO)
+    try:
+        from pipeline.model_utils import llama3_model, qwen_model
+    finally:
+        sys.path.remove(_REPO)
+    return {"llama3": (llama3_model.tokenize_instructions_llama3_chat,
+                       llama3_model.LLAMA3_CHAT_TEMPLATE, llama3_model.LLAMA3_REFUSAL_TOKS),
+            "qwen": (qwen_model.tokenize_instructions_qwen_chat,
+                     qwen_model.QWEN_CHAT_TEMPLATE, qwen_model.QWEN_REFUSAL_TOKS)}
+
+
+@pytest.mark.parametrize("repo,family", [("unsloth/Llama-3.2-1B-Instruct", "llama3"),
+                                         ("Qwen/Qwen2.5-1.5B-Instruct", "qwen")])
+def test_prompt_format_matches_released_model_utils(ref_models, repo, family):
+    """Same token ids as the release's tokenize_instructions_fn (system=None), its
+    eoi_toks and its refusal_toks, on the study's two release-family instruct
+    tokenizers. The tokenizers' own templates would add Llama-3.2's "Today Date"
+    block and Qwen2.5's "You are Qwen" system prompt."""
+    from blme.tasks.repe import refusal as R
+    try:
+        tok = transformers.AutoTokenizer.from_pretrained(repo, local_files_only=True)
+    except OSError:
+        pytest.skip(f"{repo} not cached")
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token          # as the release's _load_tokenizer
+    tokenize_fn, template, refusal_toks = ref_models[family]
+    for inst in R._HARMFUL_PROMPTS[:3] + R._HARMLESS_PROMPTS[:3]:
+        want = tokenize_fn(tokenizer=tok, instructions=[inst]).input_ids[0].tolist()
+        assert R._encode(tok, inst, "cpu")[0].tolist() == want
+    assert R._eoi_ids(tok) == tok.encode(template.split("{instruction}")[-1],
+                                         add_special_tokens=False)
+    assert R._refusal_token_ids(tok) == list(refusal_toks)
