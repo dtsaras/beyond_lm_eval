@@ -539,6 +539,13 @@ geometry_representation_dispersion:
   n_chunks: 10000
   chunk_seed: 42
 
+geometry_predictive_information:
+  # InfoRidge estimator (sigma 1); N pinned because the MI is bounded by log N.
+  num_samples: 1000
+  max_length: 512
+  sigma: 1.0
+  split_seed: 0
+
 dynamics_fractal:
   # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
   # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).

@@ -39,3 +39,4 @@ from .spectral_signature import SpectralSignatureTask
 from .gride import GrideProfileTask, InformationImbalanceTask
 from .farms import FARMSAlphaTask
 from .dispersion import RepresentationDispersionTask
+from .predictive_information import PredictiveInformationTask
