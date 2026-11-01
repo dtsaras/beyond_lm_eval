@@ -421,12 +421,9 @@ class TestRegistry:
         # Phase B added: IsoScore, Contextualization, AttentionRankCollapse (+3)
         # Phase C1-C5 added: PositionSensitivity, FormatRobustness,
         #   NeuralCollapse, SelfConsistency, RefusalDirection (+5)
-        # Future additions should bump this number.
-        # Current registry: 82 diagnostic tasks across 7 categories
-        # (74 + 8 Campaign-2 additions: vendi, phd, cknna, magnitude,
-        #  procrustes_linearity, activation_kurtosis, zigzag_persistence,
-        #  attention_rollout).
-        assert len(tasks) == 86
+        # Future additions should bump this number (tests/test_completeness.py
+        # lists every task).
+        assert len(tasks) == 98
         # Spot check some representative tasks
         assert "geometry_svd" in tasks
         assert "geometry_isoscore" in tasks
@@ -494,7 +491,7 @@ class TestCLI:
         with patch.object(sys, "argv", ["blme", "list-tasks", "--group", "geometry", "--json"]):
             main()
         payload = json.loads(capsys.readouterr().out)
-        assert payload["count"] == 34
+        assert payload["count"] == 43
         first = payload["tasks"][0]
         assert {"name", "group", "status", "papers"} <= set(first)
         assert all(task["group"] == "geometry" for task in payload["tasks"])
