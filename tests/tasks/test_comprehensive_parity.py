@@ -6566,9 +6566,11 @@ def test_repe_steering_effectiveness():
 
                 def make_hook(v):
                     def hook(mod, inp, outp):
-                        ot = outp[0].clone()
+                        # GPT2Block returns a tuple or a bare tensor, by transformers version.
+                        is_tuple = isinstance(outp, tuple)
+                        ot = (outp[0] if is_tuple else outp).clone()
                         ot[:, -1, :] += (alpha * v).to(ot.dtype)
-                        return (ot,) + outp[1:]
+                        return (ot,) + outp[1:] if is_tuple else ot
                     return hook
 
                 h = layers[l].register_forward_hook(make_hook(vec))
