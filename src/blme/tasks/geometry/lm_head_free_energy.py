@@ -38,15 +38,23 @@ def head_eigenvalues(W, dtype=torch.float32, chunk=16384):
     float32 forms the Gram in one product, as the release does, for a head of
     up to 2**28 entries (gpt2, Pythia, Qwen2.5-0.5B); a larger head, and every
     float64 Gram, accumulates it over ``chunk``-row blocks so no full-size
-    float32/float64 copy is made (a 262144 x 5376 head is 5.6 GB in float32)."""
+    float32/float64 copy is made (a 262144 x 5376 head is 5.6 GB in float32).
+
+    The float32 Gram and its eigvalsh always run on the CPU, wherever the
+    weights are: the float32 rounding of the Gram (eps32 * largest eigenvalue)
+    exceeds the smallest eigenvalue of an ill-conditioned head (gpt2: 0.026
+    against 0.020), so its sign follows the BLAS/LAPACK in use, and cuBLAS/
+    cuSOLVER returned it non-positive where the CPU returns 0.020. The cast to
+    float32 is exact, so a model on a GPU gives the CPU value."""
     W = W.detach()
+    device = torch.device("cpu") if dtype == torch.float32 else W.device
     if dtype == torch.float32 and W.numel() <= _SINGLE_PRODUCT_MAX:
-        W32 = W.to(torch.float32)
+        W32 = W.to(device=device, dtype=torch.float32)
         G = W32.T @ W32
     else:
-        G = torch.zeros(W.shape[1], W.shape[1], dtype=dtype, device=W.device)
+        G = torch.zeros(W.shape[1], W.shape[1], dtype=dtype, device=device)
         for i in range(0, W.shape[0], chunk):
-            Wc = W[i:i + chunk].to(dtype)
+            Wc = W[i:i + chunk].to(device=device, dtype=dtype)
             G += Wc.T @ Wc
     return torch.linalg.eigvalsh(G).cpu().numpy().astype(np.float64)
 
@@ -60,6 +68,17 @@ def bfe_w(e):
     lam = 1.0 / e.mean()
     energy = lam / 2 * e.mean() - .5 * np.log(e).mean() + .5 * np.log(2 * np.pi / lam)
     return float(energy), float(lam)
+
+
+def _positive_definite(e):
+    """Whether the spectrum is positive beyond its own rounding: every
+    eigenvalue finite and above ``len(e) * eps * max(e)`` (the matrix-rank
+    tolerance on the Gram), so a zero eigenvalue returned as +1e-13 is not
+    taken for full rank. ``e`` is a float64 spectrum."""
+    e = np.asarray(e, dtype=np.float64).reshape(-1)
+    if not len(e) or not np.all(np.isfinite(e)):
+        return False
+    return bool(e.min() > len(e) * np.finfo(np.float64).eps * e.max())
 
 
 @register_task("geometry_lm_head_free_energy")
@@ -78,13 +97,17 @@ class LMHeadFreeEnergyTask(DiagnosticTask):
         "As released: the eigenvalues of W.T @ W of the output unembedding (the tied input "
         "embedding where the model ties them), in float32, and BFE-W at lambda = 1 / mean(e) "
         "with no jitter (pythia_ww.bfe_w; the Qwen script's 1e-20 jitter changes nothing for a "
-        "full-rank head). A non-positive eigenvalue gives NaN where the release raises. The "
-        "float32 Gram loses the smallest eigenvalues of an ill-conditioned head (gpt2: 12% on "
-        "the smallest, 8.8e-5 on BFE-W, and 1e-4 between thread counts), so the float64 value "
-        "is _meta_; heads above 2**28 entries form the float32 Gram over row chunks (a 262k "
-        "vocabulary would otherwise need a 5.6 GB float32 copy). BFE-W is unchanged by "
-        "rescaling or rotating the head and by inserted blocks; zero-padding the width adds "
-        "zero eigenvalues, where it is undefined."
+        "full-rank head). A non-positive eigenvalue gives NaN where the release raises, with "
+        "_meta_lm_head_bfe_w_nan_reason. The float32 Gram loses the smallest eigenvalues of an "
+        "ill-conditioned head (gpt2: 12% on the smallest, 8.8e-5 on BFE-W, and 1e-4 between "
+        "thread counts), so the float64 value is _meta_, the float32 analysis runs on the CPU "
+        "wherever the weights are (cuBLAS/cuSOLVER returned gpt2's smallest float32 eigenvalue "
+        "non-positive), and only where the float32 spectrum has a non-positive eigenvalue while "
+        "the float64 one is positive beyond its rounding is the float64 value the headline "
+        "(_meta_lm_head_bfe_w_from_float64); heads above 2**28 entries form the float32 Gram "
+        "over row chunks (a 262k vocabulary would otherwise need a 5.6 GB float32 copy). BFE-W "
+        "is unchanged by rescaling or rotating the head and by inserted blocks; zero-padding "
+        "the width adds zero eigenvalues, where it is undefined."
     )
     HEADLINE_KEYS = ("lm_head_bfe_w",)
     SIZE_INVARIANT = {
@@ -103,15 +126,41 @@ class LMHeadFreeEnergyTask(DiagnosticTask):
         if head is None or getattr(head, "weight", None) is None:
             return {"error": "Could not find the output unembedding"}
         W = head.weight
-        energy, lam = bfe_w(head_eigenvalues(W))
+        e32 = head_eigenvalues(W)
+        energy, lam = bfe_w(e32)
         e64 = head_eigenvalues(W, torch.float64)
-        energy64, _ = bfe_w(e64)
-        return {
+        energy64, lam64 = bfe_w(e64)
+        # The release's float32 value wherever it is finite. Where float32
+        # returns a non-positive eigenvalue, the float64 spectrum decides
+        # whether that is rounding (float64 positive beyond its own rounding:
+        # the float64 value is the headline, flagged) or a rank-deficient head
+        # (NaN, as the release raises).
+        from_float64, nan_reason = False, None
+        if not math.isfinite(energy):
+            if not len(e32):
+                nan_reason = "the head has no eigenvalue (zero width)"
+            elif not np.all(np.isfinite(e32)):
+                nan_reason = ("non-finite float32 eigenvalue (non-finite head weights, or a "
+                              "float32 overflow of W.T @ W)")
+            elif _positive_definite(e64) and math.isfinite(energy64):
+                energy, lam, from_float64 = energy64, lam64, True
+            else:
+                nan_reason = (
+                    f"rank-deficient head: smallest eigenvalue {float(e32.min()):.3e} in float32 "
+                    f"and {float(e64.min()):.3e} in float64, not above the float64 rounding "
+                    f"{len(e64) * np.finfo(np.float64).eps * float(e64.max()):.3e} of the "
+                    f"largest ({float(e64.max()):.3e}); BFE-W takes the log of every eigenvalue")
+        out = {
             "lm_head_bfe_w": energy,
+            "_meta_lm_head_bfe_w_from_float64": from_float64,
             "_meta_lm_head_bfe_w_float64": energy64,
             "_meta_lm_head_half_log_am_gm": energy64 - 0.5 - 0.5 * math.log(2 * math.pi),
             "_meta_lm_head_bfe_lambda": lam,
-            "_meta_lm_head_min_eigenvalue_float64": float(e64.min()),
+            "_meta_lm_head_min_eigenvalue_float32": float(e32.min()) if len(e32) else float("nan"),
+            "_meta_lm_head_min_eigenvalue_float64": float(e64.min()) if len(e64) else float("nan"),
             "_meta_n_eigenvalues": int(e64.size),
             "_meta_head_shape": [int(s) for s in W.shape],
         }
+        if nan_reason is not None:
+            out["_meta_lm_head_bfe_w_nan_reason"] = nan_reason
+        return out
