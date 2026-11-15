@@ -2320,12 +2320,14 @@ def test_dynamics_gradient_flow():
     point than BLME's retain_grad()/.grad -- and take their Frobenius norms
     in float64. BLME's per-layer norms must equal these.
 
-    The derived scalars are checked two ways: (1) against ANALYTIC ground
-    truth on hand-built norm vectors (entropy of a uniform 4-vector == ln 4;
-    the log-norm slope on a geometric profile exp(-2*i) over normalized depth
-    i/(n-1) == -4), anchoring BLME's definitions independently; and (2)
-    recomputed from the INDEPENDENT reference norms (not BLME's) and asserted
-    equal to BLME's reported entropy / slope / vanishing_ratio. Also asserts
+    The headline gradient_flow_log_ratio_in_out is the log of the first over
+    the last of these norms (the input of block 0 over the input of the final
+    norm), recomputed from the reference profile. The entropy, slope and
+    vanishing ratio, all _meta_, are checked two ways: (1) against ANALYTIC
+    ground truth on hand-built norm vectors (entropy of a uniform 4-vector ==
+    ln 4; the log-norm slope on a geometric profile exp(-2*i) over normalized
+    depth i/(n-1) == -4), anchoring BLME's definitions independently; and (2)
+    recomputed from the INDEPENDENT reference norms (not BLME's). Also asserts
     the task runs and is deterministic (identical output twice).
     """
     from transformers import GPT2Config, GPT2LMHeadModel
@@ -2426,7 +2428,18 @@ def test_dynamics_gradient_flow():
     assert blme_norms.shape == (n_points,)
     assert blme_norms == pytest.approx(ref_norms, rel=1e-5, abs=1e-6)
 
-    # derived scalars match the INDEPENDENT reference values
+    # ---- headline: end-to-end log ratio of the reference profile ----
+    assert res["_meta_sink_n_massive_dropped"] == 0
+    ref_log_ratio = math.log(ref_norms[0]) - math.log(ref_norms[-1])
+    assert abs(ref_log_ratio) > 1e-2
+    assert res["gradient_flow_log_ratio_in_out"] == pytest.approx(ref_log_ratio, rel=1e-5, abs=1e-7)
+    # ... and not the block-inputs-only ratio it replaced, kept as _meta_.
+    ref_block_inputs = math.log(ref_norms[0]) - math.log(ref_norms[n_layers - 1])
+    assert abs(ref_block_inputs - ref_log_ratio) > 1e-3
+    assert res["_meta_gradient_flow_log_ratio_block_inputs"] == pytest.approx(
+        ref_block_inputs, rel=1e-5, abs=1e-7)
+
+    # _meta_ scalars match the INDEPENDENT reference values
     assert res["_meta_gradient_flow_entropy"] == pytest.approx(ref_entropy, rel=1e-5, abs=1e-6)
     assert res["_meta_gradient_flow_slope"] == pytest.approx(ref_slope, rel=1e-5, abs=1e-6)
     assert res["_meta_gradient_vanishing_ratio"] == pytest.approx(ref_vanishing, abs=1e-9)
