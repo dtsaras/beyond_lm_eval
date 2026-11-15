@@ -100,3 +100,47 @@ def test_window_is_the_published_rank_range():
     sel = (k >= 10) & (k <= 99)
     ref = np.polyfit(np.log(ds[sel]), np.log(k[sel] / ds.size), 1)[0]
     assert slope == pytest.approx(ref, rel=1e-12)
+
+
+def _lorenz(n, dt=0.01, every=5, burn=5000, s=10.0, r=28.0, b=8.0 / 3.0):
+    """RK4 orbit of the Lorenz system at GP 1983's parameters."""
+    def f(x):
+        return np.array([s * (x[1] - x[0]), x[0] * (r - x[2]) - x[1], x[0] * x[1] - b * x[2]])
+    x, out = np.ones(3), np.empty((n, 3))
+    for i in range(burn + n * every):
+        k1 = f(x)
+        k2 = f(x + dt / 2 * k1)
+        k3 = f(x + dt / 2 * k2)
+        x = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + f(x + dt * k3))
+        if i >= burn and (i - burn) % every == 0:
+            out[(i - burn) // every] = x
+    return out
+
+
+def _henon(n, burn=1000, a=1.4, b=0.3):
+    x, y, out = 0.1, 0.1, np.empty((n, 2))
+    for i in range(burn + n):
+        x, y = 1 - a * x * x + y, b * x
+        if i >= burn:
+            out[i - burn] = (x, y)
+    return out
+
+
+@pytest.mark.parametrize("system,published", [("lorenz", 2.05), ("henon", 1.21)])
+def test_reproduces_grassberger_procaccia_1983(system, published):
+    """Grassberger & Procaccia (1983) report D2 = 2.05 +/- 0.01 for the Lorenz
+    attractor and 1.21 +/- 0.01 for the Henon map. evaluate() at the shipped
+    N = 1000, on 10 random draws of points from a long orbit (a draw, not a
+    window of consecutive states, which the fixed window would read as a
+    curve): the mean is 2.034 (-0.8%) and 1.201 (-0.7%), the per-draw spread
+    0.07, so the 10-draw mean carries a standard error of 0.022 and the
+    tolerance is 0.07 (about 3 standard errors)."""
+    orbit = _lorenz(40000) if system == "lorenz" else _henon(200000)
+    cfg = {**TASK_CFG, "num_samples": 1000, "token_cloud_docs": 0}
+    vals = []
+    for seed in range(10):
+        idx = np.random.default_rng(seed).choice(len(orbit), 1000, replace=False)
+        out = _run(orbit[idx], cfg=cfg)
+        assert out["_meta_correlation_dimension_fit_window"] == "du_tanaka_ishii_2025_appA"
+        vals.append(out["correlation_dimension"])
+    assert np.mean(vals) == pytest.approx(published, abs=0.07), vals
