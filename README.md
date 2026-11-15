@@ -40,7 +40,7 @@ These are the tasks the accompanying study uses (`tests/fixtures/paper_core_task
 
 ### 2. Methods added in 0.2.0 (21)
 
-Each follows its paper's released code. The parity test runs that code, or for the two methods without released code the paper's formula, against BLME, in most cases through `evaluate()`. Departures from the release are listed in the task's `ADAPTATION_NOTE` and its metadata note.
+Each follows its paper's protocol and, where one exists, its released code. The parity test compares BLME with that code, in most cases through `evaluate()`. For the two methods without released code it checks the paper's formula instead. Departures from the release are listed in the task's `ADAPTATION_NOTE` and its metadata note.
 
 | task | released code | parity test |
 |---|---|---|
