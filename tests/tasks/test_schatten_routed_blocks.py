@@ -38,9 +38,9 @@ def test_routed_blocks_are_nan_with_reason_and_dense_blocks_kept():
     assert r["_meta_schatten_mlp_n_routed_blocks"] == 2
     assert "blocks [1, 3] hold routed experts" in r["_meta_schatten_mlp_routed_reason"]
     assert r["_meta_schatten_mlp_layers_found"] == 2
-    # The headline averages the dense blocks only (here the per-text means
+    # The layer mean averages the dense blocks only (here the per-text means
     # of two blocks, so their per-layer means average to it exactly).
-    assert r["schatten_1"] == pytest.approx(np.mean([per_layer[0], per_layer[2]]), rel=1e-12)
+    assert r["_meta_schatten_1_mlp"] == pytest.approx(np.mean([per_layer[0], per_layer[2]]), rel=1e-12)
 
 
 def test_dense_model_reports_no_routed_block():

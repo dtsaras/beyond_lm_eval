@@ -50,16 +50,33 @@ def _yusupov_reference(model, tok, texts, p):
 
 
 def test_schatten_is_yusupov_mlp_layer_mean(tiny):
-    """schatten_1 / schatten_4 are Yusupov et al.'s quantity (MLP-internal
-    activations, mean over layers); the residual last-layer values that used
-    to carry those names are _meta_."""
+    """_meta_schatten_{1,4}_mlp are Yusupov et al.'s quantity (MLP-internal
+    activations, mean over layers); the residual last-layer values are the
+    _meta_schatten_{1,4}_last keys."""
     model, tok = tiny
     r = _run(model, tok, TEXTS)
     for p in (1, 4):
-        assert r[f"schatten_{p}"] == pytest.approx(
+        assert r[f"_meta_schatten_{p}_mlp"] == pytest.approx(
             _yusupov_reference(model, tok, TEXTS, p), rel=1e-6)
     assert r["_meta_schatten_mlp_layers_found"] == len(model.transformer.h)
     assert "schatten_1_last" not in r and "_meta_schatten_1_last" in r
+
+
+def test_raw_mlp_norms_are_meta_only(tiny):
+    """The raw MLP-activation norms are in the activation's units and grow
+    with d_ff: they are emitted as _meta_ only, and the headline is the two
+    RankMe keys and the two row-normalised keys."""
+    from blme.tasks.geometry.schatten import SchattenNormTask as cls
+    r = _run(*tiny, TEXTS[:3])
+    assert cls.HEADLINE_KEYS == ("rankme_last", "row_normalized_rankme_last",
+                                 "row_normalized_matrix_nuclear_norm_last",
+                                 "row_normalized_schatten_inf_last")
+    for p in (1, 4):
+        assert f"schatten_{p}" not in r
+        assert np.isfinite(r[f"_meta_schatten_{p}_mlp"]) and r[f"_meta_schatten_{p}_mlp"] > 0
+    scalars = sorted(k for k, v in r.items() if not k.startswith("_meta_")
+                     and isinstance(v, float))
+    assert scalars == sorted(cls.HEADLINE_KEYS)
 
 
 def test_a_long_text_is_read_to_the_window(tiny):

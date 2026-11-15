@@ -33,9 +33,11 @@ a forward hook (HF's final `hidden_states` entry is `ln_f(block L-1)`);
 `_meta_last_entry_is_block_output` records whether that substitution actually
 happened.
 
-``schatten_1`` / ``schatten_4`` follow Yusupov et al. (Sec. 4.1, Eq. 5): the
-Schatten norm of each text's RAW MLP-internal activation matrix, averaged over
-all layers. The raw residual-stream norms are ``_meta_schatten_*``, and the
+``_meta_schatten_1_mlp`` / ``_meta_schatten_4_mlp`` follow Yusupov et al.
+(Sec. 4.1, Eq. 5): the Schatten norm of each text's RAW MLP-internal activation
+matrix, averaged over all layers. They are in the activation's units and grow
+with d_ff, so they are not headline keys. The raw residual-stream norms are
+``_meta_schatten_{1,4}_last``, and the
 centred, row-L2-normalised family carries the ``row_normalized_`` prefix. Dividing by
 d^(1/p) (``_meta_row_normalized_schatten_1/4``) manufactures a width
 dependence: zero-padding 768 -> 3072 leaves the raw value unchanged and
@@ -361,11 +363,13 @@ class SchattenNormTask(DiagnosticTask):
     2024) and RankMe (Garrido et al. 2023) of per-text token matrices.
 
     Reports:
-      - ``schatten_1``, ``schatten_4`` — Yusupov et al.'s quantity: the
-        Schatten-p norm of each text's RAW MLP-internal activation matrix
-        (the down-projection input), averaged over all L layers, then over
-        texts. The residual-stream last-layer versions are
-        ``_meta_schatten_{1,4}_last`` / ``_meta_schatten_{1,4}_per_layer``.
+      - ``_meta_schatten_1_mlp``, ``_meta_schatten_4_mlp`` — Yusupov et al.'s
+        quantity: the Schatten-p norm of each text's RAW MLP-internal
+        activation matrix (the down-projection input), averaged over all L
+        layers, then over texts. Raw units (activation scale, d_ff), so
+        ``_meta_`` (test_schatten.py::test_raw_mlp_norms_are_meta_only). The
+        residual-stream last-layer versions are ``_meta_schatten_{1,4}_last``
+        / ``_meta_schatten_{1,4}_per_layer``.
       - ``row_normalized_matrix_nuclear_norm_last`` — MNN / T on HF's
         post-norm last entry, as the released MNN.py.
       - ``rankme_last``, ``row_normalized_rankme_last``,
@@ -389,7 +393,9 @@ class SchattenNormTask(DiagnosticTask):
         "residual connections'; this is read as the down-projection's input (the "
         "MLP-internal activation), and its raw Schatten-1 and Schatten-4 norms per text are "
         "averaged over all layers and then over texts. The paper does not state p in the "
-        "text read, so p = 1 and 4 are kept. The Matrix Nuclear-Norm follows the released "
+        "text read, so p = 1 and 4 are kept; both are in the activation's units and "
+        "grow with d_ff, so they are reported as _meta_schatten_1_mlp and "
+        "_meta_schatten_4_mlp, not as headline keys. The Matrix Nuclear-Norm follows the released "
         "MNN.py on HF's post-norm last entry, divided by the token count. RankMe "
         "is applied per text to the raw last-layer matrix, following Yusupov et al.'s "
         "per-text ERank, instead of to one dataset-level matrix as Garrido et al. do. Every "
@@ -398,7 +404,7 @@ class SchattenNormTask(DiagnosticTask):
         "BOS included, as MNN.py) of the long WikiText articles geometry_positional_decay "
         "reads, capped at the model's context."
     )
-    HEADLINE_KEYS = ("schatten_1", "schatten_4", "rankme_last", "row_normalized_rankme_last",
+    HEADLINE_KEYS = ("rankme_last", "row_normalized_rankme_last",
                      "row_normalized_matrix_nuclear_norm_last",
                      "row_normalized_schatten_inf_last")
     # None declared: every key grows with the token count T (dossier T-law,
@@ -498,14 +504,14 @@ class SchattenNormTask(DiagnosticTask):
 
         # Yusupov et al. 2025 Sec. 4.1: per text, the mean over all L layers
         # of the Schatten-p norm of the MLP-internal activations; then the
-        # mean over texts.
+        # mean over texts. Raw units (activation scale and d_ff): _meta_.
         mlp = _prov.get("mlp") or {}
         for key in ("schatten_1", "schatten_4"):
             layers_ok = sorted(li for li in mlp if mlp[li][key])
             n_docs = min((len(mlp[li][key]) for li in layers_ok), default=0)
             per_text = [float(np.mean([mlp[li][key][j] for li in layers_ok]))
                         for j in range(n_docs)]
-            result[key] = float(np.mean(per_text)) if per_text else float("nan")
+            result[f"_meta_{key}_mlp"] = float(np.mean(per_text)) if per_text else float("nan")
             result[f"_meta_{key}_mlp_per_layer"] = [
                 float(np.mean(mlp[li][key])) if li in mlp and mlp[li][key] else float("nan")
                 for li in sorted(per_layer.keys())]
@@ -520,7 +526,7 @@ class SchattenNormTask(DiagnosticTask):
         result["_meta_schatten_mlp_n_routed_blocks"] = len(_routed)
         result["_meta_schatten_mlp_routed_reason"] = (
             f"blocks {_routed} hold routed experts: their MLP-internal activation is not "
-            f"one matrix, so their per-layer values are NaN and schatten_1/4 average the "
+            f"one matrix, so their per-layer values are NaN and _meta_schatten_1/4_mlp average the "
             f"other blocks" if _routed else None)
         result["_meta_n_trailing_special_stripped"] = int(_prov.get("n_stripped", 0))
         result["_meta_schatten_source"] = "self_collected"

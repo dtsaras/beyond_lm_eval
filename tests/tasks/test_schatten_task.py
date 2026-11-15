@@ -156,7 +156,7 @@ def test_schatten_task_registers_and_returns_expected_fields():
     assert "_meta_schatten_1_last" in result
     assert "_meta_schatten_4_last" in result
     # Yusupov's MLP-activation keys exist (NaN: this stub has no MLP blocks).
-    assert "schatten_1" in result and result["_meta_schatten_mlp_layers_found"] == 0
+    assert "_meta_schatten_1_mlp" in result and result["_meta_schatten_mlp_layers_found"] == 0
     assert "row_normalized_schatten_inf_last" in result
     assert "row_normalized_matrix_nuclear_norm_last" in result
     assert "rankme_last" in result
