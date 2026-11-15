@@ -105,7 +105,11 @@ class WeightNormProfileTask(DiagnosticTask):
         "is scale-free per matrix but moves when Q, K and V are fused into one matrix. "
         "The headline stable rank is the raw value, which zero-padding leaves unchanged; "
         "divided by min(m, n) it halves under the same padding, so that ratio is kept "
-        "only as a _meta_ fraction of capacity. Convolution kernels (Qwen3.5's depthwise "
+        "only as a _meta_ fraction of capacity. A genuinely wider model still moves "
+        "mean_frobenius_norm, mean_spectral_norm and the raw mean_stable_rank (padding "
+        "adds no directions, added width does), so they follow the Martin, Peng and "
+        "Mahoney precedent as width-dependent quantities, and the analysis reports them "
+        "with log d_model as a sensitivity covariate. Convolution kernels (Qwen3.5's depthwise "
         "conv1d, shape (C, 1, 4)) are not linear maps between feature spaces and are "
         "skipped, as WeightWatcher's min_evals gate skips them."
     )
