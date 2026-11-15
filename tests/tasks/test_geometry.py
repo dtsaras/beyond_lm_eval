@@ -784,13 +784,15 @@ def test_mahalanobis(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    # Mock tokenizer returns random tokens — Mahalanobis may encounter
-    # singular covariance with tiny hidden dimensions. Accept error or valid.
-    if "error" not in results:
-        assert (
-            "_meta_mean_mahalanobis_id" in results
-            or results.get("_meta_insufficient_holdout") is True
-        )
+    # Five mean-pooled rows: 3 fit the Ledoit-Wolf Gaussian, 2 are held out,
+    # and every headline key is a number on every toy architecture.
+    assert "error" not in results, results
+    assert results["_meta_insufficient_holdout"] is False
+    assert (results["_meta_n_id_fit"], results["_meta_n_id_score"]) == (3, 2)
+    for key in MahalanobisOODTask.HEADLINE_KEYS:
+        assert np.isfinite(results[key]), (key, results[key])
+    assert 0.0 <= results["auroc"] <= 1.0
+    assert results["_meta_mean_mahalanobis_id"] > 0.0
 
 
 def test_mutual_info(mock_model, mock_tokenizer):

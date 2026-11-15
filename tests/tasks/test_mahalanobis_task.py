@@ -158,28 +158,64 @@ def test_task_scores_mean_pooled_sample_representations():
     assert result["_meta_n_ood_score"] == 5
 
 
-def test_fit_split_preserves_id_scoring_holdout_for_small_n():
-    """With only five ID samples the split must still leave ≥2 score rows."""
-    n_id = 5
-    fit_n = max(2, min(n_id - 2, max(5, n_id // 2)))
-    assert n_id - fit_n >= 2
+def _evaluate_on_gaussians(monkeypatch, n, shift=2.0, seed=7):
+    """evaluate() with the collector replaced by n ID rows and n shifted OOD
+    rows in 30 dimensions (the first call collects ID, the second OOD)."""
+    import blme.tasks.geometry.mahalanobis as modmahal
+
+    rng = np.random.default_rng(seed)
+    X_id = rng.standard_normal((60, 30)).astype(np.float32)
+    X_ood = rng.standard_normal((60, 30)).astype(np.float32) + shift
+    calls = {"i": 0}
+
+    def fake_collect(model, tokenizer, dataset, num_samples, **kwargs):
+        calls["i"] += 1
+        return torch.from_numpy((X_id if calls["i"] == 1 else X_ood)[:num_samples])
+
+    monkeypatch.setattr(modmahal, "_collect_mean_pooled_hidden_states", fake_collect)
+
+    class StubTok:
+        def encode(self, text, add_special_tokens=False):
+            return list(range(10))
+
+        def decode(self, ids):
+            return "decoded"
+
+    task = MahalanobisOODTask({"num_samples": n, "ood_strategy": "shuffle", "id_corpus": "dataset"})
+    return task.evaluate(model=None, tokenizer=StubTok(), dataset=[{"text": "a"}] * 60, cache=None)
 
 
-def test_insufficient_holdout_payload_omits_auroc():
-    """When holdout scoring is impossible, omit biased ID/AUROC fields."""
-    from blme.tasks.geometry.mahalanobis import _compute_mahalanobis_distances
+@pytest.mark.parametrize("n,fit,score", [(5, 3, 2), (9, 5, 4), (30, 15, 15)])
+def test_fit_split_preserves_id_scoring_holdout_for_small_n(monkeypatch, n, fit, score):
+    """evaluate() fits on max(2, min(n - 2, max(5, n // 2))) rows and scores
+    the rest, so from the 5-row minimum on at least two ID rows are held out
+    and every headline key is a number."""
+    result = _evaluate_on_gaussians(monkeypatch, n)
+    assert "error" not in result, result
+    assert result["_meta_n_id_fit"] == fit
+    assert result["_meta_n_id_score"] == score >= 2
+    assert result["_meta_n_ood_score"] == score          # paired with the held-out rows
+    assert result["_meta_insufficient_holdout"] is False
+    for key in MahalanobisOODTask.HEADLINE_KEYS:
+        assert np.isfinite(result[key]), (key, result[key])
+    # The OOD rows are shifted by 2 in every coordinate: perfectly separated.
+    assert result["auroc"] == 1.0
+    assert result["ood_separation_ratio"] > 1.5
+    assert result["ood_separation_gap_per_dim"] == pytest.approx(
+        result["mahalanobis_sq_per_dim_ood"] - result["mahalanobis_sq_per_dim_id"], rel=1e-9)
 
-    rng = np.random.default_rng(0)
-    X_id_fit = rng.standard_normal((5, 12)).astype(np.float32)
-    X_ood = rng.standard_normal((5, 12)).astype(np.float32) + 1.0
-    dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
-    payload = {
-        "insufficient_holdout": True,
-        "n_id_fit": int(X_id_fit.shape[0]),
-        "n_id_score": 1,
-        "_meta_mean_mahalanobis_ood": float(np.mean(dists_ood)),
-    }
-    assert payload["insufficient_holdout"] is True
-    assert "auroc" not in payload
-    assert "_meta_mean_mahalanobis_id" not in payload
-    assert np.isfinite(payload["_meta_mean_mahalanobis_ood"])
+
+def test_no_shift_scores_at_chance(monkeypatch):
+    """The same pipeline with unshifted OOD rows: no separation to find."""
+    result = _evaluate_on_gaussians(monkeypatch, 60, shift=0.0)
+    assert 0.3 < result["auroc"] < 0.7
+    assert 0.8 < result["ood_separation_ratio"] < 1.25
+
+
+@pytest.mark.parametrize("n", [2, 4])
+def test_fewer_than_five_rows_is_an_error_not_a_score(monkeypatch, n):
+    """Below five ID rows there is no held-out score: evaluate() returns an
+    error and no headline key, never an in-sample AUROC."""
+    result = _evaluate_on_gaussians(monkeypatch, n)
+    assert "error" in result
+    assert not set(MahalanobisOODTask.HEADLINE_KEYS) & set(result)
