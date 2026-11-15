@@ -36,6 +36,27 @@ def test_task_survives_an_svd_failure(monkeypatch, mock_model_tokenizer, exc):
     import math
     assert math.isnan(out["unembedding_eff_rank"])
     assert math.isnan(out["unembedding_eff_rank_centered"])
+    assert out["_meta_unembedding_svd_error"].startswith("cpu: ")
     # ...and everything that does NOT depend on the SVD still arrives.
     assert "unembedding_is_tied" in out
     assert "_meta_unembedding_purity_mean" in out
+
+
+def test_a_gpu_svd_failure_is_retried_on_the_cpu(monkeypatch, mock_model_tokenizer):
+    """A float64 SVD of a large (V, d) table can exceed GPU memory; the task
+    then recomputes on the CPU instead of returning NaN."""
+    import blme.tasks.geometry.unembedding as U
+    model, tok = mock_model_tokenizer
+    want = U.UnembeddingDiagnosticsTask({}).evaluate(model, tok, None)
+    real = torch.Tensor.to
+
+    def to(self, *a, **k):
+        if a and a[0] == "cuda":
+            raise RuntimeError("CUDA out of memory (simulated)")
+        return real(self, *a, **k)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.Tensor, "to", to)
+    got = U.UnembeddingDiagnosticsTask({}).evaluate(model, tok, None)
+    monkeypatch.undo()
+    assert got["unembedding_eff_rank"] == want["unembedding_eff_rank"]
+    assert got["_meta_unembedding_svd_error"] is None

@@ -126,19 +126,31 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             _Wc = _Wc - _Wc.mean(dim=0, keepdim=True)
             return raw, _effective_rank(safe_svdvals(_Wc).detach().cpu().numpy())
 
-        try:
-            W_dev = W_out.detach().float()
-            if torch.cuda.is_available() and not W_dev.is_cuda:
-                W_dev = W_dev.cuda()
-            eff_rank, eff_rank_centered = _eranks(W_dev[:n_emit])
-            eff_rank_all, eff_rank_centered_all = (
-                (eff_rank, eff_rank_centered) if n_emit == W_dev.shape[0]
-                else _eranks(W_dev))
+        def _all_eranks(device):
+            W_dev = W_out.detach().float().to(device)
+            out = _eranks(W_dev[:n_emit])
+            out_all = out if n_emit == W_dev.shape[0] else _eranks(W_dev)
             del W_dev
-        except Exception as _e:
-            # NaN, not 0.0, for a failed SVD (e.g. GPU OOM); every other key
-            # is still computed (tests/tasks/test_unembedding_svd_failure.py).
-            logger.info(f"  unembedding SVD failed: {type(_e).__name__}: {_e}")
+            return out + out_all
+
+        svd_error = None
+        devices = (["cuda"] if torch.cuda.is_available() else []) + ["cpu"]
+        for _dev in devices:
+            try:
+                (eff_rank, eff_rank_centered,
+                 eff_rank_all, eff_rank_centered_all) = _all_eranks(_dev)
+                svd_error = None
+                break
+            except Exception as _e:
+                # A float64 SVD of a (V, d) table can exceed GPU memory (the
+                # Qwen3-1.7B GPU smoke run, 2026-11-16): retry on the CPU.
+                svd_error = f"{_dev}: {type(_e).__name__}: {_e}"
+                logger.info(f"  unembedding SVD failed on {svd_error}")
+                if _dev == "cuda":
+                    torch.cuda.empty_cache()
+        if svd_error is not None:
+            # NaN with its reason, not 0.0; every other key is still computed
+            # (tests/tasks/test_unembedding_svd_failure.py).
             eff_rank = eff_rank_centered = float("nan")
             eff_rank_all = eff_rank_centered_all = float("nan")
             
@@ -240,6 +252,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             "_meta_unembedding_eff_rank_all_rows": float(eff_rank_all),
             "_meta_unembedding_eff_rank_centered_all_rows": float(eff_rank_centered_all),
             "_meta_n_unused_rows": int(W_out.shape[0] - n_emit),
+            "_meta_unembedding_svd_error": svd_error,
             # _meta_: the task itself flags purity as not comparable across
             # models (which words map to single tokens is a tokenizer property).
             "_meta_unembedding_purity_mean": float(purity_mean),
