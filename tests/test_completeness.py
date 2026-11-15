@@ -124,6 +124,11 @@ EXPECTED_TASKS = [
     "repe_refusal_direction",
     "repe_steering_effectiveness",
     "repe_task_vectors",
+    # --- Paper-core tasks the list had missed ---
+    "dynamics_fractal",
+    "dynamics_perturbation_growth",
+    "geometry_effective_depth",
+    "geometry_superposition_strength",
 ]
 
 
@@ -136,20 +141,12 @@ def test_all_tasks_registered():
 
 
 def test_no_unexpected_tasks():
-    """Flag any tasks in the registry not in our expected list.
-
-    This is a soft check — new tasks being added is fine, but it
-    ensures developers consciously add them to EXPECTED_TASKS.
-    """
+    """Every registered task is in EXPECTED_TASKS, so the instantiation
+    tests below cover it (a skip here hid four paper-core tasks)."""
     registered = set(list_tasks())
-    expected = set(EXPECTED_TASKS)
-    extra = registered - expected
-
-    if extra:
-        pytest.skip(
-            f"New tasks found not yet in EXPECTED_TASKS: {extra}. "
-            "Add them to the list in test_completeness.py."
-        )
+    extra = registered - set(EXPECTED_TASKS)
+    assert not extra, (f"Tasks not in EXPECTED_TASKS: {sorted(extra)}. "
+                       "Add them to the list in test_completeness.py.")
 
 
 @pytest.mark.parametrize("task_name", EXPECTED_TASKS)
@@ -164,7 +161,7 @@ def test_task_instantiable(task_name):
 
 
 def test_task_count():
-    """Registry must expose the current 82-task catalog."""
+    """Registry must expose the current 107-task catalog."""
     registered = list_tasks()
     assert len(registered) == 107, (
         f"Expected exactly 107 registered tasks, got {len(registered)}"
