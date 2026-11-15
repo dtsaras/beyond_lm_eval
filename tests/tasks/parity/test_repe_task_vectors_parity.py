@@ -20,9 +20,10 @@ commit 5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e):
 
 The fixture embeds synthetic paired activations (two Gaussians shifted along a
 KNOWN unit direction d*) and the direction captured by RUNNING the real RepE
-ClusterMeanRepReader class. The shipped kernel does not return v, so parity is
-pinned on what it does return: ||v|| equals the released direction's norm, and
-the consensus headline equals its closed form in that released direction,
+ClusterMeanRepReader class (a float64 run). The shipped kernel does not return
+v, so parity is pinned on what it does return: ||v|| equals the released
+direction's norm to rel 1e-6 and the float32 computation bit for bit, and the
+consensus headline equals its closed form in that released direction,
     mean_{i != j} <d_i, d_j> = (N ||v||^2 - mean_i ||d_i||^2) / (N - 1).
 """
 import json
@@ -77,6 +78,31 @@ def test_task_vector_norm_matches_cluster_mean_reader(fx):
     # The reading vector is the shifted direction, not noise: |cos(ref, d*)|.
     assert _cosabs(ref, fx["dstar"]) == pytest.approx(fx["abs_cos_blme_dstar"], abs=1e-9)
     assert fx["abs_cos_blme_dstar"] > 0.9
+
+
+@pytest.mark.parametrize("offset", [0.0, 1000.0])
+def test_task_vector_norm_is_the_float32_computation_bit_for_bit(fx, offset):
+    """The kernel forms v = mean_pos - mean_neg in float32 and reports its
+    float32 norm; double is used only where float32 under/overflowed. The
+    rel 1e-6 parity above cannot see a float64 promotion (the two norms agree
+    to 2e-8 on the fixture), so the float32 arithmetic is pinned here, bit for
+    bit. A common offset of 1000 separates the third candidate, float64 means
+    with a float32 norm, which coincides with float32 on the bare fixture."""
+    pos = (np.array(fx["pos"], np.float64) + offset).tolist()
+    neg = (np.array(fx["neg"], np.float64) + offset).tolist()
+    P = torch.tensor(pos, dtype=torch.float32)
+    N = torch.tensor(neg, dtype=torch.float32)
+    f32 = float(torch.linalg.vector_norm(P.mean(dim=0) - N.mean(dim=0)).item())
+    v64 = P.double().mean(dim=0) - N.double().mean(dim=0)
+    f64 = float(torch.linalg.vector_norm(v64).item())
+    mixed = float(torch.linalg.vector_norm(v64.float()).item())
+    assert f32 != f64
+    if offset:
+        assert f32 != mixed
+
+    got = _shipped(pos, neg)["layer_task_vector_norms"][0]
+    assert got == f32
+    assert got == float(np.float32(got))      # a float32 value, not a double
 
 
 def test_consensus_headline_is_its_closed_form_in_the_released_direction(fx):
