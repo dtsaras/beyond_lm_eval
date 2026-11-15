@@ -46,6 +46,7 @@
 - `geometry_perplexity`: a special token the tokenizer adds owns no bytes, so `bits_per_byte` is finite on Llama-3 tokenizers (it was NaN).
 - `dynamics_generation_diversity`: completions are cut at the first of every stop id, not only the tokenizer's EOS. This changes `distinct_*`, `mean_distinct_*`, `mean_self_bleu`, `mean_phrase_repetition_rate` and the sampling-entropy keys.
 - `dynamics_generation_diversity` and `dynamics_coe` decode under the task's own settings only. On transformers 5.x, `generate()` fills unset fields from `model.generation_config`, so a model that ships decoding defaults (`repetition_penalty`, `no_repeat_ngram_size`, `suppress_tokens`, ...) used to change both tasks' samples. Those fields are now unset for the call and restored afterwards; `_meta_ignored_generation_config` lists them.
+- `dynamics_entropy_calibration` sampled under the same leaked decoding defaults (tiny gpt2 with a shipped `suppress_tokens` / `repetition_penalty` / `no_repeat_ngram_size`: EntCE −0.0025290 instead of −0.0025465). It now isolates the call in the same way and reports `_meta_ignored_generation_config`. Values change only for models that ship such fields.
 - `dynamics_interpolation`: context pairs are distinct and drawn without replacement (`convexity_gap`).
 - `geometry_rsa`: a constant row is dropped from every correlation RDM. `rsa_adjacent_min_corrdist` and `rsa_early_late_corrdist` are no longer NaN when such a row exists.
 - `geometry_phd_dimension`: when no text yields a per-text estimate, `phd_dimension` is NaN with a reason. It used to fall back silently to the pooled estimate.
@@ -98,6 +99,7 @@ Apart from the perturbation_growth headline, these moves leave values unchanged.
 - Task metadata notes say what each task computes and name the test that pins it. Provenance claims that no test backs were removed.
 - Identity-block invariance is declared per placement (between blocks, before block 0, after the last block).
 - `transformers>=5.2.0,<5.11` (5.2.0 and 5.10.2 are tested). The new `augment` extra installs `nlpaug==1.1.11`.
+- `dynamics_coe` and `dynamics_generation_diversity` set `max_new_tokens` on the `GenerationConfig` (per call in coe) instead of passing it next to it, which transformers deprecates. No value changes. The generation-config isolation helpers live in `blme.tasks.common`.
 - `blme.experts`: on transformers 5.10, routed-expert (MoE) models call `torch._grouped_mm`, which torch 2.8 lacks on CPU. A model loaded or evaluated on CPU without that kernel is switched to the eager experts implementation; the switch is recorded as `config.experts_implementation_fallback` in the result envelope. GPU runs and dense models are unchanged.
 - `dynamics_perturbation_growth`: the docs state that `growth_log_ratio_relative` is a BLME formulation, not Li et al.'s quasi-Lyapunov exponent (their Eq. 9 has no state-norm normalisation and a 1/(n - m) factor); `_meta_growth_rate_per_block` is the closest analogue.
 
