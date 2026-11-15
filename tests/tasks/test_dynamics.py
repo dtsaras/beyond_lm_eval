@@ -106,9 +106,9 @@ def test_chain_of_embedding(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "mean_magnitude_change" in results
+        assert "_meta_mean_magnitude_change" in results
         assert "mean_angle_change" in results
-        assert results["mean_magnitude_change"] >= 0
+        assert results["_meta_mean_magnitude_change"] >= 0
         assert results["mean_angle_change"] >= 0
 
 

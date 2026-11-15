@@ -75,7 +75,8 @@ def test_every_coe_key_matches_score_py():
         angs += [a * z_ang for a in ang_n]
     want = {"coe_r": np.mean(r), "coe_c": np.mean(c), "mean_normalized_angle": np.mean(ang),
             "coe_r_std": np.std(r), "coe_c_std": np.std(c), "coe_r_sum": np.mean(r_sum),
-            "mean_magnitude_change": np.mean(mags), "std_magnitude_change": np.std(mags),
+            "_meta_mean_magnitude_change": np.mean(mags),
+            "_meta_std_magnitude_change": np.std(mags),
             "mean_angle_change": np.mean(angs), "std_angle_change": np.std(angs)}
     for key, v in want.items():
         assert res[key] == pytest.approx(v, rel=1e-5, abs=1e-7), key

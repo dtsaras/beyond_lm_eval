@@ -209,8 +209,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
     }
     HEADLINE_KEYS = (
         "coe_r", "coe_c", "mean_normalized_angle", "coe_r_std", "coe_c_std",
-        "mean_magnitude_change", "std_magnitude_change", "mean_angle_change",
-        "std_angle_change", "coe_r_sum",
+        "mean_angle_change", "std_angle_change", "coe_r_sum",
     )
     # coe_r / coe_c / the normalised angle carry the paper's 1/L; only L * coe_r
     # passes the identity-block test (coe_c has no exact inverse under a
@@ -373,9 +372,11 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "_meta_normalized_coe_c": _mean("normalized_coe_c"),
             "_meta_normalized_coe_c_std": _std("normalized_coe_c"),
 
-            # Raw (unnormalised) magnitudes/angles for completeness.
-            "mean_magnitude_change": float(np.mean(flat_mags)),
-            "std_magnitude_change": float(np.std(flat_mags)),
+            # Raw (unnormalised) magnitudes/angles. The magnitudes are in
+            # residual-stream units and move under a residual rescale: _meta_
+            # (test_raw_magnitudes_are_meta_only).
+            "_meta_mean_magnitude_change": float(np.mean(flat_mags)),
+            "_meta_std_magnitude_change": float(np.std(flat_mags)),
             "mean_angle_change": float(np.mean(flat_angs)),
             "std_angle_change": float(np.std(flat_angs)),
 

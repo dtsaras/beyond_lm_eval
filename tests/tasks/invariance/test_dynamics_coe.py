@@ -145,3 +145,21 @@ def test_model_generation_config_does_not_apply():
     assert shipped["per_sample_coe_r"] == plain["per_sample_coe_r"]
     assert shipped["coe_c"] == plain["coe_c"]
     assert model.generation_config.repetition_penalty == 1.3
+
+
+def test_raw_magnitudes_are_meta_only():
+    """||h_{l+1} - h_l|| is in residual-stream units: doubling every chain
+    state doubles it and leaves each headline key in place, so the raw
+    magnitudes are _meta_."""
+    out = _run(tiny_gpt2(), tokenizer())
+    for k in ("mean_magnitude_change", "std_magnitude_change"):
+        assert k not in out and k not in ChainOfEmbeddingTask.HEADLINE_KEYS
+        assert out["_meta_" + k] > 0
+    assert not [k for k in ChainOfEmbeddingTask.HEADLINE_KEYS if k not in out]
+    torch.manual_seed(0)
+    chain = [torch.randn(16, dtype=torch.float64) for _ in range(5)]
+    a, b = _coe_from_chain(chain), _coe_from_chain([2.0 * h for h in chain])
+    assert np.mean(b["magnitudes"]) == pytest.approx(2.0 * np.mean(a["magnitudes"]), rel=1e-12)
+    for k in ("coe_r", "coe_c", "ang_norm_mean"):
+        assert b[k] == pytest.approx(a[k], rel=1e-12)
+    assert np.mean(b["angles"]) == pytest.approx(np.mean(a["angles"]), rel=1e-12)
