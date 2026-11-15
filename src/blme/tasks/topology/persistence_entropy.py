@@ -50,16 +50,19 @@ def _persistence_entropy(lifespans):
         lifespans: list of positive floats (birth-death intervals)
 
     Returns:
-        float: persistence entropy (0 = single dominant feature, high = uniform)
+        float: persistence entropy (0 = single dominant feature, high = uniform);
+        NaN for an empty barcode, whose entropy is undefined.
     """
-    if not lifespans or len(lifespans) < 2:
-        return 0.0
+    if not lifespans:
+        return float("nan")
 
     # Scale invariant: PE depends on p_i = l_i / sum(l) only, so both
     # degeneracy tests below are relative, not absolute cutoffs.
     arr = np.asarray(lifespans, dtype=np.float64)
     arr = arr[np.isfinite(arr) & (arr > 0)]
-    if arr.size < 2:
+    if arr.size == 0:
+        return float("nan")
+    if arr.size == 1:
         return 0.0
     total = float(arr.sum())
     if not np.isfinite(total) or total <= 0:
@@ -178,10 +181,11 @@ class PersistenceEntropyTask(DiagnosticTask):
                 # PE / log2(m), in [0, 1]: log2(m) is PE's maximum over m bars. A
                 # BLME normalisation; giotto-tda's normalize=True divides by
                 # log2(total persistence) instead, which depends on the units.
+                # Fewer than 2 bars: log2(m) = 0, so the ratio is undefined (NaN).
                 "pe_h0_norm": (pe_h0 / float(np.log2(len(lifespans_h0)))
-                               if len(lifespans_h0) >= 2 else 0.0),
+                               if len(lifespans_h0) >= 2 else float("nan")),
                 "pe_h1_norm": (pe_h1 / float(np.log2(len(lifespans_h1)))
-                               if len(lifespans_h1) >= 2 else 0.0),
+                               if len(lifespans_h1) >= 2 else float("nan")),
             }
             for k, v in vals.items():
                 results[f"_meta_layer_{l_idx}_{k}"] = v

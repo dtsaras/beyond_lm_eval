@@ -72,7 +72,8 @@ def _lifespan_summary(dgms) -> dict:
     return {
         "mean_persistence_h0": float(np.mean(h0)) if h0 else 0.0,
         "max_persistence_h0": float(np.max(h0)) if h0 else 0.0,
-        "mean_persistence_h1": float(np.mean(h1)) if h1 else 0.0,
+        # No H1 bar: the mean lifetime is undefined (NaN); num_loops_h1 = 0 says why.
+        "mean_persistence_h1": float(np.mean(h1)) if h1 else float("nan"),
         "num_loops_h1": len(h1),
     }
 
@@ -157,10 +158,12 @@ class PersistentHomologyTask(DiagnosticTask):
             data_matrix = np.array(data_points)  # Shape: (num_samples, hidden_dim)
 
             # Duplicate points are quotiented (a repeated point is a zero-length
-            # H0 bar); ripser reads float64 pairwise distances. `data_matrix`
-            # itself is kept for the mpd below.
-            dgms, _scale = rips_diagrams(
-                np.unique(np.asarray(data_matrix, dtype=np.float64), axis=0))
+            # H0 bar); ripser reads float64 pairwise distances. The mpd below
+            # uses the same de-duplicated cloud, so the _norm twins share the
+            # barcode's invariance to repeated points.
+            _uniq = np.unique(np.asarray(data_matrix, dtype=np.float64), axis=0)
+            results[f"_meta_layer_{l_idx}_n_duplicate_points"] = int(len(data_matrix) - len(_uniq))
+            dgms, _scale = rips_diagrams(_uniq)
             results[f"_meta_layer_{l_idx}_rips_scale"] = _scale
 
             summary = _lifespan_summary(dgms)
@@ -173,7 +176,7 @@ class PersistentHomologyTask(DiagnosticTask):
             # Lifetimes divided by the cloud's mean pairwise distance (mpd):
             # VR lifetimes and the mpd are both homogeneous of degree 1.
             from scipy.spatial.distance import pdist
-            pairwise = pdist(data_matrix)
+            pairwise = pdist(_uniq)
             mpd = float(pairwise.mean()) if pairwise.size else 0.0
             if mpd > 0:
                 for key in ("mean_persistence_h0", "max_persistence_h0",
