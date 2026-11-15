@@ -173,10 +173,11 @@ OUTCOMES = {
     "geometry_matrix_entropy": {
         "matrix_entropy_raw": (I, I),
     },
-    # Leading: first_last gpt2 -23%, llama -54%; adjacent llama -69%.
+    # Leading: first_last moves on both; on 20-word windows the added
+    # embedding-to-block-0 pair is not the adjacent minimum on either fixture.
     # Trailing (adjacent pair raw/post-norm): gpt2 +6.9%, llama +1.3%.
     "geometry_neighborhood_overlap": {
-        "nn_overlap_adjacent_min": (moves("llama"), BOTH),
+        "nn_overlap_adjacent_min": (unchanged("nn_overlap_adjacent"), BOTH),
         "nn_overlap_first_last": (BOTH, I),
     },
     # An identity block writes nothing, so it has weight 0.
