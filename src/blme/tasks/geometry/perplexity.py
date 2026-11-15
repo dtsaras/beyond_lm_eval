@@ -42,6 +42,13 @@ class RarePPLTask(DiagnosticTask):
     """
 
     TOKEN_POLICY = "not_token_based"
+    ADAPTATION_NOTE = (
+        "Bits per UTF-8 byte follows the Pile's definition (Gao et al. 2020, Sec 3.1) but not "
+        "its protocol: the Pile scores each document separately, while BLME scores one stream "
+        "of the joined passages with the HuggingFace strided window (1024 tokens, stride 512). "
+        "Per-document scoring truncated long documents by a tokenizer-dependent amount and "
+        "restarted the context at every document (geometry/utils.py, strided_perplexity)."
+    )
     SOURCES = {
         "paper": "arXiv:2101.00027",
         "code": "huggingface/transformers docs 'Perplexity of fixed-length models' (strided window; web page, no commit)",

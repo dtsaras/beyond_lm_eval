@@ -376,7 +376,9 @@ class FARMSAlphaTask(DiagnosticTask):
         "The released fit is fragile and kept as released: its KS optimum usually sits at the cap of "
         "1.5 times the peak histogram bin, and when two bins nearly tie, float32 rounding of the "
         "smallest eigenvalue can move one matrix's alpha by over 10% (gpt2 h.6.mlp.c_proj, "
-        "512-windows: 3.27 or 2.86), which _meta_ counts as near-ties."
+        "512-windows: 3.27 or 2.86), which _meta_ counts as near-ties. The float32 window SVDs "
+        "also depend on the BLAS thread count (up to 15% per matrix), so the headline does "
+        "too; _meta_n_threads records it."
     )
     HEADLINE_KEYS = ("farms_alpha_mean", "farms_alpha_mean_w512")
     SIZE_INVARIANT = {}
@@ -440,6 +442,7 @@ class FARMSAlphaTask(DiagnosticTask):
                 if reasons:
                     out[f"_meta_alpha_nan_reasons{sfx}"] = [f"{k}: {v}" for k, v in reasons.items()]
         out["_meta_n_matrices"] = len(mats)
+        out["_meta_n_threads"] = int(torch.get_num_threads())
         out["_meta_n_conv1d_included"] = counts["conv1d_included"]
         out["_meta_n_conv2d_skipped"] = counts["conv2d_skipped"]
         out["_meta_n_other_weight_tensors_unmeasured"] = counts["other_weight_tensors_unmeasured"]
