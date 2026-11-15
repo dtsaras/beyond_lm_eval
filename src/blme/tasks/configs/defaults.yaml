@@ -12,16 +12,12 @@ geometry_svd:
   layerwise: false
 
 geometry_isoscore:
-  # Rudman et al. warn that the point count must exceed the dimension by orders
-  # of magnitude; their own validation uses 100,000 points. 100 DOCUMENTS is not
-  # a point budget at all -- the realized N depends on document length, and at
-  # d_model = 4096 it can fall below d. The task now also enforces a minimum
-  # N/d ratio and reports the realized N, so the sampling condition is auditable
-  # rather than assumed.
+  # Rudman et al. want the point count to exceed the dimension by orders of
+  # magnitude (their validation uses 100,000 points). The task reports the
+  # realised N and N/d.
   num_samples: 1000
-  # The paper says points should outnumber dimension by ORDERS of magnitude.
-  # 10x is one order; 50x is a defensible floor at our corpus sizes, and the
-  # value is NaN-gated below it rather than silently emitted.
+  # Flag only: below this N/d, _meta_sampling_regime_ok is false. The score is still
+  # emitted, not set to NaN.
   min_points_per_dim: 50
 
 geometry_hubness:
