@@ -2861,6 +2861,8 @@ def test_geometry_categories():
             ])
             inter = np.mean([_hand_cosdist(E[t], E[r]) for t in ts for r in randoms])
             out[c] = float(inter - intra)
+            out[c + "_intra"] = float(intra)
+            out[c + "_inter"] = float(inter)
         return out
 
     # ---- Regime 1: tight, well-separated clusters -> purity == 1.0, sep > 0 ----
@@ -2888,6 +2890,8 @@ def test_geometry_categories():
     for c in ("A", "B"):
         assert res[f"{c}_purity"] == pytest.approx(ref_pur[c], abs=1e-9)
         assert res[f"{c}_separation"] == pytest.approx(ref_sep[c], abs=1e-5)
+        assert res[f"{c}_intra"] == pytest.approx(ref_sep[c + "_intra"], abs=1e-5)
+        assert res[f"{c}_inter"] == pytest.approx(ref_sep[c + "_inter"], abs=1e-5)
         assert res[f"{c}_purity"] == pytest.approx(1.0, abs=1e-9)   # clean clusters
         assert res[f"{c}_separation"] > 0.0                          # well separated
 
