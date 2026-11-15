@@ -44,13 +44,28 @@ def _run(model):
     return GradientFlowTask(config={"num_samples": 4}).evaluate(model, fd.tokenizer(), fd.dataset(4))
 
 
+def _tiny_gpt_neo():
+    """Random GPT-Neo on the tiny gpt2 vocabulary. Its decoder loop appends the
+    hidden states itself in every supported transformers; GPT-2 and Llama use
+    the output-capturing hook, which reads the block's args[0]."""
+    from transformers import GPTNeoConfig, GPTNeoForCausalLM
+    torch.manual_seed(0)
+    cfg = GPTNeoConfig(vocab_size=1000, hidden_size=32, num_layers=3, num_heads=4,
+                       intermediate_size=64, max_position_embeddings=512,
+                       attention_types=[[["global"], 3]])
+    return GPTNeoForCausalLM(cfg).eval()
+
+
 def test_keyword_called_blocks_give_the_positional_profile():
-    """GPT-2 collects hidden_states itself, so its loop can call blocks by
-    keyword (Llama's output-capturing hook in transformers 5 reads args[0])."""
-    ref = _run(fd.tiny_gpt2())
-    kw_model = fd.tiny_gpt2()
+    ref = _run(_tiny_gpt_neo())
+    kw_model = _tiny_gpt_neo()
     kw_model.transformer.h = _KeywordCalls(list(kw_model.transformer.h))
+    seen = []
+    handle = kw_model.transformer.h[0].register_forward_pre_hook(
+        lambda m, args, kwargs: seen.append((len(args), "hidden_states" in kwargs)), with_kwargs=True)
     got = _run(kw_model)
+    handle.remove()
+    assert seen and set(seen) == {(0, True)}, seen
     assert all(v > 0 for v in got["gradient_norm_per_layer"]), got["gradient_norm_per_layer"]
     assert got["gradient_norm_per_layer"] == ref["gradient_norm_per_layer"]
     assert math.isfinite(got["gradient_flow_log_ratio_in_out"])
