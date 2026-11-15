@@ -4005,16 +4005,16 @@ def test_geometry_representation_sensitivity():
 def test_geometry_rsa():
     """NUMERIC_PARITY for geometry_rsa (Kriegeskorte et al. 2008, Frontiers).
 
-    BLME's RSA recipe: per-layer RDM = condensed pairwise Euclidean distances
-    (scipy.spatial.distance.pdist), then RSA between two layers = Spearman rank
-    correlation of the two RDM vectors (scipy.stats.spearmanr). This is the
-    canonical RSA method (build RDM, compare RDMs by Spearman rank correlation)
-    of Kriegeskorte et al. 2008.
+    BLME's RSA recipe: one RDM per layer over evenly spaced non-sink token
+    rows, then RSA between two layers = Spearman rank correlation of the two
+    RDM vectors (Kriegeskorte et al. 2008, Step 4). The headline keys
+    (rsa_adjacent_min_corrdist, rsa_early_late_corrdist) use Kriegeskorte's
+    correlation distance; the Euclidean RDMs are _meta_ twins.
 
     Independent reference: the `rsatoolbox` package (pip rsatoolbox==0.3.2, the
-    reference repo named for this task). We build per-layer RDMs with
-    rsatoolbox `calc_rdm(method='euclidean')` and compare them with
-    `compare(method='spearman')`. rsatoolbox's euclidean dissimilarity is a
+    reference repo named for this task): `calc_rdm(method='correlation')` for
+    the headline and `calc_rdm(method='euclidean')` for the twins, compared
+    with `compare(method='spearman')`. rsatoolbox's euclidean dissimilarity is a
     *different* numeric quantity from scipy.pdist's euclidean (it uses a
     squared, per-feature-scaled distance), but Spearman is rank-based and
     invariant to that monotonic transform, so the comparison values must match
@@ -4079,7 +4079,9 @@ def test_geometry_rsa():
                                     num_samples=config["num_samples"],
                                     layer_idx="all",
                                     replace_final_norm=True, per_sample=True)
-    # The task drops position 0 (TOKEN_POLICY) before selecting rows.
+    # The task drops the sink rows (TOKEN_POLICY); on this model that is
+    # position 0 only, since no token is massive.
+    assert out["_meta_sink_n_massive_dropped"] == 0
     from blme.tasks._tokens import select_rows
     all_layers = {li: select_rows(v, "exclude_pos0")[0] for li, v in per_doc.items()}
     layer_indices = sorted(all_layers.keys())
@@ -4103,16 +4105,29 @@ def test_geometry_rsa():
     else:
         _sel = np.arange(_avail)
 
-    rsa_rdms, scipy_rdms = {}, {}
+    assert out["_meta_n_tokens_used"] == len(_sel) == config["max_tokens"] < _avail
+    assert out["_meta_n_constant_rows_dropped_corrdist"] == 0
+
+    rsa_rdms, corr_rdms, scipy_rdms = {}, {}, {}
     for li in layer_indices:
         X = all_layers[li].numpy()[_sel].astype(np.float64)
         rsa_rdms[li] = calc_rdm(RsaDataset(X), method="euclidean")
+        corr_rdms[li] = calc_rdm(RsaDataset(X), method="correlation")
         scipy_rdms[li] = pdist(X, metric="euclidean")
 
-    def ref_rsa(la, lb):
+    def ref_rsa(la, lb, rdms=rsa_rdms):
         return float(np.asarray(
-            compare(rsa_rdms[la], rsa_rdms[lb], method="spearman")
+            compare(rdms[la], rdms[lb], method="spearman")
         ).ravel()[0])
+
+    # ---- headline: correlation-distance RDMs ----
+    corr_adj = [ref_rsa(layer_indices[i], layer_indices[i + 1], corr_rdms)
+                for i in range(n_layers - 1)]
+    corr_early_late = ref_rsa(layer_indices[0], layer_indices[-1], corr_rdms)
+    assert out["rsa_adjacent_min_corrdist"] == pytest.approx(min(corr_adj), abs=1e-9)
+    assert out["rsa_early_late_corrdist"] == pytest.approx(corr_early_late, abs=1e-9)
+
+    # ---- _meta_ twins: Euclidean RDMs ----
 
     adj = [ref_rsa(layer_indices[i], layer_indices[i + 1])
            for i in range(n_layers - 1)]
@@ -4122,6 +4137,11 @@ def test_geometry_rsa():
     ref_early_late = ref_rsa(layer_indices[0], layer_indices[-1])
     ref_first_mid = ref_rsa(layer_indices[0], layer_indices[n_layers // 2])
     ref_min_layer = int(np.argmin(adj))
+
+    # The twins are a different number, so neither set of assertions can
+    # pass on the other's RDMs.
+    assert abs(ref_adjacent_min - min(corr_adj)) > 1e-4
+    assert abs(ref_early_late - corr_early_late) > 1e-4
 
     TOL = 1e-9
     assert out["_meta_rsa_adjacent_mean_euclidean"] == pytest.approx(ref_adjacent_mean, abs=TOL)
