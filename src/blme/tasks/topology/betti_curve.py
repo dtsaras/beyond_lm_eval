@@ -14,7 +14,9 @@ Method (refined adaptation of Naitzat et al. and topnn/topnn_framework):
     unit-edge (hop) metric of each component, read with ripser -- the paper's
     Eirene read at minrad=1, maxrad=2, numrad=1.
   The homology engine differs from the paper's Eirene; the construction is
-  validated on the paper's own examples (tests/tasks/test_topology.py).
+  tested on point clouds with known Betti numbers (a circle gives (1, 1);
+  tests/tasks/test_topology.py),
+  not on the paper's own examples.
 
 References:
 - "Topology of Deep Neural Networks" (Naitzat, Zhitnikov & Lim, JMLR 21(184):1-40, 2020, arXiv:2004.06093)

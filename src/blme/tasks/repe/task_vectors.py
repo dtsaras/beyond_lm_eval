@@ -181,7 +181,7 @@ class TaskVectorGeometryTask(DiagnosticTask):
             A_pos = torch.stack(pos_activations[l])
             A_neg = torch.stack(neg_activations[l])
             # float32 means, as the released reader computes them: the vector is
-            # bit-pinned to ClusterMeanRepReader (tests/test_reference_parity_guard.py).
+            # pinned to ClusterMeanRepReader (tests/tasks/parity/test_repe_task_vectors_parity.py).
             mean_pos = A_pos.mean(dim=0)
             mean_neg = A_neg.mean(dim=0)
             v = mean_pos - mean_neg

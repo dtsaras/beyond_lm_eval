@@ -52,11 +52,10 @@ Implementation notes:
       order (reruns outer, test-n middle, restarts inner), so the estimate is
       bit-for-bit reproducible and can be matched against the reference run
       single-threaded under the same seed. See the parity harness/test.
-    * Point cloud: token hidden states at one layer (default: last), pooled
-      per config (``all_tokens`` by default — PHD is defined on a *set* of
-      token embeddings exactly as the reference feeds it text-token
-      embeddings). Capped at ``max_points`` via a seeded draw so the O(n^2)
-      distance matrices stay bounded.
+    * Point cloud: the headline is GPTID's per-text protocol, one PHD per
+      text on that text's token hidden states [1:-1] at one layer, averaged
+      over texts. The pooled cloud of every text's tokens (capped at
+      ``max_points`` by a seeded draw) is kept only as ``_meta_``.
     * float64 throughout; guards for too-few points return ``{"error": ...}``.
 """
 
