@@ -56,6 +56,13 @@ def _eigenspectrum(X, max_eigenvals: int = MAX_EIGENVALS) -> np.ndarray:
     s = scipy.linalg.svd(Xc, compute_uv=False, lapack_driver="gesdd")
     ev = s ** 2
     total = ev.sum()
+    if not np.isfinite(total) and np.isfinite(Xc).all() and Xc.size:
+        # s**2 overflowed on huge finite rows: the ratios are scale-free, so
+        # divide by a power of two (exact) and redo. Spectra that fit never get here.
+        scale = 2.0 ** np.ceil(np.log2(np.abs(Xc).max()))
+        s = scipy.linalg.svd(Xc / scale, compute_uv=False, lapack_driver="gesdd")
+        ev = s ** 2
+        total = ev.sum()
     if not np.isfinite(total) or total <= 0:
         return np.zeros(0)
     # PCA(n_components=k).explained_variance_ratio_: the first k of the ratios

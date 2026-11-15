@@ -34,7 +34,10 @@ and the three parameters fitted on the pooled per-document statistics
 ``_meta_*_concat_legacy``.
 
 Estimator parity is pinned against ``nolds`` (hurst_rs) and analytic anchors
-(white noise H ~ 0.5; J = 0.5 for iid).
+(white noise H ~ 0.5). J = 0.5 holds for an iid sequence, but the pooled
+headline standardises each document first, as the released notebook does, and
+on white noise at the shipped lag range that gives J ~ 0.44 (a
+Brownian-bridge effect; tests/tasks/parity/).
 """
 
 import logging

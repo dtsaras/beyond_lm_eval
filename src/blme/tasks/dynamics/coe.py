@@ -140,8 +140,10 @@ def _coe_from_chain(chain: list[torch.Tensor], storage_eps: float = None) -> dic
     # CoE-R (Eq. 5) — only meaningful when both normalisers are finite.
     if np.isfinite(mag_norm_mean) and np.isfinite(ang_norm_mean):
         coe_r = mag_norm_mean - ang_norm_mean
-        # L * CoE-R as an exact sum over transitions: an identity block adds a
-        # zero step and leaves it bit-identical, while Eq. 5's 1/L moves.
+        # L * CoE-R as an exact sum over transitions: an identity block between
+        # blocks adds a zero step and leaves it bit-identical, while Eq. 5's 1/L
+        # moves. One after the last block adds the final-norm step, which is not
+        # zero (tests/tasks/invariance/_end_of_stack.py).
         coe_r_sum = math.fsum(m - a for m, a in zip(mag_norm_pair, ang_norm_pair))
     else:
         coe_r = float("nan")

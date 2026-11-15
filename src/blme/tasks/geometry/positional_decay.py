@@ -90,9 +90,11 @@ def _write_sites(model):
 
 
 def _capture_input(store, i):
-    def hook(module, args):
-        if args and isinstance(args[0], torch.Tensor):
-            store[i] = args[0].detach()
+    """Pre-hook (``with_kwargs=True``) storing the projection's input, positional or keyword."""
+    def hook(module, args, kwargs):
+        x = args[0] if args else kwargs.get("input", kwargs.get("hidden_states"))
+        if isinstance(x, torch.Tensor):
+            store[i] = x.detach()
     return hook
 
 
@@ -220,7 +222,7 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         # buffers (tests/tasks/test_positional_decay_protocol.py).
         _dtype_ctx = fp32_compute(model)
         _dtype_info = _dtype_ctx.__enter__()
-        _hooks = [proj.register_forward_pre_hook(_capture_input(_zcap, i))
+        _hooks = [proj.register_forward_pre_hook(_capture_input(_zcap, i), with_kwargs=True)
                   for i, proj in enumerate(_sites or [])]
         try:
           with torch.no_grad():

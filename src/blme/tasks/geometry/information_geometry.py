@@ -162,9 +162,12 @@ class RepresentationSensitivityTask(DiagnosticTask):
                 _c = _real(_h1 * (2.0 * _k))
                 _lhs = (_c - _a)
                 _rhs = 2.0 * (_b - _a)
-                _den = _lhs.abs().max().clamp_min(1e-30)
-                lin_rel = max(lin_rel, float(
-                    ((_lhs - _rhs).abs().max() / _den).item()))
+                _num = float((_lhs - _rhs).abs().max().item())
+                _den = float(_lhs.abs().max().item())
+                # A head constant along this ray is linear on it (0 discrepancy);
+                # any discrepancy with no step to compare it to is non-linear.
+                lin_rel = max(lin_rel, 0.0 if _num == 0.0 else
+                              (_num / _den if _den > 0.0 else float("inf")))
         except (TypeError, ValueError, RuntimeError) as e:
             return float("nan"), f"linearity test could not run ({type(e).__name__}: {e})"
         if not np.isfinite(lin_rel):
