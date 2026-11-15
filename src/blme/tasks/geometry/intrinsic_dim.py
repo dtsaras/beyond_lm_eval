@@ -48,11 +48,13 @@ class IntrinsicDimensionTask(DiagnosticTask):
         "scale. The static mode measures the input-embedding rows, whose count is the "
         "vocabulary size."
     )
-    HEADLINE_KEYS = ("intrinsic_dimension", "lid_first_layer", "lid_mid_layer",
-                     "lid_last_layer")
+    # The layerwise keys. The static mode's intrinsic_dimension (vocabulary
+    # rows, V-dependent) is a plain key: layerwise mode never emits it
+    # (test_layerwise_mode_emits_every_headline_key).
+    HEADLINE_KEYS = ("lid_first_layer", "lid_mid_layer", "lid_last_layer")
     _INV = "tests/tasks/invariance/test_geometry_intrinsic_dim.py::"
     # lid_mid_layer is an index-selected depth and moves under identity-block
-    # insertion; intrinsic_dimension counts vocabulary rows (V-dependent).
+    # insertion.
     SIZE_INVARIANT = {
         "lid_first_layer": (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
                              "identity_blocks_trailing"),
