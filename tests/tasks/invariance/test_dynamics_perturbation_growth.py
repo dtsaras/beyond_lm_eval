@@ -33,7 +33,7 @@ def test_bf16_model_computes_in_fp32(build):
     bf16 = inv.run_with_dtype(model, torch.bfloat16)
     ref = inv.bf16_weights_fp32_math(model)
     got, want = _run(bf16, tok), _run(ref, tok)
-    inv.assert_invariant(want, got, ["growth_log_ratio", "perturbation_growth_per_layer"],
+    inv.assert_invariant(want, got, ["_meta_growth_log_ratio_absolute", "perturbation_growth_per_layer"],
                          rtol=0.0)
     assert got["_meta_compute_dtype"] == "float32"
     assert got["_meta_original_dtype"] == "bfloat16"
@@ -61,7 +61,8 @@ def test_growth_log_ratio_invariant_under_identity_blocks(where):
     deeper = inv.insert_identity_blocks(model, DEPTH_LAYOUTS[where],
                                         verify_on=token_batches(tok))
     base, other = _run(model, tok), _run(deeper, tok)
-    inv.assert_invariant(base, other, ["growth_log_ratio"], rtol=0.0)
+    inv.assert_invariant(base, other, ["growth_log_ratio_relative",
+                                       "_meta_growth_log_ratio_absolute"], rtol=0.0)
 
 
 def test_demoted_forms_move_under_identity_blocks():
@@ -114,7 +115,7 @@ def test_token_mean_excludes_sink_rows():
     assert out["_meta_rows_policy"] == "exclude_sinks"
     assert out["_meta_rows_n_rows"] == (n_tokens - CFG["num_samples"]
                                         - out["_meta_sink_n_massive_dropped"])
-    assert out["growth_log_ratio"] != out["_meta_growth_log_ratio_incl_pos0"]
+    assert out["_meta_growth_log_ratio_absolute"] != out["_meta_growth_log_ratio_incl_pos0"]
 
 
 @pytest.fixture(scope="module")
@@ -152,14 +153,14 @@ def test_massive_row_at_one_middle_depth_is_dropped_at_every_layer(gpt2, monkeyp
     new, old = _run_policy(model, tok, monkeypatch), _run_policy(model, tok, monkeypatch,
                                                                   "exclude_pos0")
     assert new["_meta_sink_n_massive_dropped"] == 0
-    inv.assert_invariant(old, new, ["growth_log_ratio", "perturbation_growth_per_layer"],
+    inv.assert_invariant(old, new, ["_meta_growth_log_ratio_absolute", "perturbation_growth_per_layer"],
                          rtol=0.0)
     new_inj = _run_policy(model, tok, monkeypatch, hook=(3, 1000.0))
     old_inj = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(3, 1000.0))
     assert new_inj["_meta_sink_n_massive_dropped"] == CFG["num_samples"]
     assert new_inj["_meta_massive_token_share"] > 0.5 > new["_meta_massive_token_share"]
-    d_old = old_inj["growth_log_ratio"] - old["growth_log_ratio"]
-    d_new = abs(new_inj["growth_log_ratio"] - new["growth_log_ratio"])
+    d_old = old_inj["_meta_growth_log_ratio_absolute"] - old["_meta_growth_log_ratio_absolute"]
+    d_new = abs(new_inj["_meta_growth_log_ratio_absolute"] - new["_meta_growth_log_ratio_absolute"])
     assert d_old > 1.0, d_old
     assert d_new < 0.01 * d_old, (d_new, d_old)
 
@@ -172,7 +173,7 @@ def test_excluded_sink_content_cannot_reach_the_headline(gpt2, monkeypatch):
     a = _run_policy(model, tok, monkeypatch, hook=(-1, 1000.0))
     b = _run_policy(model, tok, monkeypatch, hook=(-1, 2000.0))
     assert a["_meta_sink_n_massive_dropped"] == CFG["num_samples"]
-    inv.assert_invariant(a, b, ["growth_log_ratio", "perturbation_growth_per_layer"], rtol=0.0)
+    inv.assert_invariant(a, b, ["_meta_growth_log_ratio_absolute", "perturbation_growth_per_layer"], rtol=0.0)
     oa = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(-1, 1000.0))
     ob = _run_policy(model, tok, monkeypatch, "exclude_pos0", hook=(-1, 2000.0))
-    inv.assert_moves(oa, ob, "growth_log_ratio", 1e-2)
+    inv.assert_moves(oa, ob, "_meta_growth_log_ratio_absolute", 1e-2)

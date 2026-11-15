@@ -5,8 +5,7 @@ each layer's hidden state influences the prediction loss.
 For each layer l, computes ||d L_CE / d h_l||_F where L_CE is the shifted
 next-token cross-entropy loss averaged over positions (the same objective
 the model was trained on). This is the "signal strength" reaching the
-output from each layer. Smooth flow indicates healthy propagation; sharp
-drops indicate vanishing gradients; spikes indicate exploding gradients.
+output from each layer.
 
 SIGN CONVENTION. The layer index runs FORWARD, but backpropagation runs
 backward, so for a chain with per-layer Jacobian scale ``a`` the activation
@@ -19,8 +18,12 @@ gives slope +3.465736 and a = 2 gives -3.465736.
 Reported metrics:
   - **gradient_flow_log_ratio_in_out** (headline): log(||g_emb|| / ||g_final||),
     the end-to-end backward gain from the final residual to the embeddings.
-    Direction-aware and unit-free -- NEGATIVE means the input-side gradient
-    is the smaller one, i.e. vanishing; POSITIVE means exploding.
+    Direction-aware and unit-free: NEGATIVE means the input-side gradient is
+    the smaller one, POSITIVE the larger. In pre-LN stacks the activation
+    gradient scales like 1 / ||h||, so this key co-varies with residual-norm
+    growth (log ||h_L|| / ||h_emb||); it is not by itself evidence of vanishing
+    or exploding gradients, and an analysis should report it partialled on
+    geometry_lipschitz's norm growth.
   - **gradient_norm_per_layer**: Frobenius norm of dL/dh_l at the input of
     every block, then at the final residual (the input of the final norm).
   - ``_meta_`` profile summaries, which move under identity-block insertion:

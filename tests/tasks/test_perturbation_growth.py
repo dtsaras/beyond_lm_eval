@@ -45,3 +45,19 @@ def test_growth_profile_ignores_a_common_translation():
     a = _growth_profile(base_c, base_p)
     b = _growth_profile(shifted_c, shifted_p)
     assert b["growth_log_ratio"] == pytest.approx(a["growth_log_ratio"], rel=1e-12)
+
+
+def test_relative_form_removes_state_norm_growth():
+    """A stack that rescales the state by a per layer moves the divergence and the
+    state alike: the absolute log ratio is L ln a, the relative one is 0."""
+    import torch
+    from blme.tasks.dynamics.perturbation_growth import _growth_profile
+    g = torch.Generator().manual_seed(0)
+    h0 = torch.randn(40, 8, generator=g, dtype=torch.float64)
+    p0 = h0 + 1e-2 * torch.randn(40, 8, generator=g, dtype=torch.float64)
+    a, L = 1.7, 5
+    clean = [h0 * a ** l for l in range(L + 1)]
+    pert = [p0 * a ** l for l in range(L + 1)]
+    out = _growth_profile(clean, pert)
+    assert out["growth_log_ratio"] == pytest.approx(L * np.log(a), rel=1e-10)
+    assert out["growth_log_ratio_relative"] == pytest.approx(0.0, abs=1e-12)

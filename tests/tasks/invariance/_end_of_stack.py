@@ -80,7 +80,7 @@ OUTCOMES = {
         "convexity_gap": (I, I),
     },
     "dynamics_perturbation_growth": {
-        "growth_log_ratio": (I, I),
+        "growth_log_ratio_relative": (I, I),
     },
     # The post-norm output cloud; its 32 eigenvalues are too few for alpha.
     "geometry_alpha_req": {

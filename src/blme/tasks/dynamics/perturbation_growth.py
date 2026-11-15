@@ -15,8 +15,13 @@ relative size ``rel_eps`` (scaled per token to rel_eps * ||h_token||), run
 the clean and perturbed forward passes, and measure the per-layer
 divergence d_l = E_t ||h_l - h'_l||. Reported:
 
-  * ``growth_log_ratio`` (headline): log(d_L / d_0), the end-to-end
-    amplification. Positive = perturbations amplify; negative = contract.
+  * ``growth_log_ratio_relative`` (headline): log(r_L / r_0) with
+    r_l = E_t ||h_l - h'_l|| / ||h_l||, the divergence's growth relative to the
+    state's own norm growth. Positive = perturbations amplify; negative =
+    contract.
+  * ``_meta_growth_log_ratio_absolute``: log(d_L / d_0). In pre-LN stacks it
+    mostly tracks residual-norm growth, so its sign does not mean
+    amplification.
   * ``perturbation_growth_per_layer``: log(d_l / d_0) profile.
   * ``_meta_growth_slope``: least-squares slope of log d_l against
     normalised depth in [0, 1].
@@ -52,11 +57,17 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
     # Both operands in double before the subtraction: a float32 norm under- and
     # overflows at extreme scales, and casting before subtracting quantises a
     # common offset away (tests/tasks/test_perturbation_growth.py scale/offset).
-    d = []
+    d, rel = [], []
     for l in range(L):
-        diff = (clean_layers[l].double() - perturbed_layers[l].double())
-        d.append(float(diff.norm(dim=-1).mean().item()))
+        clean = clean_layers[l].double()
+        dn = (clean - perturbed_layers[l].double()).norm(dim=-1)
+        d.append(float(dn.mean().item()))
+        # Per-token divergence relative to the clean state's own norm.
+        cn = clean.norm(dim=-1)
+        ok = cn > 0
+        rel.append(float((dn[ok] / cn[ok]).mean().item()) if bool(ok.any()) else float("nan"))
     d = np.asarray(d, dtype=np.float64)
+    rel = np.asarray(rel, dtype=np.float64)
     if d[0] <= 0 or not np.all(np.isfinite(d)) or np.any(d <= 0):
         return {}
     log_d = np.log(d)
@@ -70,6 +81,12 @@ def _growth_profile(clean_layers, perturbed_layers) -> dict:
     return {
         "perturbation_growth_per_layer": (log_d - log_d[0]).tolist(),
         "growth_log_ratio": float(log_d[-1] - log_d[0]),
+        # log(d_L/||h_L||) - log(d_0/||h_0||): the divergence's growth beyond the
+        # state's own norm growth; its sign is amplify (+) or contract (-).
+        "growth_log_ratio_relative": (
+            float(np.log(rel[-1]) - np.log(rel[0]))
+            if np.isfinite(rel[0]) and np.isfinite(rel[-1]) and rel[0] > 0 and rel[-1] > 0
+            else float("nan")),
         "_meta_growth_slope": slope,
         "_meta_growth_rate_per_block": float((log_d[-1] - log_d[0]) / n_transitions),
         "_meta_initial_divergence": float(d[0]),
@@ -98,14 +115,15 @@ class PerturbationGrowthTask(DiagnosticTask):
         "and tracks the token-mean divergence (sink rows excluded) through every block, "
         "which costs two forward passes per passage; per-element QLE would need d x T x L "
         "passes and Jacobian spectra are infeasible at 34B. The headline is the end-to-end "
-        "amplification growth_log_ratio = log(d_L / d_0), which identity-block insertion "
-        "leaves bit-identical; the per-block rate and the normalised-depth slope move under "
-        "it and are _meta_. The forward passes run in fp32 arithmetic, because bf16 rounding "
+        "relative amplification growth_log_ratio_relative = log(r_L / r_0), r_l the token "
+        "mean of ||h_l - h'_l|| / ||h_l||, which identity-block insertion leaves "
+        "bit-identical; the absolute log(d_L / d_0) mostly tracks residual-norm growth and "
+        "is _meta_, as are the per-block rate and the normalised-depth slope. The forward passes run in fp32 arithmetic, because bf16 rounding "
         "is a noise floor of the same order as the perturbation."
     )
-    HEADLINE_KEYS = ("growth_log_ratio",)
+    HEADLINE_KEYS = ("growth_log_ratio_relative",)
     SIZE_INVARIANT = {
-        "growth_log_ratio": (
+        "growth_log_ratio_relative": (
             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/invariance/test_dynamics_perturbation_growth.py::"
             "test_growth_log_ratio_invariant_under_identity_blocks",
@@ -240,6 +258,9 @@ class PerturbationGrowthTask(DiagnosticTask):
         results = _growth_profile(clean_layers, pert_layers)
         if not results:
             return {"error": "Degenerate divergence profile"}
+        # The absolute log ratio mostly tracks residual-norm growth (review
+        # 2026-11-15): _meta_; the relative form is the headline.
+        results["_meta_growth_log_ratio_absolute"] = results.pop("growth_log_ratio")
         incl = _growth_profile([torch.cat(c, dim=0) for c in clean_acc],
                                [torch.cat(c, dim=0) for c in pert_acc])
         results["_meta_growth_log_ratio_incl_pos0"] = incl.get(
