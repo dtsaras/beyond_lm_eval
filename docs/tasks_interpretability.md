@@ -12,12 +12,7 @@ This module contains metrics that probe the internal properties, specialized cir
 `interpretability_logit_lens_kl`, `interpretability_prediction_entropy`,
 `interpretability_probing`, `interpretability_sae_features`,
 `interpretability_sparsity`, `interpretability_superposition`, and
-`interpretability_waa`. The sections below cover 17 of them;
-`interpretability_activation_kurtosis`
-(`src/blme/tasks/interpretability/activation_kurtosis.py`) and
-`interpretability_attention_rollout`
-(`src/blme/tasks/interpretability/attention_rollout.py`) are documented in
-their module docstrings.
+`interpretability_waa`.
 
 **Paper-faithful vs. BLME proxy notes**: `interpretability_activation_sinks`
 implements paper-derived Sinkε, massive-activation, and compression-valley
@@ -168,3 +163,19 @@ monosemanticity method. Only `interpretability_logit_lens_kl` and
 * **Citation/Paper**: `Sandoval-Segura, P., et al. (2026). Identifying and Evaluating Inactive Heads in Pretrained LLMs.` [ICLR 2026, ArXiv: 2504.03889]; code psandovalsegura/inactive-heads.
 * **File & Function**: `src/blme/tasks/interpretability/inactive_heads.py` -> `InactiveHeadsTask`
 * **Critical Info**: Headline keys: `inactive_head_fraction` and `inactive_head_threshold_5pct`. No key is declared size-invariant: inserted identity blocks move the fraction (`tests/tasks/invariance/test_interpretability_inactive_heads.py::test_identity_blocks_move_the_fraction`), because their heads write nothing yet the score is read before W_O and rates them as ordinary heads; zero-padding the width adds no heads and changes no score (`test_zero_padding_the_width_adds_no_heads`). Defaults: `num_samples: 1000`, `max_length: 512`, `tau: 0.5`; each passage is scored once. The release picks tau per model at the quantiles that capture 0-30% of heads on MMLU (5-shot) and checks them by zeroing; BLME uses one fixed tau and reports the fraction over a tau grid and the release's 0-30% thresholds in `_meta_`. Heads that share a GQA value head are scored separately, as in the release. On gated attention the score reads the gated output; linear-attention and other non-softmax layers are skipped and counted.
+
+## 18. Activation Kurtosis (interpretability_activation_kurtosis)
+* **What are we measuring**: How heavy-tailed the per-channel activation distributions of the residual stream are, as a signal of outlier features.
+* **How are we measuring**: For each hidden dimension at each layer, the excess (Fisher) kurtosis E[(x - mu)^4] / sigma^4 - 3 of its values across tokens, with population moments. Reported: the mean and maximum over channels and layers, the fraction of (channel, layer) pairs above `kurtosis_threshold: 10`, the kurtosis of the pooled activation tensor, last-layer scalars and per-layer profiles.
+* **Hypothesis**: A few channels with very large kurtosis indicate the massive-activation regime; such outlier channels are what makes low-bit quantization hard.
+* **Citation/Paper**: `Akhondzadeh, Bojchevski, Eleftheriou, & Dazzi (2025). KurTail: Kurtosis-based LLM Quantization.` [Findings of EMNLP 2025, ArXiv: 2503.01483]; massive activations: `Sun et al. (2024). Massive Activations in Large Language Models.` [ArXiv: 2402.17762]
+* **File & Function**: `src/blme/tasks/interpretability/activation_kurtosis.py` -> `ActivationKurtosisTask`
+* **Critical Info**: A normal channel has excess kurtosis 0. The per-channel kernel follows `scipy.stats.kurtosis(A, axis=0, fisher=True, bias=True)` (`tests/tasks/parity/test_activation_kurtosis_parity.py`). Reads the shared hidden-state cache when available; otherwise it runs its own forward pass. Counts are `_meta_`. Defaults: `num_samples: 100`, `kurtosis_threshold: 10`, `use_cache: true`. No headline keys or size-invariances are declared.
+
+## 19. Attention Rollout (interpretability_attention_rollout)
+* **What are we measuring**: Cumulative token-to-token influence across layers, with the residual connection taken into account.
+* **How are we measuring**: Each layer's attention is averaged over heads, augmented with the identity and re-normalised to stay row-stochastic; the rollout is the cumulative matrix product from the first layer to the last (Abnar & Zuidema 2020, Sec. 3). The final-layer rollout is summarised across samples: mean influence from the first token, from the last token, mean self-influence (the diagonal), the mean row-wise Gini coefficient and the mean normalised row entropy.
+* **Hypothesis**: Concentrated rollout rows (high Gini, low entropy) mean each position draws on few input tokens; high self-influence means little mixing across positions.
+* **Citation/Paper**: `Abnar, S., & Zuidema, W. (2020). Quantifying Attention Flow in Transformers.` [ACL 2020, ArXiv: 2005.00928]
+* **File & Function**: `src/blme/tasks/interpretability/attention_rollout.py` -> `AttentionRolloutTask`
+* **Critical Info**: The rollout kernel is checked against the reference implementation's `compute_joint_attention(add_residual=True)` in `tests/tasks/parity/test_attention_rollout_parity.py`. Reads cached attention maps when available; otherwise it runs its own forward pass with `output_attentions=True`. Rollout treats head-averaged attention as the only mixing mechanism and ignores MLPs and value transformations. Defaults: `num_samples: 10`. No headline keys or size-invariances are declared.
