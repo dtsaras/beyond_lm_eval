@@ -63,16 +63,30 @@ def test_linear_cka_matches_kornblith_invariances():
     assert 0.0 <= got <= 1.0
 
 
-def test_normalized_linear_hsic_matches_centered_gram_trace():
-    from blme.tasks.geometry.mutual_info import _normalized_linear_hsic
+def _shipped_nhsic(X, Y):
+    """geometry_hsic's kernel as evaluate() calls it: centred linear Grams,
+    then the normalised trace with the self terms passed in."""
+    from blme.tasks.geometry.mutual_info import _centered_linear_gram, _nhsic_from_grams
 
+    K, L = _centered_linear_gram(X), _centered_linear_gram(Y)
+    got = _nhsic_from_grams(K, L, float(torch.sum(K * K)), float(torch.sum(L * L)))
+    assert got == _nhsic_from_grams(K, L)   # the default self terms are the same ones
+    return got
+
+
+def test_normalized_linear_hsic_matches_centered_gram_trace():
     X = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
     Y = torch.tensor([[2.0, 0.0], [0.0, 2.0], [2.0, 2.0]])
-    assert _normalized_linear_hsic(X, Y) == pytest.approx(1.0, abs=1e-6)
+    assert _shipped_nhsic(X, Y) == pytest.approx(1.0, abs=1e-12)
 
-    Z = torch.tensor([[1.0, -1.0], [-1.0, 1.0], [0.0, 0.0]])
-    got = _normalized_linear_hsic(X, Z)
-    assert 0.0 <= got <= 1.0
+    # Explicit-H form on a pair that is neither aligned nor orthogonal.
+    Z = torch.tensor([[1.0, -1.0], [-1.0, 2.0], [0.5, 0.0]])
+    H = torch.eye(3, dtype=torch.float64) - 1.0 / 3.0
+    Kx = H @ (X.double() @ X.double().T) @ H
+    Kz = H @ (Z.double() @ Z.double().T) @ H
+    want = float(torch.trace(Kx @ Kz) / torch.sqrt(torch.trace(Kx @ Kx) * torch.trace(Kz @ Kz)))
+    assert 0.05 < want < 0.95
+    assert _shipped_nhsic(X, Z) == pytest.approx(want, abs=1e-12)
 
 
 def test_linear_cka_and_hsic_match_kornblith_reference_value():
@@ -86,13 +100,12 @@ def test_linear_cka_and_hsic_match_kornblith_reference_value():
     actual reference value, complementing the invariance tests above.
     """
     from blme.tasks.geometry.cka import _linear_cka
-    from blme.tasks.geometry.mutual_info import _normalized_linear_hsic
 
     case = _case("linear_cka_fixed_pair")
     X = torch.tensor(case["X"])
     Y = torch.tensor(case["Y"])
     assert _linear_cka(X, Y) == pytest.approx(case["expected"], abs=1e-6)
-    assert _normalized_linear_hsic(X, Y) == pytest.approx(case["expected"], abs=1e-9)
+    assert _shipped_nhsic(X, Y) == pytest.approx(case["expected"], abs=1e-9)
 
 
 def test_matrix_nuclear_norm_fixture_matches_reference_formula():

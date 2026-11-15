@@ -133,7 +133,11 @@ def test_linear_cka_is_scale_and_translation_invariant():
     Before: 0.132094427492 -> 4.41881768414e-5 at scale 1e-5 (a +1e-12
     denominator), and 24.17% error at offset 1e3 (Gram formed before centring).
     """
-    from blme.tasks.geometry.mutual_info import _normalized_linear_hsic as cka
+    from blme.tasks.geometry.mutual_info import _centered_linear_gram, _nhsic_from_grams
+
+    def cka(X, Y):   # the two kernels geometry_hsic's evaluate() composes
+        return _nhsic_from_grams(_centered_linear_gram(X), _centered_linear_gram(Y))
+
     rng = np.random.default_rng(0)
     X = torch.tensor(rng.normal(size=(60, 10)))
     Y = torch.tensor(rng.normal(size=(60, 10)) * .6 + rng.normal(size=(60, 10)) * .1)
