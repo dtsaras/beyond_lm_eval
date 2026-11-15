@@ -90,7 +90,8 @@ class NeighborhoodStabilityTask(DiagnosticTask):
                 "No reference model provided. Calculating embedding-noise "
                 f"stability with noise_std={noise_std}."
             )
-            generator = torch.Generator(device=E1.device)
+            # Drawn on the CPU and moved, so a GPU run perturbs exactly as a CPU run.
+            generator = torch.Generator(device="cpu")
             generator.manual_seed(seed)
             E1_float = E1.float()
             # Scale-exact row norms: the row max is factored out and the product
@@ -106,10 +107,10 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             # elementwise randn would realise noise_std * sqrt(d)).
             raw = torch.randn(
                 E1_float.shape,
-                device=E1.device,
+                device="cpu",
                 dtype=E1_float.dtype,
                 generator=generator,
-            )
+            ).to(E1.device)
             raw = raw / raw.norm(dim=1, keepdim=True).clamp_min(1e-12)
             noise = (raw.double() * row_scale * noise_std).to(E1_float.dtype)
             E2 = E1_float + noise

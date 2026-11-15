@@ -45,3 +45,22 @@ def test_a_head_constant_on_the_probe_ray_is_linear_not_floor_divided():
     h = torch.randn(5, 4, generator=torch.Generator().manual_seed(1))
     rel, why = RepresentationSensitivityTask._head_linearity(model, None, W, h)
     assert why is None and rel == 0.0
+
+
+def test_s_unit_is_finite_with_a_non_affine_final_norm():
+    """OLMo-1B's final LayerNorm has no gain or bias; gamma = 1 is well defined."""
+    import sys
+    from pathlib import Path
+    import transformers
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "invariance"))
+    import _family_d as fd
+    from blme.tasks.geometry.information_geometry import RepresentationSensitivityTask
+    cfg = transformers.OlmoConfig(vocab_size=1000, hidden_size=32, intermediate_size=64,
+                                  num_hidden_layers=2, num_attention_heads=4,
+                                  num_key_value_heads=4, max_position_embeddings=128)
+    torch.manual_seed(0)
+    model = transformers.OlmoForCausalLM(cfg).eval()
+    assert getattr(model.model.norm, "weight", None) is None
+    r = RepresentationSensitivityTask({"num_samples": 3}).evaluate(model, fd.tokenizer(), fd.dataset(3))
+    assert r["_meta_final_norm_gain_form"] == "no_affine"
+    assert np.isfinite(r["S_unit"]) and r["S_unit"] > 0

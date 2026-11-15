@@ -59,6 +59,14 @@ class _UnitGainNorm:
         self.ok = isinstance(w, torch.Tensor)
         self.form = "unavailable"
         if not self.ok:
+            # A norm without affine parameters (OLMo-1B's non-parametric
+            # LayerNorm) already outputs the unit-gain state: gamma = 1, beta = 0.
+            shape = getattr(norm, "normalized_shape", None)
+            if shape:
+                d = int(np.prod(tuple(shape)))
+                self.ok, self.form = True, "no_affine"
+                self.w = self.gamma = torch.ones(d)
+                self.beta = torch.zeros(d)
             return
         self.w = norm.weight.detach().float()
         b = getattr(norm, "bias", None)
@@ -77,7 +85,8 @@ class _UnitGainNorm:
 
     def unit(self, x):
         with torch.no_grad():
-            dev = self.probe.weight.device
+            w = getattr(self.probe, "weight", None)
+            dev = w.device if isinstance(w, torch.Tensor) else x.device
             return self.probe(x.detach().float().to(dev))
 
 
