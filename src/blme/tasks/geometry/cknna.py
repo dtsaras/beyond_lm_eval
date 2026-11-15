@@ -66,7 +66,7 @@ from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ...cache import CACHE_TOKENIZER_MAX_LENGTH
 from .._tokens import (hidden_states_for_task, massive_token_share,
-                       position0_share, select_rows)
+                       position0_share, select_rows, strip_trailing_special)
 import math
 
 logger = logging.getLogger("blme")
@@ -327,6 +327,9 @@ def _pooled_layer_features(model, tokenizer, dataset, cache, *, num_samples,
             text = sample["text"] if isinstance(sample, dict) else str(sample)
             inputs = tokenizer(text, return_tensors="pt", truncation=True,
                                max_length=CACHE_TOKENIZER_MAX_LENGTH).to(device)
+            # As the cache route: an appended EOS is not a pooled row
+            # (tests/tasks/test_eos_appending_tokenizers.py).
+            inputs, _ = strip_trailing_special(inputs, tokenizer)
             if inputs["input_ids"].shape[1] < 1:
                 continue
             out = model(**inputs, output_hidden_states=True)

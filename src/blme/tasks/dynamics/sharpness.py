@@ -46,6 +46,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._precision import effective_dtype_meta, fp32_compute
+from .._tokens import strip_trailing_special
 from ..common import get_layers, get_lm_head
 from ..geometry.utils import safe_norm as _safe_norm
 
@@ -463,12 +464,17 @@ class LossSharpnessTask(DiagnosticTask):
         # Build a single batched loss using `num_samples` short sequences.
         # We accumulate per-sample losses, then take the mean for HVP.
         encs = []
+        n_stripped = 0
         for i, sample in enumerate(dataset):
             if i >= num_samples:
                 break
             text = sample["text"] if isinstance(sample, dict) else str(sample)
             enc = tokenizer(text, return_tensors="pt",
                             truncation=True, max_length=64).to(device)
+            # An appended EOS would be a next-token target of the loss
+            # (tests/tasks/test_eos_appending_tokenizers.py).
+            enc, _k = strip_trailing_special(enc, tokenizer)
+            n_stripped += int(_k)
             if enc["input_ids"].shape[1] >= 4:
                 encs.append(enc)
         if not encs:
@@ -604,5 +610,6 @@ class LossSharpnessTask(DiagnosticTask):
             "_meta_hutchinson_tol": hutchinson_tol,
             "_meta_power_iter_max_iter": n_power_iter,
             "_meta_power_iter_tol": power_iter_tol,
+            "_meta_n_trailing_special_stripped": int(n_stripped),
             **effective_dtype_meta(_prec),
         }

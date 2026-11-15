@@ -47,6 +47,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
 
@@ -258,6 +259,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
         chain_length = None
         n_generated = []
         n_eos = 0
+        n_stripped = 0
         _used_hook = [False]
 
         # The deepest block's raw output is hooked only for the _meta_ blockout
@@ -278,6 +280,10 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
                 enc = tokenizer(text, return_tensors="pt", truncation=True,
                                 max_length=max_prompt)
+                # An appended EOS would be the prompt's last token
+                # (tests/tasks/test_eos_appending_tokenizers.py).
+                enc, _k = strip_trailing_special(enc, tokenizer)
+                n_stripped += int(_k)
                 input_ids = enc["input_ids"][:, :max_prompt].to(device)
                 P = int(input_ids.shape[1])
                 if P < 1 or ctx - P < 1:
@@ -409,6 +415,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "_meta_n_generated_tokens_mean": float(np.mean(n_generated)),
             "_meta_max_new_tokens": max_new_tokens,
             "_meta_n_samples_ended_by_eos": int(n_eos),
+            "_meta_n_trailing_special_stripped": int(n_stripped),
             "_meta_n_samples": len(sample_results),
             "token_position": "generated_mean",
             "note": (

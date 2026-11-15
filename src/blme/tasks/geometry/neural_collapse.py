@@ -35,6 +35,7 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
 
@@ -239,10 +240,15 @@ def _next_token_class_stats(model, tokenizer, texts, min_per_class: int,
     count needs only the tokenizer), so only kept classes are accumulated.
     """
     enc = []
+    n_stripped = 0
     counts: Dict[int, int] = defaultdict(int)
     for t in texts:
         ids = tokenizer(t, return_tensors="pt", truncation=True,
                         max_length=max_length)
+        # An appended EOS would be a next-token class of every text
+        # (tests/tasks/test_eos_appending_tokenizers.py).
+        ids, _k = strip_trailing_special(ids, tokenizer)
+        n_stripped += int(_k)
         if ids["input_ids"].shape[1] < 2:
             continue
         enc.append(ids)
@@ -255,7 +261,7 @@ def _next_token_class_stats(model, tokenizer, texts, min_per_class: int,
     n_tokens = 0
     with torch.no_grad():
         for ids in tqdm(enc, desc="Neural collapse (next-token)"):
-            ids = ids.to(device)
+            ids = {k: v.to(device) for k, v in ids.items()}
             out = model(**ids, output_hidden_states=True)
             # post-final-norm: DELIBERATELY post-norm -- the classifier input
             # (the reference replaces lm_head by Identity, model.py:261-268).
@@ -280,7 +286,8 @@ def _next_token_class_stats(model, tokenizer, texts, min_per_class: int,
     # Mean squared deviation (the reference's VarNormAccumulator, 1/n_c).
     variances = np.maximum(sumsq / n - np.einsum("ij,ij->i", means, means), 0.0)
     return {"means": means, "variances": variances, "counts": n,
-            "n_tokens": n_tokens, "n_docs": len(enc), "n_classes_seen": len(counts)}
+            "n_tokens": n_tokens, "n_docs": len(enc), "n_classes_seen": len(counts),
+            "n_stripped": n_stripped}
 
 
 def _topic_proxy(model, tokenizer, samples):
@@ -291,6 +298,7 @@ def _topic_proxy(model, tokenizer, samples):
         for text, label in tqdm(samples, desc="Neural collapse (topic proxy)"):
             inputs = tokenizer(text, return_tensors="pt",
                                truncation=True, max_length=128).to(device)
+            inputs, _ = strip_trailing_special(inputs, tokenizer)
             if inputs["input_ids"].shape[1] < 1:
                 continue
             out = model(**inputs, output_hidden_states=True)
@@ -396,6 +404,7 @@ class NeuralCollapseTask(DiagnosticTask):
             "_meta_nc_n_samples": int(st["counts"].sum()),
             "_meta_nc_n_tokens": int(st["n_tokens"]),
             "_meta_nc_n_docs": int(st["n_docs"]),
+            "_meta_n_trailing_special_stripped": int(st["n_stripped"]),
             "_meta_nc_min_per_class": min_per_class,
             "_meta_nc_mean_within_class_variance": float(np.mean(st["variances"])),
         })

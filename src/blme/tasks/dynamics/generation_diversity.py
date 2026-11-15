@@ -35,6 +35,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import stop_ids
+from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
 
@@ -300,6 +301,7 @@ class GenerationDiversityTask(DiagnosticTask):
         _n_ok_prompts = [0]
         _n_failed_prompts = [0]
         _n_cut = [0]
+        _n_stripped = [0]
         all_entropy_first_q = []
         all_entropy_last_q = []
         all_entropy_delta = []
@@ -315,6 +317,10 @@ class GenerationDiversityTask(DiagnosticTask):
                 if n_samples < 1:
                     continue
                 enc = tokenizer(prompt, return_tensors="pt").to(device)
+                # An appended EOS would make every completion continue an
+                # ended text (tests/tasks/test_eos_appending_tokenizers.py).
+                enc, _k = strip_trailing_special(enc, tokenizer)
+                _n_stripped[0] += int(_k)
                 prompt_len = enc["input_ids"].shape[1]
 
                 try:
@@ -481,6 +487,7 @@ class GenerationDiversityTask(DiagnosticTask):
             "_meta_n_completions": len(all_completions),
             "_meta_stop_ids": sorted(int(t) for t in stops),
             "_meta_n_completions_cut_at_stop": int(_n_cut[0]),
+            "_meta_n_trailing_special_stripped": int(_n_stripped[0]),
             "_meta_top_k": int(self.config.get("top_k", 0)) or 0,
             "temperature": temperature,
             "seed": int(seed) if seed is not None else None,
