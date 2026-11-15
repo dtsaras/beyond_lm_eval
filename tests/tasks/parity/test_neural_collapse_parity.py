@@ -1,4 +1,10 @@
-"""Numeric-parity test: BLME geometry_neural_collapse vs official NC library.
+"""Numeric-parity test: geometry_neural_collapse's Papyan NC1 kernel vs the NC library.
+
+Scope: the headline is Wu & Papyan's (2024) next-token CDNV (``nc1_cdnv``,
+``nc1_cdnv_galanti``), pinned in tests/tasks/invariance/test_neural_collapse.py
+::test_next_token_classes_and_cdnv. The kernel tested here,
+``_neural_collapse_metrics``, now feeds only the ``_meta_topic_*`` construct
+(5 bundled topics x 8 sentences, or a ``{text, label}`` dataset).
 
 Neural Collapse NC1 (within-class variability collapse), Papyan, Han & Donoho
 2020 PNAS (arXiv:2008.08186):
