@@ -41,4 +41,4 @@ def test_h1_entropy_is_width_and_scale_free(states):
 def test_the_lifetimes_it_summarises_carry_the_scale(states):
     base = _run("topology_homology", states)
     scaled = _run("topology_homology", inv.rescale_docs(states, 2.0 ** -7))
-    inv.assert_moves(base, scaled, "mid_layer_mean_persistence_h1", min_rel=0.9)
+    inv.assert_moves(base, scaled, "_meta_mid_layer_mean_persistence_h1", min_rel=0.9)

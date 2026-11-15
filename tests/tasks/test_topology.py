@@ -227,9 +227,9 @@ def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
         assert mpd > 0
         for stat in ("mean_persistence_h0", "max_persistence_h0",
                      "mean_persistence_h1"):
-            assert results[f"{prefix}_{stat}_norm"] == pytest.approx(
-                results[f"{prefix}_{stat}"] / mpd, rel=1e-9
-            )
+            # The raw role-named lifetimes are _meta_ (the representation's units).
+            raw = results.get(f"{prefix}_{stat}", results.get(f"_meta_{prefix}_{stat}"))
+            assert results[f"{prefix}_{stat}_norm"] == pytest.approx(raw / mpd, rel=1e-9)
 
 
 def test_zigzag_duplicate_points_do_not_inflate_components():

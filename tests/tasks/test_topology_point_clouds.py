@@ -134,7 +134,7 @@ def test_rips_reads_float64_distances():
     res = fd.inv.run_task_on_states("topology_homology", S, {"num_samples": len(X)},
                                     force=True, store_dtype=torch.float64)
     assert res["first_layer_num_loops_h1"] == len(want)
-    assert res["first_layer_mean_persistence_h1"] == pytest.approx(np.mean(want), rel=1e-6)
+    assert res["_meta_first_layer_mean_persistence_h1"] == pytest.approx(np.mean(want), rel=1e-6)
 
 
 def test_a_smaller_cache_is_not_silently_accepted(tiny):

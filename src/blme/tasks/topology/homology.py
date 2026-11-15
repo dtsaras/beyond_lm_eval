@@ -80,8 +80,10 @@ def _lifespan_summary(dgms) -> dict:
 
 _ROLES = ("first", "mid", "last")
 _TWINS = ("mean_persistence_h0", "max_persistence_h0", "mean_persistence_h1")
+# The raw lifetimes are in the representation's units: _meta_ only
+# (tests/tasks/invariance/test_topology_homology.py::test_raw_lifetimes_are_meta_only).
 _HEADLINES = tuple(
-    [f"{r}_layer_{k}" for r in _ROLES for k in ("mean_persistence_h0", "num_loops_h1")]
+    [f"{r}_layer_num_loops_h1" for r in _ROLES]
     + [f"{r}_layer_{k}_norm" for r in _ROLES for k in _TWINS])
 _INV = "tests/tasks/invariance/test_topology_homology.py::"
 # The mean-pairwise-distance twins; the raw lifetimes move with any rescale.
@@ -115,9 +117,9 @@ class PersistentHomologyTask(DiagnosticTask):
         "last block, as Fay et al. (2025) do "
         "for LLMs, with N = 1000 sequences for every model. ripser reads float64 pairwise "
         "distances. H0 / H1 lifetimes are summarised by their mean and maximum and the H1 bar "
-        "count. Raw lifetimes are in the representation's units, so each is also divided by the "
-        "cloud's mean pairwise distance (the _norm twins), which removes a global rescale and a "
-        "change of embedding width exactly. The twins still drift with N (about -4.5% per "
+        "count. Raw lifetimes are in the representation's units and are kept only as _meta_; "
+        "the headline lifetimes are divided by the cloud's mean pairwise distance (the _norm "
+        "twins), which removes a global rescale and a change of embedding width exactly. The twins still drift with N (about -4.5% per "
         "doubling for mean H0), so models are compared at the same N. The fine/coarse split at "
         "half the mean pairwise distance is a BLME construct."
     )
@@ -171,7 +173,9 @@ class PersistentHomologyTask(DiagnosticTask):
                        "mean_persistence_h1", "num_loops_h1"):
                 results[f"_meta_layer_{l_idx}_{_k}"] = summary[_k]
                 if _r:
-                    results[f"{_r}_layer_{_k}"] = summary[_k]
+                    # Raw lifetimes carry the representation's scale: _meta_.
+                    _pfx = "" if _k == "num_loops_h1" else "_meta_"
+                    results[f"{_pfx}{_r}_layer_{_k}"] = summary[_k]
 
             # Lifetimes divided by the cloud's mean pairwise distance (mpd):
             # VR lifetimes and the mpd are both homogeneous of degree 1.

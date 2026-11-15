@@ -52,7 +52,7 @@ def test_hop_metric_keys_are_width_and_scale_free(states):
 def test_a_euclidean_summary_of_the_same_clouds_moves(states):
     base = _run("topology_homology", states)
     scaled = _run("topology_homology", inv.rescale_docs(states, 2.0 ** -7))
-    inv.assert_moves(base, scaled, "mid_layer_mean_persistence_h0", min_rel=0.9)
+    inv.assert_moves(base, scaled, "_meta_mid_layer_mean_persistence_h0", min_rel=0.9)
 
 
 def test_no_absolute_layer_index_is_a_feature(states):

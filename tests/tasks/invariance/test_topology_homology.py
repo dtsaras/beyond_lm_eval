@@ -46,9 +46,25 @@ def test_raw_lifetimes_move_with_the_scale(states):
     base = _run(states)
     scaled = _run(inv.rescale_docs(states, 2.0 ** -7))
     for r in ("first", "mid", "last"):
-        inv.assert_moves(base, scaled, f"{r}_layer_mean_persistence_h0", min_rel=0.9)
-        assert scaled[f"{r}_layer_mean_persistence_h0"] == pytest.approx(
-            base[f"{r}_layer_mean_persistence_h0"] * 2.0 ** -7, rel=1e-12)
+        inv.assert_moves(base, scaled, f"_meta_{r}_layer_mean_persistence_h0", min_rel=0.9)
+        assert scaled[f"_meta_{r}_layer_mean_persistence_h0"] == pytest.approx(
+            base[f"_meta_{r}_layer_mean_persistence_h0"] * 2.0 ** -7, rel=1e-12)
+
+
+def test_raw_lifetimes_are_meta_only(states):
+    """The raw lifetimes move with any rescale, so the headline is the nine
+    _norm twins and the three H1 bar counts; the raw values stay as _meta_."""
+    want = {f"{r}_layer_{k}" for r in ("first", "mid", "last")
+            for k in ("num_loops_h1", "mean_persistence_h0_norm",
+                      "max_persistence_h0_norm", "mean_persistence_h1_norm")}
+    assert set(PersistentHomologyTask.HEADLINE_KEYS) == want
+    res = _run(states)
+    for r in ("first", "mid", "last"):
+        mpd = res[f"_meta_{r}_layer_mean_pairwise_distance"]
+        for k in ("mean_persistence_h0", "max_persistence_h0", "mean_persistence_h1"):
+            assert f"{r}_layer_{k}" not in res
+            assert res[f"{r}_layer_{k}_norm"] == pytest.approx(
+                res[f"_meta_{r}_layer_{k}"] / mpd, rel=1e-12, nan_ok=True)
 
 
 def test_role_layers_report_their_depth_fraction(states):

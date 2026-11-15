@@ -95,7 +95,7 @@ def test_landscape_h0_keys_are_meta_closed_forms_of_homology(states):
     assert not [k for k in _features(res) if "_h0_" in k]
     for r in ("first", "mid", "last"):
         assert res[f"_meta_{r}_layer_h0_landscape_max_1"] == pytest.approx(
-            hom[f"{r}_layer_max_persistence_h0"] / 2, rel=1e-12)
+            hom[f"_meta_{r}_layer_max_persistence_h0"] / 2, rel=1e-12)
         assert f"{r}_layer_h1_landscape_max_1" in res
 
 

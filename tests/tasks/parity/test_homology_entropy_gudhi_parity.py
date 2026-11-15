@@ -65,7 +65,9 @@ def test_homology_evaluate_matches_gudhi(clouds, states):
         mpd = float(pdist(X).mean())
         assert len(h1) >= 2, "the cloud must have several loops"
         assert res[f"{role}_layer_num_loops_h1"] == len(h1)
-        want = {"mean_persistence_h0": h0.mean(),
+        assert res[f"_meta_{role}_layer_mean_persistence_h0"] == pytest.approx(
+            h0.mean(), rel=1e-6)
+        want = {
                 "mean_persistence_h0_norm": h0.mean() / mpd,
                 "max_persistence_h0_norm": h0.max() / mpd,
                 "mean_persistence_h1_norm": h1.mean() / mpd}
