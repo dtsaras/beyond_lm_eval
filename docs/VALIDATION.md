@@ -1,6 +1,6 @@
 # Validation status
 
-Generated at BLME `19b78ca` from the study's verification trackers. Nothing here
+Generated at BLME `cabf703` from the study's verification trackers. Nothing here
 is a sign-off; it states what has been checked and how.
 
 **Columns**
@@ -24,8 +24,8 @@ is a sign-off; it states what has been checked and how.
 | dynamics_interpolation | plat (slerp only, local) | n/a | 1/1 |
 | dynamics_perturbation_growth | none | n/a | 1/1 |
 | dynamics_sharpness | PyHessian (pip+local) | kernel | 7/7 |
-| dynamics_stability | none | n/a | 2/2 |
-| geometry_categories | none | n/a | 7/7 |
+| dynamics_stability | none | n/a | 1/1 |
+| geometry_categories | none | n/a | not in the confirmatory set |
 | geometry_cka | Kornblith notebook (local) | copy | 6/6 |
 | geometry_cknna | platonic-rep (local) | copy | 9/9 |
 | geometry_collapse | none | n/a | 4/4 |
@@ -39,7 +39,7 @@ is a sign-off; it states what has been checked and how.
 | geometry_lid | lid_adversarial (local) | untested | 6/6 |
 | geometry_lipschitz | lipEstimation (other estimand) | n/a | 4/4 |
 | geometry_magnitude | magnipy (pip+local) | kernel | 2/2 |
-| geometry_mahalanobis | deep_Mahalanobis (local) | untested | 7/7 |
+| geometry_mahalanobis | deep_Mahalanobis (local) | untested | 5/5 |
 | geometry_matrix_entropy | Diff-eRank (local) | copy | 2/2 |
 | geometry_mp_bulk_deviation | none | n/a | 12/12 |
 | geometry_neural_collapse | linguistic-collapse (kernel not local) | copy | 2/2 |
@@ -56,7 +56,7 @@ is a sign-off; it states what has been checked and how.
 | geometry_svd | kawine/contextual (local) | untested | 2/2 |
 | geometry_tokenizer_efficiency | none | n/a | not in the confirmatory set |
 | geometry_trajectory_curvature | sent_sampling (local) | copy | 3/3 |
-| geometry_unembedding | none | n/a | 5/5 |
+| geometry_unembedding | none | n/a | 2/2 |
 | geometry_vendi_score | Vendi-Score (pip) | kernel | 4/4 |
 | geometry_weight_norms | WeightWatcher (pip+local) | untested | 4/4 |
 | repe_concept_separability | representation-engineering (local) | kernel | not in the confirmatory set |

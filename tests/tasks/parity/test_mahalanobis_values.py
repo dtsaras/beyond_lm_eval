@@ -66,3 +66,11 @@ def test_pooled_keys_match_a_ledoit_wolf_refit(monkeypatch):
     }
     for key, v in want.items():
         assert res[key] == pytest.approx(v, rel=1e-9), key
+    # auroc: the mean over splits of sklearn's ROC AUC of the reference
+    # distances (ID = 0, OOD = 1).
+    from sklearn.metrics import roc_auc_score
+    per_split = []
+    for f, s_id, s_ood in zip(fits, scored[0::2], scored[1::2]):
+        a, b = _reference_distances(f, s_id), _reference_distances(f, s_ood)
+        per_split.append(roc_auc_score(np.r_[np.zeros(len(a)), np.ones(len(b))], np.r_[a, b]))
+    assert res["auroc"] == pytest.approx(float(np.mean(per_split)), rel=1e-12)
