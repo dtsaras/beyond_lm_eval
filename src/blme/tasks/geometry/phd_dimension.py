@@ -456,11 +456,12 @@ class PHDimensionTask(DiagnosticTask):
         # the mean over texts (a pooled cloud mixes per-document manifolds and
         # reads high by a model-dependent factor).
         per_text = []
+        # Every document lands in exactly one bucket (estimated, too short,
+        # ungriddable, non-finite), and the buckets sum to _n_seen.
+        _n_seen = _n_short = _n_ungriddable = _n_nonfinite = 0
+        _fit_pts = []
+        _per_text_error = None
         try:
-            # Every document lands in exactly one bucket (estimated, too short,
-            # ungriddable, non-finite), and the buckets sum to _n_seen.
-            _n_seen = _n_short = _n_ungriddable = _n_nonfinite = 0
-            _fit_pts = []
             # GPTID's per-text protocol drops the first and last token ([1:-1]):
             # the sink at position 0 and the final token
             # (test_phd_dimension_protocol.py::test_first_and_last_token_are_dropped).
@@ -497,7 +498,8 @@ class PHDimensionTask(DiagnosticTask):
                 else:
                     _n_nonfinite += 1
         except Exception as e:  # pragma: no cover - defensive
-            logger.info(f"phd: per-text pass failed ({e})")
+            _per_text_error = f"{type(e).__name__}: {e}"
+            logger.warning(f"phd: per-text pass failed ({_per_text_error})")
 
         if per_text:
             out["phd_dimension"] = float(np.mean(per_text))
@@ -524,9 +526,16 @@ class PHDimensionTask(DiagnosticTask):
                     f"The reported mean is over the long tail of the corpus, "
                     f"not over the corpus.")
         else:
-            # No document was large enough; fall back to the pooled estimate
-            # and flag that this is NOT the per-text quantity.
-            out["phd_dimension"] = float(d)
+            # No text gave a per-text PHD: the headline is NaN, never the
+            # pooled estimand, which stays in _meta_phd_dimension_pooled
+            # (test_phd_no_pooled_fallback.py).
+            out["phd_dimension"] = float("nan")
             out["phd_dimension_std"] = float("nan")
-            out["_meta_phd_pooled_fallback"] = True
+            out["_meta_phd_nan_reason"] = (
+                f"no text gave a per-text PHD: {_n_seen} seen, {_n_short} under "
+                f"{min_text_tokens} tokens, {_n_ungriddable} with fewer than 2 grid "
+                f"sizes, {_n_nonfinite} non-finite"
+                + (f"; per-text pass failed ({_per_text_error})" if _per_text_error else ""))
+        if _per_text_error is not None:
+            out["_meta_phd_per_text_error"] = _per_text_error
         return out
