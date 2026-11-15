@@ -104,13 +104,13 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `geometry_positional_decay` | `mean_positional_decay_correlation` | How attention weight decays with distance. Strong negative (< −0.5) = healthy local structure. |
 | `geometry_spectral` | `avg_alpha`, `avg_stable_rank` | Power-law exponent and stable rank of weight matrices. Extreme values indicate brittle spectra. |
 | `geometry_mahalanobis` | `ood_separation_gap` | Mahalanobis distance gap between in-distribution and OOD data. Larger = better OOD detection. |
-| `geometry_representation_sensitivity` | `representation_sensitivity` | Closed-form sensitivity proxy `||∇_h log P(y|h)||²`. Higher = the output distribution is more locally sensitive to hidden-state perturbations. |
+| `geometry_representation_sensitivity` | `S_unit` | Mean squared norm of the gradient of log P(y) with respect to the unit-gain normalised final state. Higher = the output distribution is more locally sensitive to hidden-state perturbations. It does not depend on how a model splits scale between the final-norm gain and the unembedding, and it carries a factor of the width. The raw `||∇_h log P(y|h)||²` and its std are `_meta_representation_sensitivity_raw` and `_meta_representation_sensitivity_raw_std`. |
 | `geometry_correlation_dimension` | `correlation_dimension` | Fractal complexity of the representation manifold. Non-integer values indicate self-similar structure. |
 | `geometry_categories` | `*_separation`, `*_purity` | Per-category separation and purity scores in embedding space. |
-| `geometry_unembedding` | `unembedding_eff_rank`, `unembedding_purity_mean` | Structure and tokenizer-dependent category purity of the unembedding space (plus tied-weight flag). |
+| `geometry_unembedding` | `unembedding_eff_rank`, `unembedding_eff_rank_centered` | Roy-Vetterli effective rank of the unembedding rows the tokenizer can emit (ids below `len(tokenizer)`), raw and mean-centred. The values over every row are `_meta_unembedding_eff_rank_all_rows` and `_meta_unembedding_eff_rank_centered_all_rows`, and `_meta_n_unused_rows` counts the rows no token reaches. Category purity and the embedding alignment are tokenizer-dependent `_meta_` diagnostics. |
 | `geometry_isoscore` | `isoscore` | Rudman et al. covariance-isotropy score. Higher = more uniform use of embedding dimensions. |
 | `geometry_neural_collapse` | `nc1_within_class_collapse`, `nc2_etf_cosine_deviation_proxy` | Topic-label neural-collapse proxies; NC2 is an ETF cosine-deviation proxy, not full NC2/NC3. |
-| `geometry_schatten` | `row_normalized_schatten_1_last`, `row_normalized_matrix_nuclear_norm_last` | Row-normalized spectral geometry summaries. Schatten-2 is intentionally omitted as content-free after row-L2 normalization. |
+| `geometry_schatten` | `rankme_last`, `row_normalized_rankme_last`, `row_normalized_matrix_nuclear_norm_last`, `row_normalized_schatten_inf_last` | Per-text spectral summaries of the last layer, on the first 256 tokens of long WikiText articles. The raw MLP-activation Schatten norms are `_meta_schatten_1_mlp` and `_meta_schatten_4_mlp` (they carry the activation scale and d_ff). Schatten-2 is intentionally omitted as content-free after row-L2 normalization. |
 | `geometry_mp_bulk_deviation` | `mp_outlier_frac_*`, `mp_spike_energy_*` | Deviation from a Marchenko-Pastur random-matrix null; larger spike energy means more structured directions. |
 
 ---
@@ -141,7 +141,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 
 | Task | Key Metric | Range | What It Tells You |
 |------|-----------|-------|-------------------|
-| `topology_homology` | `layer_*_mean_persistence_h0` | ≥0 | Per-layer persistence lifespans for connected components and loops. |
+| `topology_homology` | `{first,mid,last}_layer_mean_persistence_h0_norm`, `*_max_persistence_h0_norm`, `*_mean_persistence_h1_norm`, `*_num_loops_h1` | ≥0 | Persistence lifetimes of connected components and loops divided by the cloud's mean pairwise distance, and the number of loops, at the first, middle and last block. The lifetimes in the representation's own units are `_meta_{first,mid,last}_layer_*`. |
 | `topology_persistence_entropy` | `layer_*_pe_h0`, `pe_simplification_ratio` | ≥0 | Per-layer persistence entropy and simplification across depth. |
 | `topology_betti_curve` | `betti_0_curve`, `simplification_ratio` | ≥0 | Betti trajectory across layers and its simplification ratio. |
 | `topology_persistence_landscape` | `layer_*_h0_mean_landscape_integral` | ≥0 | Persistence-landscape functional summaries of H0/H1 diagrams. |

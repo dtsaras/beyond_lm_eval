@@ -14,11 +14,19 @@
 
 ### Fixes that change numbers
 - **One-point-per-sequence clouds read 20-word windows.** Each passage contributes the last token of a 20-word window, chosen from its text alone, as Cheng et al. do. Before, the cloud took the last token of each whole passage. This changes every cloud key of 13 tasks: `geometry_intrinsic_dim`, `geometry_lid`, `geometry_vendi_score`, `geometry_magnitude`, `geometry_correlation_dimension`, `geometry_gride`, `geometry_information_imbalance`, `geometry_neighborhood_overlap`, `geometry_alpha_req`, `topology_betti_curve`, `topology_homology`, `topology_persistence_entropy` and `topology_persistence_landscape`. `points_readout: passage` restores whole passages; that route is now also capped at the model's context.
+- `geometry_procrustes_linearity`: all 17 keys are fitted without position 0 and the massive-activation rows (token policy `exclude_sinks`, one mask per token shared by every layer, as `geometry_cka`). Position-0 rows hold 94% of the centred sum of squares on gpt2 and set every key: `procrustes_linearity_mean` is 0.978 with them and 0.919 without. The every-position values of the released notebook are `_meta_incl_pos0_procrustes_linearity_*`.
+- `topology_zigzag_persistence`: each point is the last token of a 20-word window of a passage, as in the other topology tasks. It used to be the last token of the whole passage. `zz_true_adjacent_mean` and `zz_true_mean_bar_len` change; `points_readout: passage` restores whole passages. Sites, tokenisation without special tokens and the barcode are unchanged.
+- `geometry_unembedding`: `unembedding_eff_rank` and `unembedding_eff_rank_centered` read only the rows the tokenizer can emit (ids below `len(tokenizer)`). Models whose unembedding has padded rows change; the all-rows values are `_meta_unembedding_eff_rank_all_rows` and `_meta_unembedding_eff_rank_centered_all_rows`, beside `_meta_n_unused_rows`.
+- `geometry_schatten`: every model scores the first 256 tokens of the long WikiText validation articles `geometry_positional_decay` reads (`seq_tokens`; `documents: dataset` scores the run's passages in the same window). It used to score each full passage, so the token count followed the passage and the tokenizer. Every key changes. `_meta_schatten_seq_tokens` and `_meta_schatten_documents` replace `_meta_schatten_max_length`.
+- Long articles are selected by whitespace-word count (`load_long_documents(min_words=)`), so every tokenizer gets the same articles:
+  - `geometry_phd_dimension` keeps articles of ≥ 512 words (it kept ≥ 300 tokens);
+  - `dynamics_fractal` keeps articles of ≥ 4096 words (it kept ≥ 4096 tokens);
+  - `geometry_positional_decay` keeps articles of ≥ `seq_tokens` + 1 words.
 - **An appended EOS is stripped wherever a task tokenises its own input**, as the shared cache already did. The change affects tokenizers that append EOS (OLMo). Keys:
   - `convexity_gap` (interpolation);
   - `growth_log_ratio_relative` (perturbation_growth);
   - `gradient_flow_log_ratio_in_out`;
-  - `representation_sensitivity` and `S_unit`;
+  - `S_unit` and `_meta_representation_sensitivity_raw`;
   - `positional_decay_nosink_write_weighted`;
   - `effective_depth_90`, `total_block_influence` and `max_block_influence`;
   - `prediction_alignment_mean` and `prediction_alignment_std` (fallback route).
@@ -40,14 +48,15 @@
 - `dynamics_gradient_flow`: blocks called with `hidden_states=` are captured. `gradient_flow_log_ratio_in_out` was NaN or wrong on such models.
 - `geometry_representation_sensitivity`:
   - `S_unit` is finite on a final norm without affine parameters (OLMo);
-  - the head-linearity guard fails closed, so `representation_sensitivity` and `S_unit` are NaN, with a reason, when the guard cannot run.
-- `geometry_schatten`: blocks with routed experts get NaN with a reason, and `schatten_1` / `schatten_4` average the remaining blocks. Dense models are unchanged.
+  - the head-linearity guard fails closed, so `S_unit` and `_meta_representation_sensitivity_raw` are NaN, with a reason, when the guard cannot run.
+- `geometry_schatten`: blocks with routed experts get NaN with a reason, and `_meta_schatten_1_mlp` / `_meta_schatten_4_mlp` average the remaining blocks. Dense models are unchanged.
 - `geometry_predictive_information`: special tokens are never targets. This changes `predictive_info_*` on EOS-appending tokenizers.
 - `geometry_alpha_req`: non-finite rows are masked and counted, and huge finite rows no longer overflow, which affects `alpha_req` and `rankme`. Finite clouds are unchanged.
 - `dynamics_stability`: the noise is drawn on the CPU, so `stability_mean` from a GPU run equals the CPU value.
 - Phi-1/1.5/2: the final norm at `model.final_layernorm` is found. Phi results of logit_lens, logit_lens_kl, unembedding, representation_sensitivity, gradient_flow, zigzag_persistence and bias_weat change.
 - Gemma 3n / 4: the final logit softcap is read from the text config. This changes the tasks that decode through `common.apply_lm_head`: `interpretability_logit_lens`, `interpretability_logit_lens_kl` and `convexity_gap`.
 - `_meta_` only: `_meta_gride_peak_layer_frac` uses the hidden-state index / L, as the other peak depths do.
+- `_meta_` only: `_meta_correlation_dimension_under_resolved` compares the reported fixed-window `correlation_dimension` with the Eckmann-Ruelle bound 2 log10 N. It used to compare the demoted plateau fit.
 
 ### Key renames and demotions to `_meta_`
 - `dynamics_perturbation_growth`: `growth_log_ratio` → `_meta_growth_log_ratio_absolute`; the new headline is `growth_log_ratio_relative`.
@@ -56,6 +65,10 @@
 - `geometry_mahalanobis`: `mean_mahalanobis_id`, `mean_mahalanobis_ood` and `ood_separation_gap` move to `_meta_`. Their per-dimension twins stay headline.
 - `topology_betti_curve`: the headline is `betti_1_curve_mean`; `max_betti_1` moves to `_meta_`.
 - `geometry_rsa`: `_meta_n_degenerate_rows_jittered` → `_meta_n_constant_rows_dropped_corrdist`.
+- `geometry_procrustes_linearity`: `_meta_excl_pos0_procrustes_linearity_mean` and `_meta_excl_pos0_procrustes_linearity_adjusted_mean` are removed (the headline now excludes position 0), and the `meta_excl_pos0` option becomes `meta_incl_pos0`.
+- `geometry_schatten`: `schatten_1` → `_meta_schatten_1_mlp` and `schatten_4` → `_meta_schatten_4_mlp`. They are in the MLP activation's units and grow with d_ff. The headline is `rankme_last`, `row_normalized_rankme_last`, `row_normalized_matrix_nuclear_norm_last` and `row_normalized_schatten_inf_last`.
+- `topology_homology`: the raw lifetimes `{first,mid,last}_layer_mean_persistence_h0`, `*_max_persistence_h0` and `*_mean_persistence_h1` move to `_meta_{first,mid,last}_layer_*`. The headline is their `_norm` twins and `*_num_loops_h1`.
+- `geometry_representation_sensitivity`: `representation_sensitivity` → `_meta_representation_sensitivity_raw` and `sensitivity_std` → `_meta_representation_sensitivity_raw_std`. The headline is `S_unit`.
 
 Apart from the perturbation_growth headline, these moves leave values unchanged.
 
