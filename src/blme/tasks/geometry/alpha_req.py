@@ -33,7 +33,8 @@ from sklearn.metrics import r2_score
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ._sequence_points import DEFAULT_N_SEQUENCES, readout_for, sequence_clouds
+from .._windows import window_options
+from ._sequence_points import DEFAULT_N_SEQUENCES, readout_for, readout_meta, sequence_clouds
 
 logger = logging.getLogger("blme")
 
@@ -121,7 +122,8 @@ class AlphaReQTask(DiagnosticTask):
         "their entropy; both follow the released reptrix estimator. Li et al. (2025) apply "
         "them to LLMs at the last layer's representation of the last token of each sequence, "
         "which BLME reads as the model's output state (HF's final hidden state, after the "
-        "final norm) of the last content token of each of 1000 documents. Li et al. use 15000 "
+        "final norm) of the last token of a 20-word window of each of 1000 passages (the "
+        "same words for every model, as in Cheng et al. 2024). Li et al. use 15000 "
         "sequences and report the spectral metrics robust to the sample count; BLME pins N at "
         "1000 for every model. The fit window, ranks 11-100, is fixed, so the exponent ignores "
         "the zero eigenvalues that zero-padding or an isometric embedding adds; RankMe adds "
@@ -148,7 +150,8 @@ class AlphaReQTask(DiagnosticTask):
         sc = sequence_clouds(
             model, tokenizer, dataset, cache, n=num_samples, layer=-1,
             replace_final_norm=False, use_cache=use_cache, token_docs=0,
-            readout=readout_for(self.TOKEN_POLICY))
+            readout=readout_for(self.TOKEN_POLICY),
+            points=window_options(self.config))
         if not sc.last:
             return {"error": "No hidden states available for alpha-ReQ"}
         X = next(iter(sc.last.values()))
@@ -158,6 +161,7 @@ class AlphaReQTask(DiagnosticTask):
             "rankme": st["rankme"],
             "_meta_alpha_req_fit_r2_100": st["r2"],
             "_meta_n_points": int(sc.n_points),
+            **readout_meta(sc),
             "_meta_n_eigenvalues": st["n_eig"],
             "_meta_fit_ranks": [int(FIT_RANGE[0]) + 1, int(FIT_RANGE[-1]) + 1],
         }
@@ -169,7 +173,8 @@ class AlphaReQTask(DiagnosticTask):
             prof = sequence_clouds(
                 model, tokenizer, dataset, cache, n=num_samples, layer="all",
                 replace_final_norm=True, use_cache=use_cache, token_docs=0,
-                readout=readout_for(self.TOKEN_POLICY))
+                readout=readout_for(self.TOKEN_POLICY),
+                points=window_options(self.config))
             per = [_spectral_stats(prof.last[k]) for k in sorted(prof.last)]
             out["alpha_req_per_layer"] = [p["alpha"] for p in per]
             out["rankme_per_layer"] = [p["rankme"] for p in per]

@@ -1,4 +1,8 @@
-"""The one-point-per-sequence reader shared by the sequence-level geometry tasks."""
+"""The one-point-per-sequence reader shared by the sequence-level geometry tasks.
+
+These tests drive the whole-passage route (``points_readout: passage``); the
+default 20-word-window route is tested in ``test_word_windows.py``.
+"""
 import pytest
 import torch
 
@@ -6,6 +10,7 @@ transformers = pytest.importorskip("transformers")
 
 from blme.cache import ModelOutputCache  # noqa: E402
 from blme.tasks._tokens import select_rows, sink_keep_masks  # noqa: E402
+from blme.tasks._windows import window_options  # noqa: E402
 from blme.tasks.geometry._sequence_points import _norm_columns, sequence_clouds  # noqa: E402
 
 TEXTS = [
@@ -16,6 +21,8 @@ TEXTS = [
     "She opened the old wooden door and stepped into the dusty library.",
     "The recipe calls for two cups of flour, one egg and a pinch of salt.",
 ]
+
+PASSAGE = window_options({"points_readout": "passage"})
 
 
 @pytest.fixture(scope="module")
@@ -40,9 +47,9 @@ def test_cache_and_forward_routes_agree_bit_for_bit(tiny, layer, rfn):
     model, tok = tiny
     data = [{"text": t} for t in TEXTS]
     a = sequence_clouds(model, tok, data, _cache(model, tok, 6), n=6, layer=layer,
-                        replace_final_norm=rfn, token_docs=4)
+                        replace_final_norm=rfn, token_docs=4, points=PASSAGE)
     b = sequence_clouds(model, tok, data, None, n=6, layer=layer,
-                        replace_final_norm=rfn, token_docs=4)
+                        replace_final_norm=rfn, token_docs=4, points=PASSAGE)
     assert a.info["source"] == "shared_cache" and b.info["source"] == "self_collected"
     assert a.last.keys() == b.last.keys()
     for k in a.last:
@@ -56,7 +63,7 @@ def test_cache_and_forward_routes_agree_bit_for_bit(tiny, layer, rfn):
 def test_one_row_per_document_is_its_last_token(tiny):
     model, tok = tiny
     c = _cache(model, tok, 6)
-    sc = sequence_clouds(model, tok, None, c, n=6, layer="all", replace_final_norm=True)
+    sc = sequence_clouds(model, tok, None, c, n=6, layer="all", replace_final_norm=True, points=PASSAGE)
     per_doc = c.get_hidden_states(layer_idx="all", per_sample=True, replace_final_norm=True)
     for k, rows in sc.last.items():
         assert rows.shape[0] == 6
@@ -69,7 +76,7 @@ def test_a_cache_with_fewer_documents_than_n_is_not_used(tiny):
     model, tok = tiny
     data = [{"text": t} for t in TEXTS]
     sc = sequence_clouds(model, tok, data, _cache(model, tok, 3), n=6, layer=-1,
-                         replace_final_norm=False)
+                         replace_final_norm=False, points=PASSAGE)
     assert sc.info["source"] == "self_collected"
     assert sc.info["cache_rejected"] == "too_few_docs"
     assert sc.n_points == 6
@@ -79,7 +86,7 @@ def test_a_dataset_shorter_than_n_is_logged(tiny, caplog):
     model, tok = tiny
     data = [{"text": t} for t in TEXTS]
     with caplog.at_level("WARNING", logger="blme"):
-        sc = sequence_clouds(model, tok, data, None, n=1000, layer=-1, replace_final_norm=False)
+        sc = sequence_clouds(model, tok, data, None, n=1000, layer=-1, replace_final_norm=False, points=PASSAGE)
     assert sc.n_points == 6 and sc.meta()["_meta_n_points_requested"] == 1000
     assert "6 of the 1000 requested sequences" in caplog.text
 
@@ -99,7 +106,7 @@ def test_norm_columns_give_the_full_row_masks():
 def test_token_cloud_drops_the_sink_rows(tiny):
     model, tok = tiny
     sc = sequence_clouds(model, tok, None, _cache(model, tok, 6), n=6, layer="all",
-                         replace_final_norm=True, token_docs=6)
+                         replace_final_norm=True, token_docs=6, points=PASSAGE)
     for k in sc.tokens:
         rows, meta = sc.token_rows(k)
         assert meta.policy == "exclude_sinks"

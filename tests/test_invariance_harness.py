@@ -240,12 +240,42 @@ def test_stub_model_reports_depth_and_width():
 _DRIVER_CONFIG = {"geometry_lid": {"k": 5}}
 
 
+def _reads_sequences(task):
+    from blme.core import _register_all_tasks
+    from blme.registry import get_task
+    _register_all_tasks()
+    return getattr(get_task(task), "TOKEN_POLICY", None) == "last_per_sequence"
+
+
 @pytest.mark.parametrize("task", sorted(inv.STATE_DRIVABLE_TASKS))
 def test_driver_reproduces_a_real_cache_bit_for_bit(task, tiny_gpt2, tiny_states):
-    """The stub path and a real populated cache give identical results."""
-    stub = inv.run_task_on_states(task, tiny_states, _DRIVER_CONFIG.get(task))
-    real = inv.run_task_on_model(task, *tiny_gpt2, TEXTS, _DRIVER_CONFIG.get(task))
+    """The stub path and a real populated cache give identical results.
+
+    The one-point-per-sequence tasks read 20-word windows by default, which
+    these short texts do not hold; they are compared on the whole-passage
+    route, where the injected documents are the sequences
+    (``InjectedStateCache.window_rows`` serves the same rows to the window
+    route; test_word_windows.py pins the cache and forward window routes).
+    """
+    cfg = dict(_DRIVER_CONFIG.get(task) or {})
+    if _reads_sequences(task):
+        cfg["points_readout"] = "passage"
+    stub = inv.run_task_on_states(task, tiny_states, cfg)
+    real = inv.run_task_on_model(task, *tiny_gpt2, TEXTS, cfg)
     assert _same(stub, real), _diff(stub, real)
+
+
+@pytest.mark.parametrize("task", sorted(t for t in inv.STATE_DRIVABLE_TASKS if _reads_sequences(t)))
+def test_driver_serves_the_window_route_the_injected_sequences(task, tiny_states):
+    """On the default window route the driver's sequences are the injected
+    documents, so it gives the passage-route result on the same states."""
+    cfg = dict(_DRIVER_CONFIG.get(task) or {})
+    window = inv.run_task_on_states(task, tiny_states, cfg)
+    passage = inv.run_task_on_states(task, tiny_states, dict(cfg, points_readout="passage"))
+    strip = lambda r: {k: v for k, v in r.items()  # noqa: E731
+                       if not k.startswith(("_meta_window", "_meta_points"))
+                       and not k.endswith("_source")}
+    assert _same(strip(window), strip(passage)), _diff(strip(window), strip(passage))
 
 
 def _same(a, b):

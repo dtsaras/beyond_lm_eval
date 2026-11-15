@@ -80,6 +80,24 @@ class ModelOutputCache:
     # Public API
     # ------------------------------------------------------------------
 
+    def window_rows(self, dataset, *, n: int, opts, replace_final_norm: bool):
+        """Last-token rows of the 20-word windows of ``dataset`` at every block output.
+
+        Computed once per window set and ``replace_final_norm`` and shared by
+        the tasks that read them (:func:`blme.tasks._windows.window_rows`).
+        """
+        from .tasks._windows import window_last_rows, window_set
+        ws = window_set(dataset if dataset is not None else self.dataset, n,
+                        n_words=opts["n_words"], seed=opts["seed"],
+                        drop_punct_final=opts["drop_punct_final"])
+        memo = self.__dict__.setdefault("_window_memo", {})
+        key = (ws.digest, bool(replace_final_norm))
+        if key not in memo:
+            memo[key] = window_last_rows(self.model, self.tokenizer, ws.texts, select=range,
+                                         replace_final_norm=replace_final_norm)
+        rows, info = memo[key]
+        return rows, ws, dict(info, source="shared_window_cache")
+
     def populate(
         self,
         need_hidden: bool = True,

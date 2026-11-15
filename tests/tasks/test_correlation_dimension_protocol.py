@@ -15,7 +15,8 @@ transformers = pytest.importorskip("transformers")
 
 from blme.tasks.geometry.correlation_dimension import CorrelationDimensionTask  # noqa: E402
 
-TASK_CFG = {"num_samples": 200}
+# The stub tokenizer maps "doc i" to point i: whole passages, not 20-word windows.
+TASK_CFG = {"num_samples": 200, "points_readout": "passage"}
 
 
 class _Tok:

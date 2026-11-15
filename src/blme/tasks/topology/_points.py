@@ -2,17 +2,18 @@
 
 The LLM precedents for barcode summaries read the LAST token of each prompt
 at a layer (Fay et al. 2025, arXiv:2505.20435 Sec. 2.2; Gardinazzi et al.
-2025, arXiv:2410.11042 Sec. 3), with thousands of prompts. The shared cache
-supplies the block outputs when it holds at least ``num_samples`` documents;
-otherwise a private forward keeps only the last-token rows of the requested
-blocks, so memory is O(N * layers * d) rather than every token of every layer.
-Both routes tokenise like the cache (window 512, appended EOS/SEP stripped)
-and read the raw last block in place of HF's ``ln_f`` entry.
+2025, arXiv:2410.11042 Sec. 3), with thousands of prompts. A prompt is a
+20-word window of a passage by default (:mod:`blme.tasks._windows`), the same
+text for every model; whole passages are opt-in (``points_readout: passage``).
+On the passage route the shared cache supplies the block outputs when it
+holds at least ``num_samples`` documents; otherwise a private forward keeps
+only the last-token rows of the requested blocks. Every route strips appended
+EOS/SEP and reads the raw last block in place of HF's ``ln_f`` entry.
 """
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, Iterable, List, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -78,19 +79,44 @@ def _text(sample) -> str:
 
 def last_token_points(model, tokenizer, dataset, cache=None, *, num_samples: int,
                       layers: LayerSpec, policy: str = "last",
-                      use_cache: bool = True) -> Tuple[Dict[int, np.ndarray], Dict]:
+                      use_cache: bool = True,
+                      points: Optional[Dict] = None) -> Tuple[Dict[int, np.ndarray], Dict]:
     """``{block index: (N, d) float64}`` last-token clouds, and provenance.
 
-    ``policy`` is passed to :func:`blme.tasks._tokens.select_rows` on the cache
-    route; the private route implements ``"last"`` only.
+    ``points`` is :func:`blme.tasks._windows.window_options` of the task's
+    config (20-word windows by default). On the passage route ``policy`` is
+    passed to :func:`blme.tasks._tokens.select_rows` on the cache route; the
+    private route implements ``"last"`` only.
     """
-    pts, info = _last_token_points(model, tokenizer, dataset, cache, num_samples=num_samples,
-                                   layers=layers, policy=policy, use_cache=use_cache)
+    from .._windows import window_options
+    opts = window_options(None) if points is None else dict(points)
+    if opts["readout"] == "window":
+        if policy != "last":
+            raise ValueError(f"the window route implements policy 'last', not {policy!r}")
+        pts, info = _window_points(model, tokenizer, dataset, cache, int(num_samples), layers,
+                                   opts, use_cache)
+    else:
+        pts, info = _last_token_points(model, tokenizer, dataset, cache,
+                                       num_samples=num_samples, layers=layers, policy=policy,
+                                       use_cache=use_cache)
     got = int(next(iter(pts.values())).shape[0]) if pts else 0
     if got < int(num_samples):
         logger.warning(f"last_token_points: {got} of the {int(num_samples)} requested "
                        f"sequences; the dataset is shorter than the task's N")
     return pts, dict(info, n_requested=int(num_samples))
+
+
+def _window_points(model, tokenizer, dataset, cache, num_samples, layers, opts, use_cache):
+    from .._windows import token_count_meta, window_rows
+    rows, ws, winfo = window_rows(model, tokenizer, dataset, cache, n=num_samples, opts=opts,
+                                  replace_final_norm=True, use_cache=use_cache)
+    n_layers = len(rows)
+    pts = {l: rows[l].to(torch.float64).numpy() for l in _wanted(layers, n_layers)}
+    return pts, {"source": winfo["source"], "last_is_block": winfo["last_is_block"],
+                 "n_layers": n_layers, "positions": winfo["positions"],
+                 "n_docs": len(winfo["positions"]), "cache_rejected": None,
+                 "readout_label": f"last_token_of_{ws.n_words}_word_window",
+                 "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]))}
 
 
 def _last_token_points(model, tokenizer, dataset, cache, *, num_samples, layers, policy,
@@ -184,8 +210,10 @@ def point_meta(info: Dict, cloud: np.ndarray) -> Dict[str, object]:
         "_meta_points_source": info["source"],
         "_meta_points_cache_rejected": info["cache_rejected"],
         "_meta_rows_policy": "last",
+        "_meta_points_readout": info.get("readout_label", "last_content_token_of_passage"),
         "_meta_last_entry_is_block_output": bool(info["last_is_block"]),
     }
+    out.update(info.get("window_meta", {}))
     if docs:
         out["_meta_massive_token_share"] = massive_token_share(docs, positions=pos)
         out["_meta_position0_share"] = position0_share(docs, positions=pos)

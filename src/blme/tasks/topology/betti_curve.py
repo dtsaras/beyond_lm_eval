@@ -27,6 +27,7 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._windows import window_options
 from ._points import fallback_dataset, last_token_points, point_meta, rows_policy
 import logging
 logger = logging.getLogger("blme")
@@ -203,7 +204,8 @@ class BettiCurveTask(DiagnosticTask):
         "Naitzat et al. compute Betti numbers of one class's point cloud at every layer of small "
         "trained classifiers, on the hop metric of a kNN graph, with k and the radius calibrated "
         "so that the input cloud reproduces its known topology. BLME reads the same hop-metric "
-        "Betti numbers at every block on one point per sequence (its last token, the LLM "
+        "Betti numbers at every block on one point per sequence (the last token of a 20-word "
+        "window of each passage, the LLM "
         "precedent's cloud) with N = 1000 sequences; there is no class and no ground truth, so "
         "k = max(14, ceil(log2 N)) (counting the point itself, as the released loader does) and "
         "the 2-hop radius are carried over uncalibrated. Euclidean VR persistence and kNN zigzag "
@@ -220,7 +222,8 @@ class BettiCurveTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Betti Curve (Topological Complexity Trajectory)...")
-        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        # Q1: one point per sequence (the last token of a 20-word window of each
+        # passage, the same words for every model), N = 1000 for every model.
         num_samples = int(self.config.get("num_samples", 1000))
         n_neighbors = self.config.get("n_neighbors", "auto")
         if n_neighbors != "auto":
@@ -238,7 +241,8 @@ class BettiCurveTask(DiagnosticTask):
         pts, pinfo = last_token_points(
             model, tokenizer, dataset, cache, num_samples=num_samples,
             layers=lambda L: range(L), policy=rows_policy(self.TOKEN_POLICY),
-            use_cache=use_cache)
+            use_cache=use_cache,
+            points=window_options(self.config))
         if not pts or min(len(X) for X in pts.values()) < 3:
             return {"error": "Need at least 3 samples for Betti curve"}
         num_layers = len(pts)

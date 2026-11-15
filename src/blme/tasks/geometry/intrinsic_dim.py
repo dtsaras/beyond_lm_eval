@@ -3,6 +3,7 @@ from ...registry import register_task
 import torch
 import numpy as np
 from tqdm import tqdm
+from .._windows import window_options
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 import logging
@@ -38,8 +39,8 @@ class IntrinsicDimensionTask(DiagnosticTask):
         "TwoNN (Facco et al. 2017) estimates intrinsic dimension from the ratio of each "
         "point's second- to first-nearest-neighbour distance, fitted through the origin "
         "with the top 10% of ratios discarded. In layerwise mode BLME applies it to one "
-        "point per sequence at every block output: the last content token of each of 1000 "
-        "documents, the same N for every model, Euclidean distance, as Cheng et al. 2024 do "
+        "point per sequence at every block output: the last token of a 20-word window of each "
+        "of 1000 passages (the same words and N for every model), Euclidean distance, as Cheng et al. 2024 do "
         "with the last token. A token cloud pooled across documents is avoided because 28-83% "
         "of a token's nearest neighbours lie in its own document; its value is kept as "
         "_meta_tokens_* with position 0 and massive rows excluded. TwoNN falls as N grows "
@@ -75,15 +76,15 @@ class IntrinsicDimensionTask(DiagnosticTask):
             seed = int(self.config.get("subsample_seed", 42))
 
             logger.info("  Collecting hidden states...")
-            # One point per sequence (Q1): the last content token of each of
-            # n_seq documents, at every block output (the deepest one the
-            # hooked raw block output). A cache holding fewer documents, or no
-            # hidden states, is bypassed (test_intrinsic_dim_protocol.py).
+            # One point per sequence (Q1): the last token of a 20-word window of
+            # each of n_seq passages, at every block output (the deepest one the
+            # hooked raw block output); test_word_windows.py.
             sc = sequence_clouds(
                 model, tokenizer, dataset, cache, n=n_seq, layer="all",
                 replace_final_norm=True, use_cache=use_cache,
                 token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
-                readout=readout_for(self.TOKEN_POLICY))
+                readout=readout_for(self.TOKEN_POLICY),
+                points=window_options(self.config))
             if not sc.last:
                 return {"error": "No hidden states available for intrinsic dimension"}
 

@@ -23,6 +23,7 @@ import numpy as np
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .._tokens import select_rows
+from .._windows import window_options
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 import logging
@@ -131,10 +132,10 @@ class CorrelationDimensionTask(DiagnosticTask):
     """
     Computes the Grassberger-Procaccia fractional correlation dimension
     on the final representation space to evaluate fractal complexity: one
-    point per document (its last content token), Du & Tanaka-Ishii 2025's
+    point per document (the last token of a 20-word window), Du & Tanaka-Ishii 2025's
     fixed fit window.
     """
-    # One point per sequence (Q1): the last content token of each document.
+    # One point per sequence (Q1): the last token of a 20-word window of each passage.
     TOKEN_POLICY = "last_per_sequence"
     SOURCES = {
         "paper": "DOI:10.1103/PhysRevLett.50.346",
@@ -147,8 +148,8 @@ class CorrelationDimensionTask(DiagnosticTask):
         "slope of log C(r), where C(r) is the fraction of point pairs closer than r. Its LLM "
         "applications (Du & Tanaka-Ishii 2024/2025) measure the trajectory of next-token "
         "probability vectors along one long text; BLME instead measures how the model spreads "
-        "documents, with one point per document (the last content token of 1000 whole "
-        "documents at the output representation, Euclidean distance), the per-sequence "
+        "documents, with one point per document (the last token of a 20-word window of each "
+        "of 1000 passages at the output representation, Euclidean distance), the per-sequence "
         "convention of the LLM intrinsic-dimension literature. The fit uses Du & "
         "Tanaka-Ishii's published window, C in [20/(N(N-1)), 1/N], a function of N alone, so "
         "the value moves continuously with the data; the plateau search it replaces jumped "
@@ -174,22 +175,22 @@ class CorrelationDimensionTask(DiagnosticTask):
         use_cache = self.config.get("use_cache", True)
         if self.config.get("pooling", "last") not in ("last", None):
             logger.info("  correlation_dimension: `pooling` is ignored; the headline is "
-                        "one point per sequence (last content token), the mean-pooled "
+                        "one point per sequence (last token of its window), the mean-pooled "
                         "cloud is _meta_.")
 
         if dataset is None:
              from ...cache import load_default_corpus
              dataset = load_default_corpus(num_samples)
 
-        # One point per sequence (Q1): the last content token of each of
-        # num_samples whole documents (cache window, no token cap) at HF's
-        # post-norm output representation; a cache holding fewer documents is
-        # bypassed (test_correlation_dimension_protocol.py).
+        # One point per sequence (Q1): the last token of a 20-word window of
+        # each of num_samples passages at HF's post-norm output representation
+        # (test_word_windows.py).
         sc = sequence_clouds(
             model, tokenizer, dataset, cache, n=num_samples, layer=-1,
             replace_final_norm=False, use_cache=use_cache,
             token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
-            readout=readout_for(self.TOKEN_POLICY))
+            readout=readout_for(self.TOKEN_POLICY),
+            points=window_options(self.config))
         if not sc.last:
             return {"error": "Need at least 1 sample."}
         key = next(iter(sc.last))

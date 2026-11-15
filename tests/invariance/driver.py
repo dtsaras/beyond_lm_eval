@@ -269,6 +269,28 @@ class InjectedStateCache(ModelOutputCache):
         self.forward_attempts += 1
         raise TaskForwardAttempted("InjectedStateCache cannot run a forward pass")
 
+    def window_rows(self, dataset, *, n, opts, replace_final_norm):
+        """The injected documents are the sequences: the last row of each of the
+        first ``n``, at every block (the raw deepest block when
+        ``replace_final_norm``, else HF's post-norm entry), as the passage route
+        reads them from a real cache."""
+        from blme.tasks._windows import WindowSet
+
+        lengths = list(self._sample_lengths)[:int(n)]
+        ends = torch.as_tensor([sum(lengths[:i + 1]) - 1 for i in range(len(lengths))],
+                               dtype=torch.long)
+        L = len(self._hidden_states)
+        rows = {l: self._hidden_states[l][ends] for l in range(L)}
+        if replace_final_norm and self._last_block_raw is not None:
+            rows[L - 1] = self._last_block_raw[ends]
+        ws = WindowSet(texts=[f"<injected document {i}>" for i in range(len(lengths))],
+                       n_words=int(opts["n_words"]), seed=int(opts["seed"]),
+                       punct_final=[False] * len(lengths))
+        info = {"n_tokens": lengths, "positions": [t - 1 for t in lengths],
+                "last_is_block": bool(replace_final_norm and self._last_block_raw is not None),
+                "source": "shared_window_cache"}
+        return rows, ws, info
+
 
 def run_task_on_states(
     task_name: str,

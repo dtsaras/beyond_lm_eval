@@ -68,6 +68,7 @@ import numpy as np
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._windows import window_options
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 from scipy.linalg import cho_factor, solve_triangular
@@ -394,7 +395,7 @@ class MagnitudeTask(DiagnosticTask):
                                     (low/med scale, auc, area, dimension)
     """
 
-    # One point per sequence (Q1): the last content token of each document,
+    # One point per sequence (Q1): the last token of a 20-word window of each passage,
     # as the paper scores one embedding per text.
     TOKEN_POLICY = "last_per_sequence"
     SOURCES = {
@@ -425,16 +426,16 @@ class MagnitudeTask(DiagnosticTask):
             dataset = load_default_corpus(num_samples)
 
         # --- 1. One point per sequence (Q1) -----------------------------------
-        # The last content token of each of num_samples documents at one
-        # configured layer (default -1, HF's post-norm output representation):
-        # one embedding per text, as Limbeck et al. score text spaces. The
-        # point count is part of the estimand, so a cache holding fewer
-        # documents is bypassed (test_magnitude_protocol.py).
+        # The last token of a 20-word window of each of num_samples passages at
+        # one configured layer (default -1, HF's post-norm output
+        # representation): one embedding per text, as Limbeck et al. score
+        # text spaces. The point count is part of the estimand.
         sc = sequence_clouds(
             model, tokenizer, dataset, cache, n=num_samples, layer=layer_idx,
             replace_final_norm=False, use_cache=use_cache,
             token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
-            readout=readout_for(self.TOKEN_POLICY))
+            readout=readout_for(self.TOKEN_POLICY),
+            points=window_options(self.config))
         if not sc.last:
             return {"error": "No hidden states available for magnitude"}
         key = next(iter(sc.last))

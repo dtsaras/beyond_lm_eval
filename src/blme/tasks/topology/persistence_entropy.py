@@ -24,6 +24,7 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._windows import window_options
 from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
                       role_layers, role_meta, role_names, rows_policy)
 import logging
@@ -100,7 +101,8 @@ class PersistenceEntropyTask(DiagnosticTask):
     }
     ADAPTATION_NOTE = (
         "Persistent entropy (Atienza et al. 2020 Def. 3.1, log base 2) is computed per homology "
-        "dimension on the Vietoris-Rips barcode of one point per sequence, its last token, at the "
+        "dimension on the Vietoris-Rips barcode of one point per sequence (the last token of a "
+        "20-word window of each passage, the same words for every model) at the "
         "first, middle and last block (the LLM precedent's point cloud, Fay et al. 2025), with "
         "N = 1000 sequences. The essential H0 bar is dropped, as giotto-tda's reduced homology "
         "does; pe_h0_full keeps it through Atienza's scale-invariant mu_2 projection. The H0 "
@@ -115,7 +117,8 @@ class PersistenceEntropyTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistence Entropy Analysis...")
-        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        # Q1: one point per sequence (the last token of a 20-word window of each
+        # passage, the same words for every model), N = 1000 for every model.
         num_samples = int(self.config.get("num_samples", 1000))
         use_cache = self.config.get("use_cache", True)
 
@@ -128,7 +131,8 @@ class PersistenceEntropyTask(DiagnosticTask):
             dataset = fallback_dataset(num_samples, "Persistence entropy")
         pts, pinfo = last_token_points(
             model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
-            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache)
+            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache,
+            points=window_options(self.config))
         if not pts or min(len(X) for X in pts.values()) < 3:
             return {"error": "Need at least 3 samples for persistence entropy"}
         target_layers = sorted(pts)

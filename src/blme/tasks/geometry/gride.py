@@ -25,7 +25,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ._sequence_points import DEFAULT_N_SEQUENCES, readout_for, sequence_clouds
+from .._windows import window_options
+from ._sequence_points import DEFAULT_N_SEQUENCES, readout_for, readout_meta, sequence_clouds
 
 logger = logging.getLogger("blme")
 
@@ -159,7 +160,8 @@ def _layer_clouds(task, model, tokenizer, dataset, cache):
     sc = sequence_clouds(
         model, tokenizer, dataset, cache, n=num_samples, layer="all",
         replace_final_norm=False, use_cache=task.config.get("use_cache", True),
-        token_docs=0, readout=readout_for(task.TOKEN_POLICY))
+        token_docs=0, readout=readout_for(task.TOKEN_POLICY),
+        points=window_options(task.config))
     keys = sorted(sc.last)
     return sc, [sc.last[k].double().cpu().numpy() if isinstance(sc.last[k], torch.Tensor)
                 else np.asarray(sc.last[k], dtype=np.float64) for k in keys]
@@ -181,8 +183,9 @@ class GrideProfileTask(DiagnosticTask):
         "GRIDE estimates the intrinsic dimension at neighbour scale n1 -> 2 n1 from the "
         "ratios of each point's neighbour distances. Cheng et al. apply it with DADApy to "
         "the last token of each of 10000 sequences at every layer and read the "
-        "high-dimensional peak of the profile; BLME uses the last content token of each of "
-        "1000 documents at every HF hidden state after the embeddings, as their scripts do. "
+        "high-dimensional peak of the profile; BLME uses the last token of a 20-word window "
+        "of each of 1000 passages (the same words for every model, as their corpora hold) at "
+        "every HF hidden state after the embeddings, as their scripts do. "
         "They choose the scale per model by eye (most near n2 = 32 at N = 10000); BLME fixes "
         "n2 = 4 at N = 1000, the power of two nearest the same fraction of the cloud "
         "(0.004 vs 0.0032), and keeps the whole scaling profile as _meta_. The peak height "
@@ -220,6 +223,7 @@ class GrideProfileTask(DiagnosticTask):
             "_meta_gride_scaling_per_layer": scaling,
             "_meta_gride_scale_n2": n2,
             "_meta_n_points": int(sc.n_points),
+            **readout_meta(sc),
             "_meta_n_unique_points_min": int(min(n_unique)),
             "_meta_n_layers": len(clouds),
         }
@@ -242,8 +246,8 @@ class InformationImbalanceTask(DiagnosticTask):
     ADAPTATION_NOTE = (
         "The information imbalance from layer A to layer B is the mean rank, in B, of each "
         "point's nearest neighbour in A, over N/2 (k = 1, Euclidean, full-rank neighbour lists, "
-        "as in Cheng et al.'s scripts). BLME scores the last content token of each of 1000 "
-        "documents at every HF hidden state after the embeddings, and reports the two "
+        "as in Cheng et al.'s scripts). BLME scores the last token of a 20-word window of "
+        "each of 1000 passages at every HF hidden state after the embeddings, and reports the two "
         "directions between the first and last layer, which identity blocks leave unchanged, "
         "and their difference. The full profiles to and from the last layer are kept; values "
         "for an index-selected middle layer move when blocks are added and are _meta_. Ranks "
@@ -274,6 +278,7 @@ class InformationImbalanceTask(DiagnosticTask):
             "_meta_ii_mid_to_last": to_last[mid],
             "_meta_ii_last_to_mid": from_last[mid],
             "_meta_n_points": int(sc.n_points),
+            **readout_meta(sc),
             "_meta_n_layers": len(clouds),
         }
 
@@ -295,8 +300,8 @@ class NeighborhoodOverlapTask(DiagnosticTask):
         "chi^k(A, B) is the mean fraction of each point's k = 30 nearest Euclidean neighbours "
         "in A that are also among its k nearest in B (DADApy return_data_overlap, the default "
         "k). BLME scores the clouds of geometry_gride and geometry_information_imbalance (the "
-        "last content token of each of 1000 documents at every HF hidden state after the "
-        "embeddings) and reports the overlap between the first and the last layer, and the "
+        "last token of a 20-word window of each of 1000 passages at every HF hidden state "
+        "after the embeddings) and reports the overlap between the first and the last layer, and the "
         "smallest overlap between adjacent layers, the largest single reorganisation of the "
         "neighbourhoods. Identity blocks add adjacent pairs with overlap 1 and leave both "
         "unchanged; the mean adjacent overlap rises with them and is _meta_. Neighbour ranks "
@@ -327,5 +332,6 @@ class NeighborhoodOverlapTask(DiagnosticTask):
             "_meta_nn_overlap_adjacent_mean": float(np.mean(adjacent)),
             "_meta_nn_overlap_k": k,
             "_meta_n_points": int(sc.n_points),
+            **readout_meta(sc),
             "_meta_n_layers": len(clouds),
         }

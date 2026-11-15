@@ -20,7 +20,12 @@ pytest.importorskip("ripser")
 
 from blme.cache import ModelOutputCache  # noqa: E402
 from blme.tasks._tokens import select_rows  # noqa: E402
+from blme.tasks._windows import window_options  # noqa: E402
 from blme.tasks.topology._points import last_token_points, role_layers  # noqa: E402
+
+# These tests pin the whole-passage route (its cache gate and private forward);
+# the default 20-word-window route is tested in test_word_windows.py.
+PASSAGE = window_options({"points_readout": "passage"})
 
 TASKS = {
     "topology_homology": ("blme.tasks.topology.homology", "PersistentHomologyTask"),
@@ -50,7 +55,7 @@ def test_points_are_the_last_row_of_each_cached_document(tiny):
     model, tok, cache = tiny
     n = len(fd.TEXTS)
     pts, info = last_token_points(model, tok, fd.dataset(), cache, num_samples=n,
-                                  layers=role_layers)
+                                  layers=role_layers, points=PASSAGE)
     states = cache.get_hidden_states(layer_idx="all", num_samples=n, per_sample=True,
                                      replace_final_norm=True)
     for l, X in pts.items():
@@ -67,8 +72,8 @@ def test_private_route_reproduces_the_cache_route(tiny):
     last-token rows; both routes must give the same points."""
     model, tok, cache = tiny
     n = len(fd.TEXTS)
-    a, ia = last_token_points(model, tok, fd.dataset(), cache, num_samples=n, layers=role_layers)
-    b, ib = last_token_points(model, tok, fd.dataset(), None, num_samples=n, layers=role_layers)
+    a, ia = last_token_points(model, tok, fd.dataset(), cache, num_samples=n, layers=role_layers, points=PASSAGE)
+    b, ib = last_token_points(model, tok, fd.dataset(), None, num_samples=n, layers=role_layers, points=PASSAGE)
     assert ia["source"] == "shared_cache" and ib["source"] == "self_collected"
     for l in a:
         np.testing.assert_array_equal(a[l], b[l])
@@ -80,12 +85,12 @@ def test_task_scores_one_point_per_sequence(task, tiny):
     model, tok, cache = tiny
     cls = _cls(task)
     assert cls.TOKEN_POLICY == "last_per_sequence"
-    res = cls({"num_samples": len(fd.TEXTS)}).evaluate(model, tok, fd.dataset(), cache=cache)
+    res = cls({"num_samples": len(fd.TEXTS), "points_readout": "passage"}).evaluate(model, tok, fd.dataset(), cache=cache)
     assert "error" not in res, res
     assert res["_meta_n_points"] == len(fd.TEXTS)
     assert res["_meta_rows_policy"] == "last"
     assert res["_meta_points_source"] == "shared_cache"
-    own = cls({"num_samples": len(fd.TEXTS)}).evaluate(model, tok, fd.dataset(), cache=None)
+    own = cls({"num_samples": len(fd.TEXTS), "points_readout": "passage"}).evaluate(model, tok, fd.dataset(), cache=None)
     assert own["_meta_points_source"] == "self_collected"
     for k, v in res.items():
         if not k.startswith("_meta_points"):
@@ -139,7 +144,7 @@ def test_a_smaller_cache_is_not_silently_accepted(tiny):
     small = ModelOutputCache(model, tok, dataset=fd.dataset(), num_samples=5)
     small.populate(need_hidden=True)
     pts, info = last_token_points(model, tok, fd.dataset(), small,
-                                  num_samples=len(fd.TEXTS), layers=role_layers)
+                                  num_samples=len(fd.TEXTS), layers=role_layers, points=PASSAGE)
     assert info["source"] == "self_collected" and info["cache_rejected"] == "too_few_docs"
     assert all(len(X) == len(fd.TEXTS) for X in pts.values())
 
@@ -151,6 +156,6 @@ def test_a_short_dataset_is_recorded_against_the_requested_n(task, tiny, caplog)
     model, tok, _ = tiny
     n = len(fd.TEXTS)
     with caplog.at_level("WARNING", logger="blme"):
-        res = _cls(task)({"num_samples": 1000}).evaluate(model, tok, fd.dataset(), cache=None)
+        res = _cls(task)({"num_samples": 1000, "points_readout": "passage"}).evaluate(model, tok, fd.dataset(), cache=None)
     assert res["_meta_n_points"] == n and res["_meta_n_points_requested"] == 1000
     assert f"{n} of the 1000 requested sequences" in caplog.text

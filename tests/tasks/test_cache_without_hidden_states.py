@@ -38,7 +38,7 @@ def test_vendi_self_collects_instead_of_erroring(gpt2, attention_only_cache):
     from blme.tasks.geometry.vendi import VendiScoreTask
     model, tok = gpt2
     out = VendiScoreTask(
-        config={"num_samples": len(DOCS), "max_points": 128}
+        config={"num_samples": len(DOCS), "max_points": 128, "points_readout": "passage"}
     ).evaluate(model, tok, dataset=DOCS, cache=attention_only_cache)
     assert "error" not in out, out.get("error")
     assert any(k.startswith("vendi") for k in out), sorted(out)[:10]
@@ -49,7 +49,7 @@ def test_magnitude_self_collects_instead_of_erroring(gpt2, attention_only_cache)
     from blme.tasks.geometry.magnitude import MagnitudeTask
     model, tok = gpt2
     out = MagnitudeTask(
-        config={"num_samples": 32}
+        config={"num_samples": 32, "points_readout": "passage"}
     ).evaluate(model, tok, dataset=DOCS, cache=attention_only_cache)
     assert "error" not in out, out.get("error")
     assert out.get("_meta_magnitude_source") in (None, "self_collected") or True

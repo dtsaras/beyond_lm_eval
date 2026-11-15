@@ -49,6 +49,7 @@ import scipy.linalg
 import torch
 
 from ...registry import register_task
+from .._windows import window_options
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 from ...tasks.base import DiagnosticTask
@@ -208,7 +209,7 @@ class VendiScoreTask(DiagnosticTask):
         _meta_ counts (n_layers, n_points_per_layer, kernel, ...)
     """
 
-    # One point per sequence (Q1): the last content token of each document.
+    # One point per sequence (Q1): the last token of a 20-word window of each passage.
     TOKEN_POLICY = "last_per_sequence"
     SOURCES = {
         "paper": "arXiv:2210.02410",
@@ -221,8 +222,8 @@ class VendiScoreTask(DiagnosticTask):
         "The Vendi Score (Friedman & Dieng 2023) is the exponential of the Shannon entropy of "
         "the eigenvalues of K/n for a unit-diagonal similarity kernel K, the effective number "
         "of distinct samples. No paper applies it to LLM hidden states, so BLME scores one "
-        "embedding per sample as the paper does: the last content token of each of 1000 "
-        "documents, at every block output, with the released score_X kernel (cosine "
+        "embedding per sample as the paper does: the last token of a 20-word window of each "
+        "of 1000 passages (Cheng et al. 2024's sequences), at every block output, with the released score_X kernel (cosine "
         "similarity, a row-normalised uncentred linear Gram). With this kernel VS equals exp "
         "of the alpha=1 matrix entropy that Skean et al. 2025 apply per layer to one vector "
         "per prompt. An uncentred cosine kernel is dominated by a shared mean direction, so "
@@ -256,7 +257,7 @@ class VendiScoreTask(DiagnosticTask):
             dataset = load_default_corpus(num_samples)
 
         # One point per sequence (Q1), as the Vendi Score scores one embedding
-        # per sample: the last content token of each of num_samples documents
+        # per sample: the last token of a 20-word window of each of num_samples passages
         # at every block output (the deepest one the hooked raw block output).
         # Every point is scored: VS grows with N, which is pinned. A cache with
         # fewer documents is bypassed (test_vendi_protocol.py).
@@ -264,7 +265,8 @@ class VendiScoreTask(DiagnosticTask):
             model, tokenizer, dataset, cache, n=num_samples, layer="all",
             replace_final_norm=True, use_cache=use_cache,
             token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
-            readout=readout_for(self.TOKEN_POLICY))
+            readout=readout_for(self.TOKEN_POLICY),
+            points=window_options(self.config))
         if not sc.last:
             return {"error": "No hidden states available for Vendi Score"}
 

@@ -19,6 +19,7 @@ import warnings
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._windows import window_options
 from ._points import (fallback_dataset, last_token_points, point_meta, rips_diagrams,
                       role_layers, role_meta, role_names, rows_policy)
 import logging
@@ -109,7 +110,8 @@ class PersistentHomologyTask(DiagnosticTask):
     }
     ADAPTATION_NOTE = (
         "Vietoris-Rips persistence (ripser, dimensions 0 and 1) is computed on one point per "
-        "sequence, its last token, at the first, middle and last block, as Fay et al. (2025) do "
+        "sequence (the last token of a 20-word window of each passage) at the first, middle and "
+        "last block, as Fay et al. (2025) do "
         "for LLMs, with N = 1000 sequences for every model. ripser reads float64 pairwise "
         "distances. H0 / H1 lifetimes are summarised by their mean and maximum and the H1 bar "
         "count. Raw lifetimes are in the representation's units, so each is also divided by the "
@@ -123,7 +125,8 @@ class PersistentHomologyTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Persistent Homology (TDA)...")
-        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        # Q1: one point per sequence (the last token of a 20-word window of each
+        # passage, the same words for every model), N = 1000 for every model.
         num_samples = int(self.config.get("num_samples", 1000))
         use_cache = self.config.get("use_cache", True)
 
@@ -136,7 +139,8 @@ class PersistentHomologyTask(DiagnosticTask):
             dataset = fallback_dataset(num_samples, "Homology")
         pts, pinfo = last_token_points(
             model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
-            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache)
+            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache,
+            points=window_options(self.config))
         layer_representations = {l: X for l, X in pts.items()}
         if not layer_representations or min(len(X) for X in pts.values()) < 3:
             return {"error": "Need at least 3 samples for meaningful topological features"}

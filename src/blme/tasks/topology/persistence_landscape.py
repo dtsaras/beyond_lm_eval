@@ -35,6 +35,7 @@ from scipy.spatial.distance import pdist
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
+from .._windows import window_options
 from ._points import (last_token_points, point_meta, rips_diagrams, role_layers, role_meta,
                       role_names, rows_policy)
 
@@ -333,8 +334,9 @@ class PersistenceLandscapeTask(DiagnosticTask):
     }
     ADAPTATION_NOTE = (
         "Persistence landscapes (Bubenik 2015) of the Vietoris-Rips barcodes of one point per "
-        "sequence, its last token, at the first, middle and last block (the LLM precedent's "
-        "point cloud, Fay et al. 2025), with N = 1000 sequences. Following Bubenik's statistical "
+        "sequence (the last token of a 20-word window of each passage) at the first, middle "
+        "and last block (the LLM precedent's point cloud, Fay et al. 2025), with N = 1000 "
+        "sequences. Following Bubenik's statistical "
         "use, each summary is the mean over 16 subsamples of 500 points: sum_{k<=5} of the "
         "landscape integrals (Eq. 3.4, reported divided by K), the sup of lambda_1 (Prop. 2.5) "
         "and the L2 norm of lambda_1. For H0 every bar is born at 0, so these are closed forms "
@@ -352,7 +354,8 @@ class PersistenceLandscapeTask(DiagnosticTask):
         if not HAS_RIPSER:
             return {"error": "ripser not installed. Install with: pip install ripser"}
 
-        # Q1: one point per sequence (its last token), N = 1000 for every model.
+        # Q1: one point per sequence (the last token of a 20-word window of each
+        # passage, the same words for every model), N = 1000 for every model.
         num_samples = int(self.config.get("num_samples", 1000))
         n_landscapes = self.config.get("n_landscapes", 5)
         n_points = self.config.get("n_points", 200)
@@ -368,7 +371,8 @@ class PersistenceLandscapeTask(DiagnosticTask):
             return {"error": "Could not detect layers"}
         pts, pinfo = last_token_points(
             model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
-            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache)
+            policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache,
+            points=window_options(self.config))
         target_layers = sorted(pts)
         layer_reps: Dict[int, List[np.ndarray]] = {l: list(pts[l]) for l in target_layers}
         _last_is_block = bool(pinfo["last_is_block"])

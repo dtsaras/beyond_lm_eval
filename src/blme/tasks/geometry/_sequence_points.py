@@ -1,22 +1,23 @@
 """One point per sequence, plus a sink-masked token cloud for ``_meta_``.
 
 The sequence-level estimators (intrinsic_dim, lid, vendi_score, magnitude,
-correlation_dimension) take one point per document: the hidden state of its
-last content token (``select_rows(policy="last")`` on the whole document, no
-token cap). Pooling every token of a document into the cloud makes a token's
-nearest neighbour another token of the same document 28-83% of the time,
-which the text-LLM precedents avoid by reducing each sequence to one point
-(Cheng et al. 2024; Yin et al. 2024). The point count N is pinned per task.
+correlation_dimension, and the gride family and alpha_req) take one point per
+sequence. By default a sequence is a 20-word window of a passage
+(:mod:`blme.tasks._windows`, after Cheng et al. 2024), the same text for every
+model, and its point is the last token's hidden state. Pooling every token of
+a document makes a token's nearest neighbour another token of the same
+document 28-83% of the time; the text-LLM precedents reduce each sequence to
+one point (Cheng et al. 2024; Yin et al. 2024). Whole passages (opt-in,
+``points_readout: passage``) let passage length and the closing " ." organise
+the cloud. The point count N is pinned per task.
 
 The token-cloud value each task used to report is kept as ``_meta_``. Those
-clouds follow the sink policy: position 0 and every massive row (norm > 10x
-the median at any middle depth, Sun et al. 2024) are dropped, with one mask
-per document shared by every layer.
+clouds are whole passages and follow the sink policy: position 0 and every
+massive row (norm > 10x the median at any middle depth, Sun et al. 2024) are
+dropped, with one mask per document shared by every layer.
 
-:func:`sequence_clouds` reads both from the shared cache when it holds at
-least N documents and otherwise runs one forward pass per document, keeping
-only the last row of each layer for the N documents and the token rows of the
-first ``token_docs`` documents.
+:func:`sequence_clouds` reads the token cloud from the shared cache when it
+holds enough documents and otherwise runs one forward pass per document.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ import torch
 from .._tokens import (DocList, hidden_states_for_task, massive_token_share,
                        middle_depth_layers, position0_share, select_rows,
                        sink_keep_masks, sink_meta, strip_trailing_special)
+from .._windows import _store, token_count_meta, window_options, window_rows
 
 logger = logging.getLogger("blme")
 
@@ -88,15 +90,22 @@ class SequenceClouds:
             "_meta_n_points": self.n_points,
             "_meta_n_points_requested": int(self.info.get("n_requested", 0)),
             "_meta_points_source": self.info.get("source"),
-            "_meta_points_readout": "last_content_token",
+            "_meta_points_readout": self.info.get("readout_label", "last_content_token_of_passage"),
             "_meta_token_cloud_n_docs": int(len(self.keep or [])),
         }
+        out.update(self.info.get("window_meta", {}))
         if self.keep is not None:
             out.update(sink_meta(self.sink_info))
         if self.mid is not None and len(self.mid):
             out["_meta_position0_share"] = position0_share(self.mid)
             out["_meta_massive_token_share"] = massive_token_share(self.mid)
         return out
+
+
+def readout_meta(sc: "SequenceClouds") -> Dict[str, Any]:
+    """The readout ``_meta_`` keys (route, readout, window set) without the point counts."""
+    return {k: v for k, v in sc.meta().items()
+            if k in ("_meta_points_source", "_meta_points_readout") or k.startswith("_meta_window_")}
 
 
 def _norm_columns(docs: Sequence[torch.Tensor]) -> List[torch.Tensor]:
@@ -114,18 +123,6 @@ def _masks_from_norms(norms_by_depth: Sequence[Sequence[torch.Tensor]]):
     if not norms_by_depth:
         return None, {}
     return sink_keep_masks(norms_by_depth)
-
-
-def _store(t: torch.Tensor) -> torch.Tensor:
-    """CPU copy of one row block in the dtype the shared cache stores.
-
-    The cache stores ``.float()``; half types are widened the same way so the
-    two routes return identical rows, and float32/float64 are kept.
-    """
-    t = t.detach().to("cpu")
-    if not t.is_floating_point() or t.dtype in (torch.float16, torch.bfloat16):
-        t = t.float()
-    return t
 
 
 def _resolve_key(keys: List[Any], layer: Union[int, str]) -> Any:
@@ -148,22 +145,56 @@ def sequence_clouds(
     use_cache: bool = True,
     token_docs: int = DEFAULT_TOKEN_DOCS,
     readout: str = "last",
+    points: Optional[Dict[str, Any]] = None,
 ) -> SequenceClouds:
-    """Last-token rows of ``n`` documents, plus the ``_meta_`` token cloud.
+    """Last-token rows of ``n`` sequences, plus the ``_meta_`` token cloud.
 
-    ``layer`` is ``"all"`` (every block output, keys 0..L-1, the deepest the
-    raw block output when ``replace_final_norm``) or one cache layer index
-    (``-1`` = HF's last entry, post-norm unless ``replace_final_norm``). The
-    token cloud covers the first ``min(token_docs, n)`` documents at the same
-    layer(s), and its sink masks come from the middle depths of those
-    documents. The shared cache is used only when it holds at least ``n``
-    documents (``hidden_states_for_task(min_cached_docs=n)``), so the cache
-    cap cannot shrink N.
+    ``points`` is :func:`blme.tasks._windows.window_options` of the task's
+    config: 20-word windows by default, whole passages when
+    ``readout == "passage"``. ``layer`` is ``"all"`` (every block output,
+    keys 0..L-1, the deepest the raw block output when
+    ``replace_final_norm``) or one cache layer index (``-1`` = HF's last
+    entry, post-norm unless ``replace_final_norm``). The token cloud covers
+    the first ``min(token_docs, n)`` whole passages at the same layer(s), and
+    its sink masks come from the middle depths of those passages. The shared
+    cache supplies passages only when it holds enough of them
+    (``hidden_states_for_task(min_cached_docs=...)``), so the cache cap cannot
+    shrink N.
     """
     if readout != "last":
         raise ValueError(f"unsupported readout {readout!r}; only 'last' is implemented")
+    opts = window_options(None) if points is None else dict(points)
     n = int(n)
     m = max(0, min(int(token_docs), n))
+    if opts["readout"] == "passage":
+        out = _passage_clouds(model, tokenizer, dataset, cache, n=n, layer=layer, m=m,
+                              replace_final_norm=replace_final_norm, use_cache=use_cache)
+    else:
+        rows, ws, winfo = window_rows(model, tokenizer, dataset, cache, n=n, opts=opts,
+                                      replace_final_norm=replace_final_norm,
+                                      use_cache=use_cache)
+        keys = sorted(rows)
+        want = keys if layer == "all" or not keys else [_resolve_key(keys, layer)]
+        last = {k: rows[k] for k in want}
+        tc = (_passage_clouds(model, tokenizer, dataset, cache, n=m, layer=layer, m=m,
+                              replace_final_norm=replace_final_norm, use_cache=use_cache)
+              if m > 0 else SequenceClouds(last={}))
+        info = {"source": winfo["source"], "n_requested": n,
+                "token_cloud_source": tc.info.get("source"),
+                "last_is_block": winfo["last_is_block"], "layer_keys": sorted(last),
+                "readout_label": f"last_token_of_{ws.n_words}_word_window",
+                "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]))}
+        out = SequenceClouds(last=last, tokens=tc.tokens, keep=tc.keep,
+                             sink_info=tc.sink_info, mid=tc.mid, info=info)
+    if out.n_points < n:
+        logger.warning(f"sequence_clouds: {out.n_points} of the {n} requested sequences; "
+                       f"the dataset is shorter than the task's N")
+    return out
+
+
+def _passage_clouds(model, tokenizer, dataset, cache, *, n, layer, m, replace_final_norm,
+                    use_cache) -> SequenceClouds:
+    """Last-token rows of ``n`` whole passages and the token cloud of the first ``m``."""
     states, info = hidden_states_for_task(
         model, tokenizer, dataset, cache, num_samples=n,
         replace_final_norm=replace_final_norm, layer_idx="all", use_cache=use_cache,
@@ -177,9 +208,7 @@ def sequence_clouds(
         out = _from_forward(model, tokenizer, dataset, n=n, layer=layer, m=m,
                             replace_final_norm=replace_final_norm,
                             info=dict(info, n_requested=n))
-    if out.n_points < n:
-        logger.warning(f"sequence_clouds: {out.n_points} of the {n} requested sequences; "
-                       f"the dataset is shorter than the task's N")
+    out.info.setdefault("readout_label", "last_content_token_of_passage")
     return out
 
 

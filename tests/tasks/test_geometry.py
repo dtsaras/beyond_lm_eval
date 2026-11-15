@@ -724,7 +724,7 @@ def test_correlation_dimension_reframes_hidden_state_gp_method():
             return B({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
 
     dataset = [{"text": f"sample {i}"} for i in range(25)]
-    result = CorrelationDimensionTask(config={"num_samples": 25}).evaluate(
+    result = CorrelationDimensionTask(config={"num_samples": 25, "points_readout": "passage"}).evaluate(
         StubModel(), Tok(), dataset=dataset,
     )
 

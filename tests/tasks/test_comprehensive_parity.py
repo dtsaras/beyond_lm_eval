@@ -3136,7 +3136,7 @@ def test_geometry_correlation_dimension():
         pts = torch.tensor(P, dtype=torch.float32)
         ds = [{"text": str(i)} for i in range(len(P))]
         task = CorrelationDimensionTask(config={
-            "num_samples": len(P), "pooling": "mean",
+            "num_samples": len(P), "pooling": "mean", "points_readout": "passage",
             "num_radii": NUM_RADII, "seed": 42, "max_points": 100000,
         })
         out = task.evaluate(_StubModel(pts), _StubTok(), ds)

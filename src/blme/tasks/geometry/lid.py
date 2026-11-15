@@ -15,6 +15,7 @@ References:
 
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
+from .._windows import window_options
 from ._sequence_points import (DEFAULT_N_SEQUENCES, DEFAULT_TOKEN_DOCS, readout_for,
                                sequence_clouds)
 import numpy as np
@@ -167,11 +168,11 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     k/(k-1), +5.26% at k=20. Levina & Bickel is the origin of the
     maximum-likelihood derivation; the implemented formula is Ma et al.'s.
 
-    Points are one per document (the last content token); the mean, std, max
+    Points are one per sequence (the last token of a 20-word window); the mean, std, max
     and median are over up to 500 query points, at HF's output representation
     or, with ``layerwise=True``, at every block output.
     """
-    # One point per sequence (Q1): the last content token of each document.
+    # One point per sequence (Q1): the last token of a 20-word window of each passage.
     TOKEN_POLICY = "last_per_sequence"
     SOURCES = {
         "paper": "arXiv:1801.02613",
@@ -182,8 +183,8 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     ADAPTATION_NOTE = (
         "LID is Ma et al.'s (2018, Eq. 4) maximum-likelihood local intrinsic dimension, "
         "-k / sum_i log(r_i/r_k) over the k=20 nearest neighbours, derived from Levina & "
-        "Bickel (2004). BLME applies it to one point per sequence, the last content token of "
-        "each of 1000 documents, as Yin et al. (2024) do with one last-token vector per sample "
+        "Bickel (2004). BLME applies it to one point per sequence, the last token of a "
+        "20-word window of each of 1000 passages, as Yin et al. (2024) do with one last-token vector per sample "
         "and neighbours drawn from the other samples. The estimate falls as the reference set "
         "grows, so N is pinned at 1000 documents for every model rather than set by the "
         "tokenizer's token count. Exact-duplicate neighbours give a 0.0 estimate that is kept "
@@ -214,17 +215,17 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
 
-        # One point per sequence (Q1): the last content token of each of
-        # num_samples documents, neighbours from the other documents (Yin et
-        # al. 2024). Layerwise: every block output, the deepest the raw block
-        # output; single layer: HF's post-norm output representation. A cache
-        # holding fewer documents is bypassed (test_lid_protocol.py).
+        # One point per sequence (Q1): the last token of a 20-word window of
+        # each of num_samples passages, neighbours from the other sequences
+        # (Yin et al. 2024). Layerwise: every block output, the deepest the raw
+        # block output; single layer: HF's post-norm output representation.
         sc = sequence_clouds(
             model, tokenizer, dataset, cache, n=num_samples,
             layer="all" if layerwise else -1, replace_final_norm=bool(layerwise),
             use_cache=use_cache,
             token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
-            readout=readout_for(self.TOKEN_POLICY))
+            readout=readout_for(self.TOKEN_POLICY),
+            points=window_options(self.config))
         if not sc.last:
             return {"error": "No hidden states available for LID"}
 

@@ -44,7 +44,8 @@ def test_cache_without_hidden_states(tiny):
     cache = ModelOutputCache(model, tok, dataset=data, num_samples=len(data))
     cache.populate(need_hidden=False, need_logits=True)
     assert cache.is_populated and cache.get_hidden_states(layer_idx="all") is None
-    out = IntrinsicDimensionTask({"layerwise": True, "num_samples": len(data)}).evaluate(
+    out = IntrinsicDimensionTask({"layerwise": True, "num_samples": len(data),
+                                  "points_readout": "passage"}).evaluate(
         model, tok, data, cache=cache)
     assert "error" not in out and "lid_first_layer" in out
     assert out["_meta_points_source"] == "self_collected"
@@ -74,7 +75,7 @@ def test_headline_is_one_point_per_sequence(tiny):
     keys = ["lid_first_layer", "lid_mid_layer", "lid_last_layer", "lid_trend"]
     inv.assert_invariant(base, edited, keys, rtol=0.0)
     assert base["_meta_n_points"] == len(TEXTS)
-    assert base["_meta_points_readout"] == "last_content_token"
+    assert base["_meta_points_readout"] == "last_token_of_20_word_window"
     inv.assert_moves(base, edited, "_meta_tokens_lid_trend", min_rel=1e-3)
 
 
