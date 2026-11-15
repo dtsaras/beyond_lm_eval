@@ -37,6 +37,10 @@ class _HeadNotLinear(RuntimeError):
     """The closed form does not apply (non-linear head or non-finite logits)."""
 
 
+class _HeadGuardUnavailable(RuntimeError):
+    """The linearity guard could not be evaluated, so the head is not certified."""
+
+
 class _UnitGainNorm:
     """The final norm with its gain set to 1 and its bias to 0, plus the
     effective gain and bias the real norm applies: h = gamma * n + beta.
@@ -130,12 +134,16 @@ class RepresentationSensitivityTask(DiagnosticTask):
         """Worst superposition violation |f(2kh)-f(0) - 2(f(kh)-f(0))| / |.| over
         k in {1, 2, 4}, through the model's own post-head transforms
         (logit_scale, final_logit_softcapping). A linear head stays at the
-        rounding floor at every k; a saturating one grows with k."""
+        rounding floor at every k; a saturating one grows with k.
+
+        Returns ``(lin_rel, reason)``. A test that cannot run (an unparseable
+        transform in the config, a tensor shape/device error or OOM) or gives a
+        non-finite value returns ``(nan, reason)``: the guard fails closed."""
         _h1 = h.detach()
+        _bias = getattr(head, "bias", None) if head is not None else None
         try:
-            _f = (lambda _x: (_x @ W.T + (head.bias.detach().float()
-                                          if head is not None and head.bias is not None
-                                          else 0.0)))
+            _f = (lambda _x: (_x @ W.T + (_bias.detach().float()
+                                          if _bias is not None else 0.0)))
             _cfg = getattr(model, "config", None)
             _cap = getattr(_cfg, "final_logit_softcapping", None)
             _lscale = getattr(_cfg, "logit_scale", None)
@@ -157,9 +165,11 @@ class RepresentationSensitivityTask(DiagnosticTask):
                 _den = _lhs.abs().max().clamp_min(1e-30)
                 lin_rel = max(lin_rel, float(
                     ((_lhs - _rhs).abs().max() / _den).item()))
-        except Exception:
-            lin_rel = 0.0
-        return lin_rel
+        except (TypeError, ValueError, RuntimeError) as e:
+            return float("nan"), f"linearity test could not run ({type(e).__name__}: {e})"
+        if not np.isfinite(lin_rel):
+            return float("nan"), f"linearity test gave a non-finite discrepancy ({lin_rel})"
+        return lin_rel, None
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Representation Sensitivity Analysis...")
@@ -212,6 +222,11 @@ class RepresentationSensitivityTask(DiagnosticTask):
                        scalefree_values, unit_values, captured, ug if unit_reason is None else None)
         except _HeadNotLinear as e:
             return {"error": str(e)}
+        except _HeadGuardUnavailable as e:
+            # Fail closed: an uncertified head gives NaN, never the closed form
+            # (tests/tasks/test_representation_sensitivity_guard.py).
+            return {"representation_sensitivity": float("nan"), "S_unit": float("nan"),
+                    "sensitivity_std": float("nan"), "_meta_head_guard_reason": str(e)}
         finally:
             if hook is not None:
                 hook.remove()
@@ -289,7 +304,9 @@ class RepresentationSensitivityTask(DiagnosticTask):
                 _ldtype = out.logits.dtype
                 _eps = float(torch.finfo(_ldtype).eps)
                 _tol = max(1e-3, 3.0 * _eps)
-                _lin_rel = self._head_linearity(model, head, W, h)
+                _lin_rel, _lin_why = self._head_linearity(model, head, W, h)
+                if _lin_why is not None:
+                    raise _HeadGuardUnavailable(_lin_why)
                 if _lin_rel > _tol:
                     raise _HeadNotLinear(
                         "LM head is not LINEAR (superposition test "
