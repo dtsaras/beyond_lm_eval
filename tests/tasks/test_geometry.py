@@ -1586,7 +1586,7 @@ def test_neural_collapse_evaluate_end_to_end(mock_model, mock_tokenizer):
     # The dummy tokenizer's 4 x 8 random ids give no next-token class with
     # min_per_class samples: the CDNV keys are then NaN WITH a reason, and
     # every other float (the topic proxy included) must be finite.
-    explained = {"nc1_cdnv", "nc1_cdnv_galanti"} if "_meta_nc_reason" in results else set()
+    explained = {"_meta_nc1_cdnv", "nc1_cdnv_galanti"} if "_meta_nc_reason" in results else set()
     for key, val in results.items():
         if isinstance(val, float) and key not in explained:
             assert np.isfinite(val), f"{key} not finite"

@@ -98,7 +98,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 |------|-----------|-------------------|
 | `geometry_rsa` | `rsa_adjacent_mean` | How similar the representational geometry is between consecutive layers (higher = more stable). |
 | `geometry_hsic` | `avg_adjacent_hsic` | HSIC dependence between adjacent layers. Higher = more linearly dependent layer transitions. |
-| `geometry_intrinsic_dim` | `lid_first_layer`, `lid_mid_layer`, `lid_last_layer` | Two-NN intrinsic dimension at the first, middle and last block (layer-wise mode, the default). Static mode emits `intrinsic_dimension` instead. |
+| `geometry_intrinsic_dim` | `lid_first_layer`, `lid_mid_layer`, `lid_last_layer` | Two-NN intrinsic dimension at the first, middle and last block (`layerwise: true`, the study's setting). The library default is static mode, which emits only `intrinsic_dimension` (input-embedding rows, not a headline key). |
 | `geometry_prediction_alignment` | `prediction_alignment_mean` | Cosine alignment between final hidden states and the output-projection row for the target next token. |
 | `geometry_perplexity` | `ppl_rare` / `ppl_freq` | Perplexity on rare vs. frequent tokens. Large gaps signal poor tail performance. |
 | `geometry_positional_decay` | `mean_positional_decay_correlation` | How attention weight decays with distance. Strong negative (< −0.5) = healthy local structure. |

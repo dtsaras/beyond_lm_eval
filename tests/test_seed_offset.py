@@ -139,12 +139,18 @@ def _canon(x):
     return x
 
 
+# The seeded stream of geometry_intrinsic_dim is the static mode's vocabulary
+# subsample; that mode's key is not a headline (the layerwise headline has no
+# random stream), so the check reads it directly.
+_KEYS = {"geometry_intrinsic_dim": ("intrinsic_dimension",)}
+
+
 def _headline_values(task, res):
     from blme.core import _register_all_tasks
     from blme.registry import get_task
     _register_all_tasks()
     out = {}
-    for key in get_task(task).HEADLINE_KEYS:
+    for key in _KEYS.get(task, get_task(task).HEADLINE_KEYS):
         pat = re.compile(re.sub(r"\\\{\w+\\\}", r"[^.]+", re.escape(key)))
         out.update({k: v for k, v in res.items() if pat.fullmatch(k)})
     return out
