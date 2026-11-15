@@ -188,3 +188,21 @@ def test_task_reads_windows_and_the_cache_route_equals_its_own_forward(task):
         if isinstance(va, float) and isinstance(vb, float) and va != va and vb != vb:
             continue
         assert va == vb, (k, va, vb)
+
+
+def test_the_passage_route_is_capped_at_the_model_context():
+    """Whole passages longer than a 64-position model's context are cut at it."""
+    import transformers
+    from blme.tasks.topology._points import last_token_points, role_layers
+    cfg = transformers.GPT2Config(n_layer=2, n_head=2, n_embd=32, vocab_size=fd.tokenizer().vocab_size,
+                                  n_positions=64)
+    model = transformers.GPT2LMHeadModel(cfg).eval()
+    tok = fd.tokenizer()
+    data = [{"text": " ".join(["word"] * 300)} for _ in range(4)]
+    passage = window_options({"points_readout": "passage"})
+    sc = sequence_clouds(model, tok, data, None, n=4, layer="all", replace_final_norm=True,
+                         token_docs=2, points=passage)
+    assert sc.n_points == 4
+    pts, info = last_token_points(model, tok, data, None, num_samples=4, layers=role_layers,
+                                  points=passage)
+    assert max(info["positions"]) == 63

@@ -232,7 +232,11 @@ def _from_states(states, layer, m, info) -> SequenceClouds:
 def _from_forward(model, tokenizer, dataset, *, n, layer, m, replace_final_norm,
                   info) -> SequenceClouds:
     from ...cache import CACHE_TOKENIZER_MAX_LENGTH
-    from ..common import get_layers
+    from ..common import get_layers, get_max_positions
+
+    # The cache's window, never past the model's own context.
+    _max_len = min(CACHE_TOKENIZER_MAX_LENGTH,
+                   int(get_max_positions(model, CACHE_TOKENIZER_MAX_LENGTH)))
 
     device = next(model.parameters()).device
     hook_out: Dict[str, torch.Tensor] = {}
@@ -258,7 +262,7 @@ def _from_forward(model, tokenizer, dataset, *, n, layer, m, replace_final_norm,
                     break
                 text = sample.get("text", "") if isinstance(sample, dict) else str(sample)
                 enc = tokenizer(text, return_tensors="pt", truncation=True,
-                                max_length=CACHE_TOKENIZER_MAX_LENGTH).to(device)
+                                max_length=_max_len).to(device)
                 enc, _ = strip_trailing_special(enc, tokenizer)
                 if enc["input_ids"].shape[1] < 1:
                     continue

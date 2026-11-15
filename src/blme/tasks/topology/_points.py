@@ -18,7 +18,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 import torch
 
-from ..common import get_layers
+from ..common import get_layers, get_max_positions
 
 logger = logging.getLogger("blme")
 
@@ -167,7 +167,8 @@ def _private_last_rows(model, tokenizer, dataset, num_samples, layers, rejected)
                 if i >= num_samples:
                     break
                 enc = tokenizer(_text(sample), return_tensors="pt", truncation=True,
-                                max_length=CACHE_TOKENIZER_MAX_LENGTH)
+                                max_length=min(CACHE_TOKENIZER_MAX_LENGTH, int(
+                                    get_max_positions(model, CACHE_TOKENIZER_MAX_LENGTH))))
                 enc, _ = strip_trailing_special(enc, tokenizer)
                 T = int(enc["input_ids"].shape[1])
                 if T < 1:
