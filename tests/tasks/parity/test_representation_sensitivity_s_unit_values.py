@@ -78,4 +78,4 @@ def test_s_unit_matches_autograd_on_the_unit_gain_state(build):
     want = _reference(model, norm, unit, tok)
     assert res["S_unit"] == pytest.approx(want, rel=1e-4)
     # Not the raw-h sensitivity: the gain gauge moves that one.
-    assert abs(res["representation_sensitivity"] - want) > 1e-3 * want
+    assert abs(res["_meta_representation_sensitivity_raw"] - want) > 1e-3 * want

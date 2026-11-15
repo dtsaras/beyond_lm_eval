@@ -20,7 +20,7 @@ CASES = {
     "dynamics_interpolation": ({"num_samples": 5, "num_pairs": 10}, "convexity_gap"),
     "dynamics_perturbation_growth": ({"num_samples": 3}, "growth_log_ratio_relative"),
     "dynamics_gradient_flow": ({"num_samples": 3}, "gradient_flow_log_ratio_in_out"),
-    "geometry_representation_sensitivity": ({"num_samples": 3}, "representation_sensitivity"),
+    "geometry_representation_sensitivity": ({"num_samples": 3}, "S_unit"),
     "geometry_positional_decay": ({"num_samples": 3}, "positional_decay_nosink_write_weighted"),
     "geometry_effective_depth": ({"num_samples": 3}, "total_block_influence"),
     "geometry_prediction_alignment": ({"num_samples": 3, "use_cache": False},

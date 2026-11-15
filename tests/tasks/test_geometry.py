@@ -754,8 +754,8 @@ def test_information_geometry(mock_model, mock_tokenizer):
 
     assert isinstance(results, dict)
     if "error" not in results:
-        assert "representation_sensitivity" in results
-        assert results["representation_sensitivity"] >= 0
+        assert "_meta_representation_sensitivity_raw" in results
+        assert results["_meta_representation_sensitivity_raw"] >= 0
 
 
 def test_lid(mock_model, mock_tokenizer):
@@ -1680,7 +1680,7 @@ def test_representation_sensitivity_bias_head_matches_autograd():
     out = task.evaluate(model, _Tok(), dataset=texts)
     if "error" in out:
         pytest.skip(f"unsupported: {out['error']}")
-    blme_val = out["representation_sensitivity"]
+    blme_val = out["_meta_representation_sensitivity_raw"]
 
     # Independent autograd reference on the same texts/ids/hidden states.
     W = model.lm_head.weight.detach().double()

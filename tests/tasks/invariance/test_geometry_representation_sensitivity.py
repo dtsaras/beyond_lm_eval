@@ -50,13 +50,12 @@ def test_s_unit_invariant_under_final_norm_unembedding_gauge(gpt2):
     # Power-of-two scalar: exact (logits bit-identical).
     g2 = _run(inv.final_norm_unembedding_gauge(model, D=2.0, verify_on=ids, atol=0.0), tok)
     inv.assert_invariant(base, g2, ["S_unit"], rtol=0.0)
-    assert g2["representation_sensitivity"] == pytest.approx(
-        base["representation_sensitivity"] / 4, rel=1e-12)
+    assert g2["_meta_representation_sensitivity_raw"] == pytest.approx(base["_meta_representation_sensitivity_raw"] / 4, rel=1e-12)
 
     # A random log-normal diagonal: float32 rounding only.
     gd = _run(inv.final_norm_unembedding_gauge(model, D=None, seed=0), tok)
     inv.assert_invariant(base, gd, ["S_unit"], rtol=1e-4)
-    inv.assert_moves(base, gd, "representation_sensitivity", min_rel=0.1)
+    inv.assert_moves(base, gd, "_meta_representation_sensitivity_raw", min_rel=0.1)
 
 
 def test_s_unit_invariant_under_residual_gauge(gpt2):
@@ -64,4 +63,19 @@ def test_s_unit_invariant_under_residual_gauge(gpt2):
     ids = tok(DOCS[0]["text"], return_tensors="pt")["input_ids"]
     base = _run(model, tok)
     g = _run(inv.residual_scale_gauge(model, 2.0, rescale_eps=True, verify_on=ids, atol=0.0), tok)
-    inv.assert_invariant(base, g, ["S_unit", "representation_sensitivity"], rtol=1e-6)
+    inv.assert_invariant(base, g, ["S_unit", "_meta_representation_sensitivity_raw"], rtol=1e-6)
+
+
+def test_raw_value_is_meta_only():
+    """The raw ||grad_h log p||^2 moves with the final-norm gain versus
+    unembedding gauge, so it is reported only under _meta_ and S_unit is the
+    one headline."""
+    import _family_d as fd
+    assert RepresentationSensitivityTask.HEADLINE_KEYS == ("S_unit",)
+    model, tok, data = fd.tiny_gpt2(), fd.tokenizer(), fd.dataset(3)
+    base = RepresentationSensitivityTask({"num_samples": 3}).evaluate(model, tok, data)
+    assert {k for k in base if not k.startswith("_meta_")} == {"S_unit"}, sorted(base)
+    gauged = RepresentationSensitivityTask({"num_samples": 3}).evaluate(
+        inv.final_norm_unembedding_gauge(model, D=None, seed=0), tok, data)
+    inv.assert_invariant(base, gauged, ["S_unit"], rtol=1e-4)
+    inv.assert_moves(base, gauged, "_meta_representation_sensitivity_raw", min_rel=0.1)

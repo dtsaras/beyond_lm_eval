@@ -3951,7 +3951,7 @@ def test_geometry_representation_sensitivity():
     blme = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in blme, blme
     assert blme["_meta_num_samples_analyzed"] == len(texts)
-    blme_val = blme["representation_sensitivity"]
+    blme_val = blme["_meta_representation_sensitivity_raw"]
 
     # -- INDEPENDENT reference: autograd on log_softmax(W h + b)[y] --
     head = get_lm_head(model)
@@ -3998,8 +3998,8 @@ def test_geometry_representation_sensitivity():
 
     # Determinism: same input twice -> identical output (deterministic task).
     blme2 = task.evaluate(model, tok, dataset, cache=None)
-    assert blme2["representation_sensitivity"] == pytest.approx(blme_val, abs=1e-12)
-    assert blme2["sensitivity_std"] == pytest.approx(blme["sensitivity_std"], abs=1e-12)
+    assert blme2["_meta_representation_sensitivity_raw"] == pytest.approx(blme_val, abs=1e-12)
+    assert blme2["_meta_representation_sensitivity_raw_std"] == pytest.approx(blme["_meta_representation_sensitivity_raw_std"], abs=1e-12)
 
 # === geometry_rsa  [NUMERIC_PARITY / strong_independent_numeric / ref=pip_package] ===
 def test_geometry_rsa():

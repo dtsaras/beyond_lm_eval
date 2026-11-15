@@ -114,6 +114,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
         "gauge, so S_unit takes the gradient with respect to the unit-gain normalised "
         "state n (gamma times n plus beta is h), which absorbs the gain into the "
         "unembedding and is exactly invariant to that gauge and to a residual rescale. "
+        "S_unit is therefore the headline, and the raw value is reported only as "
+        "_meta_representation_sensitivity_raw. "
         "Because ||n||^2 = d for a normalised state, S_unit equals d E||gamma * g||^2, with "
         "g the gradient with respect to h, so it carries a factor of the width. "
         "The ||h||^2 ||grad_h||^2 twin was rejected because it fails the diagonal "
@@ -121,7 +123,7 @@ class RepresentationSensitivityTask(DiagnosticTask):
         "Heads with a non-linear post-transform (final-logit softcapping) are refused "
         "by the linearity guard."
     )
-    HEADLINE_KEYS = ("representation_sensitivity", "S_unit")
+    HEADLINE_KEYS = ("S_unit",)
     SIZE_INVARIANT = {
         "S_unit": (("final_norm_unembedding_gauge", "residual_scale_gauge"),
                    "tests/tasks/invariance/test_geometry_representation_sensitivity.py::"
@@ -240,8 +242,10 @@ class RepresentationSensitivityTask(DiagnosticTask):
         except _HeadGuardUnavailable as e:
             # Fail closed: an uncertified head gives NaN, never the closed form
             # (tests/tasks/test_representation_sensitivity_guard.py).
-            return {"representation_sensitivity": float("nan"), "S_unit": float("nan"),
-                    "sensitivity_std": float("nan"), "_meta_head_guard_reason": str(e)}
+            return {"S_unit": float("nan"),
+                    "_meta_representation_sensitivity_raw": float("nan"),
+                    "_meta_representation_sensitivity_raw_std": float("nan"),
+                    "_meta_head_guard_reason": str(e)}
         finally:
             if hook is not None:
                 hook.remove()
@@ -251,8 +255,11 @@ class RepresentationSensitivityTask(DiagnosticTask):
              return {"error": "Could not compute representation sensitivity."}
 
         out = {
-            "representation_sensitivity": float(np.mean(sensitivity_values)),
-            "sensitivity_std": float(np.std(sensitivity_values)),
+            # Gradient with respect to h: depends on the final-norm gain versus
+            # unembedding gauge, so _meta_ only (tests/tasks/invariance/
+            # test_geometry_representation_sensitivity.py::test_raw_value_is_meta_only).
+            "_meta_representation_sensitivity_raw": float(np.mean(sensitivity_values)),
+            "_meta_representation_sensitivity_raw_std": float(np.std(sensitivity_values)),
             # The number of documents actually scored (a config echo otherwise).
             "_meta_num_samples_analyzed": len(sensitivity_values),
         }

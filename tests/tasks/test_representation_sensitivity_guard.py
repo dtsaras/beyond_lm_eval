@@ -23,7 +23,7 @@ def test_unrunnable_guard_gives_nan_with_reason_through_evaluate():
     r = RepresentationSensitivityTask(config={"num_samples": 3}).evaluate(
         model, fd.tokenizer(), fd.dataset(3))
     assert "error" not in r, r
-    assert math.isnan(r["representation_sensitivity"]), r["representation_sensitivity"]
+    assert math.isnan(r["_meta_representation_sensitivity_raw"]), r["_meta_representation_sensitivity_raw"]
     assert math.isnan(r["S_unit"])
     assert "linearity test could not run (ValueError" in r["_meta_head_guard_reason"]
 
@@ -43,4 +43,5 @@ def test_guard_returns_nan_and_reason_on_a_tensor_error():
 def test_linear_head_is_unchanged():
     r = RepresentationSensitivityTask(config={"num_samples": 3}).evaluate(
         fd.tiny_gpt2(), fd.tokenizer(), fd.dataset(3))
-    assert math.isfinite(r["representation_sensitivity"]) and "_meta_head_guard_reason" not in r
+    assert math.isfinite(r["S_unit"]) and math.isfinite(r["_meta_representation_sensitivity_raw"])
+    assert "_meta_head_guard_reason" not in r
