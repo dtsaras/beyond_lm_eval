@@ -114,6 +114,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
         "gauge, so S_unit takes the gradient with respect to the unit-gain normalised "
         "state n (gamma times n plus beta is h), which absorbs the gain into the "
         "unembedding and is exactly invariant to that gauge and to a residual rescale. "
+        "Because ||n||^2 = d for a normalised state, S_unit equals d E||gamma * g||^2, with "
+        "g the gradient with respect to h, so it carries a factor of the width. "
         "The ||h||^2 ||grad_h||^2 twin was rejected because it fails the diagonal "
         "gauge, and Fisher-trace or Hessian variants need second-order work over V. "
         "Heads with a non-linear post-transform (final-logit softcapping) are refused "

@@ -467,7 +467,7 @@ class MPBulkDeviationTask(DiagnosticTask):
     SOURCES = {
         "paper": "doi:10.1070/SM1967v001n04ABEH001994 (Marchenko & Pastur 1967); "
                  "arXiv:math/0403022 (Baik, Ben Arous & Peche 2005)",
-        "code": "none (BLME construct; the MP CDF is cross-checked against scikit-rmt)",
+        "code": "none (BLME construct; the MP edge, CDF and BBP spike have closed-form tests)",
         "llm_precedent": "none verified for activation correlation spectra "
                          "(arXiv:2410.17770 applies MP to weight matrices)",
     }
