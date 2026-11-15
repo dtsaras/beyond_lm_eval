@@ -291,6 +291,11 @@ def test_svd_isotropy(mock_model, mock_tokenizer):
     task = SVDIsotropyTask(config={"num_samples": 5})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
+    # Headline keys: bounded by their definitions on a d = 32 cloud.
+    assert set(SVDIsotropyTask.HEADLINE_KEYS) <= set(results)
+    assert -1.0 <= results["avg_cosine_similarity"] <= 1.0
+    assert 1.0 <= results["participation_ratio"] <= results["effective_rank"] <= 32.0
+    # _meta_ spectrum summaries.
     assert "_meta_svd_auc" in results
     assert "_meta_cond_number" in results
     assert results["_meta_svd_auc"] > 0
@@ -1374,17 +1379,22 @@ def test_mp_bulk_edge_and_cdf_sanity():
                       (1 + (200 / 799) ** 0.5) ** 2, atol=1e-9)
 
 
-def test_mp_bulk_integration(mock_model, mock_tokenizer):
-    """End-to-end on the conftest toy models: per-tag scalars present
-    and the gamma-matched metrics finite."""
+@pytest.mark.parametrize("n_docs", [8, 20])
+def test_mp_bulk_integration(mock_model, mock_tokenizer, n_docs):
+    """End-to-end on the conftest toy models (d = 32, 7 scored tokens per
+    passage). The headline keys are the gamma = 0.25 ones, which need 4 d + 1 =
+    129 tokens: finite with 20 passages (140 tokens), NaN with 8 (56), never a
+    value at another gamma. The natural-gamma keys are _meta_ and finite in
+    both cases."""
     from blme.tasks.geometry.rmt_bulk import MPBulkDeviationTask
 
-    dataset = [{"text": f"sample passage number {i}"} for i in range(8)]
-    task = MPBulkDeviationTask(config={"num_samples": 8})
+    dataset = [{"text": f"sample passage number {i}"} for i in range(n_docs)]
+    task = MPBulkDeviationTask(config={"num_samples": n_docs})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=dataset)
 
     assert isinstance(results, dict)
     assert "error" not in results, f"mp_bulk_deviation failed: {results}"
+    assert set(MPBulkDeviationTask.HEADLINE_KEYS) <= set(results)
     for tag in ("first", "mid", "last"):
         for stem in ("_meta_mp_outlier_frac", "_meta_mp_spike_energy", "_meta_mp_ks_distance"):
             key = f"{stem}_{tag}"
@@ -1393,7 +1403,22 @@ def test_mp_bulk_integration(mock_model, mock_tokenizer):
         assert 0.0 <= results[f"_meta_mp_outlier_frac_{tag}"] <= 1.0
         assert results[f"_meta_mp_gamma_{tag}"] > 0
         assert results[f"_meta_mp_n_tokens_{tag}"] > 0
+        need = results[f"_meta_mp_g25_n_tokens_needed_{tag}"]
+        have = results[f"_meta_mp_n_tokens_available_{tag}"]
+        assert need == 129 and have == 7 * n_docs
+        for stem in ("mp_outlier_frac", "mp_spike_energy", "mp_ks_distance"):
+            value = results[f"{stem}_g25_{tag}"]
+            assert np.isfinite(value) == (have >= need), (stem, tag, value)
+        if have >= need:
+            assert 0.0 <= results[f"mp_outlier_frac_g25_{tag}"] <= 1.0
+            assert 0.0 <= results[f"mp_ks_distance_g25_{tag}"] <= 1.0
     assert np.isfinite(results["_meta_mp_ks_distance_mean"])
+    for stem in ("mp_outlier_frac", "mp_spike_energy", "mp_ks_distance"):
+        tags = [results[f"{stem}_g25_{t}"] for t in ("first", "mid", "last")]
+        if n_docs == 20:
+            assert results[f"{stem}_g25_mean"] == pytest.approx(float(np.mean(tags)), rel=1e-12)
+        else:
+            assert np.isnan(results[f"{stem}_g25_mean"])
 
 
 # ---------------------------------------------------------------------------
