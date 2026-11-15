@@ -1,9 +1,20 @@
-"""Numeric-parity test: BLME geometry_magnitude `_magnitude(D, t)` vs the
-OFFICIAL magnipy reference (aidos-lab/magnipy).
+"""Numeric-parity test: BLME geometry_magnitude vs the OFFICIAL magnipy
+reference (aidos-lab/magnipy).
 
 TASK: geometry_magnitude
-BLME: src/blme/tasks/geometry/magnitude.py :: _magnitude(D, t)
-      |tX| = 1^T (exp(-t*D))^{-1} 1 = sum(np.linalg.solve(exp(-t*D), ones))
+BLME: src/blme/tasks/geometry/magnitude.py
+      _magnitude(D, t): |tX| = 1^T (exp(-t*D))^{-1} 1, the solve under every key.
+
+What ships, and where each part is pinned in this file:
+  * headline ``magnitude_area_tconv`` / ``magnitude_dimension_tconv``: the
+    Magnipy class protocol on cosine distances (t_conv at 0.95 n, 30 scales on
+    [0, t_conv]) -- test_tconv_protocol_matches_live_magnipy (kernel) and
+    test_evaluate_headline_is_live_magnipy_on_one_point_per_sequence
+    (evaluate());
+  * ``_meta_magnitude_*``: the earlier Euclidean median-heuristic ladder
+    (``_median_heuristic_scale``, ``_magnitude_summary``). The tests on the
+    median scale, the ladder and the fixture's verdict cover these _meta_
+    keys only.
 
 Reference: Limbeck, Andreeva, Sarkar, Rieck (2024), "Metric Space Magnitude
 for Evaluating the Diversity of Latent Representations", NeurIPS 2024,
@@ -129,7 +140,7 @@ def _dist_matrix(X):
 
 
 def test_median_heuristic_includes_zero_distances():
-    """Campaign-3 DISCREPANCY: _median_heuristic_scale pre-filtered d>0, but
+    """(_meta_magnitude_median_scale.) _median_heuristic_scale pre-filtered d>0, but
     magnipy's median_heuristic_from_distances medians ALL upper-triangle
     entries (including zeros between duplicate points). On a duplicate-heavy
     cloud the two disagree; BLME must match magnipy."""
@@ -150,7 +161,7 @@ def test_median_heuristic_includes_zero_distances():
 
 
 def test_magnitude_med_scale_evaluated_at_t_med():
-    """Campaign-3 DISCREPANCY: magnitude_med_scale was |tX| at the nearest
+    """(_meta_magnitude_med_scale.) magnitude_med_scale was |tX| at the nearest
     SAMPLED ladder scale (~0.774*t_med at defaults), not at the median-
     heuristic scale t_med it is documented as. It must be _magnitude(D, t_med)."""
     rng = np.random.default_rng(2)
@@ -381,3 +392,45 @@ def test_tconv_protocol_matches_live_magnipy(shape):
     assert got["_meta_magnitude_t_conv"] == pytest.approx(ref["t"], rel=1e-10)
     assert got["magnitude_area_tconv"] == pytest.approx(ref["area"], rel=1e-10)
     assert got["magnitude_dimension_tconv"] == pytest.approx(ref["dim"], rel=1e-10)
+
+
+def test_evaluate_headline_is_live_magnipy_on_one_point_per_sequence():
+    """evaluate() on injected states with the packaged defaults: the headline
+    is the Magnipy class (metric="cosine", 30 scales) on the last row of every
+    document at layer -1, the post-norm entry. The last block output and the
+    Euclidean median-ladder area (_meta_) are other numbers."""
+    magnipy = pytest.importorskip("magnipy.magnipy")
+    fo = pytest.importorskip("magnipy.magnitude.function_operations")
+    import contextlib
+    import io
+    tests_dir = str(Path(__file__).resolve().parents[2])
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    import invariance as inv
+
+    g = np.random.default_rng(11)
+    n_docs, d = 40, 12
+    lengths = g.integers(4, 9, size=n_docs)
+    blocks = {li: [(g.standard_normal((int(t), d)) + 0.5).astype(np.float32) for t in lengths]
+              for li in range(3)}
+    final = [(g.standard_normal((int(t), d)) * np.linspace(0.3, 2.0, d) + 0.5).astype(np.float32)
+             for t in lengths]
+    res = inv.run_task_on_states("geometry_magnitude", blocks, final_norm=final)
+    assert res["_meta_n_points"] == n_docs
+    assert res["_meta_magnitude_distance"] == "cosine"
+    assert res["_meta_magnitude_tconv_status"] == "ok"
+
+    def reference(docs):
+        X = np.stack([np.asarray(x, dtype=np.float64)[-1] for x in docs])
+        with contextlib.redirect_stdout(io.StringIO()):
+            M = magnipy.Magnipy(X, n_ts=30, metric="cosine")
+            mag, ts = M.get_magnitude()
+            return float(fo.mag_area(mag, ts)), float(M.get_magnitude_dimension())
+
+    area, dim = reference(final)
+    assert res["magnitude_area_tconv"] == pytest.approx(area, rel=1e-9)
+    assert res["magnitude_dimension_tconv"] == pytest.approx(dim, rel=1e-9)
+    other_area, other_dim = reference(blocks[2])
+    assert abs(other_area - area) > 1e-3 and abs(other_dim - dim) > 1e-3
+    assert "magnitude_area" not in res
+    assert abs(res["_meta_magnitude_area"] - area) > 1e-3
