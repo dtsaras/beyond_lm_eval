@@ -1,13 +1,15 @@
-"""Numeric-parity test: BLME `repe_refusal_direction` kernel vs the OFFICIAL
-refusal-direction difference-of-means (Arditi et al. 2024, "Refusal in Language
-Models Is Mediated by a Single Direction", arXiv:2406.11717).
+"""repe_refusal_direction: the shipped direction / separability kernels vs the
+OFFICIAL refusal-direction difference-of-means (Arditi et al. 2024, "Refusal in
+Language Models Is Mediated by a Single Direction", arXiv:2406.11717).
 
-BLME kernel (src/blme/tasks/representation_engineering.py):
-    line 551  mu_h = X[y == 1].mean(axis=0)          # harmful
-    line 552  mu_n = X[y == 0].mean(axis=0)          # harmless
-    line 553  full_direction = mu_h - mu_n           <-- the refusal direction
-Held-out separability (558-583): per-fold direction = train_h.mean - train_n.mean,
-project test activations, roc_auc.
+Shipped kernels (src/blme/tasks/repe/refusal.py), called here as evaluate()
+composes them:
+    ``_ClassSums``            float64 class means per (position, layer);
+                              mean_diff = harmful.mean() - harmless.mean()
+    ``direction_norm``        torch.linalg.vector_norm(mean_diff[pos, layer])
+    ``_layer_separability``   held-out projection AUC / gap (headline
+                              ``separability_auc``, ``mean_projection_gap``)
+    ``_rel_energy``           headline ``rel_direction_energy``
 
 OFFICIAL reference kernel (refusal_direction, github.com/andyrdt/refusal_direction,
 commit 9d852fae1a9121c78b29142de733cb1340770cc3):
@@ -18,22 +20,19 @@ commit 9d852fae1a9121c78b29142de733cb1340770cc3):
     (get_mean_activations accumulates (1/n) * sum of last-token activations,
      i.e. the arithmetic mean of the class's activations.)
 
-The refusal direction IS the difference of class means -> BLME `full_direction`
-(mu_h - mu_n) is IDENTICAL to the reference `mean_diff`. The fixture embeds
-synthetic labelled activations (two Gaussians shifted along a KNOWN d*) and the
-reference direction; this test recomputes BLME's kernel and asserts EXACT parity
-(<1e-9), |cos|==1, perfect held-out separability, and the d* anchor.
-
-VERDICT: PARITY (exact).
+The fixture embeds synthetic labelled activations (two Gaussians shifted along a
+KNOWN d*) and the reference direction. The released pipeline itself, selection
+included, is run live in test_repe_refusal_direction_arditi_parity.py.
 """
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import roc_auc_score
+pytest.importorskip("sklearn")
+from blme.tasks.repe.refusal import _ClassSums, _layer_separability, _rel_energy  # noqa: E402
 
 _FIXTURE = (
     Path(__file__).resolve().parents[2]
@@ -49,30 +48,25 @@ def fx():
         return json.load(f)
 
 
+def _class_sums(rows):
+    """One class at one (position, layer) site, accumulated prompt by prompt."""
+    rows = np.asarray(rows, np.float64)
+    c = _ClassSums(1, 1, rows.shape[1])
+    for r in rows:
+        c.add(torch.tensor(r, dtype=torch.float64).reshape(1, 1, -1))
+    return c
+
+
 def _blme_refusal_direction(harmful, harmless):
-    """BLME full-layer refusal direction, verbatim (representation_engineering.py:551-553)."""
-    X = np.concatenate([harmful, harmless], axis=0)
-    y = np.concatenate([np.ones(len(harmful), int), np.zeros(len(harmless), int)])
-    mu_h = X[y == 1].mean(axis=0)
-    mu_n = X[y == 0].mean(axis=0)
-    return mu_h - mu_n
+    """mean_diff at the one site, as evaluate() forms it."""
+    return (_class_sums(harmful).mean() - _class_sums(harmless).mean())[0, 0].numpy()
 
 
-def _blme_heldout_auc(harmful, harmless, seed=42):
-    """BLME held-out projection separability, verbatim (representation_engineering.py:558-583)."""
+def _blme_heldout(harmful, harmless, seed=42, cv_splits=3):
+    """(direction norm, AUC, gap) from the shipped kernel with evaluate()'s arguments."""
     X = np.concatenate([harmful, harmless], axis=0)
     y = np.concatenate([np.ones(len(harmful), int), np.zeros(len(harmless), int)])
-    n_splits = min(3, int(min(len(harmful), len(harmless))))
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    fold_aucs, fold_gaps = [], []
-    for tr, te in cv.split(X, y):
-        Xtr, Xte, ytr, yte = X[tr], X[te], y[tr], y[te]
-        d = Xtr[ytr == 1].mean(axis=0) - Xtr[ytr == 0].mean(axis=0)
-        unit = d / np.linalg.norm(d)
-        scores = Xte @ unit
-        fold_aucs.append(float(roc_auc_score(yte, scores)))
-        fold_gaps.append(float(scores[yte == 1].mean() - scores[yte == 0].mean()))
-    return float(np.mean(fold_aucs)), float(np.mean(fold_gaps))
+    return _layer_separability(X, y, min(cv_splits, len(harmful), len(harmless)), seed)
 
 
 def _ref_mean_diff(harmful, harmless):
@@ -106,16 +100,43 @@ def test_refusal_direction_exact_parity(fx):
     max_abs_diff = float(np.max(np.abs(blme - ref)))
     assert max_abs_diff <= TOL, f"max|BLME-REF|={max_abs_diff} > {TOL}"
     assert _cosabs(blme, ref) >= 1.0 - 1e-12
+    # direction_norm, by both routes evaluate() has to it.
+    want = float(np.linalg.norm(ref))
+    assert float(torch.linalg.vector_norm(torch.tensor(blme))) == pytest.approx(want, rel=1e-12)
+    assert _blme_heldout(harmful, harmless)[0] == pytest.approx(want, rel=1e-12)
+
+
+def test_rel_direction_energy_is_the_unbiased_separation(fx):
+    """rel_direction_energy = [||ref||^2 - tr S_h / n_h - tr S_n / n_n] / mean ||x||^2,
+    with ref the released mean difference and S the class covariances."""
+    harmful = np.array(fx["harmful"], np.float64)
+    harmless = np.array(fx["harmless"], np.float64)
+    ref = np.array(fx["ref_direction"], np.float64).ravel()
+    bias = sum(float(np.trace(np.atleast_2d(np.cov(c, rowvar=False)))) / len(c)
+               for c in (harmful, harmless))
+    denom = float(np.mean(np.sum(np.concatenate([harmful, harmless]) ** 2, axis=1)))
+    want = (float(ref @ ref) - bias) / denom
+    got = _rel_energy(_class_sums(harmful), _class_sums(harmless), 0, 0)
+    assert got == pytest.approx(want, rel=1e-9)
+    assert abs(float(ref @ ref) / denom - want) > 1e-4      # not the biased ratio
 
 
 def test_heldout_separability_perfect(fx):
     """Along the refusal direction the two classes are perfectly separable."""
     harmful = np.array(fx["harmful"], np.float64)
     harmless = np.array(fx["harmless"], np.float64)
-    auc, gap = _blme_heldout_auc(harmful, harmless)
+    _, auc, gap = _blme_heldout(harmful, harmless)
     assert auc >= 0.99, f"held-out AUC={auc} unexpectedly low"
-    assert gap > 0.0
     assert abs(auc - fx["heldout_separability_auc"]) <= 1e-9
+    # The gap is the classes' separation along the unit direction: close to
+    # the norm of the released mean difference (each fold refits it).
+    assert gap == pytest.approx(float(np.linalg.norm(fx["ref_direction"])), rel=0.15)
+    # Shuffled labels: no held-out separation left.
+    y_null = np.random.default_rng(0).permutation(
+        np.concatenate([np.ones(len(harmful), int), np.zeros(len(harmless), int)]))
+    X = np.concatenate([harmful, harmless], axis=0)
+    _, auc_null, gap_null = _layer_separability(X, y_null, 3, 42)
+    assert auc_null < 0.8 and abs(gap_null) < 0.5 * gap
 
 
 def test_dstar_anchor(fx):
