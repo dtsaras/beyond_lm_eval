@@ -1,6 +1,6 @@
 # Validation status
 
-Generated at BLME `cabf703` from the study's verification trackers. Nothing here
+Generated at BLME `facc93d` from the study's verification trackers. Nothing here
 is a sign-off; it states what has been checked and how.
 
 **Columns**
@@ -49,11 +49,11 @@ is a sign-off; it states what has been checked and how.
 | geometry_prediction_alignment | none | n/a | 2/2 |
 | geometry_procrustes_linearity | LLM-Microscope (local) | copy | 17/17 |
 | geometry_representation_sensitivity | none | n/a | 2/2 |
-| geometry_rsa | rsatoolbox (pip) | untested | 2/2 |
+| geometry_rsa | rsatoolbox (pip) | kernel (live rsatoolbox: correlation-distance headline via evaluate()) | 2/2 |
 | geometry_schatten | MatrixNuclearNorm (local) | kernel | 6/6 |
 | geometry_spectral | WeightWatcher (pip+local) | kernel | 4/4 |
-| geometry_superposition_strength | SuperpositionScaling (local) | untested | 6/6 |
-| geometry_svd | kawine/contextual (local) | untested | 2/2 |
+| geometry_superposition_strength | SuperpositionScaling (local) | kernel (the release's loop on pythia-70m's head, 1e-5) | 6/6 |
+| geometry_svd | kawine/contextual (local) | kernel within sampling error (the release samples pairs; gpt2 profile within 0.04) | 2/2 |
 | geometry_tokenizer_efficiency | none | n/a | not in the confirmatory set |
 | geometry_trajectory_curvature | sent_sampling (local) | copy | 3/3 |
 | geometry_unembedding | none | n/a | 2/2 |
@@ -92,6 +92,8 @@ is a sign-off; it states what has been checked and how.
 | geometry_zipfian_symmetry | Yokoi et al., NeurIPS 2024 | zipfian-whitening@fa44d29 scores ≤8e-9 (the release's log d is float32) |
 | geometry_delta_hyperbolicity | Yang et al., NeurIPS 2025 (HypLoRA); Khrulkov 2020 | HypLoRA@c888e16 delta_hyp / get_delta exact |
 | interpretability_inactive_heads | Sandoval-Segura et al., ICLR 2026 | inactive-heads@9dd884c HONOR scores ≤3.6e-7, masks identical, via evaluate() |
+| geometry_prompt_id | Viswanathan et al. 2026 | token_geometry@0214897 extract_id.py pipeline + DADApy GRIDE: profile and Pearson 1e-9 (fp64), 1e-4 (fp32), via evaluate() |
+| geometry_ffn_spectral_utilization | Jha & Reagen 2025 (arXiv:2510.00537) | no code released: Table 1 formulas, analytic spectra, the hooked down-projection input recomputed through evaluate() |
 
 Interpretability, causality and consistency tasks outside these tables are
 experimental: they run and are tested for crashes and leaks, but have not been
