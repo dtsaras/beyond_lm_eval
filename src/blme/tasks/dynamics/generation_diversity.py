@@ -23,6 +23,7 @@ For each prompt, generate N completions (with temperature > 0) and measure:
     first and last quarter of generated tokens, and the delta.
 """
 
+import contextlib
 import logging
 import re
 from collections import Counter
@@ -220,6 +221,51 @@ def _self_bleu_single_fallback(hypothesis: List[int], references: List[List[int]
     return float(bp * np.exp(log_avg))
 
 
+# generation_config fields that do not shape the generated text: token ids,
+# caching, compilation and bookkeeping. Every other field is the model's own
+# decoding default.
+_GENERATION_INFRA_FIELDS = frozenset((
+    "pad_token_id", "bos_token_id", "eos_token_id", "decoder_start_token_id",
+    "use_cache", "cache_implementation", "cache_config", "compile_config",
+    "disable_compile", "low_memory", "prefill_chunk_size",
+    "transformers_version", "_from_model_config"))
+
+
+@contextlib.contextmanager
+def _no_model_generation_defaults(model):
+    """generate() fills every unset field of a passed GenerationConfig from
+    model.generation_config (repetition_penalty, no_repeat_ngram_size,
+    suppress_tokens, ...), so those fields are unset on the model for the call.
+    The cache and token-id fields stay: some architectures need them."""
+    saved = getattr(model, "generation_config", None)
+    if saved is None:
+        yield
+        return
+    import copy
+    from transformers import GenerationConfig
+    neutral = copy.deepcopy(saved)
+    for field in GenerationConfig().to_dict():
+        if field not in _GENERATION_INFRA_FIELDS:
+            setattr(neutral, field, None)
+    model.generation_config = neutral
+    try:
+        yield
+    finally:
+        model.generation_config = saved
+
+
+def _ignored_generation_settings(model) -> Dict[str, object]:
+    """The model's non-default decoding fields: what a bare generate() would
+    have applied and _no_model_generation_defaults keeps out."""
+    cfg = getattr(model, "generation_config", None)
+    try:
+        diff = dict(cfg.to_diff_dict()) if cfg is not None else {}
+    except Exception:
+        return {}
+    return {k: (v if isinstance(v, (bool, int, float, str, type(None))) else repr(v))
+            for k, v in sorted(diff.items()) if k not in _GENERATION_INFRA_FIELDS}
+
+
 @register_task("dynamics_generation_diversity")
 class GenerationDiversityTask(DiagnosticTask):
     """Distinct-n, Self-BLEU, and entropy collapse over generated tokens.
@@ -290,6 +336,8 @@ class GenerationDiversityTask(DiagnosticTask):
 
         device = next(model.parameters()).device
         stops = stop_ids(model, tokenizer)
+        from transformers import GenerationConfig
+        ignored = _ignored_generation_settings(model)
 
         all_distinct1 = []
         all_distinct2 = []
@@ -324,20 +372,20 @@ class GenerationDiversityTask(DiagnosticTask):
                 prompt_len = enc["input_ids"].shape[1]
 
                 try:
-                    generate_kwargs = {
-                        "input_ids": enc["input_ids"].expand(n_samples, -1),
-                        "max_new_tokens": max_new_tokens,
-                        "do_sample": True,
-                        "temperature": temperature,
-                        "top_p": 1.0,
-                        # Pinned: generate() would otherwise take top_k=50 from
-                        # the model's generation config.
-                        "top_k": int(self.config.get("top_k", 0)) or 0,
-                        "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
-                        "output_scores": True,
-                        "return_dict_in_generate": True,
-                    }
-                    outputs = model.generate(**generate_kwargs)
+                    # The task's own config, with the model's decoding
+                    # defaults unset: its top_k, repetition_penalty, ... must not apply
+                    # (test_model_generation_config_does_not_apply).
+                    gen_cfg = GenerationConfig(
+                        do_sample=True, num_beams=1, temperature=temperature,
+                        top_p=1.0, top_k=int(self.config.get("top_k", 0)) or 0,
+                        max_new_tokens=max_new_tokens,
+                        eos_token_id=sorted(stops) or None,
+                        pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
+                        output_scores=True, return_dict_in_generate=True)
+                    with _no_model_generation_defaults(model):
+                        outputs = model.generate(
+                            input_ids=enc["input_ids"].expand(n_samples, -1),
+                            max_new_tokens=max_new_tokens, generation_config=gen_cfg)
                 except Exception as e:
                     logger.info(f"  generate() failed: {e}")
                     _n_failed_prompts[0] += 1
@@ -489,6 +537,9 @@ class GenerationDiversityTask(DiagnosticTask):
             "_meta_n_completions_cut_at_stop": int(_n_cut[0]),
             "_meta_n_trailing_special_stripped": int(_n_stripped[0]),
             "_meta_top_k": int(self.config.get("top_k", 0)) or 0,
+            # The model's own non-default generation settings, none of which
+            # entered the sampling.
+            "_meta_ignored_generation_config": ignored,
             "temperature": temperature,
             "seed": int(seed) if seed is not None else None,
             "completion_filter": "trim_at_eos_drop_special",

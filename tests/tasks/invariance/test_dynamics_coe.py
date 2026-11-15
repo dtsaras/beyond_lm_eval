@@ -130,3 +130,18 @@ def test_zero_normaliser_is_nan_as_in_the_release():
              for v in ([1.0, 0.0], [0.0, 1.0], [1.0, 0.0])]
     out = _coe_from_chain(chain)
     assert math.isnan(out["coe_r"]) and math.isnan(out["coe_c"])
+
+
+def test_model_generation_config_does_not_apply():
+    """Greedy decoding under the task's own config: a model that ships
+    repetition_penalty / no_repeat_ngram_size generates the same tokens, as
+    with the release's GenerationConfig()."""
+    tok = tokenizer()
+    plain = _run(tiny_gpt2(), tok)
+    model = tiny_gpt2()
+    model.generation_config.repetition_penalty = 1.3
+    model.generation_config.no_repeat_ngram_size = 2
+    shipped = _run(model, tok)
+    assert shipped["per_sample_coe_r"] == plain["per_sample_coe_r"]
+    assert shipped["coe_c"] == plain["coe_c"]
+    assert model.generation_config.repetition_penalty == 1.3

@@ -43,3 +43,22 @@ def test_completions_are_cut_at_every_generation_stop_id():
     assert r["_meta_stop_ids"] == sorted(stops)
     assert r["_meta_n_completions_cut_at_stop"] == sum(
         any(t in stops for t in row) for row in captured)
+
+
+def test_model_generation_config_does_not_apply():
+    """A model that ships sampling defaults (repetition_penalty 1.3 moved
+    distinct_2 from 0.845 to 0.912 on a study model) gives the same result as
+    one that ships none: the task samples under its own fresh config."""
+    tok = fd.tokenizer()
+    cfg = {"seed": 0, "num_prompts": 2, "n_samples_per_prompt": 8, "max_new_tokens": 16}
+    plain = GenerationDiversityTask(config=dict(cfg)).evaluate(fd.tiny_gpt2(), tok, None)
+    model = fd.tiny_gpt2()
+    model.generation_config.repetition_penalty = 1.3
+    model.generation_config.no_repeat_ngram_size = 2
+    model.generation_config.top_k = 5
+    shipped = GenerationDiversityTask(config=dict(cfg)).evaluate(model, tok, None)
+    for key in GenerationDiversityTask.HEADLINE_KEYS:
+        assert shipped[key] == plain[key], key
+    assert plain["_meta_ignored_generation_config"] == {}
+    assert shipped["_meta_ignored_generation_config"] == {
+        "no_repeat_ngram_size": 2, "repetition_penalty": 1.3, "top_k": 5}

@@ -48,6 +48,7 @@ import torch.nn.functional as F
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._tokens import strip_trailing_special
+from .generation_diversity import _no_model_generation_defaults
 
 logger = logging.getLogger("blme")
 
@@ -249,7 +250,8 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             pad = eos[0] if eos else 0
         from transformers import GenerationConfig
         # A fresh config, as inference.py passes GenerationConfig(): the model's
-        # own sampling or repetition defaults must not apply.
+        # own sampling or repetition defaults must not apply, so they are unset
+        # for the call (test_model_generation_config_does_not_apply).
         gen_cfg = GenerationConfig(do_sample=False, num_beams=1,
                                    max_new_tokens=max_new_tokens,
                                    eos_token_id=eos or None, pad_token_id=pad)
@@ -288,10 +290,11 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 P = int(input_ids.shape[1])
                 if P < 1 or ctx - P < 1:
                     continue
-                seq = model.generate(input_ids=input_ids,
-                                     attention_mask=torch.ones_like(input_ids),
-                                     generation_config=gen_cfg,
-                                     max_new_tokens=min(max_new_tokens, ctx - P))
+                with _no_model_generation_defaults(model):
+                    seq = model.generate(input_ids=input_ids,
+                                         attention_mask=torch.ones_like(input_ids),
+                                         generation_config=gen_cfg,
+                                         max_new_tokens=min(max_new_tokens, ctx - P))
                 T = int(seq.shape[1]) - P
                 if T < 1:
                     continue
