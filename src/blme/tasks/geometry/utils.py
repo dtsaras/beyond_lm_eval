@@ -888,9 +888,15 @@ def _exact_token_bytes(tokenizer, ids, corpus):
         return None
     if not toks or any(t is None for t in toks):
         return None
+    # Special tokens a tokenizer ADDS (Llama-3's <|begin_of_text|>) own no
+    # source bytes; if one stood for literal corpus text the round-trip below
+    # fails and ownership is withheld (test_bits_per_byte_bos.py).
+    special = set(getattr(tokenizer, "all_special_ids", None) or ())
     pieces = []
-    for t in toks:
-        if t and all(ch in _U2B for ch in t):
+    for i, t in zip(ids, toks):
+        if int(i) in special:
+            pieces.append(b"")
+        elif t and all(ch in _U2B for ch in t):
             pieces.append(bytes(_U2B[ch] for ch in t))          # byte-level BPE
         elif len(t) == 6 and t.startswith("<0x") and t.endswith(">"):
             try:
