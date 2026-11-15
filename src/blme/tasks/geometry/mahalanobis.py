@@ -447,27 +447,10 @@ class MahalanobisOODTask(DiagnosticTask):
         X_ood_full = X_ood
         if _paired_ood:
             X_ood = X_ood[_score_idx]
-        insufficient_holdout = X_id_score.shape[0] < 2
-
-        if insufficient_holdout:
-            dists_ood = _compute_mahalanobis_distances(X_id_fit, X_ood)
-            if not dists_ood:
-                return {
-                    "error": "Failed to compute Mahalanobis distance (likely covariance singularity).",
-                    "_meta_insufficient_holdout": True,
-                    "_meta_n_id_fit": int(X_id_fit.shape[0]),
-                    "_meta_n_id_score": int(X_id_score.shape[0]),
-                    "_meta_n_ood_score": int(X_ood.shape[0]),
-                }
-            return {
-                "_meta_insufficient_holdout": True,
-                "_meta_n_id_fit": int(X_id_fit.shape[0]),
-                "_meta_n_id_score": int(X_id_score.shape[0]),
-                "_meta_n_ood_score": int(X_ood.shape[0]),
-                "_meta_mean_mahalanobis_ood": float(np.mean(dists_ood)),
-                "_meta_ood_separation_gap": float("nan"),
-                "ood_separation_ratio": float("nan"),
-            }
+        # n_id >= 5 (the guard above), so fit_n <= n_id - 2 and at least two ID
+        # rows are held out: _meta_insufficient_holdout is False on every run
+        # (tests/tasks/test_mahalanobis_task.py::test_fit_split_preserves_id_scoring_holdout_for_small_n).
+        assert X_id_score.shape[0] >= 2, (n_id, fit_n)
 
         # Average over n_splits splits (one split has a seed-to-seed range of
         # ~68% of its mean at num_samples=100); n_splits: 1 is a single split.
