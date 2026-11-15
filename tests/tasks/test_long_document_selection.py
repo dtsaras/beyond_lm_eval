@@ -66,6 +66,9 @@ def _task(name):
         from blme.tasks.dynamics import fractal as mod
         return mod, mod.FractalLikelihoodTask, {"num_samples": 2, "use_tokens": 400,
                                                 "burn_in": 32}
+    if name == "geometry_schatten":
+        from blme.tasks.geometry import schatten as mod
+        return mod, mod.SchattenNormTask, {"num_samples": 3}
     from blme.tasks.geometry import positional_decay as mod
     return mod, mod.PositionalAttentionDecayTask, {"num_samples": 3}
 
@@ -88,26 +91,38 @@ def test_token_threshold_would_split_the_tokenizers(fake_documents, tokenizers):
         assert a != b
 
 
-@pytest.mark.parametrize("name", ["geometry_phd_dimension", "dynamics_fractal",
-                                  "geometry_positional_decay"])
-def test_two_tokenizers_get_the_same_articles(name, fake_documents, tokenizers, model,
-                                              monkeypatch):
+def _articles_read(name, tokenizer, model, monkeypatch):
+    """The article titles the task's real evaluate() loads."""
     mod, cls, cfg = _task(name)
     real = cache_mod.load_long_documents
     seen = []
 
     def spy(*a, **k):
         docs = real(*a, **k)
-        seen[-1].extend(d["text"].split("\n")[0] for d in docs)   # the title
+        seen.extend(d["text"].split("\n")[0] for d in docs)   # the title
         return docs
 
-    monkeypatch.setattr(cache_mod, "load_long_documents", spy)
-    if hasattr(mod, "load_long_documents"):
-        monkeypatch.setattr(mod, "load_long_documents", spy)
-    outs = []
-    for tok in tokenizers:
-        seen.append([])
-        outs.append(cls(dict(cfg)).evaluate(model, tok, None))
-        assert "error" not in outs[-1], outs[-1]
-    assert seen[0] and seen[0] == seen[1]
-    assert len(seen[0]) == cfg["num_samples"]
+    with monkeypatch.context() as mp:
+        mp.setattr(cache_mod, "load_long_documents", spy)
+        if hasattr(mod, "load_long_documents"):
+            mp.setattr(mod, "load_long_documents", spy)
+        out = cls(dict(cfg)).evaluate(model, tokenizer, None)
+    assert "error" not in out, out
+    assert len(seen) == cfg["num_samples"]
+    return seen
+
+
+@pytest.mark.parametrize("name", ["geometry_phd_dimension", "dynamics_fractal",
+                                  "geometry_positional_decay", "geometry_schatten"])
+def test_two_tokenizers_get_the_same_articles(name, fake_documents, tokenizers, model,
+                                              monkeypatch):
+    fine, coarse = tokenizers
+    assert (_articles_read(name, fine, model, monkeypatch)
+            == _articles_read(name, coarse, model, monkeypatch))
+
+
+def test_schatten_reads_the_positional_decay_articles(fake_documents, tokenizers, model,
+                                                      monkeypatch):
+    tok = tokenizers[1]
+    assert (_articles_read("geometry_schatten", tok, model, monkeypatch)
+            == _articles_read("geometry_positional_decay", tok, model, monkeypatch))

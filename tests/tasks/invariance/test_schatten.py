@@ -1,5 +1,6 @@
 """geometry_schatten: Yusupov et al.'s Schatten norm (MLP-internal activations,
-averaged over layers, full text) with the residual-stream version as _meta_."""
+averaged over layers, the first 256 tokens of each text) with the
+residual-stream version as _meta_."""
 from __future__ import annotations
 
 import numpy as np
@@ -18,7 +19,8 @@ def tiny():
 
 def _run(model, tok, texts, **cfg):
     from blme.tasks.geometry.schatten import SchattenNormTask
-    return SchattenNormTask({"num_samples": len(texts), **cfg}).evaluate(
+    cfg = {"num_samples": len(texts), "documents": "dataset", **cfg}
+    return SchattenNormTask(cfg).evaluate(
         model, tok, dataset=[{"text": t} for t in texts], cache=None)
 
 
@@ -60,17 +62,50 @@ def test_schatten_is_yusupov_mlp_layer_mean(tiny):
     assert "schatten_1_last" not in r and "_meta_schatten_1_last" in r
 
 
-def test_full_text_not_a_128_token_window(tiny):
-    """MNN.py scores every token of the text: a ~330-token document is read in
-    full (up to the model's context), not cut at 128."""
+def test_a_long_text_is_read_to_the_window(tiny):
+    """A ~330-token document is read to its first 256 tokens, exactly the
+    256-token prefix scored on its own; seq_tokens moves the window."""
     model, tok = tiny
     long_text = " ".join(TEXTS)
-    assert tok(long_text, return_tensors="pt")["input_ids"].shape[-1] > 128
-    full = _run(model, tok, [long_text])
-    cut = _run(model, tok, [long_text], max_length=128)
-    assert full["_meta_schatten_n_docs_truncated"] == 0
-    assert cut["_meta_schatten_n_docs_truncated"] == 1
-    assert full["row_normalized_matrix_nuclear_norm_last"] != cut["row_normalized_matrix_nuclear_norm_last"]
+    ids = tok(long_text, return_tensors="pt")["input_ids"][0]
+    assert ids.shape[-1] > 256
+    win = _run(model, tok, [long_text])
+    prefix = _run(model, tok, [tok.decode(ids[:256])])
+    assert win["_meta_schatten_seq_tokens"] == 256
+    assert win["_meta_schatten_n_docs_truncated"] == 1
+    assert prefix["_meta_schatten_n_docs_truncated"] == 0
+    from blme.tasks.geometry.schatten import SchattenNormTask
+    for k in SchattenNormTask.HEADLINE_KEYS:
+        assert win[k] == prefix[k], k
+    cut = _run(model, tok, [long_text], seq_tokens=128)
+    assert win["row_normalized_matrix_nuclear_norm_last"] != cut["row_normalized_matrix_nuclear_norm_last"]
+
+
+def _article(i, tail_seed):
+    rng = np.random.default_rng(1000 * tail_seed + i)
+    head = " ".join(TEXTS)                         # > 256 tokens, shared
+    tail = " ".join(rng.choice(head.split(), size=200))
+    return f"\n = Article {i} = \n\n {head} {tail} \n"
+
+
+def test_text_past_the_window_is_not_read(tiny, monkeypatch):
+    """By default every model scores the first 256 tokens of the long WikiText
+    articles geometry_positional_decay reads: rewriting each article past its
+    first 256 tokens leaves every headline bit-identical."""
+    datasets = pytest.importorskip("datasets")
+    from blme.tasks.geometry.schatten import SchattenNormTask
+    model, tok = tiny
+    outs = []
+    for tail_seed in (1, 2):
+        pages = [{"page": _article(i, tail_seed)} for i in range(4)]
+        monkeypatch.setattr(datasets, "load_dataset", lambda *a, _p=pages, **k: _p)
+        data = [{"text": p["page"].strip()} for p in pages[:3]]
+        outs.append(SchattenNormTask({"num_samples": 3}).evaluate(model, tok, data, cache=None))
+    a, b = outs
+    for k in SchattenNormTask.HEADLINE_KEYS:
+        assert a[k] == b[k], (k, a[k], b[k])
+    assert a["_meta_schatten_seq_tokens"] == 256 and a["_meta_schatten_documents"] == "long"
+    assert a["_meta_schatten_n_docs_truncated"] == 3
 
 
 

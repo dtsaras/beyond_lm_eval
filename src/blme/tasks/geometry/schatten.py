@@ -269,12 +269,13 @@ def _routed_blocks(model):
     return out
 
 
-def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
-    """One forward per text, full text up to ``max_length`` (None: the model's
-    context). Returns the residual profile (deepest entry the hooked raw
-    block) and, in ``flag``: HF's post-norm last entry, the per-layer Schatten
-    norms of the MLP-internal activations (reduced on the fly, so the (T,
-    d_ff) matrices are never stored), and the provenance counters."""
+def _collect_per_layer_fresh(model, tokenizer, samples, seq_tokens, flag=None):
+    """One forward per text on its first ``seq_tokens`` tokens (tokenizer
+    defaults, BOS included; an appended EOS/SEP dropped first). Returns the
+    residual profile (deepest entry the hooked raw block) and, in ``flag``:
+    HF's post-norm last entry, the per-layer Schatten norms of the
+    MLP-internal activations (reduced on the fly, so the (T, d_ff) matrices
+    are never stored), and the provenance counters."""
     device = next(model.parameters()).device
     per_layer: Dict[int, List[torch.Tensor]] = {}
     post_norm_last: List[torch.Tensor] = []
@@ -297,22 +298,18 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
             if args and isinstance(args[0], torch.Tensor):
                 _act[_i] = args[0].detach()
         _hooks.append(_dp.register_forward_pre_hook(_cap_mlp))
-    _cfg = getattr(model, "config", None)
-    _cap = max_length if max_length is not None else getattr(_cfg, "max_position_embeddings", None)
+    seq_tokens = int(seq_tokens)
     try:
         with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                if _cap is not None:
-                    inputs = tokenizer(text, return_tensors="pt", truncation=True,
-                                       max_length=int(_cap))
-                    _full = tokenizer(text, return_tensors="pt")["input_ids"].shape[-1]
-                    _n_trunc += int(_full > int(_cap))
-                else:
-                    inputs = tokenizer(text, return_tensors="pt")
+                inputs = tokenizer(text, return_tensors="pt")
                 # Drop a tokenizer-appended EOS/SEP, as the shared cache does.
                 inputs, _k = strip_trailing_special(inputs, tokenizer)
                 _n_strip += _k
+                _n_trunc += int(inputs["input_ids"].shape[-1] > seq_tokens)
+                inputs = {k: (v[:, :seq_tokens] if isinstance(v, torch.Tensor) and v.ndim == 2
+                              else v) for k, v in inputs.items()}
                 inputs = {k: (v.to(device) if hasattr(v, "to") else v)
                           for k, v in inputs.items()}
                 # Clear both sinks before every forward, so a block that skips
@@ -352,7 +349,7 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
         flag["mlp"] = mlp
         flag["n_mlp_layers_found"] = len(_down)
         flag["mlp_routed_blocks"] = _routed
-        flag["max_length"] = _cap
+        flag["seq_tokens"] = seq_tokens
         flag["n_truncated"] = _n_trunc
         flag["n_stripped"] = _n_strip
     return per_layer
@@ -376,8 +373,8 @@ class SchattenNormTask(DiagnosticTask):
       - Per-layer residual lists (``*_per_layer``); Schatten-2 is omitted
         (content-free under row-L2 normalisation).
     """
-    TOKEN_POLICY = ("paper_protocol:Yusupov2025 / Li2024 every token of the text "
-                    "(MNN.py keeps the tokenizer defaults)")
+    TOKEN_POLICY = ("paper_protocol:Yusupov2025 / Li2024 the first 256 tokens of each "
+                    "text (MNN.py keeps the tokenizer defaults)")
     SOURCES = {
         "paper": "arXiv:2509.25359v1 (Yusupov et al. 2025, Sec. 4.1, Eq. 5-6); "
                  "arXiv:2410.10672 (Li et al. 2024, MNN Eq. 11, Algorithm 1); "
@@ -393,38 +390,54 @@ class SchattenNormTask(DiagnosticTask):
         "MLP-internal activation), and its raw Schatten-1 and Schatten-4 norms per text are "
         "averaged over all layers and then over texts. The paper does not state p in the "
         "text read, so p = 1 and 4 are kept. The Matrix Nuclear-Norm follows the released "
-        "MNN.py on HF's post-norm last entry, full text, divided by the token count. RankMe "
+        "MNN.py on HF's post-norm last entry, divided by the token count. RankMe "
         "is applied per text to the raw last-layer matrix, following Yusupov et al.'s "
         "per-text ERank, instead of to one dataset-level matrix as Garrido et al. do. Every "
         "key grows with the token count, which Yusupov et al. report as the dominant "
-        "confound, so models are compared on one corpus."
+        "confound, so every model scores exactly the first 256 tokens (tokenizer defaults, "
+        "BOS included, as MNN.py) of the long WikiText articles geometry_positional_decay "
+        "reads, capped at the model's context."
     )
     HEADLINE_KEYS = ("schatten_1", "schatten_4", "rankme_last", "row_normalized_rankme_last",
                      "row_normalized_matrix_nuclear_norm_last",
                      "row_normalized_schatten_inf_last")
     # None declared: every key grows with the token count T (dossier T-law,
-    # Yusupov's length confound), and MNN's column-norm sum is basis-dependent
-    # (it moves under an isometric embedding).
+    # Yusupov's length confound; T is pinned at seq_tokens, not removed), and
+    # MNN's column-norm sum is basis-dependent (it moves under an isometric
+    # embedding).
     SIZE_INVARIANT = {}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Schatten-p norms + MNN + RankMe...")
         num_samples = int(self.config.get("num_samples", 10))
-        # Full text, as MNN.py (no truncation): None = the model's context.
-        _ml = self.config.get("max_length", None)
-        max_length = int(_ml) if _ml is not None else None
+        # Every key grows with T, so every model scores exactly the first
+        # seq_tokens tokens of the articles geometry_positional_decay reads,
+        # never past its context (test_schatten.py::test_text_past_the_window_is_not_read).
+        from ..common import get_max_positions
+        seq_tokens = min(int(self.config.get("seq_tokens", 256)),
+                         int(get_max_positions(model, 10 ** 9)) - 1)
+        source = self.config.get("documents", "long")
 
         # The MLP-internal activations are not in the shared cache, so this
         # task always runs its own forward (one per text) and reads the
         # residual states from the same forward.
         _prov = {"last_is_block": False}
-        if dataset is None:
-            from ...cache import load_default_corpus
-            dataset = load_default_corpus(num_samples)
-        samples = list(dataset)[:num_samples]
+        if source == "long":
+            from ...cache import load_long_documents
+            try:
+                samples = load_long_documents(
+                    num_samples, min_words=seq_tokens + 1,
+                    split=self.config.get("doc_split", "validation"))
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"geometry_schatten: long documents unavailable: {e}"}
+        else:
+            if dataset is None:
+                from ...cache import load_default_corpus
+                dataset = load_default_corpus(num_samples)
+            samples = list(dataset)[:num_samples]
         if not samples:
             return {"error": "Need at least 1 sample"}
-        per_layer = _collect_per_layer_fresh(model, tokenizer, samples, max_length,
+        per_layer = _collect_per_layer_fresh(model, tokenizer, samples, seq_tokens,
                                              flag=_prov)
         if not per_layer:
             return {"error": "Could not collect hidden states"}
@@ -499,9 +512,8 @@ class SchattenNormTask(DiagnosticTask):
 
         result["_meta_last_entry_is_block_output"] = bool(_prov.get("last_is_block"))
         result["_meta_schatten_headline_is_post_final_norm"] = bool(_pn_profile)
-        result["_meta_schatten_max_length"] = (int(_prov["max_length"])
-                                               if _prov.get("max_length") is not None
-                                               else -1)
+        result["_meta_schatten_seq_tokens"] = int(seq_tokens)
+        result["_meta_schatten_documents"] = source
         result["_meta_schatten_n_docs_truncated"] = int(_prov.get("n_truncated", 0))
         result["_meta_schatten_mlp_layers_found"] = int(_prov.get("n_mlp_layers_found", 0))
         _routed = list(_prov.get("mlp_routed_blocks") or [])

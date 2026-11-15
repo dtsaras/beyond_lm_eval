@@ -30,7 +30,7 @@ def _tiny_qwen2_moe():
 
 
 def test_routed_blocks_are_nan_with_reason_and_dense_blocks_kept():
-    r = SchattenNormTask(config={"num_samples": 4}).evaluate(
+    r = SchattenNormTask(config={"num_samples": 4, "documents": "dataset"}).evaluate(
         _tiny_qwen2_moe(), fd.tokenizer(), fd.dataset(4))
     per_layer = r["_meta_schatten_1_mlp_per_layer"]
     assert math.isnan(per_layer[1]) and math.isnan(per_layer[3]), per_layer
@@ -44,7 +44,7 @@ def test_routed_blocks_are_nan_with_reason_and_dense_blocks_kept():
 
 
 def test_dense_model_reports_no_routed_block():
-    r = SchattenNormTask(config={"num_samples": 2}).evaluate(
+    r = SchattenNormTask(config={"num_samples": 2, "documents": "dataset"}).evaluate(
         fd.tiny_llama(), fd.tokenizer(), fd.dataset(2))
     assert r["_meta_schatten_mlp_n_routed_blocks"] == 0
     assert r["_meta_schatten_mlp_routed_reason"] is None

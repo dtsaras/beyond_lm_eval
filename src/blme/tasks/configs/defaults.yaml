@@ -56,8 +56,11 @@ geometry_matrix_entropy:
 
 geometry_schatten:
   num_samples: 10
-  # Full text, as MNN.py: null = up to the model's context.
-  max_length: null
+  # The first seq_tokens tokens (tokenizer defaults, BOS included) of the long
+  # WikiText validation articles geometry_positional_decay reads; every key
+  # grows with the token count, so the window is pinned across models.
+  documents: long
+  seq_tokens: 256
 
 interpretability_activation_sinks:
   num_samples: 10

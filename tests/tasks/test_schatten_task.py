@@ -107,7 +107,7 @@ def test_schatten_task_registers_and_returns_expected_fields():
 
     cls = get_task("geometry_schatten")
     assert cls is not None
-    task = cls({"num_samples": 4, "use_cache": False})
+    task = cls({"num_samples": 4, "use_cache": False, "documents": "dataset"})
 
     # Stub model: a simple nn.Module that returns hidden_states.
     import torch.nn as nn
