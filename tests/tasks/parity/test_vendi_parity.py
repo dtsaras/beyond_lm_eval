@@ -19,17 +19,21 @@ script $SCRATCH/newtasks/vendi_verify.py):
       entropy_q(w, q=1) -> -(w[w>0] * log(w[w>0])).sum() (lines 22-27)
       return np.exp(entropy)
 
-BLME's ``_vendi_score(X, kernel=...)`` builds a NONLINEAR kernel (cosine
-by default, or rbf) on the representations and then runs exactly the
-score_K algebra above (same scipy.linalg.eigvalsh, same positive-eigval
-mask), so on the SAME kernel matrix the two agree bit-exactly. Using a
-nonlinear kernel is a deliberate design choice that makes this metric
-distinct from effective_rank / RankMe, which use the raw (linear)
-singular-value spectrum.
+The shipped default (``kernel="cosine"``) is the released ``score_X``
+protocol: rows L2-normalised, K = Xn Xn^T (an uncentred linear Gram), then
+``score_K``. It is pinned twice below against the live package:
+
+  * ``_vendi_score(X)`` == ``vendi.score_X(X)`` (the released entry point, so
+    the kernel construction is the library's, not BLME's);
+  * through ``evaluate()``: the four headline keys == ``vendi.score_X`` on the
+    one-point-per-sequence cloud of the first / middle / last layer, and its
+    maximum over layers.
+
+The remaining tests feed BLME's own kernel matrix to ``score_K`` (same K, same
+algebra, bit-exact) and cover the ``rbf`` option, which is not the default.
 
 The OFFICIAL_* constants below were produced by RUNNING vendi.score_K on
-the kernel matrices BLME builds (verify script output, vendi_score 0.0.3,
-scipy 1.18.0, numpy 2.4.6).
+the kernel matrices BLME builds (vendi_score 0.0.3, scipy 1.18.0, numpy 2.4.6).
 """
 import numpy as np
 import pytest
@@ -70,6 +74,54 @@ def _mid_cloud():
     _ = rng.standard_normal((8, 5))          # consumed first (Check A cloud)
     base = rng.standard_normal((4, 5))
     return np.repeat(base, 2, axis=0) + 1e-3 * rng.standard_normal((8, 5))
+
+
+@pytest.mark.parametrize("shape,seed", [((8, 5), 0), ((40, 12), 1), ((30, 64), 2)])
+def test_default_kernel_is_the_released_score_X(shape, seed):
+    """The released entry point builds its own kernel from X, so this pins
+    BLME's kernel construction (row-normalised, uncentred) and not only the
+    eigenvalue algebra."""
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal(shape) + 2.0          # a shared mean direction
+    official = float(vendi.score_X(X, q=1, normalize=True))
+    assert _vendi_score(X) == pytest.approx(official, rel=1e-10)
+    assert _vendi_score(X, kernel="cosine") == _vendi_score(X)
+    # Neither the centred cloud nor the unnormalised Gram gives this number.
+    assert abs(_vendi_score(X - X.mean(axis=0)) - official) > 1e-2
+    assert abs(float(vendi.score_X(X * np.arange(1, shape[0] + 1)[:, None],
+                                   q=1, normalize=False)) - official) > 1e-2
+
+
+def test_evaluate_headline_is_score_X_on_one_point_per_sequence():
+    """geometry_vendi_score on injected states with the packaged defaults: each
+    headline key is the released score_X on the last row of every document at
+    that layer (the first / middle / last block output), and vendi_max the
+    largest of the per-layer scores."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import invariance as inv
+
+    L, n_docs, d = 5, 24, 16
+    g = np.random.default_rng(7)
+    docs = [g.standard_normal((int(t), d)) + 1.5 for t in g.integers(4, 9, size=n_docs)]
+    blocks = {}
+    for li in range(L):
+        blocks[li] = [x.astype(np.float32) for x in docs]
+        W = np.eye(d) + 0.6 * g.standard_normal((d, d)) / np.sqrt(d)
+        docs = [np.tanh(x @ W) + 0.3 * g.standard_normal(x.shape) for x in docs]
+    res = inv.run_task_on_states("geometry_vendi_score", blocks)
+    assert res["_meta_n_points"] == n_docs
+
+    per_layer = [float(vendi.score_X(
+        np.stack([np.asarray(x, dtype=np.float64)[-1] for x in blocks[li]]),
+        q=1, normalize=True)) for li in range(L)]
+    assert np.ptp(per_layer) > 1e-2
+    assert res["vendi_mean_first_layer"] == pytest.approx(per_layer[0], rel=1e-9)
+    assert res["vendi_mean_mid_layer"] == pytest.approx(per_layer[L // 2], rel=1e-9)
+    assert res["vendi_mean_last_layer"] == pytest.approx(per_layer[-1], rel=1e-9)
+    assert res["vendi_max"] == pytest.approx(max(per_layer), rel=1e-9)
+    assert not [k for k in res if "null_ratio" in k]
 
 
 def test_cosine_parity_vs_official_score_K():
