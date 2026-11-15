@@ -57,6 +57,19 @@ from ..geometry.utils import safe_norm as _safe_norm
 logger = logging.getLogger("blme")
 
 
+def _block_input(module, args, kwargs):
+    """The residual-stream input of a hooked block or final norm: its first
+    positional argument, else ``hidden_states=``. Neither raises, because a
+    missed capture would read as a zero gradient norm."""
+    if args:
+        return args[0]
+    if "hidden_states" in kwargs:
+        return kwargs["hidden_states"]
+    raise RuntimeError(
+        f"dynamics_gradient_flow: {type(module).__name__} was called with neither a "
+        f"positional input nor hidden_states= (keywords: {sorted(kwargs)})")
+
+
 @register_task("dynamics_gradient_flow")
 class GradientFlowTask(DiagnosticTask):
     """Per-layer gradient norm profile."""
@@ -163,20 +176,21 @@ class GradientFlowTask(DiagnosticTask):
             for d, enc in enumerate(encodings):
                 captured: Dict[int, torch.Tensor] = {}
 
+                # with_kwargs: a block called with hidden_states= is captured too
+                # (tests/tasks/test_gradient_flow_keyword_capture.py).
                 def make_hook(li):
-                    def hook(module, args):
-                        if isinstance(args, tuple) and len(args) > 0:
-                            x = args[0]
-                            x.requires_grad_(True)
-                            x.retain_grad()
-                            captured[li] = x
+                    def hook(module, args, kwargs):
+                        x = _block_input(module, args, kwargs)
+                        x.requires_grad_(True)
+                        x.retain_grad()
+                        captured[li] = x
                     return hook
 
-                handles = [layers[li].register_forward_pre_hook(make_hook(li))
+                handles = [layers[li].register_forward_pre_hook(make_hook(li), with_kwargs=True)
                            for li in range(n_layers)]
                 if final_norm is not None:
                     handles.append(final_norm.register_forward_pre_hook(
-                        make_hook(n_layers)))
+                        make_hook(n_layers), with_kwargs=True))
                     _endpoint[0] = "final_norm_input"
                 else:
                     def _out_hook(module, args, output):
@@ -187,6 +201,11 @@ class GradientFlowTask(DiagnosticTask):
                     _endpoint[0] = "last_block_output"
                 try:
                     out = model(**enc)
+                    _missed = [li for li in range(n_points) if li not in captured]
+                    if _missed:
+                        raise RuntimeError(
+                            f"dynamics_gradient_flow: no input captured at profile "
+                            f"points {_missed} of {n_points}")
                     # Shifted next-token cross-entropy (the training objective),
                     # not the argmax logit, whose target differs across models
                     # (tests/tasks/test_dynamics.py::test_gradient_flow_uses_cross_entropy_loss).
