@@ -3265,16 +3265,20 @@ def test_geometry_correlation_dimension():
 
 # === geometry_lipschitz  [NUMERIC_PARITY / analytic / ref=analytic] ===
 def test_geometry_lipschitz():
-    """NUMERIC_PARITY for geometry_lipschitz (Miyato 2018; Virmaux & Scaman 2018).
+    """NUMERIC_PARITY for geometry_lipschitz: the residual relative-change
+    profile (not a Lipschitz constant; no spectral norm is formed).
 
-    The task's docstring defines the per-token *relative-change ratio* (which it
-    labels the "empirical Lipschitz" estimate) between adjacent layers:
+    Per token and per block-to-block update,
 
-        L_hat(l)  =  ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||
+        r_l(x)  =  ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)||
 
-    aggregated as np.mean / np.max over tokens per layer pair, then np.mean /
-    np.max / np.std over the per-layer-pair means. The contraction rate is
-    mean over tokens of ||h_{l+1}(x)|| / ||h_l(x)||.
+    is averaged over tokens. The headline keys are relative_change_max (the
+    largest per-update mean), embedding_relative_change (the embedding ->
+    block 0 update on its own), e2e_log_norm_growth = mean_x log(||h_last(x)||
+    / ||h_first(x)||) and total_angular_path = sum_l mean_x angle(h_l(x),
+    h_{l+1}(x)), the last two over block outputs. The uniform mean and std
+    over updates and the contraction rate ||h_{l+1}|| / ||h_l|| are _meta_
+    (the _meta_lipschitz_* names are aliases of _meta_relative_change_*).
 
     The core logic lives inline in evaluate() (no module-level helper), so we
     (A) pin EXACT hand-derived analytic values on controlled activations
@@ -3433,6 +3437,34 @@ def test_geometry_lipschitz():
             assert blme[k] == pytest.approx(v, rel=1e-6, abs=1e-9), (
                 f"{k}: BLME={blme[k]} ref={v}"
             )
+
+    # ---- headline keys, from the same independently extracted states ----
+    assert blme["_meta_sink_n_massive_dropped"] == 0
+    assert blme["_meta_embedding_transition_available"] is True
+    assert blme["relative_change_max"] == pytest.approx(float(ref_arr.max()), rel=1e-6)
+    assert blme["_meta_relative_change_mean"] == pytest.approx(float(ref_arr.mean()), rel=1e-6)
+    assert float(ref_arr.max()) - float(ref_arr.mean()) > 1e-3
+
+    def _n64(M):
+        return np.linalg.norm(np.asarray(M, dtype=np.float64), axis=1)
+
+    emb, first, last = layers[idxs[0]], layers[idxs[1]], layers[idxs[-1]]
+    ref_emb = float(np.mean(_n64(first.astype(np.float64) - emb) / _n64(emb)))
+    assert blme["embedding_relative_change"] == pytest.approx(ref_emb, rel=1e-6)
+    assert abs(ref_emb - float(ref_arr.max())) > 1e-3      # its own update, not the max
+
+    ref_e2e = float(np.mean(np.log(_n64(last) / _n64(first))))
+    assert abs(ref_e2e) > 1e-3
+    assert blme["e2e_log_norm_growth"] == pytest.approx(ref_e2e, rel=1e-5, abs=1e-7)
+
+    ref_path = 0.0
+    for i in range(1, len(idxs) - 1):
+        a = np.asarray(layers[idxs[i]], dtype=np.float64)
+        b = np.asarray(layers[idxs[i + 1]], dtype=np.float64)
+        cos = np.sum(a * b, axis=1) / (_n64(a) * _n64(b))
+        ref_path += float(np.mean(np.arccos(np.clip(cos, -1.0, 1.0))))
+    assert ref_path > 1e-3
+    assert blme["total_angular_path"] == pytest.approx(ref_path, rel=1e-5, abs=1e-7)
 
     # paper-defining sanity: relative-change ratios and contraction rates are
     # non-negative, and the *_max stat is >= the *_mean stat.
