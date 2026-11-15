@@ -173,7 +173,12 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         "mass are _meta_. Rows are aggregated over heads and layers with weights equal to the "
         "norm of each head's write into the residual stream (after Kobayashi et al. 2020), "
         "normalised by the model total, which is exactly unchanged by identity blocks and by a "
-        "residual rescale, where a uniform layer mean is not; the attention is computed in fp32."
+        "residual rescale, where a uniform layer mean is not; the attention is computed in fp32. "
+        "Each row scores the keys before the query, excluding the query itself (distance 0 is "
+        "not a relation between two tokens; the pooled _meta_ form keeps the diagonal). The "
+        "rowwise correlation grows in magnitude with row length, so every model scores exactly "
+        "the first 256 content tokens of long WikiText documents (documents: dataset scores "
+        "the run's passages instead)."
     )
     HEADLINE_KEYS = ("positional_decay_nosink_write_weighted",)
     SIZE_INVARIANT = {
@@ -189,12 +194,29 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         _drop = 1 if self.TOKEN_POLICY == "exclude_pos0" else 0
         num_samples = self.config.get("num_samples", 5)
 
-        # We need reasonably long sequences to measure positional decay gracefully
-        if dataset is None:
-            from ...cache import load_default_corpus
-            dataset = load_default_corpus(num_samples)
-
-        samples = list(dataset)[:num_samples]
+        # Rowwise Spearman magnitude grows with row length, so every model
+        # scores exactly the first `seq_tokens` content tokens of long
+        # documents (test_positional_decay_fixed_length.py); `documents:
+        # dataset` scores the run's passages instead.
+        from ..common import get_max_positions
+        # Never past the model's own context (the window holds seq_tokens + 1
+        # tokens before an appended EOS is stripped).
+        seq_tokens = min(int(self.config.get("seq_tokens", 256)),
+                         int(get_max_positions(model, 10 ** 9)) - 1)
+        source = self.config.get("documents", "long")
+        if source == "long":
+            from ...cache import load_long_documents
+            try:
+                samples = load_long_documents(
+                    num_samples, min_tokens=seq_tokens + 1, tokenizer=tokenizer,
+                    split=self.config.get("doc_split", "validation"))
+            except (ValueError, RuntimeError) as e:
+                return {"error": f"geometry_positional_decay: long documents unavailable: {e}"}
+        else:
+            if dataset is None:
+                from ...cache import load_default_corpus
+                dataset = load_default_corpus(num_samples)
+            samples = list(dataset)[:num_samples]
         if not samples:
             return {"error": "Need at least 1 sample."}
 
@@ -229,8 +251,11 @@ class PositionalAttentionDecayTask(DiagnosticTask):
           with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
-                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=256).to(device)
+                inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                                   max_length=seq_tokens + 1).to(device)
                 inputs, _ = strip_trailing_special(inputs, tokenizer)
+                inputs = {k: (v[:, :seq_tokens] if isinstance(v, torch.Tensor) and v.ndim == 2 else v)
+                          for k, v in inputs.items()}
 
                 seq_len = inputs["input_ids"].shape[1]
                 if seq_len < 4:
@@ -373,6 +398,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
             _nan_reason = "no attention layer scored"
         out["_meta_positional_decay_nan_reason"] = _nan_reason
         out["_meta_n_blocks_without_softmax_attention"] = int(_n_mixer_skipped)
+        out["_meta_documents"] = source
+        out["_meta_seq_tokens"] = seq_tokens if source == "long" else None
         out["_meta_positional_decay_inclusive_write_weighted"] = (
             _write_weighted_mean(_w_incl) if complete else float("nan"))
         out["_meta_write_weight_site"] = (

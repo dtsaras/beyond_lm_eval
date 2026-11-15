@@ -3702,7 +3702,7 @@ def test_geometry_positional_decay():
     text = "The quick brown fox jumps over the lazy dog while the sun sets behind the distant hills."
     dataset = [{"text": text}]
 
-    task = PositionalAttentionDecayTask({"num_samples": 1})
+    task = PositionalAttentionDecayTask({"num_samples": 1, "documents": "dataset"})
     res = task.evaluate(model, tok, dataset, cache=None)
     assert "error" not in res, res
     assert set(res) >= {"_meta_mean_positional_decay_correlation", "_meta_layer_positional_decay"}

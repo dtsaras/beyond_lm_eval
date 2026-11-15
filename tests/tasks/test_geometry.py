@@ -867,7 +867,7 @@ def test_positional_decay_uniform_causal_attention_is_null():
 
             return B({"input_ids": ids, "attention_mask": torch.ones_like(ids)})
 
-    result = PositionalAttentionDecayTask(config={"num_samples": 1}).evaluate(
+    result = PositionalAttentionDecayTask(config={"num_samples": 1, "documents": "dataset"}).evaluate(
         UniformCausalAttentionModel(), Tok(), dataset=[{"text": "x"}],
     )
 
