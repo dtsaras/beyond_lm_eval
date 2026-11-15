@@ -4530,8 +4530,9 @@ def test_geometry_unembedding():
 
     BLME's geometry_unembedding (src/blme/tasks/geometry/unembedding.py)
     reports ``unembedding_eff_rank`` = the Roy & Vetterli (2007) "effective
-    rank" of the *row-centered* unembedding matrix W_out, computed on its
-    singular values. Reference: Roy & Vetterli, "The effective rank: a
+    rank" of the unembedding matrix W_out as it is, and
+    ``unembedding_eff_rank_centered`` that of W_out with its mean row removed,
+    both computed on singular values. Reference: Roy & Vetterli, "The effective rank: a
     measure of effective dimensionality", EUSIPCO 2007 — eq. (2)/(3):
 
         erank(A) = exp(H(p)),   H(p) = - Sum_i p_i log p_i,
@@ -4575,8 +4576,11 @@ def test_geometry_unembedding():
     # random head so W_out is an independent, non-degenerate matrix (and so
     # the is_tied invariant below is False rather than trivially True).
     g = torch.Generator().manual_seed(12345)
+    # A shared offset row makes the raw and centred spectra differ, so the
+    # two keys cannot be confused (a zero-mean head gives them the same value).
+    offset = torch.linspace(-2.0, 2.0, 32)
     model.lm_head.weight = torch.nn.Parameter(
-        (torch.randn(256, 32, generator=g) * 0.5).clone()
+        (torch.randn(256, 32, generator=g) * 0.5 + offset).clone()
     )
 
     tok = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -4587,15 +4591,18 @@ def test_geometry_unembedding():
     # Independent reference computed from the SAME extracted W_out.
     W = model.lm_head.weight.detach().cpu().numpy().astype(np.float64)
     W_centered = W - W.mean(axis=0, keepdims=True)          # BLME centers dim=0 (over rows)
-    S = np.linalg.svd(W_centered, compute_uv=False)         # numpy SVD, independent of torch
-    erank_ref = roy_vetterli_erank(S)
+    erank_raw = roy_vetterli_erank(np.linalg.svd(W, compute_uv=False))
+    erank_ref = roy_vetterli_erank(np.linalg.svd(W_centered, compute_uv=False))
 
     # Sanity: a 256x32 centered random matrix is high-rank, so erank should
-    # be a substantial fraction of 32 (not collapsed, not the full 32).
+    # be a substantial fraction of 32 (not collapsed, not the full 32); the
+    # offset row concentrates the raw spectrum.
     assert 20.0 < erank_ref < 32.0
+    assert erank_raw < erank_ref - 1.0
 
-    # PARITY: BLME's reported effective rank matches the independent value.
-    assert out["unembedding_eff_rank"] == pytest.approx(erank_ref, rel=1e-4, abs=1e-3)
+    # PARITY: each key matches its own independent value.
+    assert out["unembedding_eff_rank"] == pytest.approx(erank_raw, rel=1e-4, abs=1e-3)
+    assert out["unembedding_eff_rank_centered"] == pytest.approx(erank_ref, rel=1e-4, abs=1e-3)
 
     # Behavioral invariant: untied head => is_tied False; tied dims match.
     assert out["unembedding_is_tied"] is False
