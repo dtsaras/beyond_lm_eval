@@ -102,16 +102,6 @@ def _trajectory_angles(X) -> np.ndarray:
     return np.arccos(cosines)
 
 
-def _mean_curvature(X) -> float:
-    """Mean discrete curvature (radians) of one (T, D) trajectory.
-
-    Returns NaN when the trajectory has no valid angle (T < 3 or all
-    difference vectors degenerate).
-    """
-    angles = _trajectory_angles(X)
-    return float(np.mean(angles)) if angles.size else float("nan")
-
-
 def _pooled_layer_curvature(chunks: List, skip_first: int = 1) -> float:
     """Mean curvature for one layer: the mean of PER-SENTENCE mean angles.
 

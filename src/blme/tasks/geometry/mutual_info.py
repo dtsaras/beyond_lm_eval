@@ -68,11 +68,6 @@ def _debiased_ncka(h_ij: float, h_ii: float, h_jj: float) -> float:
     return float(h_ij / den)
 
 
-def _normalized_linear_hsic(X: torch.Tensor, Y: torch.Tensor) -> float:
-    """Normalized linear HSIC, equivalent to linear CKA."""
-    return _nhsic_from_grams(_centered_linear_gram(X), _centered_linear_gram(Y))
-
-
 _SI_NODE = "tests/tasks/invariance/test_hsic.py::test_size_invariant_entry[{}]"
 
 
