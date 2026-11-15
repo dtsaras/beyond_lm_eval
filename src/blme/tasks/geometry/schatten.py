@@ -255,6 +255,20 @@ def _mlp_down_projections(model):
     return out
 
 
+def _routed_blocks(model):
+    """Indices of the blocks whose MLP holds routed experts (an ``experts``
+    attribute: Mixtral, Qwen2/3-MoE, Qwen3-Next, OLMoE, DeepSeek). Their
+    MLP-internal activation is not one matrix, and _find_down_proj's fallback
+    returns a gate (Qwen3-Next's shared_expert_gate reads the residual stream)."""
+    from ..common import get_layers
+    out = []
+    for i, layer in enumerate(get_layers(model) or []):
+        mlp = getattr(layer, "mlp", None) or getattr(layer, "feed_forward", None)
+        if mlp is not None and getattr(mlp, "experts", None) is not None:
+            out.append(i)
+    return out
+
+
 def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
     """One forward per text, full text up to ``max_length`` (None: the model's
     context). Returns the residual profile (deepest entry the hooked raw
@@ -274,7 +288,10 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
         def _cap_last(module, inputs, output):
             _sink["h"] = (output[0] if isinstance(output, tuple) else output).detach()
         _hooks.append(_blocks[-1].register_forward_hook(_cap_last))
-    _down = _mlp_down_projections(model)
+    # Routed MoE blocks get no site, so their per-layer value is NaN
+    # (tests/tasks/test_schatten_routed_blocks.py).
+    _routed = _routed_blocks(model)
+    _down = [(i, dp) for i, dp in _mlp_down_projections(model) if i not in _routed]
     for _i, _dp in _down:
         def _cap_mlp(module, args, _i=_i):
             if args and isinstance(args[0], torch.Tensor):
@@ -334,6 +351,7 @@ def _collect_per_layer_fresh(model, tokenizer, samples, max_length, flag=None):
         flag["post_norm_last"] = post_norm_last
         flag["mlp"] = mlp
         flag["n_mlp_layers_found"] = len(_down)
+        flag["mlp_routed_blocks"] = _routed
         flag["max_length"] = _cap
         flag["n_truncated"] = _n_trunc
         flag["n_stripped"] = _n_strip
@@ -486,6 +504,12 @@ class SchattenNormTask(DiagnosticTask):
                                                else -1)
         result["_meta_schatten_n_docs_truncated"] = int(_prov.get("n_truncated", 0))
         result["_meta_schatten_mlp_layers_found"] = int(_prov.get("n_mlp_layers_found", 0))
+        _routed = list(_prov.get("mlp_routed_blocks") or [])
+        result["_meta_schatten_mlp_n_routed_blocks"] = len(_routed)
+        result["_meta_schatten_mlp_routed_reason"] = (
+            f"blocks {_routed} hold routed experts: their MLP-internal activation is not "
+            f"one matrix, so their per-layer values are NaN and schatten_1/4 average the "
+            f"other blocks" if _routed else None)
         result["_meta_n_trailing_special_stripped"] = int(_prov.get("n_stripped", 0))
         result["_meta_schatten_source"] = "self_collected"
         result["preprocessing"] = "center_columns_then_row_l2_normalize"
