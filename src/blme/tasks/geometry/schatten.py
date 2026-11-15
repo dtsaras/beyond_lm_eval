@@ -428,12 +428,15 @@ class SchattenNormTask(DiagnosticTask):
         # task always runs its own forward (one per text) and reads the
         # residual states from the same forward.
         _prov = {"last_is_block": False}
+        doc_split = None
         if source == "long":
             from ...cache import load_long_documents
+            # Train, like every long-document task: validation holds 60
+            # articles, fewer than the study's 200 (test_long_document_split.py).
+            doc_split = self.config.get("doc_split", "train")
             try:
                 samples = load_long_documents(
-                    num_samples, min_words=seq_tokens + 1,
-                    split=self.config.get("doc_split", "validation"))
+                    num_samples, min_words=seq_tokens + 1, split=doc_split)
             except (ValueError, RuntimeError) as e:
                 return {"error": f"geometry_schatten: long documents unavailable: {e}"}
         else:
@@ -520,6 +523,7 @@ class SchattenNormTask(DiagnosticTask):
         result["_meta_schatten_headline_is_post_final_norm"] = bool(_pn_profile)
         result["_meta_schatten_seq_tokens"] = int(seq_tokens)
         result["_meta_schatten_documents"] = source
+        result["_meta_schatten_doc_split"] = doc_split
         result["_meta_schatten_n_docs_truncated"] = int(_prov.get("n_truncated", 0))
         result["_meta_schatten_mlp_layers_found"] = int(_prov.get("n_mlp_layers_found", 0))
         _routed = list(_prov.get("mlp_routed_blocks") or [])

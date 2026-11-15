@@ -204,13 +204,16 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         seq_tokens = min(int(self.config.get("seq_tokens", 256)),
                          int(get_max_positions(model, 10 ** 9)) - 1)
         source = self.config.get("documents", "long")
+        doc_split = None
         if source == "long":
             from ...cache import load_long_documents
+            # Train, like every long-document task: validation holds 60
+            # articles, fewer than the study's 200 (test_long_document_split.py).
+            doc_split = self.config.get("doc_split", "train")
             try:
                 # Counted in words, so the article list does not depend on the tokenizer.
                 samples = load_long_documents(
-                    num_samples, min_words=seq_tokens + 1,
-                    split=self.config.get("doc_split", "validation"))
+                    num_samples, min_words=seq_tokens + 1, split=doc_split)
             except (ValueError, RuntimeError) as e:
                 return {"error": f"geometry_positional_decay: long documents unavailable: {e}"}
         else:
@@ -400,6 +403,7 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         out["_meta_positional_decay_nan_reason"] = _nan_reason
         out["_meta_n_blocks_without_softmax_attention"] = int(_n_mixer_skipped)
         out["_meta_documents"] = source
+        out["_meta_doc_split"] = doc_split
         out["_meta_seq_tokens"] = seq_tokens if source == "long" else None
         out["_meta_positional_decay_inclusive_write_weighted"] = (
             _write_weighted_mean(_w_incl) if complete else float("nan"))

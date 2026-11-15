@@ -53,9 +53,13 @@ geometry_matrix_entropy:
 geometry_schatten:
   num_samples: 10
   # The first seq_tokens tokens (tokenizer defaults, BOS included) of the long
-  # WikiText validation articles geometry_positional_decay reads; every key
-  # grows with the token count, so the window is pinned across models.
+  # WikiText articles geometry_positional_decay reads; every key grows with
+  # the token count, so the window is pinned across models. Articles of
+  # > seq_tokens words from doc_split, in nested order, the same ones for every
+  # tokenizer. Train, like the other long-document tasks: validation and test
+  # hold 60 such articles each, train 28,831.
   documents: long
+  doc_split: train
   seq_tokens: 256
 
 interpretability_activation_sinks:
@@ -89,6 +93,14 @@ geometry_spectral:
 
 geometry_positional_decay:
   num_samples: 5
+  # The first seq_tokens content tokens of WikiText-103 articles of
+  # > seq_tokens words from doc_split, in nested order, the same ones for every
+  # tokenizer (documents: dataset scores the run's passages instead). Train,
+  # like the other long-document tasks: validation and test hold 60 such
+  # articles each, train 28,831.
+  documents: long
+  doc_split: train
+  seq_tokens: 256
 
 geometry_cka:
   num_samples: 100

@@ -709,8 +709,10 @@ def load_long_documents(
     ``min_tokens`` (which needs ``tokenizer``) articles shorter than
     ``min_tokens`` tokens -- counted as the model sees them, special tokens
     included -- are skipped; the result is then nested for a fixed tokenizer
-    only. Raises ``ValueError`` if fewer than ``n`` articles qualify. The
-    validation split holds 60 articles.
+    only. Raises ``ValueError`` if fewer than ``n`` articles qualify: a draw
+    comes from ``split`` alone and is never topped up from another split or
+    truncated. Validation holds 60 articles and test 62; train holds 29,145,
+    so a task that may be asked for more than 60 reads ``split="train"``.
     """
     n = int(n)
     if n < 0:
@@ -735,9 +737,10 @@ def load_long_documents(
         need = "".join(
             f" of >= {v} {unit}" for v, unit in ((min_words, "words"), (min_tokens, "tokens"))
             if v is not None)
+        hint = "" if split == "train" else " The train split holds about 29,000 articles."
         raise ValueError(
             f"load_long_documents: {n} articles requested, but {path} {split} has "
-            f"{len(out)}{need}.")
+            f"{len(out)}{need}.{hint}")
     return out
 
 
