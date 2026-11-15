@@ -126,6 +126,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
             # Why the cache was not used (the route is _meta_points_source).
             results["_meta_cache_rejected"] = sc.info.get("cache_rejected")
             results.update(sc.meta())
+            results["_meta_intrinsic_dim_mode"] = "layerwise"
             return results
 
         else:
@@ -138,9 +139,11 @@ class IntrinsicDimensionTask(DiagnosticTask):
              # float64, as on the layerwise route.
              E_np = E.double().cpu().numpy()
              # `sample_size` subsamples the rows (None: every row).
-             return self._compute_id(
+             out = self._compute_id(
                  E_np, sample_size=self.config.get("sample_size", None),
                  seed_offset=int(self.config.get("seed_offset", 0)))
+             out["_meta_intrinsic_dim_mode"] = "static_embeddings"
+             return out
 
     def _compute_id(self, X, sample_size=None, seed_offset=0):
         """Two-NN intrinsic dimension of the point cloud ``X``.
