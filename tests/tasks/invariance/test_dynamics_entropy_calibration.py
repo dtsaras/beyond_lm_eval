@@ -27,3 +27,30 @@ def test_headline_invariant(arch):
     ins = EntropyCalibrationTask(_CFG).evaluate(deep, tok, docs)
     assert base["_meta_n_examples"] == 3
     inv.assert_invariant(base, ins, sorted(EntropyCalibrationTask.SIZE_INVARIANT), rtol=0.0)
+
+
+def test_model_generation_config_does_not_apply():
+    """Pure sampling at temperature 1 under the task's own config: a model that
+    ships decoding defaults (suppress_tokens, repetition_penalty,
+    no_repeat_ngram_size) draws the same samples as one that ships none. A
+    passed GenerationConfig alone does not do it: generate() fills its unset
+    fields from model.generation_config."""
+    tok = fd.tokenizer()
+    docs = load_long_documents(3, split="validation")
+    plain = EntropyCalibrationTask(_CFG).evaluate(fd.tiny_gpt2(), tok, docs)
+    model = fd.tiny_gpt2()
+    suppressed = list(range(100, 600))
+    model.generation_config.suppress_tokens = suppressed
+    model.generation_config.repetition_penalty = 1.3
+    model.generation_config.no_repeat_ngram_size = 2
+    shipped = EntropyCalibrationTask(_CFG).evaluate(model, tok, docs)
+    for key in EntropyCalibrationTask.HEADLINE_KEYS + (
+            "_meta_mean_generation_entropy", "_meta_n_generated_tokens"):
+        assert shipped[key] == plain[key], key
+    assert plain["_meta_ignored_generation_config"] == {}
+    assert shipped["_meta_ignored_generation_config"] == {
+        "no_repeat_ngram_size": 2, "repetition_penalty": 1.3,
+        "suppress_tokens": repr(suppressed)}
+    # The model's config is restored after the call.
+    assert model.generation_config.suppress_tokens == suppressed
+    assert model.generation_config.repetition_penalty == 1.3

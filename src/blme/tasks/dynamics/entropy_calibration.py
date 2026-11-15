@@ -26,6 +26,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_max_positions, stop_ids
+from .generation_diversity import _ignored_generation_settings, _no_model_generation_defaults
 
 logger = logging.getLogger("blme")
 
@@ -76,8 +77,11 @@ def response_log_losses(model, prompt, response, device):
 def _sample(model, tokenizer, prompts, max_new, batch_size, device):
     """Pure sampling at temperature 1 (top_k 0, top_p 1, as vLLM's defaults),
     left-padded batches; each continuation is cut after its first stop id.
-    A fresh GenerationConfig keeps the model's own processors (suppress_tokens,
-    no_repeat_ngram_size, min_p, ...) out of the sampling."""
+    The task's own GenerationConfig, with the model's decoding defaults unset
+    for the call: generate() fills every field the passed config leaves unset
+    from model.generation_config, so its processors (suppress_tokens,
+    repetition_penalty, no_repeat_ngram_size, min_p, ...) would otherwise shape
+    the samples (test_model_generation_config_does_not_apply)."""
     from transformers import GenerationConfig
     stops = stop_ids(model, tokenizer)
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -91,7 +95,8 @@ def _sample(model, tokenizer, prompts, max_new, batch_size, device):
         width = max(len(p) for p in batch)
         ids = torch.tensor([[pad] * (width - len(p)) + p for p in batch], device=device)
         mask = torch.tensor([[0] * (width - len(p)) + [1] * len(p) for p in batch], device=device)
-        seqs = model.generate(input_ids=ids, attention_mask=mask, generation_config=gen_cfg)
+        with _no_model_generation_defaults(model):
+            seqs = model.generate(input_ids=ids, attention_mask=mask, generation_config=gen_cfg)
         for row in seqs[:, width:].tolist():
             cut = next((i for i, t in enumerate(row) if t in stops), None)
             out.append(row if cut is None else row[:cut + 1])
@@ -198,4 +203,6 @@ class EntropyCalibrationTask(DiagnosticTask):
             "_meta_batch_size": batch_size,
             "_meta_max_new_tokens": max_new,
             "_meta_generation_seed": seed,
+            # The model's own decoding defaults, which the sampling keeps out.
+            "_meta_ignored_generation_config": _ignored_generation_settings(model),
         }
