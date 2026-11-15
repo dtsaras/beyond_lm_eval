@@ -72,6 +72,11 @@ Implementation notes (BLME):
       values, so on a rank-deficient cloud the reference rule depends on how
       the SVD resolved the null space. ``rank_aware=True`` applies the
       Moore-Penrose cutoff at numpy's pinv tolerance.
+    * Rows: the headline drops position 0 and the massive-activation rows
+      (``TOKEN_POLICY``), one mask per token shared by every layer. Those rows
+      hold most of the centred sum of squares, so with them the fit scores the
+      sink and not the content tokens. The released notebook keeps every
+      position; that value is emitted as ``_meta_incl_pos0_*``.
     * Only summary scalars are emitted; the slope is on normalised depth.
 """
 
@@ -82,9 +87,10 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import get_num_layers
 from .utils import as_numpy
-from .._tokens import (hidden_states_for_task, massive_token_share,
-                       position0_share, select_rows)
+from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+                       position0_share, select_rows, sink_keep_masks, sink_meta)
 
 logger = logging.getLogger("blme")
 
@@ -224,6 +230,12 @@ class ProcrustesLinearityTask(DiagnosticTask):
     definition (Q2), so the released rule is kept only as ``_meta_``; on real
     full-rank pairs the two agree exactly.
 
+    Rows follow ``TOKEN_POLICY``: position 0 and the massive-activation rows
+    are dropped with one mask per token, taken from the middle block outputs
+    and shared by every layer. The every-position values of the released
+    notebook are ``_meta_incl_pos0_*`` (tests/tasks/invariance/
+    test_procrustes_linearity.py).
+
     Outputs (flat floats):
         procrustes_linearity_mean   — mean over adjacent pairs
         procrustes_linearity_min    — least-linear transition
@@ -234,7 +246,7 @@ class ProcrustesLinearityTask(DiagnosticTask):
         procrustes_linearity_q25/q50/q75 — quartiles over pairs
     """
 
-    TOKEN_POLICY = "paper_protocol:Razzhigaev2024 every position, BOS included"
+    TOKEN_POLICY = "exclude_sinks"
     SOURCES = {
         "paper": "arXiv:2405.12250",
         "code": "AIRI-Institute/LLM-Microscope@b6db939b2696845ce1f88cf69cddc41e808eea17",
@@ -293,9 +305,17 @@ class ProcrustesLinearityTask(DiagnosticTask):
         if n_layers < 2:
             return {"error": "Need at least 2 layers for procrustes linearity"}
 
-        # TOKEN_POLICY: every position, BOS included, as the released notebook.
-        _policy = "exclude_pos0" if self.TOKEN_POLICY == "exclude_pos0" else "all"
-        layer_states = {li: select_rows(per_doc[li], _policy)[0] for li in layers}
+        # One keep mask per token from the middle block outputs (the embedding
+        # is not a depth, so the mask is the cross-layer tasks'), used at every
+        # layer: both clouds of a pair hold the same rows.
+        n_blocks = int(get_num_layers(model) or 0)
+        _blocks = layers[1:] if (n_blocks > 0 and n_layers == n_blocks + 1) else layers
+        _keys = middle_depth_layers({k: per_doc[k] for k in _blocks})
+        masks, _sink_info = sink_keep_masks([per_doc[k] for k in _keys])
+        layer_states, _rows_meta = {}, None
+        for li in layers:
+            layer_states[li], _rows_meta = select_rows(
+                per_doc[li], self.TOKEN_POLICY, keep=masks)
         sims, sims_ref, sims_adj, ranks, n_tokens = _pair_profile(layer_states, layers)
 
         sim = np.asarray(sims, dtype=np.float64)
@@ -317,19 +337,25 @@ class ProcrustesLinearityTask(DiagnosticTask):
         _adj.pop("procrustes_linearity_adjusted_slope")
         out.update(_adj)
         out["_meta_fit_rank_max"] = int(max(ranks)) if ranks else 0
-        # P2: the paper keeps position 0; the value without it is _meta_.
-        if self.config.get("meta_excl_pos0", True):
-            _ex = {li: select_rows(per_doc[li], "exclude_pos0")[0] for li in layers}
-            _es, _, _ea, _, _ = _pair_profile(_ex, layers, reference_rule=False)
-            _es = np.asarray(_es, dtype=np.float64)
-            _ea = np.asarray(_ea, dtype=np.float64)
-            out["_meta_excl_pos0_procrustes_linearity_mean"] = (
-                float(np.nanmean(_es)) if np.isfinite(_es).any() else float("nan"))
-            out["_meta_excl_pos0_procrustes_linearity_adjusted_mean"] = (
-                float(np.nanmean(_ea)) if np.isfinite(_ea).any() else float("nan"))
+        # The released notebook's rows (every position): the same 17 summaries.
+        if self.config.get("meta_incl_pos0", True):
+            _all = {li: select_rows(per_doc[li], "all")[0] for li in layers}
+            _is, _, _ia, _, _n_all = _pair_profile(_all, layers, reference_rule=False)
+            _incl = _profile_summary(np.asarray(_is, dtype=np.float64),
+                                     "_meta_incl_pos0_procrustes_linearity")
+            _incl_adj = _profile_summary(np.asarray(_ia, dtype=np.float64),
+                                         "_meta_incl_pos0_procrustes_linearity_adjusted")
+            _incl_adj.pop("_meta_incl_pos0_procrustes_linearity_adjusted_slope")
+            out.update(_incl)
+            out.update(_incl_adj)
+            out["_meta_incl_pos0_n_tokens"] = int(_n_all)
+        # Sink diagnostics on the full (inclusive) middle-layer cloud.
         _mid = per_doc[layers[n_layers // 2]]
         out["_meta_position0_share"] = position0_share(_mid)
         out["_meta_massive_token_share"] = massive_token_share(_mid)
+        out.update(sink_meta(_sink_info))
+        if _rows_meta is not None:
+            out.update(_rows_meta.as_meta())
         _ref_fin = _sref[np.isfinite(_sref)]
         out.update({
             "_meta_n_layers": int(n_layers),

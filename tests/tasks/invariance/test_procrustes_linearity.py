@@ -1,5 +1,6 @@
-"""geometry_procrustes_linearity: rank-aware headline, adjusted-R^2 twin and
-the position-0 companion, driven through the real ``evaluate()``."""
+"""geometry_procrustes_linearity: rank-aware headline on the sink-free rows,
+adjusted-R^2 twin and the every-position ``_meta_incl_pos0_*`` companion,
+driven through the real ``evaluate()``."""
 from __future__ import annotations
 
 import numpy as np
@@ -7,6 +8,8 @@ import pytest
 import torch
 
 from _family_c import TEXTS, inv, load
+
+from blme.tasks.geometry.procrustes_linearity import ProcrustesLinearityTask  # noqa: E402
 
 TASK = "geometry_procrustes_linearity"
 
@@ -66,25 +69,59 @@ def test_adjusted_twin_removes_the_chance_fit(null_states):
     assert drift > 0.2                                        # known negative
 
 
-def test_position0_kept_with_the_excluded_value_beside_it(tiny_states):
-    """The paper keeps every position (BOS included): a synthetic sink moves
-    the headline, while the _meta_ value without position 0 does not."""
+HEADLINE = tuple(ProcrustesLinearityTask.HEADLINE_KEYS)
+INCL = tuple("_meta_incl_pos0_" + k for k in HEADLINE)
+
+
+def test_headline_ignores_position0(tiny_states):
+    """Position-0 rows scaled x1000 (a synthetic sink) leave all 17 headline
+    keys bit-stable; the every-position values of the released notebook, kept
+    as _meta_incl_pos0_*, move (known negative)."""
     from _family_c import scale_position0
     f64 = {"store_dtype": torch.float64}
     base = inv.run_task_on_states(TASK, tiny_states, **f64)
     sunk = inv.run_task_on_states(TASK, scale_position0(tiny_states, 1e3), **f64)
-    inv.assert_moves(base, sunk, "procrustes_linearity_mean", 1e-3)
-    inv.assert_invariant(base, sunk, ["_meta_excl_pos0_procrustes_linearity_mean",
-                                      "_meta_excl_pos0_procrustes_linearity_adjusted_mean"],
-                         rtol=1e-9)
+    assert len(HEADLINE) == 17 and set(HEADLINE) <= set(base)
+    assert set(INCL) <= set(base)
+    assert not any(k.startswith("_meta_excl_pos0_") for k in base)
+    inv.assert_invariant(base, sunk, list(HEADLINE), rtol=1e-9)
+    inv.assert_moves(base, sunk, "_meta_incl_pos0_procrustes_linearity_mean", 1e-3)
     assert base["_meta_position0_share"] < 0.5 < sunk["_meta_position0_share"]
+    for r in (base, sunk):
+        assert r["_meta_rows_policy"] == "exclude_sinks"
+        assert r["_meta_n_tokens"] == r["_meta_rows_n_rows"]
+        assert r["_meta_n_tokens"] == (r["_meta_incl_pos0_n_tokens"] - tiny_states.n_docs
+                                       - r["_meta_sink_n_massive_dropped"])
+
+
+def test_massive_row_is_dropped_at_every_layer(tiny_states):
+    """A row massive at one middle block only is dropped from every pair: the
+    headline equals the corpus without that token, bit for bit."""
+    from _sinks import drop_row, inject_massive
+    f64 = {"store_dtype": torch.float64}
+    mid = tiny_states.n_layers // 2
+    spiked = inv.run_task_on_states(TASK, inject_massive(tiny_states, mid), **f64)
+    control = inv.run_task_on_states(TASK, drop_row(tiny_states), **f64)
+    assert spiked["_meta_sink_n_massive_dropped"] == tiny_states.n_docs
+    assert control["_meta_sink_n_massive_dropped"] == 0
+    inv.assert_invariant(control, spiked, list(HEADLINE), rtol=1e-12)
+
+
+def test_evaluate_on_a_model_reads_the_sink_free_rows(tiny):
+    """The real forward path: the headline cloud is every token but position
+    0 (and massive rows), and the 17 every-position values sit beside it."""
+    model, tok = tiny
+    r = inv.run_task_on_model(TASK, model, tok, TEXTS)
+    assert r["_meta_rows_policy"] == "exclude_sinks"
+    assert r["_meta_n_tokens"] == (r["_meta_incl_pos0_n_tokens"] - len(TEXTS)
+                                   - r["_meta_sink_n_massive_dropped"])
+    assert all(np.isfinite(r[k]) for k in HEADLINE + INCL)
 
 
 # --------------------------------------------------------------------------
 # SIZE_INVARIANT declarations, checked against their direct tests
 # --------------------------------------------------------------------------
 
-from blme.tasks.geometry.procrustes_linearity import ProcrustesLinearityTask  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +148,6 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_state
 
 def test_declarations():
     P = ProcrustesLinearityTask
-    assert P.TOKEN_POLICY.startswith("paper_protocol:")
+    assert P.TOKEN_POLICY == "exclude_sinks"
     assert set(P.SIZE_INVARIANT) <= set(P.HEADLINE_KEYS)
     assert {"paper", "code", "llm_precedent"} <= set(P.SOURCES)

@@ -2,9 +2,11 @@
 
 The reference pair score is LLM-Microscope's released ``procrustes_similarity``
 (LLM_microscope.ipynb, taken with ``ast``), computed in float64 as the task
-does. evaluate() runs on injected states (embedding + 5 blocks, every row kept,
-as the paper's protocol), and the 17 keys are the profile summaries of the
-reference scores: mean / min / max / first / last, the OLS slope on depth
+does. evaluate() runs on injected states (embedding + 5 blocks). The 17
+headline keys are the profile summaries of the reference scores on the rows the
+task keeps (position 0 dropped), and the 17 ``_meta_incl_pos0_*`` keys are the
+same summaries on every row, the paper's protocol: mean / min / max / first /
+last, the OLS slope on depth
 l / (n_pairs - 1), the linear-interpolation quartiles, and the adjusted
 twins 1 - (1 - sim)(N - 1)/(N - 1 - r) (Wherry 1931) with r = d, the rank
 of every centred cloud here. Skips without the clone (fails under
@@ -80,11 +82,7 @@ def _summary(s, prefix, slope=True):
     return {f"{prefix}_{k}": v for k, v in out.items()}
 
 
-def test_every_headline_key_matches_the_release(release, walk):
-    states, layers = walk
-    res = inv.run_task_on_states("geometry_procrustes_linearity", states)
-    assert res["_meta_n_pairs"] == L and res["_meta_n_tokens"] == N_DOCS * T
-    clouds = [np.concatenate(docs).astype(np.float64) for docs in layers]
+def _want(release, clouds):
     n = clouds[0].shape[0]
     sims = np.array([release(a, b) for a, b in zip(clouds[:-1], clouds[1:])])
     assert np.ptp(sims) > 1e-2 and sims.max() < 1.0
@@ -92,6 +90,29 @@ def test_every_headline_key_matches_the_release(release, walk):
     want = {**_summary(sims, "procrustes_linearity"),
             **_summary(adj, "procrustes_linearity_adjusted", slope=False)}
     assert len(want) == 17
-    for key, v in want.items():
+    return want
+
+
+def test_every_headline_key_matches_the_release(release, walk):
+    """The release's score on the task's rows: position 0 of each document
+    dropped (the walk has no massive row)."""
+    states, layers = walk
+    res = inv.run_task_on_states("geometry_procrustes_linearity", states)
+    assert res["_meta_n_pairs"] == L and res["_meta_n_tokens"] == N_DOCS * (T - 1)
+    assert res["_meta_rows_policy"] == "exclude_sinks"
+    assert res["_meta_sink_n_massive_dropped"] == 0
+    clouds = [np.concatenate([x[1:] for x in docs]).astype(np.float64) for docs in layers]
+    for key, v in _want(release, clouds).items():
         assert res[key] == pytest.approx(v, rel=1e-9, abs=1e-12), key
     assert "procrustes_linearity_adjusted_slope" not in res
+
+
+def test_every_position_twin_matches_the_release(release, walk):
+    """_meta_incl_pos0_*: the paper's protocol, every row kept."""
+    states, layers = walk
+    res = inv.run_task_on_states("geometry_procrustes_linearity", states)
+    assert res["_meta_incl_pos0_n_tokens"] == N_DOCS * T
+    clouds = [np.concatenate(docs).astype(np.float64) for docs in layers]
+    for key, v in _want(release, clouds).items():
+        assert res["_meta_incl_pos0_" + key] == pytest.approx(v, rel=1e-9, abs=1e-12), key
+    assert "_meta_incl_pos0_procrustes_linearity_adjusted_slope" not in res
