@@ -106,39 +106,68 @@ def test_persistent_homology(mock_model, mock_tokenizer):
         assert any("persistence_h0" in k for k in results.keys())
 
 
-def test_betti_curve(mock_model, mock_tokenizer):
-    """Betti number trajectory across layers, with the derived summary
-    statistics numerically pinned to their definitions (recomputed here
-    from the returned curves) — a source-grep test alone lets the polyfit
-    degree/coefficient silently change."""
-    import numpy as np
-    from blme.tasks.topology.betti_curve import BettiCurveTask
+def _window_docs():
+    """16 passages of 31-39 words, so the shipped readout (the last token of a
+    20-word window of each passage) places one point per passage. The mock
+    tokenizer's 8 unaligned ids give it none, and the task returns an error."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "invariance"))
+    import _family_d as fd
+    T = fd.TEXTS
+    return fd, [{"text": " ".join(T[(i + j) % len(T)] for j in range(3))}
+                for i in range(len(T))]
 
-    task = BettiCurveTask(config={"num_samples": 5})
-    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
-    assert isinstance(results, dict)
-    # May error if get_layers returns None for this architecture
-    if "error" not in results:
-        curve0 = results["betti_0_curve"]
-        curve1 = results["betti_1_curve"]
-        L = len(curve0)
-        assert results["_meta_betti_0_first"] == curve0[0]
-        assert results["_meta_betti_0_last"] == curve0[-1]
-        # simplification_ratio = last/first (1.0 fallback when first == 0)
-        expected_ratio = curve0[-1] / curve0[0] if curve0[0] > 0 else 1.0
-        assert results["_meta_simplification_ratio"] == pytest.approx(
-            expected_ratio, abs=1e-12
-        )
-        # decay rate = degree-1 polyfit SLOPE on normalized depth in [0, 1]
-        if L > 1:
-            x = np.arange(L, dtype=np.float64) / float(max(1, L - 1))
-            expected_slope = float(np.polyfit(x, curve0, 1)[0])
-            assert results["betti_0_decay_rate"] == pytest.approx(
-                expected_slope, abs=1e-9
-            )
-        assert results["_meta_max_betti_1_layer"] == int(np.argmax(curve1))
-        assert results["_meta_max_betti_1"] == int(np.max(curve1))
+@pytest.mark.parametrize("arch,n_neighbors", [("gpt2", 4), ("gpt2", 3), ("llama", 2)])
+def test_betti_curve(arch, n_neighbors):
+    """evaluate() on the shipped window readout: the headline
+    betti_1_curve_mean and the other summaries are recomputed here from the
+    returned curves, and the curves from the kernel on the window points."""
+    pytest.importorskip("ripser")
+    from blme.tasks._windows import window_options
+    from blme.tasks.topology._points import last_token_points, rows_policy
+    from blme.tasks.topology.betti_curve import BettiCurveTask, _count_betti
+
+    fd, docs = _window_docs()
+    model = fd.tiny_gpt2() if arch == "gpt2" else fd.tiny_llama()
+    tok = fd.tokenizer()
+    cfg = {"num_samples": len(docs), "n_neighbors": n_neighbors}
+    results = BettiCurveTask(config=dict(cfg)).evaluate(model, tok, dataset=docs)
+
+    assert "error" not in results, results
+    assert results["_meta_points_readout"] == "last_token_of_20_word_window"
+    assert results["_meta_n_points"] == len(docs)
+    curve0 = results["betti_0_curve"]
+    curve1 = results["betti_1_curve"]
+    L = len(curve0)
+    assert L == len(curve1) == model.config.num_hidden_layers
+
+    pts, _ = last_token_points(model, tok, docs, None, num_samples=len(docs),
+                               layers=lambda n: range(n),
+                               policy=rows_policy(BettiCurveTask.TOKEN_POLICY),
+                               points=window_options(cfg))
+    for l in range(L):
+        assert (curve0[l], curve1[l]) == _count_betti(
+            np.array(pts[l]), maxdim=1, n_neighbors=n_neighbors), l
+    # Not the all-(1, 0) curve a fully connected graph gives.
+    assert np.ptp(curve0) > 0 or max(curve1) > 0
+
+    # Headline: the mean of the loop counts over layers, not their maximum.
+    assert results["betti_1_curve_mean"] == pytest.approx(float(np.mean(curve1)), abs=1e-12)
+    assert results["_meta_max_betti_1"] == int(np.max(curve1))
+    assert results["_meta_max_betti_1_layer"] == int(np.argmax(curve1))
+    if (arch, n_neighbors) == ("gpt2", 4):
+        assert 0.0 < results["betti_1_curve_mean"] < results["_meta_max_betti_1"]
+
+    assert results["_meta_betti_0_first"] == curve0[0]
+    assert results["_meta_betti_0_last"] == curve0[-1]
+    assert results["_meta_simplification_ratio"] == pytest.approx(
+        curve0[-1] / curve0[0], abs=1e-12)
+    # decay rate = degree-1 polyfit SLOPE on normalized depth in [0, 1]
+    x = np.arange(L, dtype=np.float64) / float(L - 1)
+    assert results["betti_0_decay_rate"] == pytest.approx(
+        float(np.polyfit(x, curve0, 1)[0]), abs=1e-9)
 
 
 def test_betti_curve_geodesic_recovers_clusters_and_loops():
@@ -175,29 +204,50 @@ def test_betti_curve_geodesic_recovers_clusters_and_loops():
     assert _count_betti(np.zeros((2, 5)), maxdim=1) == (1, 0)
 
 
-def test_persistence_entropy(mock_model, mock_tokenizer):
-    """Persistence entropy at early, middle, and late layers. The normalized
-    (relative) entropy keys must equal PE / log2(m) with m the number of
-    finite bars — the [0, 1] scale-free form stated in the paper appendix."""
+@pytest.mark.parametrize("arch", ["gpt2", "llama"])
+def test_persistence_entropy(arch):
+    """evaluate() on the shipped window readout. The headline is the H1
+    entropy at the first / middle / last layer and its PE / log2(m) twin, m
+    the number of H1 bars: NaN below two bars, and the entropy itself NaN on
+    an empty barcode. The H0 family carries the same rule under _meta_."""
+    pytest.importorskip("ripser")
     from blme.tasks.topology.persistence_entropy import PersistenceEntropyTask
 
-    task = PersistenceEntropyTask(config={"num_samples": 5})
-    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
+    fd, docs = _window_docs()
+    model = fd.tiny_gpt2() if arch == "gpt2" else fd.tiny_llama()
+    results = PersistenceEntropyTask(config={"num_samples": len(docs)}).evaluate(
+        model, fd.tokenizer(), dataset=docs)
 
-    assert isinstance(results, dict)
-    # May error if get_layers returns None for this architecture
-    if "error" not in results:
-        assert "_meta_pe_simplification_ratio" in results
-        assert any("pe_h0" in k for k in results.keys())
-        for key in list(results):
-            if not key.endswith("_pe_h0_norm"):
-                continue
-            prefix = key[: -len("_pe_h0_norm")]
-            m = results[f"{prefix}_num_features_h0"]
-            pe = results[f"{prefix}_pe_h0"]
-            expected = pe / np.log2(m) if m >= 2 else 0.0
-            assert results[key] == pytest.approx(expected, abs=1e-12)
-            assert 0.0 <= results[key] <= 1.0 + 1e-9
+    assert "error" not in results, results
+    assert results["_meta_points_readout"] == "last_token_of_20_word_window"
+    assert results["_meta_n_points"] == len(docs)
+    assert set(PersistenceEntropyTask.HEADLINE_KEYS) <= set(results)
+    assert not [k for k in results if "pe_h0" in k and not k.startswith("_meta_")]
+
+    def check(prefix, dim, meta):
+        m = results[f"{meta if dim == 'h0' else prefix}_num_features_{dim}"]
+        pe = results[f"{meta if dim == 'h0' else prefix}_pe_{dim}"]
+        norm = results[f"{meta if dim == 'h0' else prefix}_pe_{dim}_norm"]
+        if m == 0:
+            assert np.isnan(pe) and np.isnan(norm)
+        elif m == 1:
+            assert pe == 0.0 and np.isnan(norm)
+        else:
+            assert pe > 0.0
+            assert norm == pytest.approx(pe / np.log2(m), abs=1e-12)
+            assert 0.0 <= norm <= 1.0 + 1e-9
+        return m
+
+    counts = []
+    for role in ("first", "mid", "last"):
+        counts.append(check(f"{role}_layer", "h1", None))
+        assert check(f"{role}_layer", "h0", f"_meta_{role}_layer") >= 2
+    # gpt2 has H1 bars at every role; the llama reaches the one-bar and
+    # empty-barcode branches.
+    if arch == "gpt2":
+        assert min(counts) >= 2
+    else:
+        assert {0, 1} <= set(counts)
 
 
 def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
