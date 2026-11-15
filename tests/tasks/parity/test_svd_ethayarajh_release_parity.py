@@ -9,10 +9,13 @@ pairs drawn with replacement, so a pair is the same vector with probability
 1/N: its expectation is 1/N + (1 - 1/N) * (mean over distinct pairs), which is
 BLME's exact all-pairs value when tokens within and across sentences are
 exchangeable, as here. Agreement is required within 5 standard errors of the
-release's pair sampling plus its rounding to 3 decimals. Skips without the
-clone (fails under BLME_REQUIRE_REFS=1).
+release's pair sampling plus its rounding to 3 decimals. On gpt2 over the
+clone's own ``sts.csv`` the per-layer values reproduce the released
+``gpt2/embedding_space_stats.json`` behind the paper's Fig. 1. Skips without
+the clone (fails under BLME_REQUIRE_REFS=1).
 """
 import ast
+import csv
 import json
 import os
 import random
@@ -101,3 +104,34 @@ def test_avg_cosine_matches_the_release_estimator(explore_embedding_space, tmp_p
     expected = 1.0 / N_DOCS + (1.0 - 1.0 / N_DOCS) * ours
     assert 0.5 < ours < 0.95 and sd > 0.01
     assert abs(ref - expected) <= 5.0 * sd / np.sqrt(N_DOCS) + 5e-4
+
+
+def test_gpt2_reproduces_the_released_anisotropy_profile():
+    """Ethayarajh (2019) Fig. 1, GPT-2 "mean cosine similarity across words"
+    (gpt2/embedding_space_stats.json): 0.978 at layer 12, HF's post-norm last
+    entry; ours 0.9705 (-0.77%) on the 196 sentences of the clone's sts.csv.
+    BLME's layerwise index k is Ethayarajh's layer k + 1 (block outputs, the
+    last post-norm); every layer is within 0.032 (layer 10). The released
+    values are 1000-pair estimates over one word per sentence of the full STS
+    2012-16 corpus rounded to 3 decimals, so the corpus sample dominates: the
+    tolerance is 0.015 at layer 12 and 0.04 per layer."""
+    transformers = pytest.importorskip("transformers")
+    import torch
+    stats, sts = _REPO / "gpt2" / "embedding_space_stats.json", _REPO / "sts.csv"
+    if not (stats.is_file() and sts.is_file()):
+        _missing(stats)
+    try:
+        tok = transformers.AutoTokenizer.from_pretrained("gpt2")
+        model = transformers.AutoModelForCausalLM.from_pretrained("gpt2", dtype=torch.float32).eval()
+    except OSError as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"gpt2 not cached: {e}")
+    pub = json.loads(stats.read_text())["mean cosine similarity across words"]
+    with open(sts) as f:
+        docs = [{"text": r[k]} for r in csv.DictReader(f, delimiter="\t") for k in ("Sent1", "Sent2")]
+    res = SVDIsotropyTask({"num_samples": len(docs), "use_cache": False, "layerwise": True}).evaluate(
+        model, tok, docs)
+    prof = [res["_meta_layer_metrics"][f"layer_{k}"]["avg_cosine_similarity"] for k in range(12)]
+    assert res["avg_cosine_similarity"] == prof[-1]
+    assert prof[-1] == pytest.approx(pub["layer_12"], abs=0.015)
+    assert prof == pytest.approx([pub[f"layer_{k + 1}"] for k in range(12)], abs=0.04)
+    assert int(np.argmin(prof)) in (3, 4, 5) and prof[-1] > 0.95
