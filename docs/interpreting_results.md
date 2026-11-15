@@ -98,7 +98,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 |------|-----------|-------------------|
 | `geometry_rsa` | `rsa_adjacent_mean` | How similar the representational geometry is between consecutive layers (higher = more stable). |
 | `geometry_hsic` | `avg_adjacent_hsic` | HSIC dependence between adjacent layers. Higher = more linearly dependent layer transitions. |
-| `geometry_intrinsic_dim` | `intrinsic_dimension` | Global intrinsic dimensionality via Two-NN. (Layer-wise mode yields `lid_layer_*` keys.) |
+| `geometry_intrinsic_dim` | `lid_first_layer`, `lid_mid_layer`, `lid_last_layer` | Two-NN intrinsic dimension at the first, middle and last block (layer-wise mode, the default). Static mode emits `intrinsic_dimension` instead. |
 | `geometry_prediction_alignment` | `prediction_alignment_mean` | Cosine alignment between final hidden states and the output-projection row for the target next token. |
 | `geometry_perplexity` | `ppl_rare` / `ppl_freq` | Perplexity on rare vs. frequent tokens. Large gaps signal poor tail performance. |
 | `geometry_positional_decay` | `mean_positional_decay_correlation` | How attention weight decays with distance. Strong negative (< −0.5) = healthy local structure. |
@@ -144,7 +144,7 @@ This guide explains what each BLME metric measures, what values to expect, and w
 | `topology_homology` | `{first,mid,last}_layer_mean_persistence_h0_norm`, `*_max_persistence_h0_norm`, `*_mean_persistence_h1_norm`, `*_num_loops_h1` | ≥0 | Persistence lifetimes of connected components and loops divided by the cloud's mean pairwise distance, and the number of loops, at the first, middle and last block. The lifetimes in the representation's own units are `_meta_{first,mid,last}_layer_*`. |
 | `topology_persistence_entropy` | `layer_*_pe_h0`, `pe_simplification_ratio` | ≥0 | Per-layer persistence entropy and simplification across depth. |
 | `topology_betti_curve` | `betti_0_curve`, `simplification_ratio` | ≥0 | Betti trajectory across layers and its simplification ratio. |
-| `topology_persistence_landscape` | `layer_*_h0_mean_landscape_integral` | ≥0 | Persistence-landscape functional summaries of H0/H1 diagrams. |
+| `topology_persistence_landscape` | `{first,mid,last}_layer_h1_*_mpd*` | ≥0 | H1 persistence-landscape summaries divided by the cloud's mean pairwise distance to the matching power. The raw-unit summaries and the H0 closed forms are `_meta_`. |
 
 **Guidance**: These metrics characterize the *shape* of the representation space. More complex topology (higher Betti numbers, higher persistence entropy) often correlates with richer learned representations.
 
