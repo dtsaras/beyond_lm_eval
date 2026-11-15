@@ -758,9 +758,17 @@ def test_information_geometry(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    if "error" not in results:
-        assert "_meta_representation_sensitivity_raw" in results
-        assert results["_meta_representation_sensitivity_raw"] >= 0
+    if "error" in results:
+        # Only the fail-closed linearity guard may decline (the BERT toy's
+        # transform head); any other error is a regression.
+        assert "not purely linear" in results["error"], results
+        assert "S_unit" not in results
+        return
+    # The headline is the gauge-free S_unit; the raw value is _meta_.
+    assert RepresentationSensitivityTask.HEADLINE_KEYS == ("S_unit",)
+    assert np.isfinite(results["S_unit"]) and results["S_unit"] >= 0
+    assert "_meta_representation_sensitivity_raw" in results
+    assert results["_meta_representation_sensitivity_raw"] >= 0
 
 
 def test_lid(mock_model, mock_tokenizer):
@@ -771,9 +779,12 @@ def test_lid(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    if "error" not in results:
-        assert "lid_mean" in results
-        assert "lid_std" in results
+    assert "error" not in results, results
+    # Single-layer mode: the four pooled headline keys (the first / middle
+    # layer keys belong to the layerwise mode).
+    for key in ("lid_mean", "lid_std", "lid_max", "lid_median"):
+        assert np.isfinite(results[key]) and results[key] >= 0, (key, results[key])
+    assert results["lid_max"] >= results["lid_median"]
 
 
 def test_mahalanobis(mock_model, mock_tokenizer):
@@ -803,9 +814,13 @@ def test_mutual_info(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    if "error" not in results:
-        assert "min_adjacent_hsic" in results
-        assert "_meta_avg_adjacent_hsic" in results
+    assert "error" not in results, results
+    for key in HSICDependenceTask.HEADLINE_KEYS:
+        assert np.isfinite(results[key]), (key, results[key])
+    # The biased nHSIC keys are similarities of centred Grams.
+    for key in ("min_adjacent_hsic", "hsic_compression_ratio"):
+        assert -1e-9 <= results[key] <= 1.0 + 1e-9, (key, results[key])
+    assert results["min_adjacent_hsic"] <= results["_meta_avg_adjacent_hsic"] + 1e-12
 
 
 def test_perplexity_rare_freq(mock_model, mock_tokenizer):
@@ -900,8 +915,11 @@ def test_rsa(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    if "error" not in results:
-        assert any("rsa" in k for k in results.keys())
+    assert "error" not in results, results
+    # Headline: Spearman correlations of correlation-distance RDMs.
+    for key in RepresentationalSimilarityTask.HEADLINE_KEYS:
+        assert -1.0 - 1e-9 <= results[key] <= 1.0 + 1e-9, (key, results[key])
+    assert results["rsa_adjacent_min_corrdist"] <= results["_meta_rsa_adjacent_mean_corrdist"] + 1e-12
 
 
 def test_matrix_entropy(mock_model, mock_tokenizer):
