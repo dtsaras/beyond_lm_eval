@@ -72,26 +72,34 @@ def _ref_debiased_hsic(K, L):
 
 
 def test_debiased_hsic_matches_song_estimator():
-    from blme.tasks.geometry.cka import _debiased_hsic
+    """The production kernel behind the *_cka_debiased headline keys is the
+    feature-space ``_debiased_hsic_features``; the Gram-space ``_debiased_hsic``
+    is the same estimator on explicit K, L. Both against the reference."""
+    from blme.tasks.geometry.cka import _debiased_hsic, _debiased_hsic_features
     rng = np.random.default_rng(0)
     for _ in range(15):
         n = int(rng.integers(8, 40))
         A, B = rng.standard_normal((n, 6)), rng.standard_normal((n, 6))
         K, L = A @ A.T, B @ B.T
+        ref = _ref_debiased_hsic(K, L)
+        shipped = _debiased_hsic_features(torch.from_numpy(A), torch.from_numpy(B))
+        assert shipped == pytest.approx(ref, rel=1e-8, abs=1e-10)
         got = float(_debiased_hsic(torch.from_numpy(K.copy()),
                                    torch.from_numpy(L.copy())))
-        assert got == pytest.approx(_ref_debiased_hsic(K, L), rel=1e-8)
+        assert got == pytest.approx(ref, rel=1e-8)
+        # Not the biased V-statistic tr(K L) / n^2 of the uncentred Grams.
+        assert abs(shipped - float((K * L).sum()) / n ** 2) > 1e-3
 
 
 def test_debiased_hsic_is_unbiased_under_independence():
-    """The debiased estimator must average to ~0 for independent inputs."""
-    from blme.tasks.geometry.cka import _debiased_hsic
+    """The debiased estimator (the production feature-space kernel) must
+    average to ~0 for independent inputs."""
+    from blme.tasks.geometry.cka import _debiased_hsic_features
     rng = np.random.default_rng(3)
     vals = []
     for _ in range(200):
         A, B = rng.standard_normal((30, 4)), rng.standard_normal((30, 4))
-        K, L = A @ A.T, B @ B.T
-        vals.append(float(_debiased_hsic(torch.from_numpy(K), torch.from_numpy(L))))
+        vals.append(_debiased_hsic_features(torch.from_numpy(A), torch.from_numpy(B)))
     m = float(np.mean(vals))
     se = float(np.std(vals) / np.sqrt(len(vals)))
     assert abs(m) < 4 * se, f"mean {m:.4g} is {abs(m)/se:.1f} SE from 0 -- biased"
