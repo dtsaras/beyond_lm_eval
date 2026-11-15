@@ -124,24 +124,19 @@ class RepresentationalSimilarityTask(DiagnosticTask):
         if n_tokens < 3:
             return {"error": f"Too few tokens ({n_tokens}) for RSA"}
 
-        # Rows that make correlation distance undefined (exactly constant).
-        _n_degenerate = [0]
+        # A row exactly constant at any layer has no correlation distance; it
+        # is dropped from every correlation RDM, so all keep the same
+        # conditions (rsatoolbox excludes a NaN position from all RDMs).
+        _const = np.zeros(len(sel), dtype=bool)
+        for li in layer_indices:
+            _const |= np.ptp(as_numpy(all_layers[li])[sel], axis=1) == 0.0
+        _corr_rows = sel[~_const]
 
         def _rdms(metric):
-            out = {}
-            for li in layer_indices:
-                X = np.asarray(as_numpy(all_layers[li])[sel], dtype=np.float64)
-                if metric == "correlation":
-                    # An exactly constant row has no correlation distance:
-                    # NaN as scipy returns, counted, never jittered (a jitter
-                    # breaks scale invariance; rsatoolbox masks such rows).
-                    _bad = np.ptp(X, axis=1) == 0.0
-                    if np.any(_bad):
-                        X = X.copy().astype(np.float64)
-                        X[_bad] = np.nan
-                        _n_degenerate[0] += int(_bad.sum())
-                out[li] = pdist(X, metric=metric)
-            return out
+            rows = _corr_rows if metric == "correlation" else sel
+            return {li: pdist(np.asarray(as_numpy(all_layers[li])[rows], dtype=np.float64),
+                              metric=metric)
+                    for li in layer_indices}
 
         def _summarize(rdms):
             adjacent_corrs = []
@@ -169,14 +164,22 @@ class RepresentationalSimilarityTask(DiagnosticTask):
             }
 
         euc = _summarize(_rdms("euclidean"))
-        cor = _summarize(_rdms("correlation"))
+        _cor_reason = None
+        if len(_corr_rows) >= 3:
+            cor = _summarize(_rdms("correlation"))
+        else:
+            _cor_reason = (f"{len(_corr_rows)} of {len(sel)} rows are non-constant at every "
+                           f"layer; a correlation RDM needs 3")
+            cor = {k: float("nan") for k in euc}
+            cor.update(n_undefined_pairs=n_layers - 1, min_continuity_layer=-1)
 
         _mid = per_doc[layer_indices[n_layers // 2]]
         out = {
             # Euclidean RDMs mostly encode token norm (Kriegeskorte uses
             # correlation distance, Abnar et al. 2019 cosine): _meta_ only.
             "_meta_rsa_adjacent_mean_euclidean": euc["adjacent_mean"],
-            "_meta_n_degenerate_rows_jittered": int(_n_degenerate[0]),
+            "_meta_n_constant_rows_dropped_corrdist": int(_const.sum()),
+            "_meta_rsa_corrdist_nan_reason": _cor_reason,
             "_meta_last_entry_is_block_output": bool(_last_is_block),
             "_meta_rsa_adjacent_min_euclidean": euc["adjacent_min"],
             "_meta_rsa_adjacent_std_euclidean": euc["adjacent_std"],
