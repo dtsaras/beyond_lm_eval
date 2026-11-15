@@ -170,7 +170,7 @@ quality.
 * **Critical Info**: Headline keys: `avg_alpha_official`, `median_alpha_official`, `avg_alpha_hat`, `avg_stable_rank`. All of them are declared invariant to zero-padding the width (`tests/tasks/invariance/test_spectral.py::test_size_invariant_entry`). Weights only. A fixed-tail Hill estimate (`tail_fraction: 0.2`) is reported as `_meta_avg_alpha`.
 
 ## 15. HSIC Dependence (`geometry_hsic`)
-* **What are we measuring**: Kernel dependence between representation sets, usually across layers or between input and layer representations.
+* **What are we measuring**: Kernel dependence between the token clouds of different layers.
 * **How are we measuring**: Hilbert-Schmidt Independence Criterion between the centred Gram matrices of layers' token clouds (sink rows excluded, at most `max_hsic_tokens: 2000` tokens). The headlines are the minimum over adjacent layers and a compression ratio, each with a debiased twin.
 * **Hypothesis**: High HSIC indicates strong statistical dependence between two representation views; low HSIC suggests a stronger transformation or decorrelation.
 * **Citation/Paper**: `Gretton, A., Bousquet, O., Smola, A., & Schölkopf, B. (2005). Measuring Statistical Dependence with Hilbert-Schmidt Norms.` Related representation-similarity use in `Kornblith et al. (2019). Similarity of Neural Network Representations Revisited.`
@@ -291,7 +291,7 @@ quality.
 ## 29. Vendi Score (geometry_vendi_score)
 * **What are we measuring**: The effective number of distinct samples in a representation cloud — exp of the Shannon entropy of the similarity-kernel eigenvalues.
 * **How are we measuring**: VS = exp(-Σ λ_i log λ_i) for the eigenvalues of K / n, with K the cosine kernel (`kernel: cosine`), on one point per sequence: the last token of a 20-word window cut from each passage at a hashed offset (the same words for every model), at every block output, with `num_samples: 1000`.
-* **Hypothesis**: Higher Vendi score = more diverse representations; unlike effective rank / RankMe it uses a NONLINEAR kernel, so it measures sample diversity rather than linear-subspace utilization.
+* **Hypothesis**: Higher Vendi score = more diverse representations; with the default cosine kernel it is the exponential of a matrix entropy over one vector per sequence.
 * **Citation/Paper**: `Friedman, D. & Dieng, A. B. (2023). The Vendi Score: A Diversity Evaluation Metric for Machine Learning.` [TMLR 2023, ArXiv: 2210.02410]
 * **Paper summary**: Friedman & Dieng define the Vendi Score as the exponential of the von Neumann entropy of a similarity kernel — a reference-free diversity metric requiring no labels or reference distribution, interpretable as the effective number of dissimilar samples. They apply it across modalities to diagnose mode collapse and diversity trade-offs.
 * **File & Function**: `src/blme/tasks/geometry/vendi.py` -> `VendiScoreTask`
