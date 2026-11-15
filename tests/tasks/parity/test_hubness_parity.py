@@ -25,9 +25,15 @@ import pytest
 import torch
 from scipy import stats
 
-from blme.tasks.geometry.hubness import (
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "invariance"))
+import _reference_side  # noqa: E402
+from blme.tasks.geometry.hubness import (  # noqa: E402
     GlobalHubnessTask,
     _hubness_stats_from_occurrences,
+    _k_occurrences,
     _gini_from_counts,
 )
 
@@ -206,3 +212,32 @@ def test_offset_fixture_would_catch_a_dot_product_ranking():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+@pytest.mark.parametrize("k", [5, 10])
+def test_k_occurrence_skewness_and_gini_match_live_scikit_hubness(k):
+    """The live package (VarIr/scikit-hubness@c36a058, side-installed) on a
+    self-free k-NN graph: the k-occurrence vector, S_k and the Gini index on
+    unit rows with Euclidean (chord) neighbours, as BLME ranks them.
+
+    ``Hubness().fit(vectors).score()`` builds its graph with
+    ``include_self=True`` and ``score()`` keeps the self hit, so on vectors it
+    returns 1 + N_{k-1}; the textbook N_k (Radovanovic et al. 2010) is the
+    precomputed-graph route. Both are asserted.
+    """
+    estimation = _reference_side.require("skhubness.analysis.estimation")
+    from sklearn.neighbors import kneighbors_graph
+    rng = np.random.default_rng(k)
+    X = rng.standard_normal((300, 12)) * np.linspace(0.2, 3.0, 12)
+    U = X / np.linalg.norm(X, axis=1, keepdims=True)
+    graph = kneighbors_graph(U, n_neighbors=k, mode="distance", include_self=False)
+    ref = estimation.Hubness(k=k, return_value="all", return_k_occurrence=True).fit(graph).score()
+    ours_occ = _k_occurrences(torch.from_numpy(U), [k], 64)[k]
+    np.testing.assert_array_equal(ours_occ, ref["k_occurrence"])
+    ours = _hubness_stats_from_occurrences(ours_occ, k)
+    assert ours[f"hubness_k{k}_skew"] == pytest.approx(float(ref["k_skewness"]), rel=1e-12)
+    assert ours[f"hubness_k{k}_gini"] == pytest.approx(float(ref["gini"]), rel=1e-12)
+    on_vectors = estimation.Hubness(k=k, metric="euclidean", return_value="all",
+                                    return_k_occurrence=True).fit(U).score()
+    km1 = _k_occurrences(torch.from_numpy(U), [k - 1], 64)[k - 1]
+    np.testing.assert_array_equal(on_vectors["k_occurrence"], km1 + 1)

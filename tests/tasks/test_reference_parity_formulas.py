@@ -12,6 +12,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "invariance"))
+import _reference_side  # noqa: E402
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures/reference_parity/formula_fixtures.json"
@@ -221,7 +225,7 @@ def test_isoscore_matches_rudman_reference_package():
     # zero-padding branch, which no test previously exercised — deleting
     # the padding passed the whole suite. Official IsoScore takes
     # (n_points, n_dims), same orientation as BLME.
-    iso_mod = pytest.importorskip("IsoScore.IsoScore")
+    iso_mod = _reference_side.require("IsoScore.IsoScore")
     rng = np.random.default_rng(0)
     Xa = rng.standard_normal((200, 16)) * np.linspace(1, 4, 16)[None, :]
     assert _isoscore(Xa) == pytest.approx(float(iso_mod.IsoScore(Xa)), abs=1e-6)
@@ -315,7 +319,7 @@ def test_calibration_ece_matches_torchmetrics_library():
     Verified 2026-06-21 with torchmetrics 1.9.0: confidences
     [0.1,0.4,0.8,0.9], correct [F,T,T,F], 2 bins -> ECE 0.3 from BOTH.
     """
-    tm = pytest.importorskip("torchmetrics.functional.classification")
+    tm = _reference_side.require("torchmetrics.functional.classification")
     from blme.tasks.consistency.calibration import _calibration_from_confidences
 
     case = _case("calibration_two_bins")

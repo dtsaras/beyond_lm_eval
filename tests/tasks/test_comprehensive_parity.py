@@ -14,6 +14,11 @@ small cached models offline (HF_HUB_OFFLINE is honored by transformers).
 import numpy as np
 import pytest
 import torch
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "invariance"))
+import _reference_side  # noqa: E402
 
 
 def _tiny_gpt2(n_layer=2, n_embd=32, n_head=2, vocab_size=256, seed=0):
@@ -4371,7 +4376,7 @@ def test_geometry_svd():
     assert -1.0 <= m["avg_cosine_similarity"] <= 1.0
 
     # ---------- PART B: _isoscore vs the independent IsoScore pip package ----------
-    isoscore_mod = pytest.importorskip("IsoScore.IsoScore")
+    isoscore_mod = _reference_side.require("IsoScore.IsoScore")
     ref_isoscore = isoscore_mod.IsoScore
 
     rng2 = np.random.default_rng(7)
