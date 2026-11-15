@@ -30,6 +30,7 @@
   - `positional_decay_nosink_write_weighted`;
   - `effective_depth_90`, `total_block_influence` and `max_block_influence`;
   - `prediction_alignment_mean` and `prediction_alignment_std` (fallback route).
+  - `dynamics_generation_diversity`, `dynamics_coe`, `dynamics_sharpness`, `geometry_neural_collapse` (both routes) and `geometry_cknna` (fallback route) also strip it. Each records `_meta_n_trailing_special_stripped`.
 - `geometry_categories`: both words of a relation pair use one token form, so `{relation}_consistency` changes.
 - `geometry_collapse`: `qdl_entropy_min` reads the first 64 tokens of every passage. The whole-passage value is `_meta_qdl_entropy_min_whole_passage`.
 - `geometry_positional_decay`: `positional_decay_nosink_write_weighted` scores the first 256 content tokens of long WikiText documents (`documents: dataset` keeps the run's passages).
@@ -38,6 +39,7 @@
 - `dynamics_perturbation_growth`: the headline is now the relative growth `growth_log_ratio_relative` = log(r_L / r_0); see the renames below.
 - `geometry_perplexity`: a special token the tokenizer adds owns no bytes, so `bits_per_byte` is finite on Llama-3 tokenizers (it was NaN).
 - `dynamics_generation_diversity`: completions are cut at the first of every stop id, not only the tokenizer's EOS. This changes `distinct_*`, `mean_distinct_*`, `mean_self_bleu`, `mean_phrase_repetition_rate` and the sampling-entropy keys.
+- `dynamics_generation_diversity` and `dynamics_coe` decode under the task's own settings only. On transformers 5.x, `generate()` fills unset fields from `model.generation_config`, so a model that ships decoding defaults (`repetition_penalty`, `no_repeat_ngram_size`, `suppress_tokens`, ...) used to change both tasks' samples. Those fields are now unset for the call and restored afterwards; `_meta_ignored_generation_config` lists them.
 - `dynamics_interpolation`: context pairs are distinct and drawn without replacement (`convexity_gap`).
 - `geometry_rsa`: a constant row is dropped from every correlation RDM. `rsa_adjacent_min_corrdist` and `rsa_early_late_corrdist` are no longer NaN when such a row exists.
 - `geometry_phd_dimension`: when no text yields a per-text estimate, `phd_dimension` is NaN with a reason. It used to fall back silently to the pooled estimate.
@@ -57,6 +59,7 @@
 - Gemma 3n / 4: the final logit softcap is read from the text config. This changes the tasks that decode through `common.apply_lm_head`: `interpretability_logit_lens`, `interpretability_logit_lens_kl` and `convexity_gap`.
 - `_meta_` only: `_meta_gride_peak_layer_frac` uses the hidden-state index / L, as the other peak depths do.
 - `_meta_` only: `_meta_correlation_dimension_under_resolved` compares the reported fixed-window `correlation_dimension` with the Eckmann-Ruelle bound 2 log10 N. It used to compare the demoted plateau fit.
+- Crash only: `topology_persistence_landscape` returns an error, as `topology_betti_curve` and `topology_persistence_entropy` do, when no passage holds a 20-word window. It used to raise `ValueError`.
 
 ### Key renames and demotions to `_meta_`
 - `dynamics_perturbation_growth`: `growth_log_ratio` → `_meta_growth_log_ratio_absolute`; the new headline is `growth_log_ratio_relative`.
@@ -69,6 +72,10 @@
 - `geometry_schatten`: `schatten_1` → `_meta_schatten_1_mlp` and `schatten_4` → `_meta_schatten_4_mlp`. They are in the MLP activation's units and grow with d_ff. The headline is `rankme_last`, `row_normalized_rankme_last`, `row_normalized_matrix_nuclear_norm_last` and `row_normalized_schatten_inf_last`.
 - `topology_homology`: the raw lifetimes `{first,mid,last}_layer_mean_persistence_h0`, `*_max_persistence_h0` and `*_mean_persistence_h1` move to `_meta_{first,mid,last}_layer_*`. The headline is their `_norm` twins and `*_num_loops_h1`.
 - `geometry_representation_sensitivity`: `representation_sensitivity` → `_meta_representation_sensitivity_raw` and `sensitivity_std` → `_meta_representation_sensitivity_raw_std`. The headline is `S_unit`.
+- `geometry_intrinsic_dim`: `intrinsic_dimension` leaves HEADLINE_KEYS. It is emitted only in static mode; the layer-wise default's headline is `lid_first_layer`, `lid_mid_layer` and `lid_last_layer`.
+- `topology_persistence_landscape`: the raw-unit H1 summaries `{first,mid,last}_layer_h1_mean_landscape_integral`, `*_landscape_max_1`, `*_landscape_norm_1` and `*_landscape_integrals` move to `_meta_{first,mid,last}_layer_h1_*`. The headline is the nine `_mpd` twins.
+- `dynamics_coe`: `mean_magnitude_change` → `_meta_mean_magnitude_change` and `std_magnitude_change` → `_meta_std_magnitude_change` (the representation's units).
+- `geometry_neural_collapse`: `nc1_cdnv` → `_meta_nc1_cdnv` (it scales as 1/c² with the feature scale). The headline is `nc1_cdnv_galanti`.
 
 Apart from the perturbation_growth headline, these moves leave values unchanged.
 
@@ -81,6 +88,8 @@ Apart from the perturbation_growth headline, these moves leave values unchanged.
 - Task metadata notes say what each task computes and name the test that pins it. Provenance claims that no test backs were removed.
 - Identity-block invariance is declared per placement (between blocks, before block 0, after the last block).
 - `transformers>=5.2.0,<5.11` (5.2.0 and 5.10.2 are tested). The new `augment` extra installs `nlpaug==1.1.11`.
+- `blme.experts`: on transformers 5.10, routed-expert (MoE) models call `torch._grouped_mm`, which torch 2.8 lacks on CPU. A model loaded or evaluated on CPU without that kernel is switched to the eager experts implementation; the switch is recorded as `config.experts_implementation_fallback` in the result envelope. GPU runs and dense models are unchanged.
+- `dynamics_perturbation_growth`: the docs state that `growth_log_ratio_relative` is a BLME formulation, not Li et al.'s quasi-Lyapunov exponent (their Eq. 9 has no state-norm normalisation and a 1/(n - m) factor); `_meta_growth_rate_per_block` is the closest analogue.
 
 ### Earlier changes in 0.2.0
 
