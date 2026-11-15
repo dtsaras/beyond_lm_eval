@@ -17,7 +17,7 @@ index) see the companion docs:
 - `PAPER_SURVEY.md` — inclusion/exclusion survey narrative
 - `RELATED_WORK.md` — paper-ready §2 in thematic threads
 - `CORRELATION_LITERATURE.md` — experimental-correlation papers
-- `TOP_PREDICTORS.md` — main experimental result
+- `VALIDATION.md` — per-task released-code parity and headline value tests
 - **`REPOSITORIES.md`** — GitHub reference-implementation URLs for
   every cited paper (66 papers mapped, added 2026-04-20)
 
@@ -368,7 +368,6 @@ Also cross-check:
 - `PAPER_SURVEY.md` §1 and §2 should match the rows here.
 - `CORRELATION_LITERATURE.md` status column (✅/🟡/🔴) should match
   the implemented set here.
-- `TOP_PREDICTORS.md` tables should cite papers listed in §1.
 
 Last full audit: **2026-06-20** (publication-readiness citation and proxy-label pass).
 

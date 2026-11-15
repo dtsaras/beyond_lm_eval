@@ -118,7 +118,7 @@ See [**docs/interpreting_results.md**](docs/interpreting_results.md) for a compr
 - [Getting Started](docs/getting_started.md)
 - [Configuration](docs/configuration.md)
 - [Interpreting Results](docs/interpreting_results.md)
-- [Task Certification Status](docs/TASK_STATUS.md)
+- [Validation Status](docs/VALIDATION.md)
 - Task category docs: [Geometry](docs/tasks_geometry.md) · [Interpretability](docs/tasks_interpretability.md) · [Topology](docs/tasks_topology.md) · [Causality](docs/tasks_causality.md) · [Consistency](docs/tasks_consistency.md) · [Dynamics](docs/tasks_dynamics.md) · [RepE](docs/tasks_representation_engineering.md)
 
 ## License

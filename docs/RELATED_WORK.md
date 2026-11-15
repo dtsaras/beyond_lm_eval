@@ -8,8 +8,8 @@ the two synchronised.
 
 Authoritative paper index: `docs/PAPERS.md`. Survey narrative:
 `docs/PAPER_SURVEY.md`. Experimental-correlation annex:
-`docs/CORRELATION_LITERATURE.md`. Main experimental result:
-`docs/TOP_PREDICTORS.md`.
+`docs/CORRELATION_LITERATURE.md`. Per-task validation status:
+`docs/VALIDATION.md`.
 
 ---
 

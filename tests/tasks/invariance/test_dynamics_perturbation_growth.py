@@ -90,7 +90,7 @@ def test_projecting_model_keeps_its_last_block():
     """OPT with word_embed_proj_dim < hidden_size projects HF's last entry to
     the embedding width. The raw last-block capture (hidden width) used to be
     rejected for not matching that entry, and the profile then dropped the last
-    block (SIGNOFF_MATRIX codex RED: rate +50% on a 3-block model)."""
+    block (an earlier review measured the rate +50% on a 3-block model)."""
     from transformers import OPTConfig, OPTForCausalLM
     torch.manual_seed(0)
     cfg = OPTConfig(vocab_size=1000, hidden_size=32, word_embed_proj_dim=16,
