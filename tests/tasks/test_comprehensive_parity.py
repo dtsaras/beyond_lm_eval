@@ -2455,12 +2455,16 @@ def test_dynamics_gradient_flow():
 
 # === dynamics_interpolation  [NUMERIC_PARITY / analytic / ref=analytic] ===
 def test_dynamics_interpolation():
-    """NUMERIC_PARITY for dynamics_interpolation's core helper `_slerp`.
+    """NUMERIC_PARITY for dynamics_interpolation's `_slerp` helper, which feeds
+    the _meta_slerp_* comparison path only.
 
-    The defining quantity of this task is spherical linear interpolation (SLERP)
-    between two latent vectors (Shoemake, "Animating Rotation with Quaternion
-    Curves", SIGGRAPH '85). BLME's `_slerp` applies the Shoemake coefficients
-    to the raw vectors, using the angle Omega between their UNIT directions:
+    The headline convexity_gap is read on the norm-corrected LINEAR path and
+    is pinned from its definition in
+    tests/tasks/parity/test_interpolation_values.py. Spherical linear
+    interpolation (Shoemake, "Animating Rotation with Quaternion Curves",
+    SIGGRAPH '85) is the alternative path the task also reports. `_slerp`
+    applies the Shoemake coefficients to the raw vectors, using the angle Omega
+    between their UNIT directions:
 
         Slerp(p,q;t) = sin((1-t)*Omega)/sin(Omega) * p + sin(t*Omega)/sin(Omega) * q,
         Omega = arccos( (p/|p|) . (q/|q|) )
@@ -2946,7 +2950,8 @@ def test_geometry_collapse():
         erank = exp(-sum_i p_i log p_i),   p_i = sigma_i / sum_j sigma_j
 
     where sigma are the singular values of the column-mean-centered activation
-    matrix. `collapse_ratio` = min_erank / (max_erank + 1e-12) across layers.
+    matrix. `collapse_ratio` = min_erank / max_erank across layers, the exact
+    ratio (no additive epsilon).
 
     Two independent references:
 
@@ -3067,7 +3072,9 @@ def test_geometry_collapse():
 
     # collapse_ratio derived from the independent eranks.
     mx, mn = max(ref), min(ref)
-    assert out["collapse_ratio"] == pytest.approx(mn / (mx + 1e-12), rel=1e-6)
+    assert out["collapse_ratio"] == pytest.approx(mn / mx, rel=1e-6)
+    assert out["collapse_ratio"] == out["min_erank"] / out["max_erank"]   # exact, no epsilon
+    assert mx - mn > 1e-3
     assert out["max_erank"] == pytest.approx(mx, rel=1e-6)
     assert out["min_erank"] == pytest.approx(mn, rel=1e-6)
 
