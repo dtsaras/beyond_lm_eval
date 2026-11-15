@@ -7,15 +7,18 @@ BLME's ``geometry_lipschitz`` (src/blme/tasks/geometry/lipschitz.py) does NOT
 implement a spectral-norm / power-iteration sigma_max kernel and does NOT form
 an AutoLip product of per-layer spectral norms. It computes the hidden-state
 RELATIVE-CHANGE ratio ||h_{l+1}(x) - h_l(x)|| / ||h_l(x)|| across adjacent
-layers, and is already labelled ``proxy-only`` in task_metadata.py and in its
-own docstring (lines 37-40, 112-115). The Virmaux&Scaman / Miyato citations
-refer to the sigma_max KERNEL, which in BLME lives in ``weight_norms.py`` and
-``spectral.py`` (both EXACT SVD: ``torch.linalg.svdvals(W)[0]``), NOT in
+layers, and is labelled ``proxy-only`` in task_metadata.py and in its own
+docstring; its headline keys are pinned in
+tests/tasks/parity/test_lipschitz_depth_additive_values.py and
+tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz. The
+Virmaux&Scaman / Miyato citations refer to the sigma_max KERNEL, which in BLME
+is ``weight_norms._weight_matrix_stats`` (the kernel behind
+geometry_weight_norms' ``mean_spectral_norm``), NOT anything in
 ``lipschitz.py``.
 
 What this test proves (to the strictest standard):
-  1. BLME's ACTUAL sigma_max kernel ``torch.linalg.svdvals(W)[0]``
-     (src/blme/tasks/geometry/weight_norms.py:79-80) == exact
+  1. The shipped sigma_max kernel, ``_weight_matrix_stats`` called on the
+     matrix (not a transcription of it), == exact
      ``numpy.linalg.norm(W, 2)`` == ``scipy.linalg.svdvals(W)[0]`` to < 1e-9.
   2. The OFFICIAL reference power iteration (avirmaux/lipEstimation @ 336b6cc:
      max_eigenvalue._power_method_matrix on W^T W, and generic_power_method on
@@ -77,10 +80,13 @@ def exact_sigma_max_numpy(W):
 
 
 def blme_sigma_max(W):
-    """BLME's ACTUAL kernel: torch.linalg.svdvals(W)[0]
-    (src/blme/tasks/geometry/weight_norms.py:79-80, spectral.py:66)."""
-    Wt = torch.as_tensor(W, dtype=torch.float64)
-    return float(torch.linalg.svdvals(Wt)[0].item())
+    """The shipped kernel behind geometry_weight_norms' mean_spectral_norm:
+    ``_weight_matrix_stats`` (float64 SVD of the matrix in units of its largest
+    entry), called here, not transcribed."""
+    from blme.tasks.geometry.weight_norms import _weight_matrix_stats
+    _frobs, specs, *_ = _weight_matrix_stats(torch.as_tensor(W, dtype=torch.float64))
+    assert len(specs) == 1
+    return float(specs[0])
 
 
 def ref_power_matrix(W, max_iter=5000, eps=1e-12):
@@ -118,7 +124,7 @@ def _random_W(m, n, seed):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("m,n", _SHAPES)
 def test_blme_kernel_matches_exact_sigma_max(m, n):
-    """BLME's torch.linalg.svdvals(W)[0] == numpy.linalg.norm(W,2) == scipy."""
+    """weight_norms._weight_matrix_stats' sigma_max == numpy.linalg.norm(W,2) == scipy."""
     W = _random_W(m, n, seed=hash((m, n)) & 0xFFFF)
     exact_np = exact_sigma_max_numpy(W)
     exact_sp = float(scipy.linalg.svdvals(W)[0])
