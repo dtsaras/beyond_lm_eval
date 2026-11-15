@@ -149,6 +149,8 @@ class CategoryGeometryTask(DiagnosticTask):
         if hasattr(self, 'relation_pairs') and self.relation_pairs:
             rel_results = self._compute_relation_consistency(E_emit, self.relation_pairs, tokenizer)
             results.update(rel_results)
+            for _rel, _n in sorted(self.relation_pairs_dropped.items()):
+                results[f"_meta_{_rel}_pairs_without_common_form"] = int(_n)
 
         n_mapped = sum(len(tids) for tids in cat_tokens.values())
         # A tokenizer count (which words are single tokens), not geometry.
@@ -165,6 +167,7 @@ class CategoryGeometryTask(DiagnosticTask):
         cat_tokens = {}
         cat_labels = {}
         self.relation_pairs = {}
+        self.relation_pairs_dropped = {}
         
         for cat_name, items in categories.items():
             cat_tokens[cat_name] = []
@@ -179,19 +182,19 @@ class CategoryGeometryTask(DiagnosticTask):
             if is_relation:
                 for pair in items:
                     w1, w2 = pair
-                    # Verify both are single tokens (or get their IDs)
-                    ids1 = tokenizer.encode(w1, add_special_tokens=False)
-                    ids2 = tokenizer.encode(w2, add_special_tokens=False)
-                    
-                    # Try with space prefix too
-                    if len(ids1) != 1:
-                        ids1_sp = tokenizer.encode(' ' + w1, add_special_tokens=False)
-                        if len(ids1_sp) == 1: ids1 = ids1_sp
-                    
-                    if len(ids2) != 1:
-                        ids2_sp = tokenizer.encode(' ' + w2, add_special_tokens=False)
-                        if len(ids2_sp) == 1: ids2 = ids2_sp
-                        
+                    # One token form for BOTH words: space-prefixed when both
+                    # have one, else bare when both have one, else the pair is
+                    # dropped. Mixing forms puts the leading-space direction
+                    # into the offset E[t2] - E[t1] (test_categories_pair_forms.py).
+                    ids1 = ids2 = []
+                    for _pre in (" ", ""):
+                        ids1 = tokenizer.encode(_pre + w1, add_special_tokens=False)
+                        ids2 = tokenizer.encode(_pre + w2, add_special_tokens=False)
+                        if len(ids1) == 1 and len(ids2) == 1:
+                            break
+                    if not (len(ids1) == 1 and len(ids2) == 1):
+                        self.relation_pairs_dropped[cat_name] = (
+                            self.relation_pairs_dropped.get(cat_name, 0) + 1)
                     if len(ids1) == 1 and len(ids2) == 1:
                         tid1 = ids1[0]
                         tid2 = ids2[0]
