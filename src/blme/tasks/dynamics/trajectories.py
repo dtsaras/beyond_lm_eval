@@ -4,6 +4,7 @@ from .._precision import effective_dtype_meta, fp32_compute
 from ..common import get_embeddings, apply_lm_head
 import torch
 import torch.nn.functional as F
+import math
 import numpy as np
 from collections import defaultdict
 import logging
@@ -55,13 +56,27 @@ def _slerp(h1, h2, alpha):
            (torch.sin(alpha * omega) / sin_omega) * h2
 
 
+def _distinct_pairs(n, k, rng):
+    """``k`` distinct unordered pairs of ``range(n)``, drawn without
+    replacement from the ``n(n-1)/2`` available, each in a random order."""
+    out = []
+    for m in rng.sample(range(n * (n - 1) // 2), k):
+        # Bijection from m to (i, j), i < j: row r from the end holds r + 1 pairs.
+        r = (math.isqrt(8 * m + 1) - 1) // 2
+        i, j = n - 2 - r, n - 1 - (m - r * (r + 1) // 2)
+        out.append((i, j) if rng.random() < 0.5 else (j, i))
+    return out
+
+
 @register_task("dynamics_interpolation")
 class LatentInterpolationTask(DiagnosticTask):
     """
     Interpolates between two hidden states in latent space.
     Measures entropy of decoded predictions along the path (convexity check).
     Uses norm-corrected linear interpolation and slerp for comparison.
-    Contexts are cut at ``max_tokens`` tokens (default 128).
+    Contexts are cut at ``max_tokens`` tokens (default 128). Context pairs are
+    distinct, drawn without replacement, so at most n(n-1)/2 of the
+    ``num_samples`` passages are used (``_meta_num_pairs_used``).
     """
 
     # Reads one state per context, its last token (the state whose next-token
@@ -123,23 +138,26 @@ class LatentInterpolationTask(DiagnosticTask):
         ]))))
 
         # Seeded pair sampler; `seed` is honoured, default 0
-        # (tests/tasks/test_round5_determinism.py).
+        # (tests/tasks/test_round5_determinism.py). Pairs are distinct, so at
+        # most n(n-1)/2 are used (tests/tasks/test_interpolation_distinct_pairs.py).
         import random as _random
         _rng = _random.Random(int(self.config.get("seed", 0)))
         count = 0
-        attempts = 0
         ctx_lens = []
         # Attempts are capped so unusable rows cannot spin the loop forever
         # (tests/tasks/test_dynamics.py::test_interpolation_does_not_hang_on_unusable_samples).
         max_attempts = max(20, num_pairs * 20)
+        n_distinct = len(samples) * (len(samples) - 1) // 2
+        pairs = _distinct_pairs(len(samples), min(n_distinct, max_attempts), _rng)
         # fp32 arithmetic for the forward pass AND the LM-head decode of the
         # interpolant: bf16 moves the gap by +21% on pythia-160m and is not even
         # reproducible across thread counts
         # (tests/tasks/invariance/test_dynamics_interpolation.py).
         with torch.no_grad(), fp32_compute(model) as _prec:
-            while count < num_pairs and attempts < max_attempts:
-                attempts += 1
-                s1, s2 = _rng.sample(samples, 2)
+            for i1, i2 in pairs:
+                if count >= num_pairs:
+                    break
+                s1, s2 = samples[i1], samples[i2]
 
                 h_states = []
                 for s in [s1, s2]:
@@ -233,6 +251,9 @@ class LatentInterpolationTask(DiagnosticTask):
         results["_meta_slerp_convexity_gap"] = mid_s - end_s
         results.update(effective_dtype_meta(_prec))
         results["_meta_max_tokens"] = max_tokens
+        results["_meta_num_pairs_used"] = int(count)
+        results["_meta_num_pairs_requested"] = int(num_pairs)
+        results["_meta_num_distinct_pairs"] = int(n_distinct)
         results["_meta_context_tokens_mean"] = float(np.mean(ctx_lens))
 
         return results
