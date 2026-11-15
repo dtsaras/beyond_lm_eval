@@ -126,5 +126,6 @@ def test_evaluate_headline_keys_on_square_clouds():
             "landscape_norm_1_mpd15": norm1 / mpd ** 1.5,
         }
         for key, v in want.items():
-            assert res[f"{role}_layer_h1_{key}"] == pytest.approx(v, rel=1e-6), (role, key)
-        assert res[f"{role}_layer_h1_landscape_norm_1"] == pytest.approx(norm1, rel=1e-6)
+            pfx = "" if "_mpd" in key else "_meta_"
+            assert res[f"{pfx}{role}_layer_h1_{key}"] == pytest.approx(v, rel=1e-6), (role, key)
+        assert res[f"_meta_{role}_layer_h1_landscape_norm_1"] == pytest.approx(norm1, rel=1e-6)

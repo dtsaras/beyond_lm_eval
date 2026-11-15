@@ -60,7 +60,8 @@ def test_landscape_keys_are_named_by_depth_role(states):
     res = _run("topology_persistence_landscape", states)
     assert not [k for k in _features(res) if ABS.search(k)]
     for r in ("first", "mid", "last"):
-        assert f"{r}_layer_h1_mean_landscape_integral" in res
+        assert f"{r}_layer_h1_mean_landscape_integral_mpd2" in res
+        assert f"_meta_{r}_layer_h1_mean_landscape_integral" in res
     assert res["_meta_last_layer_frac"] == 1.0
 
 
@@ -82,7 +83,7 @@ def test_landscape_is_the_mean_over_subsamples(states):
     mid = sorted(pts)[1]
     per = [_layer_landscape(pts[mid][idx], 5, 200) for idx in _subsamples(states.n_docs, 10, 4, 3)]
     want = float(np.mean([p["h1"]["vals"]["mean_landscape_integral"] for p in per]))
-    assert res["mid_layer_h1_mean_landscape_integral"] == pytest.approx(want, rel=1e-12)
+    assert res["_meta_mid_layer_h1_mean_landscape_integral"] == pytest.approx(want, rel=1e-12)
     full = _layer_landscape(pts[mid], 5, 200)["h1"]["vals"]["mean_landscape_integral"]
     assert res["_meta_layer_%d_h1_full_mean_landscape_integral" % mid] == full
 
@@ -96,7 +97,8 @@ def test_landscape_h0_keys_are_meta_closed_forms_of_homology(states):
     for r in ("first", "mid", "last"):
         assert res[f"_meta_{r}_layer_h0_landscape_max_1"] == pytest.approx(
             hom[f"_meta_{r}_layer_max_persistence_h0"] / 2, rel=1e-12)
-        assert f"{r}_layer_h1_landscape_max_1" in res
+        assert f"{r}_layer_h1_landscape_max_1_mpd" in res
+        assert f"_meta_{r}_layer_h1_landscape_max_1" in res
 
 
 def test_persistence_entropy_h0_family_is_meta(states):

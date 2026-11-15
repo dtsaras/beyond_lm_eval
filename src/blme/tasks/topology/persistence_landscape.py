@@ -254,8 +254,7 @@ def _landscape_stats(landscapes: np.ndarray, dt: float,
 
 _ROLES = ("first", "mid", "last")
 _TWINS = ("mean_landscape_integral_mpd2", "landscape_max_1_mpd", "landscape_norm_1_mpd15")
-_HEADLINES = tuple(f"{r}_layer_h1_{k}" for r in _ROLES
-                   for k in ("mean_landscape_integral", "landscape_max_1") + _TWINS)
+_HEADLINES = tuple(f"{r}_layer_h1_{k}" for r in _ROLES for k in _TWINS)
 _SIZE_INVARIANT = {
     f"{r}_layer_h1_{k}": (("embed_isometric", "zero_pad", "rescale"),
                           "tests/tasks/invariance/test_topology_persistence_landscape.py::"
@@ -341,9 +340,10 @@ class PersistenceLandscapeTask(DiagnosticTask):
         "landscape integrals (Eq. 3.4, reported divided by K), the sup of lambda_1 (Prop. 2.5) "
         "and the L2 norm of lambda_1. For H0 every bar is born at 0, so these are closed forms "
         "of the largest H0 deaths and are _meta_; the H1 summaries are the features. Raw values "
-        "carry the representation's units (degree 2, 1 and 1.5), so each is also divided by the "
-        "mean pairwise distance to that power, which removes a rescale and a width change "
-        "exactly; the twins still grow with N, so models are compared at the same N."
+        "carry the representation's units (degree 2, 1 and 1.5) and are _meta_; the headline is "
+        "each one divided by the mean pairwise distance to that power, which removes a rescale "
+        "and a width change exactly. The twins still grow with N, so models are compared at "
+        "the same N."
     )
     HEADLINE_KEYS = _HEADLINES
     SIZE_INVARIANT = _SIZE_INVARIANT
@@ -406,10 +406,13 @@ class PersistenceLandscapeTask(DiagnosticTask):
                 # H0 bars are all born at 0, so its landscape summaries are closed
                 # forms of the largest deaths (integral of lambda_k = d_(k)^2 / 4,
                 # max = d_(1) / 2): topology_homology's H0 lifetimes again. _meta_.
-                pfx = "_meta_" if dim_label == "h0" else ""
+                # The raw H1 summaries carry the representation's units and are
+                # _meta_ too; the mean-pairwise-distance twins are the features
+                # (test_raw_summaries_are_meta_and_carry_the_scale).
                 for k, v in vals.items():
                     results[f"_meta_{prefix}_{k}"] = v
                     if l_idx in roles:
+                        pfx = "" if dim_label == "h1" and k in _TWINS else "_meta_"
                         results[f"{pfx}{roles[l_idx]}_layer_{dim_label}_{k}"] = v
                 # The single landscape of the whole cloud, for continuity.
                 for k, v in full[dim_label]["vals"].items():

@@ -39,12 +39,18 @@ def test_mpd_twins_are_width_and_scale_free(states):
     inv.assert_invariant(base, _run(inv.embed_isometric_docs(states, 2, 1)), keys, rtol=1e-6)
 
 
-def test_raw_summaries_carry_the_scale(states):
-    """Known negative: the raw H1 integral scales by c^2, the sup by c."""
+def test_raw_summaries_are_meta_and_carry_the_scale(states):
+    """Known negative: the raw H1 integral scales by c^2, the sup by c, so both
+    are _meta_ and the headline is the nine twins."""
     base, scaled = _run(states), _run(inv.rescale_docs(states, 4.0))
+    assert set(PersistenceLandscapeTask.HEADLINE_KEYS) == set(
+        PersistenceLandscapeTask.SIZE_INVARIANT)
+    assert not [k for k in base if not k.startswith("_meta_")
+                and k.endswith(("landscape_integral", "landscape_max_1", "landscape_norm_1",
+                                "landscape_integrals"))]
     for r in ("first", "mid", "last"):
         for k, deg in (("mean_landscape_integral", 2), ("landscape_max_1", 1)):
-            key = f"{r}_layer_h1_{k}"
+            key = f"_meta_{r}_layer_h1_{k}"
             if base[key] == 0.0:
                 continue
             assert scaled[key] == pytest.approx(base[key] * 4.0 ** deg, rel=1e-12)
