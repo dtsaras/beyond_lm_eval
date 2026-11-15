@@ -1,44 +1,38 @@
-"""Numeric-parity test: BLME geometry_spectral (HTSR power-law alpha) vs the
-OFFICIAL reference, WeightWatcher.
+"""geometry_spectral's fixed-tail Hill proxy (``_meta_avg_alpha``) vs WeightWatcher.
 
-TASK: geometry_spectral
-BLME: src/blme/tasks/geometry/spectral.py
-      WeightSpectralTask.evaluate(), Hill alpha kernel lines 77-91.
+Scope: the headline is WeightWatcher's own alpha (``avg_alpha_official``,
+``median_alpha_official``, ``avg_alpha_hat``), pinned against the package in
+tests/tasks/test_comprehensive_parity.py::test_geometry_spectral and
+tests/tasks/parity/test_spectral_sharpness_values.py. This file covers only the
+Hill estimator over a FIXED 20% tail of the SINGULAR values, which the task
+still emits under ``_meta_`` (``_meta_avg_alpha`` and its summaries).
 
 Paper: Martin & Mahoney, Heavy-Tailed Self-Regularization (2019/2021);
        Martin, Peng & Mahoney, Nature Communications 12:4122 (2021).
        Official code: CalculatedContent/WeightWatcher (pip `weightwatcher`).
 
-This is a REFINED-ADAPTATION / PROXY task.  BLME computes HTSR alpha with a
-HILL estimator over a FIXED 20% tail of the SINGULAR values; WeightWatcher
-computes alpha with the SAME Hill/MLE *formula* but scanning ALL candidate
-xmin values and selecting the KS-optimal one, fitted on the EIGENVALUES
-lambda = sigma^2.  So:
+WeightWatcher uses the same Hill/MLE formula but scans every candidate xmin,
+keeps the KS-optimal one, and fits the EIGENVALUES lambda = sigma^2. So the
+proxy differs from WW alpha by (i) a ~factor-2 sigma-vs-lambda scale
+[alpha_sigma ~ 2*alpha_lambda - 1] and (ii) fixed-tail vs KS-xmin: it is not
+value-comparable to a published WW alpha, which is why it is _meta_.
 
-  * alpha differs by (i) a ~factor-2 sigma-vs-lambda scale
-    [alpha_sigma ~ 2*alpha_lambda - 1] and (ii) fixed-tail vs KS-xmin.
-  * geometry_spectral is NOT value-comparable to published WW alpha; it is a
-    ranking-preserving proxy.  (See scratchpad wave3/spectral_verify.py and
-    AUDIT_V2 sec 5; the docstring of spectral.py already states this.)
-
-The bar we pin here:
+What is pinned for the proxy:
 
   (a) known-exponent recovery: singular values with an ESD tail exponent a
-      -> BLME Hill alpha ~= a (statistical recovery, loose tolerance).
-  (b) EXACT PARITY: BLME's Hill kernel == an INDEPENDENT transcription of the
-      Hill estimator, to < 1e-9, over many toy spectra.  This is the exact
-      part of the verdict.
-  (c) BLME-vs-WeightWatcher delta on the SAME toy matrices is RECORDED (not
-      forced to 0); the fixture pins the measured WW alpha, the sigma-map, and
-      the residual gap so a future WW/BLME change is caught.
-  (d) anchor: a random (Marchenko-Pastur) matrix -> LARGE alpha in both BLME
-      and WW (no real heavy tail); BLME lands in the sigma-scale [3,11] band.
+      -> Hill alpha ~= a (statistical recovery, loose tolerance).
+  (b) EXACT PARITY: the Hill kernel == an INDEPENDENT transcription of the
+      Hill estimator, to < 1e-9, over many toy spectra.
+  (c) the proxy-vs-WeightWatcher delta on the SAME toy matrices is RECORDED
+      (not forced to 0); the fixture holds the measured WW alpha, the
+      sigma-map, and the residual gap.
+  (d) anchor: a random (Marchenko-Pastur) matrix -> LARGE alpha in both; the
+      proxy lands in the sigma-scale [3,11] band.
 
-BLME's Hill kernel is transcribed VERBATIM from spectral.py lines 77-91 so the
-test exercises the exact numeric path without importing torch / a model.
-src/blme is NOT modified.  WeightWatcher itself is NOT a test dependency: its
-reference numbers were produced in an isolated venv and frozen into the
-fixture; this test asserts BLME against them.
+(a)-(d) run on a transcription of the kernel, `_blme_hill_alpha`;
+test_real_task_matches_transcribed_kernel ties it to evaluate()'s
+``_meta_avg_alpha``. WeightWatcher's numbers in (c) and (d) were produced once
+and frozen into the fixture.
 """
 
 import json
@@ -59,9 +53,9 @@ def _fixture() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# BLME Hill alpha kernel, transcribed VERBATIM from
-# src/blme/tasks/geometry/spectral.py lines 77-91.
-# BLME feeds S = torch.linalg.svdvals(W) (singular values, descending).
+# The Hill proxy behind ``_meta_avg_alpha``, transcribed from
+# src/blme/tasks/geometry/spectral.py (tied to evaluate() by
+# test_real_task_matches_transcribed_kernel). S = singular values, descending.
 # ---------------------------------------------------------------------------
 def _blme_hill_alpha(S_np, tail_fraction=0.2):
     S_np = np.sort(np.asarray(S_np, dtype=np.float64))[::-1]  # svdvals: descending
@@ -199,6 +193,11 @@ def test_marchenko_pastur_anchor():
 # fixture-level verdict pin.
 # ===========================================================================
 def test_fixture_records_proxy_verdict():
+    """The PROXY verdict is the Hill proxy's (``_meta_avg_alpha``), not the
+    headline's: ``avg_alpha_official`` is WeightWatcher's alpha itself."""
+    from blme.tasks.geometry.spectral import WeightSpectralTask
+    assert "avg_alpha_official" in WeightSpectralTask.HEADLINE_KEYS
+    assert not [k for k in WeightSpectralTask.HEADLINE_KEYS if k.endswith("avg_alpha")]
     fx = _fixture()
     assert fx["task"] == "geometry_spectral"
     assert fx["label"].startswith("REFINED-ADAPTATION")
@@ -249,6 +248,11 @@ def test_real_task_matches_transcribed_kernel():
     assert out["_meta_avg_alpha"] == pytest.approx(expected_alpha, rel=1e-6), (
         "real task diverged from the transcribed kernel — update BOTH"
     )
+    # The proxy is not the headline: "avg_alpha" exists only under _meta_, and
+    # the KS-optimal fit of the eigenvalues gives another number.
+    assert "avg_alpha" not in out
+    assert np.isfinite(out["avg_alpha_official"])
+    assert abs(out["avg_alpha_official"] - expected_alpha) > 1e-2
 
     expected_srank = float((S32 ** 2).sum() / (S32 ** 2).max())
     assert out["avg_stable_rank"] == pytest.approx(expected_srank, rel=1e-5)

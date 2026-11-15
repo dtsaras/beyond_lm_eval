@@ -4177,16 +4177,18 @@ def test_geometry_spectral():
     stable rank from Bartlett, Foster & Telgarsky 2017).
 
     geometry_spectral computes, per weight matrix W (svals S sorted desc):
-      * stable_rank = ||W||_F^2 / ||W||_2^2 = sum(S^2) / S[0]^2
-      * Hill-estimator alpha on the top tail of the *singular values*:
+      * stable_rank = ||W||_F^2 / ||W||_2^2 = sum(S^2) / S[0]^2  (headline
+        avg_stable_rank)
+      * WeightWatcher's alpha: the power-law fit of the eigenvalues S^2 with a
+        KS-optimal xmin (headline avg_alpha_official, median_alpha_official;
+        avg_alpha_hat is alpha * log10(lambda_max))
+      * a fixed-tail Hill proxy on the *singular values*, _meta_ only:
             k = max(2, int(tail_fraction * len(S)));  top_k = S[:k]
             x_min = top_k[-1]
             alpha = 1 + k / sum(ln(top_k / x_min))       # NOT clipped
-        (the standard Hill 1975 tail-index estimator; the same Hill form used
-        by WeightWatcher, CalculatedContent/WeightWatcher, when fitting the
-        spectral tail.)
 
-    Two independent references:
+    Three independent references, (A) and (B) for the stable rank and the
+    _meta_ Hill proxy, (C) for the headline alpha:
 
     (A) HAND-DERIVED ANALYTIC. A single nn.Linear weight set to the diagonal
         matrix diag(10,9,...,1) has singular values exactly {10,9,...,1}
@@ -4206,6 +4208,11 @@ def test_geometry_spectral():
         tolerance. The module-selection loop is the shared data-extraction
         harness (a property of which matrices to scan, not the formula under
         test); the metric itself is recomputed independently.
+
+    (C) LIVE WEIGHTWATCHER on the same tiny GPT-2: the mean and the median of
+        analyze()'s per-layer alpha, and the mean of alpha_weighted, over its
+        non-embedding layers. The Hill proxy is a different number on this
+        model, so (B) cannot stand in for (C).
 
     Also asserts the full task runs and is deterministic.
     """
@@ -4304,6 +4311,22 @@ def test_geometry_spectral():
     # ----- runs + deterministic -----
     out_again = WeightSpectralTask({"tail_fraction": tail}).evaluate(model, None, None)
     assert out_again == out
+
+    # =================================================================
+    # (C) Headline alpha against the live weightwatcher package.
+    # =================================================================
+    ww = pytest.importorskip("weightwatcher")
+    df = ww.WeightWatcher(model=model).analyze()
+    df = df[df["layer_type"].astype(str).str.lower() != "embedding"]
+    assert len(df) == out["_meta_n_modules_scanned"] == len(ref_alphas)
+    ww_alpha = df["alpha"].to_numpy(dtype=float)
+    assert out["avg_alpha_official"] == pytest.approx(float(np.mean(ww_alpha)), rel=1e-9)
+    assert out["median_alpha_official"] == pytest.approx(float(np.median(ww_alpha)), rel=1e-9)
+    assert out["avg_alpha_hat"] == pytest.approx(float(df["alpha_weighted"].mean()), rel=1e-9)
+    # Mean and median differ here, and neither is the Hill proxy.
+    assert abs(np.mean(ww_alpha) - np.median(ww_alpha)) > 1e-3
+    assert abs(out["avg_alpha_official"] - out["_meta_avg_alpha"]) > 1e-2
+    assert abs(out["median_alpha_official"] - out["_meta_median_alpha"]) > 1e-2
 
 # === geometry_svd  [NUMERIC_PARITY / strong_independent_numeric / ref=pip_package] ===
 def test_geometry_svd():
