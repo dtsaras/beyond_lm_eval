@@ -2707,7 +2707,7 @@ def test_dynamics_stability():
     assert out1["diagnostic_semantics"] == "embedding_neighborhood_jaccard_stability"
     assert out1 == out2, "task must be deterministic on identical input"
     blme_mean = out1["stability_mean"]
-    blme_std = out1["stability_std"]
+    blme_std = out1["_meta_stability_std"]
     assert np.isfinite(blme_mean) and 0.0 <= blme_mean <= 1.0
     assert np.isfinite(blme_std) and blme_std >= 0.0
 

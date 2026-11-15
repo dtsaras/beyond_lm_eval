@@ -138,7 +138,7 @@ def test_betti_curve(mock_model, mock_tokenizer):
                 expected_slope, abs=1e-9
             )
         assert results["_meta_max_betti_1_layer"] == int(np.argmax(curve1))
-        assert results["max_betti_1"] == int(np.max(curve1))
+        assert results["_meta_max_betti_1"] == int(np.max(curve1))
 
 
 def test_betti_curve_geodesic_recovers_clusters_and_loops():

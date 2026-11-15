@@ -563,10 +563,10 @@ def test_unembedding_alignment_is_meaningful_when_tied():
     results = task.evaluate(model, tokenizer=None, dataset=None)
 
     assert results["unembedding_is_tied"] in (True, 1, 1.0)
-    assert np.isfinite(results["embedding_alignment_mean"])
-    assert results["embedding_alignment_mean"] < 0.999, (
+    assert np.isfinite(results["_meta_embedding_alignment_mean"])
+    assert results["_meta_embedding_alignment_mean"] < 0.999, (
         "alignment is tautologically 1 for tied model: "
-        f"{results['embedding_alignment_mean']}"
+        f"{results['_meta_embedding_alignment_mean']}"
     )
 
 
@@ -783,7 +783,7 @@ def test_mahalanobis(mock_model, mock_tokenizer):
     # singular covariance with tiny hidden dimensions. Accept error or valid.
     if "error" not in results:
         assert (
-            "mean_mahalanobis_id" in results
+            "_meta_mean_mahalanobis_id" in results
             or results.get("_meta_insufficient_holdout") is True
         )
 

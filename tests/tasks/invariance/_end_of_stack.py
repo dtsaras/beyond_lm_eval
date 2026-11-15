@@ -244,6 +244,5 @@ OUTCOMES = {
     },
     "topology_betti_curve": {
         "h1_max_persistence": (unchanged("h1_max_persistence_curve"), I),
-        "max_betti_1": (unchanged("h1_max_persistence_curve"), I),
     },
 }

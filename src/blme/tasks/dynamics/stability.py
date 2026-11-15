@@ -48,12 +48,12 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         "width raises the value (0.950 -> 0.963 -> 0.973), and it depends on how many emittable "
         "rows form the neighbourhoods."
     )
-    HEADLINE_KEYS = ("stability_mean", "stability_std")
+    HEADLINE_KEYS = ("stability_mean",)
     # Only the vocabulary-padding test passes (rows past the tokenizer are
     # excluded); the width dependence (isometric re-embedding raises the value)
     # has no structural inverse, so no width-free twin is declared.
     SIZE_INVARIANT = dict.fromkeys(
-        ("stability_mean", "stability_std"),
+        ("stability_mean",),
         (("pad_vocabulary(zero, small_random)",),
          "tests/tasks/invariance/test_dynamics_stability.py::"
          "test_rows_past_the_tokenizer_do_not_enter"))
@@ -167,7 +167,8 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         return {
             "diagnostic_semantics": "embedding_neighborhood_jaccard_stability",
             "stability_mean": float(np.mean(jaccards)),
-            "stability_std": float(np.std(jaccards)),
+            # A dispersion of the same quantity, not a second property.
+            "_meta_stability_std": float(np.std(jaccards)),
             "_meta_stability_sem": _sem,
             "_meta_stability_n_rows": int(_n),
             "_meta_n_rows_emittable": int(n_vocab),

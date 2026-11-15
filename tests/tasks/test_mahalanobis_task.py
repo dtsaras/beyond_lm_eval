@@ -80,10 +80,10 @@ def test_task_uses_holdout_split_on_id_samples(monkeypatch):
     task = MahalanobisOODTask({"num_samples": 30, "ood_strategy": "shuffle", "id_corpus": "dataset"})
     result = task.evaluate(model=None, tokenizer=StubTok(), dataset=dataset, cache=None)
     # Must not report the degenerate zero-ID case.
-    assert "mean_mahalanobis_id" in result, result
+    assert "_meta_mean_mahalanobis_id" in result, result
     # With a held-out split, ID mean should be a sensible non-tiny number.
     # Upper bound is sqrt(d) + noise; lower bound rules out in-sample bias.
-    mean_id = result["mean_mahalanobis_id"]
+    mean_id = result["_meta_mean_mahalanobis_id"]
     assert mean_id > 1.0, (
         f"ID mean {mean_id:.3f} too small — suggests in-sample bias not removed"
     )
@@ -177,9 +177,9 @@ def test_insufficient_holdout_payload_omits_auroc():
         "insufficient_holdout": True,
         "n_id_fit": int(X_id_fit.shape[0]),
         "n_id_score": 1,
-        "mean_mahalanobis_ood": float(np.mean(dists_ood)),
+        "_meta_mean_mahalanobis_ood": float(np.mean(dists_ood)),
     }
     assert payload["insufficient_holdout"] is True
     assert "auroc" not in payload
-    assert "mean_mahalanobis_id" not in payload
-    assert np.isfinite(payload["mean_mahalanobis_ood"])
+    assert "_meta_mean_mahalanobis_id" not in payload
+    assert np.isfinite(payload["_meta_mean_mahalanobis_ood"])

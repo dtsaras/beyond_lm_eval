@@ -310,8 +310,9 @@ class MahalanobisOODTask(DiagnosticTask):
         "AUROC, the distance ratio and the dist^2/d forms are the cross-model comparable "
         "outputs."
     )
-    HEADLINE_KEYS = ("auroc", "ood_separation_ratio", "mean_mahalanobis_id",
-                     "mean_mahalanobis_ood", "ood_separation_gap", "mahalanobis_sq_per_dim_id",
+    # The raw distances and their gap grow as sqrt(d) and are _meta_; the
+    # per-dimension forms are their width-free twins.
+    HEADLINE_KEYS = ("auroc", "ood_separation_ratio", "mahalanobis_sq_per_dim_id",
                      "mahalanobis_sq_per_dim_ood", "ood_separation_gap_per_dim")
     # Width: approximate (< 5%) only while n_fit << d; as n_fit nears d the
     # isotropic Ledoit-Wolf target moves with the width (pinned by
@@ -463,8 +464,8 @@ class MahalanobisOODTask(DiagnosticTask):
                 "_meta_n_id_fit": int(X_id_fit.shape[0]),
                 "_meta_n_id_score": int(X_id_score.shape[0]),
                 "_meta_n_ood_score": int(X_ood.shape[0]),
-                "mean_mahalanobis_ood": float(np.mean(dists_ood)),
-                "ood_separation_gap": float("nan"),
+                "_meta_mean_mahalanobis_ood": float(np.mean(dists_ood)),
+                "_meta_ood_separation_gap": float("nan"),
                 "ood_separation_ratio": float("nan"),
             }
 
@@ -531,9 +532,9 @@ class MahalanobisOODTask(DiagnosticTask):
 
         result = {
             "_meta_insufficient_holdout": False,
-            "mean_mahalanobis_id": mean_id,
-            "mean_mahalanobis_ood": mean_ood,
-            "ood_separation_gap": mean_ood - mean_id,
+            "_meta_mean_mahalanobis_id": mean_id,
+            "_meta_mean_mahalanobis_ood": mean_ood,
+            "_meta_ood_separation_gap": mean_ood - mean_id,
             "ood_separation_ratio": mean_ood / max(mean_id, 1e-10),
             "_meta_n_id_fit": int(X_id_fit.shape[0]),
             "_meta_n_id_score": int(X_id_score.shape[0]),

@@ -80,7 +80,7 @@ def test_raw_distances_grow_with_width():
     about sqrt(2) when the cloud is zero-padded to twice the width."""
     base = _run()
     pad = _run(lambda h: np.concatenate([h, np.zeros_like(h)], 1))
-    assert pad["mean_mahalanobis_id"] / base["mean_mahalanobis_id"] > 1.2
+    assert pad["_meta_mean_mahalanobis_id"] / base["_meta_mean_mahalanobis_id"] > 1.2
 
 
 def test_per_dim_width_invariance_needs_n_fit_below_d(monkeypatch):

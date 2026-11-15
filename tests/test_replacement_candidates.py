@@ -40,4 +40,4 @@ def test_betti_1_curve_mean(monkeypatch):
     res = run_task_on_model("topology_betti_curve", model, tok, _texts(60),
                             {"num_samples": 60, "points_readout": "passage"}, use_cache=False)
     assert "error" not in res, res
-    assert res["_meta_betti_1_curve_mean"] == float(np.mean(res["betti_1_curve"]))
+    assert res["betti_1_curve_mean"] == float(np.mean(res["betti_1_curve"]))

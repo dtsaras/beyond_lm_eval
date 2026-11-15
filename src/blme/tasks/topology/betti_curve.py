@@ -175,7 +175,7 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
     return betti_0, int(betti_1), max_pers, total_pers
 
 
-_HEADLINES = ("max_betti_1", "h1_max_persistence")
+_HEADLINES = ("h1_max_persistence",)
 # A kNN graph and its hop metric depend on neighbour order only.
 _SIZE_INVARIANT = {
     k: (("embed_isometric", "zero_pad", "rescale", "identity_blocks_interior",
@@ -183,6 +183,12 @@ _SIZE_INVARIANT = {
         "tests/tasks/invariance/test_topology_betti_curve.py::"
         "test_hop_metric_keys_are_width_and_scale_free")
     for k in _HEADLINES}
+# The mean of the beta_1 curve over layers (the pre-registered replacement for
+# its maximum): an identity block reweights it, so only width and scale are claimed.
+_SIZE_INVARIANT["betti_1_curve_mean"] = (
+    ("embed_isometric", "zero_pad", "rescale"),
+    "tests/tasks/invariance/test_topology_betti_curve.py::"
+    "test_hop_metric_keys_are_width_and_scale_free")
 
 
 @register_task("topology_betti_curve")
@@ -221,7 +227,7 @@ class BettiCurveTask(DiagnosticTask):
     )
     # N = 1000, three models, 800-point draws: max_betti_1 between/within SD
     # 2.46; h1_max_persistence 0.60 (kept as a feature, not a headline).
-    HEADLINE_KEYS = ("max_betti_1",)
+    HEADLINE_KEYS = ("betti_1_curve_mean",)
     SIZE_INVARIANT = _SIZE_INVARIANT
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -309,9 +315,10 @@ class BettiCurveTask(DiagnosticTask):
         results["h1_total_persistence_mean"] = float(np.mean(h1_totpers_curve))
         results["h1_max_persistence_layer_frac"] = (
             float(np.argmax(h1_maxpers_curve)) / float(max(1, num_layers - 1)))
-        results["max_betti_1"] = int(np.max(betti_1_curve))
-        # Replacement candidate for max_betti_1 (RESOLVABILITY_PREREG §6).
-        results["_meta_betti_1_curve_mean"] = float(np.mean(betti_1_curve))
+        # A maximum over L noisy counts rises with depth: it is _meta_, and the
+        # headline is the curve mean (RESOLVABILITY_PREREG §6 candidate).
+        results["_meta_max_betti_1"] = int(np.max(betti_1_curve))
+        results["betti_1_curve_mean"] = float(np.mean(betti_1_curve))
         results.update(point_meta(pinfo, pts[num_layers // 2]))
         _n_mid = int(len(np.unique(np.asarray(pts[num_layers // 2]), axis=0)))
         results["_meta_knn_k"] = _knn_k(_n_mid, n_neighbors)

@@ -28,7 +28,7 @@ def test_rows_past_the_tokenizer_do_not_enter(kind):
     model = tiny_gpt2()
     padded = inv.pad_vocabulary(model, 400, kind=kind)
     base, other = _run(model, tok), _run(padded, tok)
-    inv.assert_invariant(base, other, ["stability_mean", "stability_std"], rtol=0.0)
+    inv.assert_invariant(base, other, ["stability_mean", "_meta_stability_std"], rtol=0.0)
     assert other["_meta_n_rows_excluded"] == 400
     assert other["_meta_n_rows_emittable"] == len(tok)
 

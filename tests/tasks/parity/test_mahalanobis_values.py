@@ -56,9 +56,9 @@ def test_pooled_keys_match_a_ledoit_wolf_refit(monkeypatch):
         assert not (f[:, None, :] == s[None, :, :]).all(-1).any()
     mid, mood = d_id.mean(), d_ood.mean()
     want = {
-        "mean_mahalanobis_id": mid,
-        "mean_mahalanobis_ood": mood,
-        "ood_separation_gap": mood - mid,
+        "_meta_mean_mahalanobis_id": mid,
+        "_meta_mean_mahalanobis_ood": mood,
+        "_meta_ood_separation_gap": mood - mid,
         "ood_separation_ratio": mood / mid,
         "mahalanobis_sq_per_dim_id": np.mean(d_id ** 2) / D,
         "mahalanobis_sq_per_dim_ood": np.mean(d_ood ** 2) / D,

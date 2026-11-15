@@ -69,8 +69,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
         "the erank and the alignment and move them slightly."
     )
     HEADLINE_KEYS = ("unembedding_eff_rank", "unembedding_eff_rank_centered",
-                     "embedding_alignment_mean", "embedding_alignment_std",
-                     "embedding_high_alignment_frac")
+)
     # Width: zero-padding the hidden dimension of W_out keeps its spectrum. The
     # alignment keys have no size-free form (the final norm re-centres over
     # padded coordinates; unused rows move them).
@@ -238,7 +237,7 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                 if n_category_tokens > 0
                 else "intrinsic_unembedding_geometry"
             ),
-            "embedding_alignment_mean": emb_alignment_mean,
-            "embedding_alignment_std": emb_alignment_std,
-            "embedding_high_alignment_frac": emb_high_alignment_frac,
+            "_meta_embedding_alignment_mean": emb_alignment_mean,
+            "_meta_embedding_alignment_std": emb_alignment_std,
+            "_meta_embedding_high_alignment_frac": emb_high_alignment_frac,
         }

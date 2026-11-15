@@ -44,7 +44,9 @@ def test_hop_metric_keys_are_width_and_scale_free(states):
     deep = inv.insert_identity_blocks(model, [0, 2], verify_on=ids)
     ins = _run(T, inv.states_from_model(deep, tok, fd.TEXTS))
     assert len(ins["betti_1_curve"]) == len(base["betti_1_curve"]) + 2
-    inv.assert_invariant(base, ins, keys, rtol=0.0)
+    ident = [k for k in keys
+             if "identity_blocks_interior" in BettiCurveTask.SIZE_INVARIANT[k][0]]
+    inv.assert_invariant(base, ins, ident, rtol=0.0)
 
 
 def test_a_euclidean_summary_of_the_same_clouds_moves(states):

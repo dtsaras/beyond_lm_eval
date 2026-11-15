@@ -504,4 +504,4 @@ def test_stability_reference_model_self_reference_is_perfect(
 
     assert results["stability_mode"] == "reference_model"
     assert results["stability_mean"] == 1.0
-    assert results["stability_std"] == 0.0
+    assert results["_meta_stability_std"] == 0.0

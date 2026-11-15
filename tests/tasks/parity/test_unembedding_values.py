@@ -62,6 +62,6 @@ def test_unembedding_keys_match_an_independent_recompute():
     cos = np.sum(_unit(E_n) * _unit(W), axis=1)
     frac = float(np.mean(cos > 0.9))
     assert 0.2 < frac < 0.8
-    assert res["embedding_alignment_mean"] == pytest.approx(cos.mean(), rel=1e-5)
-    assert res["embedding_alignment_std"] == pytest.approx(cos.std(), rel=1e-5)
-    assert res["embedding_high_alignment_frac"] == frac
+    assert res["_meta_embedding_alignment_mean"] == pytest.approx(cos.mean(), rel=1e-5)
+    assert res["_meta_embedding_alignment_std"] == pytest.approx(cos.std(), rel=1e-5)
+    assert res["_meta_embedding_high_alignment_frac"] == frac

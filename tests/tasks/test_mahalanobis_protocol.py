@@ -65,7 +65,7 @@ def test_sinks_are_left_out_of_the_mean_pool():
     """Rescaling the final state of position 0 and of the massive tokens x50
     leaves every score unchanged: those rows are not in any mean."""
     base, moved = _run(1.0), _run(50.0)
-    keys = ["auroc", "mean_mahalanobis_id", "mean_mahalanobis_ood",
+    keys = ["auroc", "_meta_mean_mahalanobis_id", "_meta_mean_mahalanobis_ood",
             "mahalanobis_sq_per_dim_id", "ood_separation_ratio"]
     assert all(np.isfinite(base[k]) for k in keys)
     for k in keys:
