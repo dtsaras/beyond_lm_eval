@@ -4,7 +4,10 @@ Cazzaniga & Biagetti, ICML 2025; arXiv:2410.11042; ZigZagLLMs@2d10c07).
 
 Protocol, as the paper and its code run it:
 * one point per prompt: the last token, prompts tokenised without special
-  tokens (extract.py:73, dataset_utils.py:14-22);
+  tokens (extract.py:73, dataset_utils.py:14-22). A prompt is a 20-word window
+  of a passage by default (:mod:`blme.tasks._windows`), the same words for
+  every model, as the sibling topology tasks read; whole passages, whose
+  length and closing " ." organise the cloud, are ``points_readout: passage``;
 * L + 1 clouds: each block's post-attention normalisation (read as the MLP
   input) and the final norm (extract.py:56-62, helpers.py:5-38);
 * per cloud a kNN graph (k_NN = 4, self excluded, union-symmetrised) filled to
@@ -37,6 +40,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
+from .._windows import token_count_meta, window_options, window_set
 
 logger = logging.getLogger("blme")
 
@@ -704,13 +708,16 @@ class ZigzagPersistenceTask(DiagnosticTask):
     """Zigzag persistence of topological features across layers.
 
     The paper's point clouds (``_paper_clouds``): one last-token point per
-    prompt at each of the L post-attention-norm sites and the final norm. See
+    prompt (a 20-word window of each passage; ``points_readout: passage`` reads
+    whole passages) at each of the L post-attention-norm sites and the final
+    norm (tests/tasks/test_zigzag_windows.py). See
     the module docstring for the three output families; the mean over each
     prompt's tokens (the reference's other pooling option) is kept as _meta_.
     """
 
-    TOKEN_POLICY = ("paper_protocol:Gardinazzi2025 last token of each prompt, no special "
-                    "tokens, at the post-attention norms and the final norm")
+    TOKEN_POLICY = ("paper_protocol:Gardinazzi2025 last token of each prompt (a 20-word "
+                    "window of a passage), no special tokens, at the post-attention "
+                    "norms and the final norm")
     SOURCES = {
         "paper": "arXiv:2410.11042",
         "code": "RitAreaSciencePark/ZigZagLLMs@2d10c07999aa7c5c1624ee689a771b60afe43069",
@@ -744,13 +751,23 @@ class ZigzagPersistenceTask(DiagnosticTask):
         n_neighbors = int(self.config.get("n_neighbors", 4))
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
         window = _zigzag_window(model, int(self.config.get("max_length", 2048)))
+        opts = window_options(self.config)
 
         if dataset is None:
             from ...cache import load_default_corpus
             dataset = load_default_corpus(num_samples)
-        texts = _prompts(dataset, num_samples, tokenizer, window)
+        ws = None
+        if opts["readout"] == "window":
+            ws = window_set(dataset, num_samples, n_words=opts["n_words"], seed=opts["seed"],
+                            drop_punct_final=opts["drop_punct_final"])
+            texts = ws.texts
+        else:
+            texts = _prompts(dataset, num_samples, tokenizer, window)
         if len(texts) < 3:
-            return {"error": "Need at least 3 non-empty prompts for zigzag persistence"}
+            return {"error": "Need at least 3 prompts for zigzag persistence" + (
+                f" ({ws.n_short} of {ws.n_scanned} passages are shorter than the "
+                f"{ws.n_words}-word window; points_readout: passage reads whole passages)"
+                if ws is not None else " (non-empty passages)")}
         subsets = _draw_subsets(len(texts), subset_size, num_subsets, seed)
         first = [int(i) for i in subsets[0]]
         try:
@@ -793,6 +810,7 @@ class ZigzagPersistenceTask(DiagnosticTask):
         summary["_meta_zz_knn"] = int(min(n_neighbors, n_points - 1))
         summary.update(_subset_meta(subsets, len(texts)))
         summary.update(_protocol_meta(info, window))
+        summary.update(_readout_meta(ws, info["last_positions"]))
         summary["_meta_zz_barcode_engine"] = f"dionysus {dio_version}"
         summary.update(_sink_shares(layer_clouds[len(layer_clouds) // 2],
                                     info["last_positions"]))
@@ -872,6 +890,15 @@ def _dionysus_version():
     except ImportError:
         return None
     return str(getattr(dionysus, "__version__", "unknown"))
+
+
+def _readout_meta(ws, last_positions) -> Dict[str, object]:
+    """Which text each point reads: the window set and its token counts, or
+    whole passages (the labels of ``topology/_points.point_meta``)."""
+    if ws is None:
+        return {"_meta_points_readout": "last_content_token_of_passage"}
+    return {"_meta_points_readout": f"last_token_of_{ws.n_words}_word_window",
+            **ws.meta(), **token_count_meta([int(p) + 1 for p in last_positions])}
 
 
 def _protocol_meta(info, window):

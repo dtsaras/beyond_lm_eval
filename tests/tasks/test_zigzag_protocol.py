@@ -24,6 +24,9 @@ pytest.importorskip("dionysus")
 
 from blme.tasks.topology.zigzag import ZigzagPersistenceTask, _paper_clouds  # noqa: E402
 
+# The fixture texts hold 9-15 words: whole passages, not 20-word windows.
+SHORT = {"num_samples": len(fd.TEXTS), "points_readout": "passage"}
+
 
 def _reference_extract(model, tok, texts, names):
     mods = dict(model.named_modules())
@@ -77,7 +80,7 @@ def test_task_reads_the_paper_sites_not_block_outputs():
     the paper reads L + 1 clouds: each post-attention norm and the final norm."""
     model = fd.tiny_llama(n_layers=3)
     tok = fd.tokenizer()
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS), "n_neighbors": 4}).evaluate(
+    res = ZigzagPersistenceTask({**SHORT, "n_neighbors": 4}).evaluate(
         model, tok, fd.dataset())
     assert "error" not in res, res
     assert res["_meta_zz_n_clouds"] == 3 + 1
@@ -103,7 +106,7 @@ def test_default_neighbourhood_is_the_papers_k4():
     """k_NN = 4 (Fig. 2, Sec. 4.2); the task shipped k = 5 (the README example)."""
     from blme.tasks.config_loader import resolve_task_config
     model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
-    cfg = resolve_task_config("topology_zigzag_persistence", {"num_samples": len(fd.TEXTS)})
+    cfg = resolve_task_config("topology_zigzag_persistence", SHORT)
     default = ZigzagPersistenceTask(cfg).evaluate(model, tok, fd.dataset())
     k4 = ZigzagPersistenceTask({**cfg, "n_neighbors": 4}).evaluate(model, tok, fd.dataset())
     k5 = ZigzagPersistenceTask({**cfg, "n_neighbors": 5}).evaluate(model, tok, fd.dataset())
@@ -116,7 +119,7 @@ def test_missing_dionysus_is_an_error_not_a_fallback(monkeypatch):
     """The paper's barcode has no substitute: without dionysus the task used to
     return the GF(2)/band proxies with the zz_true_* keys silently absent."""
     monkeypatch.setitem(sys.modules, "dionysus", None)       # import raises ImportError
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+    res = ZigzagPersistenceTask(SHORT).evaluate(
         fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
     assert set(res) == {"error"} and "dionysus" in res["error"]
 
@@ -146,7 +149,7 @@ def test_descriptors_are_means_over_subsets():
     scored and the descriptors are averaged, with the overlap reported."""
     from blme.tasks.topology.zigzag import _draw_subsets, _zigzag_paper_metric
     model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
-    cfg = {"num_samples": len(fd.TEXTS), "subset_size": 10, "num_subsets": 3,
+    cfg = {**SHORT, "subset_size": 10, "num_subsets": 3,
            "n_neighbors": 4, "seed": 7}
     res = ZigzagPersistenceTask(cfg).evaluate(model, tok, fd.dataset())
     assert res["_meta_zz_n_subsets"] == 3 and res["_meta_zz_subset_size"] == 10
@@ -170,7 +173,7 @@ def test_proxies_and_constant_barcode_summaries_are_meta():
     """The band/GF(2) proxies have no counterpart in the paper; zz_true_full_depth
     and _adjacent_min were 0.0 on every model the dossier ran, and n_bars counts
     N. They were feature columns before the fix."""
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+    res = ZigzagPersistenceTask(SHORT).evaluate(
         fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
     feats = {k for k in res if not k.startswith("_meta_")}
     assert feats == {"zz_true_adjacent_mean", "zz_true_mean_bar_len"}, feats
@@ -209,7 +212,7 @@ def test_per_layer_curves_follow_the_reference_notebook():
                                    rtol=1e-12, atol=1e-15)
         B = curves[f"births_rel_freq_alpha_{_alpha_tag(a)}"]
         assert B.shape == (L,) and abs(B.sum() - 1.0) < 1e-12
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(model, tok, fd.dataset())
+    res = ZigzagPersistenceTask(SHORT).evaluate(model, tok, fd.dataset())
     assert len(res["_meta_zz_betti1_curve"]) == L
     assert len(res["_meta_zz_inter_layer_persistence_alpha_2"]) == L
 
@@ -219,7 +222,7 @@ def test_a_model_without_the_sites_returns_an_error():
     an exception (tests/tasks/test_forward_hook_leaks.py runs every task on BERT)."""
     model = fd.tiny_llama(n_layers=2)
     model.model.norm = None
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+    res = ZigzagPersistenceTask(SHORT).evaluate(
         model, fd.tokenizer(), fd.dataset())
     assert set(res) == {"error"} and "final normalisation" in res["error"]
 
@@ -231,5 +234,5 @@ def test_a_barcode_failure_propagates(monkeypatch):
         raise RuntimeError("zigzag engine failed")
     monkeypatch.setattr(zz, "_true_zigzag_barcode", boom)
     with pytest.raises(RuntimeError, match="zigzag engine failed"):
-        ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+        ZigzagPersistenceTask(SHORT).evaluate(
             fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())

@@ -21,6 +21,9 @@ from blme.tasks.topology.zigzag import (  # noqa: E402
 
 HEADLINES = ZigzagPersistenceTask.HEADLINE_KEYS
 
+# The fixture texts hold 9-15 words: whole passages, not 20-word windows.
+SHORT = {"num_samples": len(fd.TEXTS), "points_readout": "passage"}
+
 
 def _clouds():
     clouds, _, _ = _paper_clouds(fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.TEXTS, window=512)
@@ -46,7 +49,7 @@ def test_identity_block_insertion_moves_both_headlines():
     model, tok = fd.tiny_llama(n_layers=3), fd.tokenizer()
     ids = [tok(t, return_tensors="pt")["input_ids"] for t in fd.TEXTS[:3]]
     deep = inv.insert_identity_blocks(model, [1, 1, 2], verify_on=ids)
-    cfg = {"num_samples": len(fd.TEXTS)}
+    cfg = SHORT
     base = ZigzagPersistenceTask(cfg).evaluate(model, tok, fd.dataset())
     ins = ZigzagPersistenceTask(cfg).evaluate(deep, tok, fd.dataset())
     assert ins["_meta_zz_n_clouds"] == base["_meta_zz_n_clouds"] + 3
@@ -55,7 +58,7 @@ def test_identity_block_insertion_moves_both_headlines():
 
 
 def test_last_token_cloud_reports_sink_shares():
-    res = ZigzagPersistenceTask({"num_samples": len(fd.TEXTS)}).evaluate(
+    res = ZigzagPersistenceTask(SHORT).evaluate(
         fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
     assert 0.0 <= res["_meta_massive_token_share"] <= 1.0
     assert res["_meta_position0_share"] == 0.0          # no prompt is one token long
