@@ -17,6 +17,8 @@ from typing import Tuple, Optional, Dict, Any
 import torch
 from transformers import AutoTokenizer
 
+from ..experts import ensure_runnable_experts
+
 logger = logging.getLogger("blme")
 
 # ---------------------------------------------------------------------------
@@ -214,6 +216,9 @@ def load_model_and_tokenizer(
         model = model.to(device)
 
     model.eval()
+
+    # MoE experts on a kernel this torch cannot run on CPU fall back to eager.
+    ensure_runnable_experts(model)
 
     try:
         first_param = next(model.parameters())

@@ -70,9 +70,14 @@ def build_results_envelope(
     task_configs_resolved: Optional[Dict[str, dict]] = None,
     cache_settings: Optional[Dict[str, Any]] = None,
     unknown_tasks: Optional[List[str]] = None,
+    experts_fallback: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Wrap raw per-task results into a structured envelope with metadata.
+
+    ``experts_fallback`` is the record ``ensure_runnable_experts`` left on the
+    model; ``config.experts_implementation_fallback`` appears only when the MoE
+    experts were switched.
     """
     timings = task_timings or {}
     total_elapsed = round(sum(timings.values()), 2) if timings else None
@@ -87,7 +92,7 @@ def build_results_envelope(
     completed_names = [name for name in task_results if name not in errored_results]
     all_errors = {**task_errors, **errored_results}
 
-    return {
+    envelope = {
         "blme_version": _get_blme_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_hash": _get_git_hash(),
@@ -113,6 +118,9 @@ def build_results_envelope(
         "errors": all_errors if all_errors else None,
         "task_timings": timings if timings else None,
     }
+    if experts_fallback:
+        envelope["config"]["experts_implementation_fallback"] = dict(experts_fallback)
+    return envelope
 
 
 # ---------------------------------------------------------------------------

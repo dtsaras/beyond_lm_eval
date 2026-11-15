@@ -14,6 +14,7 @@ import torch
 from tqdm import tqdm
 
 from .registry import get_task, list_tasks
+from .experts import FALLBACK_ATTR
 from .models.wrapper import load_model_and_tokenizer
 from .results import build_results_envelope, print_results_table, save_results
 
@@ -520,6 +521,7 @@ def evaluate(
         task_configs_resolved=resolved_task_configs,
         cache_settings=cache_settings,
         unknown_tasks=unknown_tasks,
+        experts_fallback=getattr(model, FALLBACK_ATTR, None),
     )
 
     # 7. Print summary table

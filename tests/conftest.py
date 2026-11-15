@@ -48,6 +48,8 @@ from transformers import (
     BertConfig, BertLMHeadModel,
 )
 
+from blme.experts import ensure_runnable_experts
+
 # ── Conditional imports for newer architectures ─────────────────────────
 # These are guarded so tests skip gracefully on older transformers versions.
 
@@ -189,7 +191,11 @@ def _build_qwen3next():
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=2,
         max_position_embeddings=128, head_dim=16, use_cache=False, attn_implementation="eager",
     )
-    return model_cls(config), config.vocab_size
+    model = model_cls(config)
+    # As blme.models.load_model_and_tokenizer: eager experts where this torch
+    # has no CPU grouped_mm kernel, for the tests that call the model directly.
+    ensure_runnable_experts(model)
+    return model, config.vocab_size
 
 def _build_qwen3_5():
     cfg_cls, model_cls = _OPTIONAL_ARCHS["qwen3_5"]
