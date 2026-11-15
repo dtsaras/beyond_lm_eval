@@ -70,6 +70,9 @@
   - When the float32 spectrum has a non-positive eigenvalue but the float64 spectrum is positive beyond its rounding, the headline is the float64 value and `_meta_lm_head_bfe_w_from_float64` is True.
   - Every NaN headline carries `_meta_lm_head_bfe_w_nan_reason`. `_meta_lm_head_min_eigenvalue_float32` is new.
   - Values that were finite on the CPU are unchanged, bit for bit.
+- **A task that fails while parameters are promoted no longer corrupts the rest of the run.** On 24 GB GPUs, gemma-4-E2B and Yi-1.5-34B in bf16 ran out of memory inside `fp32_compute` (gradient_flow, interpolation, perturbation_growth, sharpness). A cast back to bf16 in its `finally` then ran out of memory too, because the traceback still held the block's tensors. The loop stopped with parameters left in float32, and every later task failed with `expected mat1 and mat2 to have the same dtype` (29 tasks on gemma-4-E2B, 13 on Yi).
+  - `fp32_compute` now keeps restoring after a failed cast and retries it through host memory.
+  - `evaluate()` restores any parameter dtype a task changed before the next task runs, and appends the count to that task's error (or `_meta_param_dtypes_restored`).
 - Crash only: `topology_persistence_landscape` returns an error, as `topology_betti_curve` and `topology_persistence_entropy` do, when no passage holds a 20-word window. It used to raise `ValueError`.
 
 ### Key renames and demotions to `_meta_`

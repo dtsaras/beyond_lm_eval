@@ -117,20 +117,67 @@ def fp32_compute(model, enabled: bool = True) -> Iterator[Dict[str, Any]]:
                         f"{len(promoted_buffers)} buffers)")
         yield info
     finally:
+        # Restore every tensor even if one cast fails. After a CUDA OOM in the
+        # block, the traceback still holds the block's tensors, so a cast back
+        # can itself run out of memory; it is retried through host memory, and
+        # a tensor left in fp32 would break every later task on the model.
+        failures: List[BaseException] = []
         with torch.no_grad():
             for p, dt in saved_params:
-                p.data = p.data.to(dt)
-                # A gradient (kept or created in the block) follows its parameter.
-                if p.grad is not None:
-                    p.grad = p.grad.to(dt)
+                try:
+                    _restore_param(p, dt)
+                except Exception as e:  # noqa: BLE001 -- keep restoring the rest
+                    failures.append(e)
             restored: Dict[int, torch.Tensor] = {}
             for mod, name, dt, key in saved_buffers:
                 cur = mod._buffers.get(name)
                 if cur is None:
                     continue
-                if key not in restored:
-                    restored[key] = cur.to(dt)
-                mod._buffers[name] = restored[key]
+                try:
+                    if key not in restored:
+                        restored[key] = _cast_back(cur, dt)
+                    mod._buffers[name] = restored[key]
+                except Exception as e:  # noqa: BLE001
+                    failures.append(e)
+        if failures:
+            raise RuntimeError(
+                f"fp32_compute could not restore {len(failures)} tensor(s) to their "
+                f"original dtype: {failures[0]!r}") from failures[0]
+
+
+def _restore_param(p: torch.nn.Parameter, dt: torch.dtype) -> None:
+    """Cast ``p`` (and its gradient) back to ``dt`` in place of its ``.data``.
+
+    If the cast runs out of device memory, the fp32 data moves to the host
+    first, which frees its device copy, and the narrower tensor goes back."""
+    try:
+        p.data = p.data.to(dt)
+    except RuntimeError:
+        if not p.data.is_cuda:
+            raise
+        dev = p.data.device
+        p.data = p.data.cpu()
+        torch.cuda.empty_cache()
+        p.data = p.data.to(dt).to(dev)
+    # A gradient (kept or created in the block) follows its parameter.
+    if p.grad is not None:
+        p.grad = _cast_back(p.grad, dt)
+
+
+def _cast_back(t: torch.Tensor, dt: torch.dtype) -> torch.Tensor:
+    """``t.to(dt)``; when that fails on a CUDA tensor (out of memory), the copy goes
+    through host memory, so the narrower tensor needs no extra device memory
+    beyond its own size."""
+    try:
+        return t.to(dt)
+    except RuntimeError:
+        if not t.is_cuda:
+            raise
+        dev = t.device
+        host = t.detach().cpu()
+        del t
+        torch.cuda.empty_cache()
+        return host.to(dt).to(dev)
 
 
 def effective_dtype_meta(source, prefix: str = "_meta_") -> Dict[str, Any]:

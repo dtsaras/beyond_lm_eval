@@ -80,6 +80,19 @@ def _register_all_tasks():
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _restore_param_dtypes(saved) -> int:
+    """Cast every parameter in ``saved`` ([(param, dtype), ...]) whose dtype has
+    changed back to the recorded one; returns how many were changed."""
+    from .tasks._precision import _restore_param
+    n = 0
+    with torch.no_grad():
+        for p, dt in saved:
+            if p.dtype != dt:
+                _restore_param(p, dt)
+                n += 1
+    return n
+
+
 def evaluate(
     model_args: str = "",
     tasks: List[str] = None,
@@ -413,6 +426,10 @@ def evaluate(
             logger.warning("evaluate() not on the main thread. Per-task timeouts disabled.")
 
         logger.info(f"Running {len(diagnostic_tasks)} diagnostic tasks...")
+        # Parameter dtypes at the start of the loop. A task that fails while
+        # parameters are promoted (an OOM inside fp32_compute) must not leave
+        # them promoted: every later task would hit a float32/bf16 mismatch.
+        _param_dtypes = [(p, p.dtype) for p in model.parameters()] if model is not None else []
         for task_name in tqdm(diagnostic_tasks, desc="BLME tasks", unit="task"):
             task_cls = get_task(task_name)
             t_config = resolved_task_configs[task_name]
@@ -455,6 +472,15 @@ def evaluate(
                     signal.signal(signal.SIGALRM, old_handler)
                 elapsed = time.perf_counter() - t_start
                 task_timings[task_name] = round(elapsed, 2)
+                _n_drift = _restore_param_dtypes(_param_dtypes)
+                if _n_drift:
+                    msg = (f"left {_n_drift} parameter tensor(s) in another dtype; "
+                           f"restored before the next task")
+                    logger.error(f"Task '{task_name}' {msg}")
+                    if task_name in task_errors:
+                        task_errors[task_name] = f"{task_errors[task_name]} ({msg})"
+                    elif isinstance(task_results.get(task_name), dict):
+                        task_results[task_name]["_meta_param_dtypes_restored"] = int(_n_drift)
 
     # 5. Run lm_eval benchmark tasks (optional)
     if lm_eval_tasks:
