@@ -1,24 +1,27 @@
 """Numeric-parity test: BLME geometry_hubness vs scikit-hubness.
 
 The canonical "hubness skewness" S_k is the skewness of the k-occurrence
-distribution N_k (Radovanovic et al. 2010 JMLR; Tomasev et al. 2014 TKDE).
+distribution N_k (Radovanovic et al. 2010 JMLR; Tomasev et al. 2014 TKDE),
+with N_k counted on a k-NN graph that excludes each point from its own list.
+BLME ranks unit rows by Euclidean (chord) distance and excludes the self hit.
 
-OFFICIAL reference (transcribed verbatim, provenance below):
-    repo:   https://github.com/VarIr/scikit-hubness
-    commit: c36a058e67c34696182d3b8c5da089e287eb60bf
-    file:   skhubness/analysis/estimation.py
-      - _k_neighbors (line 231): k neighbors per point with the self hit
-        filtered (start=1, end=k+1 when querying within the indexed set).
+Reference (VarIr/scikit-hubness @ c36a058e67c34696182d3b8c5da089e287eb60bf,
+skhubness/analysis/estimation.py):
       - line 434:  k_occurrence = np.bincount(k_neighbors.ravel(), minlength=n)
       - line 442:  hubness_measures["k_skewness"] = stats.skew(k_occurrence)
+  The package's own vector route does NOT give the paper's N_k:
+  ``Hubness().fit(vectors)`` builds its graph with ``include_self=True`` and
+  ``score()`` reads it from position 0, so it returns 1 + N_{k-1}. The paper's
+  N_k is its precomputed-graph route on a self-free graph, and that is what
+  BLME's headline equals.
 
-    i.e. S_k == scipy.stats.skew(k_occurrence), with k_occurrence the
-    self-excluded k-NN occurrence-count vector. That is exactly what BLME's
-    `_hubness_stats_from_occurrences` computes via `scipy.stats.skew`.
-
-The toy k_occurrence vector below is produced (and embedded) by the wave1
-verification harness using sklearn NearestNeighbors on 60 points in R^8
-(seed 0, k=5, two deliberate hubs at indices 0 and 1).
+What is pinned:
+  * live package, both routes (test_k_occurrence_skewness_and_gini_match_live_
+    scikit_hubness): BLME's occurrence vector, S_k and Gini == the package on a
+    self-free graph, and the package on vectors == 1 + BLME's N_{k-1};
+  * through evaluate() (test_evaluate_matches_reference_under_common_offset);
+  * the formula on a frozen self-excluded occurrence vector (bincount + skew;
+    60 points in R^8, seed 0, k=5, two deliberate hubs at indices 0 and 1).
 """
 import numpy as np
 import pytest
@@ -47,7 +50,8 @@ K_OCCURRENCE = np.array(
     dtype=np.int64,
 )
 
-# OFFICIAL expected values (scikit-hubness line 442 + independent Gini).
+# Expected values on the frozen vector: scipy.stats.skew, as scikit-hubness
+# line 442 calls it, and an independent Gini.
 OFFICIAL_K_SKEWNESS = 2.1327252317535574
 OFFICIAL_GINI = 0.5146666666666667
 TOL = 1e-9
@@ -210,8 +214,6 @@ def test_offset_fixture_would_catch_a_dot_product_ranking():
     assert int((dot_occ != _reference_occurrences(seen, K)).sum()) > 100
 
 
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-v"]))
 
 
 @pytest.mark.parametrize("k", [5, 10])
@@ -241,3 +243,7 @@ def test_k_occurrence_skewness_and_gini_match_live_scikit_hubness(k):
                                     return_k_occurrence=True).fit(U).score()
     km1 = _k_occurrences(torch.from_numpy(U), [k - 1], 64)[k - 1]
     np.testing.assert_array_equal(on_vectors["k_occurrence"], km1 + 1)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
