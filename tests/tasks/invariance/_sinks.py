@@ -109,6 +109,10 @@ class massive_row_hook:
     The scaling is a multiplication by a constant tensor, so a backward pass
     through it is exact. In a causal LM the last position (``pos=-1``) is
     seen by no other token, so every other row stays bit-identical.
+
+    The hook is prepended: transformers collects ``hidden_states`` in a forward
+    hook of its own on the block, and a hook that ran after it would scale the
+    residual stream but not the collected entry.
     """
 
     def __init__(self, model, block: int, pos: int = POS, factor: float = FACTOR):
@@ -127,7 +131,7 @@ class massive_row_hook:
         return (h,) + tuple(output[1:]) if isinstance(output, tuple) else h
 
     def __enter__(self):
-        self.handle = self.layer.register_forward_hook(self._hook)
+        self.handle = self.layer.register_forward_hook(self._hook, prepend=True)
         return self
 
     def __exit__(self, *exc):
