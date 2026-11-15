@@ -351,3 +351,13 @@ def get_final_norm(model):
         if parent is not None and hasattr(parent, attr):
             return getattr(parent, attr)
     return None
+
+
+def stop_ids(model, tokenizer):
+    """Every id generation stops on: the generation config's EOS ids (often a
+    list, e.g. Qwen3's <|im_end|> and <|endoftext|>) and the tokenizer's."""
+    ids = getattr(getattr(model, "generation_config", None), "eos_token_id", None)
+    ids = set(ids if isinstance(ids, (list, tuple)) else [] if ids is None else [ids])
+    if getattr(tokenizer, "eos_token_id", None) is not None:
+        ids.add(tokenizer.eos_token_id)
+    return ids

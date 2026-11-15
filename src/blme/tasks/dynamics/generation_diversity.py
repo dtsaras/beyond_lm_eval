@@ -34,6 +34,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import stop_ids
 
 logger = logging.getLogger("blme")
 
@@ -106,12 +107,16 @@ def _word_tokenize(text: str):
         return nltk.word_tokenize(text, preserve_line=True), "nltk_treebank_no_punkt"
 
 
-def _trim_completion(tokens: List[int], eos_token_id: Optional[int],
-                     pad_token_id: Optional[int]) -> List[int]:
-    """Drop EOS/pad tokens and anything generated after EOS."""
+def _trim_completion(tokens: List[int], stops, pad_token_id: Optional[int]) -> List[int]:
+    """Cut at the first stop id (one id or a set: every id generation stops
+    on, ``common.stop_ids``) and drop pad tokens."""
+    if stops is None:
+        stops = ()
+    elif isinstance(stops, int):
+        stops = (stops,)
     trimmed = []
     for token in tokens:
-        if eos_token_id is not None and token == eos_token_id:
+        if token in stops:
             break
         if pad_token_id is not None and token == pad_token_id:
             continue
@@ -283,6 +288,7 @@ class GenerationDiversityTask(DiagnosticTask):
             counts = [q + (i < r) for i in range(len(prompts))]
 
         device = next(model.parameters()).device
+        stops = stop_ids(model, tokenizer)
 
         all_distinct1 = []
         all_distinct2 = []
@@ -293,6 +299,7 @@ class GenerationDiversityTask(DiagnosticTask):
         sub_distinct = {1: [], 2: [], 3: []}
         _n_ok_prompts = [0]
         _n_failed_prompts = [0]
+        _n_cut = [0]
         all_entropy_first_q = []
         all_entropy_last_q = []
         all_entropy_delta = []
@@ -332,13 +339,14 @@ class GenerationDiversityTask(DiagnosticTask):
                 _n_ok_prompts[0] += 1
 
                 gen_ids = outputs.sequences[:, prompt_len:]  # (N, L)
+                # generate() stops on any generation-config EOS id, so each row
+                # is cut at the first of them or the tokenizer's
+                # (tests/tasks/test_generation_diversity_stop_ids.py).
+                rows = gen_ids.tolist()
+                _n_cut[0] += sum(any(t in stops for t in r) for r in rows)
                 completions = [
-                    _trim_completion(
-                        row.tolist(),
-                        getattr(tokenizer, "eos_token_id", None),
-                        getattr(tokenizer, "pad_token_id", None),
-                    )
-                    for row in gen_ids
+                    _trim_completion(r, stops, getattr(tokenizer, "pad_token_id", None))
+                    for r in rows
                 ]
 
                 # Word units (Texygen): decode, then nltk.word_tokenize. A
@@ -471,6 +479,8 @@ class GenerationDiversityTask(DiagnosticTask):
             "_meta_n_prompts_requested": len(prompts),
             "_meta_n_prompts_failed": int(_n_failed_prompts[0]),
             "_meta_n_completions": len(all_completions),
+            "_meta_stop_ids": sorted(int(t) for t in stops),
+            "_meta_n_completions_cut_at_stop": int(_n_cut[0]),
             "_meta_top_k": int(self.config.get("top_k", 0)) or 0,
             "temperature": temperature,
             "seed": int(seed) if seed is not None else None,

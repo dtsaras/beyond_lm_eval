@@ -25,7 +25,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_max_positions
+from ..common import get_max_positions, stop_ids
 
 logger = logging.getLogger("blme")
 
@@ -71,16 +71,6 @@ def response_log_losses(model, prompt, response, device):
     pos = torch.arange(len(prompt) - 1, len(prompt) - 1 + len(response), device=lp.device)
     tgt = torch.tensor(response, device=lp.device)
     return (-lp[pos, tgt]).cpu().numpy().astype(np.float64)
-
-
-def stop_ids(model, tokenizer):
-    """Every id generation stops on: the generation config's EOS ids (often a
-    list, e.g. Qwen3's <|im_end|> and <|endoftext|>) and the tokenizer's."""
-    ids = getattr(getattr(model, "generation_config", None), "eos_token_id", None)
-    ids = set(ids if isinstance(ids, (list, tuple)) else [] if ids is None else [ids])
-    if tokenizer.eos_token_id is not None:
-        ids.add(tokenizer.eos_token_id)
-    return ids
 
 
 def _sample(model, tokenizer, prompts, max_new, batch_size, device):
