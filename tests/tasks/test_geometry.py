@@ -1037,28 +1037,21 @@ def test_matrix_entropy_bounded_and_headline_is_last_layer():
     )
     assert "error" not in res
 
-    # Normalised entropy must be in [0, 1].
-    # `_meta_` prefixed: the H / log(d) twin was demoted on 2026-09-04 because
-    # zero-padding d=512 -> 4096 (an exact isometry) moves it 0.721317 ->
-    # 0.540988 and it makes the archive width association WORSE than the raw
-    # value. Still emitted, still bounded, just not feature-eligible.
-    # `matrix_entropy` IS the normalised H (Wei et al. Def. 4.3); the
-    # `_meta_..._normalized` aliases were removed on 2026-09-05 because they
-    # carried the IDENTICAL float under a second name -- the "demotion" they
-    # documented never took effect (independent Opus review).
+    # Both headline keys: `matrix_entropy` is H / ln d (Wei et al. Def. 4.3),
+    # in [0, 1]; `matrix_entropy_raw` is H itself, the twin that zero-padding
+    # the width does not move. d = n_embd = 16 here, the same for every
+    # document, so the two differ by exactly ln 16.
+    assert set(MatrixEntropyTask.HEADLINE_KEYS) == {"matrix_entropy", "matrix_entropy_raw"}
     assert 0 <= res["matrix_entropy"] <= 1.01, (
         f"H_normalized out of [0, 1]: {res['matrix_entropy']}"
     )
     assert 0 <= res["_meta_mean_matrix_entropy"] <= 1.01
     assert "_meta_matrix_entropy_normalized" not in res
-    assert res["matrix_entropy_raw"] >= 0.0
+    assert res["matrix_entropy_raw"] > 0.0
+    assert res["matrix_entropy"] == pytest.approx(
+        res["matrix_entropy_raw"] / np.log(16), rel=1e-9)
 
-    # Headline == last-layer entropy, in the NORMALISED convention.
-    #
-    # `matrix_entropy` now holds H / log d, which is Wei et al.'s Definition
-    # 4.3 and the quantity their tables report: on their protocol pythia-70m's
-    # published 0.7003 matches the normalised 0.6659 (-4.9%), against a raw
-    # H of 4.1542 (+493%). The raw value is retained under a _meta_ key.
+    # The headline is the last hidden state, as Wei et al.'s release reads it.
     last_key = max(
         res["_meta_layer_matrix_entropies"].keys(),
         key=lambda k: int(k.split("_")[1]),
