@@ -33,6 +33,7 @@ import logging
 import numpy as np
 import torch
 
+from .._tokens import strip_trailing_special
 from ...registry import register_task
 from .._precision import effective_dtype_meta, fp32_compute
 from .._tokens import (massive_token_share, middle_depth_layers, position0_share,
@@ -156,6 +157,7 @@ class PerturbationGrowthTask(DiagnosticTask):
                     text = s["text"] if isinstance(s, dict) else str(s)
                     enc = tokenizer(text, return_tensors="pt",
                                     truncation=True, max_length=128).to(device)
+                    enc, _ = strip_trailing_special(enc, tokenizer)
                     if enc["input_ids"].shape[1] < 2:
                         continue
                     E = emb_layer(enc["input_ids"])  # (1, T, D)

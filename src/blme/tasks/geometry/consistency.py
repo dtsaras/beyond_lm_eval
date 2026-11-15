@@ -1,7 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .._sink_norms import SinkNormCollector
-from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
+from .._tokens import (hidden_states_for_task, strip_trailing_special, massive_token_share, middle_depth_layers,
                        position0_share, sink_keep_masks, sink_meta)
 from ..common import get_embeddings, get_lm_head
 from .utils import collect_prediction_stats, centre_and_rescale
@@ -63,6 +63,8 @@ def _sink_masks(model, tokenizer, dataset, cache, num_samples, from_cache):
             text = sample if isinstance(sample, str) else sample.get("text", "")
             inputs = tokenizer(text, return_tensors="pt", truncation=True,
                                max_length=512).to(device)
+            # Same rows as collect_prediction_stats, which strips an appended EOS.
+            inputs, _ = strip_trailing_special(inputs, tokenizer)
             if inputs["input_ids"].shape[1] < 2:
                 continue
             # post-final-norm: unused. The mask reads the middle depths only

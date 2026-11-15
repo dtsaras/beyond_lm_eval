@@ -22,6 +22,7 @@ import torch
 import numpy as np
 from scipy.stats import spearmanr
 
+from .._tokens import strip_trailing_special
 from .._precision import effective_dtype_meta, fp32_compute
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
@@ -229,8 +230,9 @@ class PositionalAttentionDecayTask(DiagnosticTask):
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=256).to(device)
+                inputs, _ = strip_trailing_special(inputs, tokenizer)
 
-                seq_len = inputs.input_ids.shape[1]
+                seq_len = inputs["input_ids"].shape[1]
                 if seq_len < 4:
                    continue
 

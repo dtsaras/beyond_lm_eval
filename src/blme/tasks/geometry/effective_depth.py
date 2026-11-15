@@ -35,6 +35,7 @@ from typing import List
 import numpy as np
 import torch
 
+from .._tokens import strip_trailing_special
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_layers
@@ -172,6 +173,7 @@ class EffectiveDepthTask(DiagnosticTask):
                     # values compare within this zoo only.
                     enc = tokenizer(text, return_tensors="pt", truncation=True,
                                     max_length=_max_len).to(device)
+                    enc, _ = strip_trailing_special(enc, tokenizer)
                     last_block_out.pop("h", None)
                     out = model(**enc, output_hidden_states=True)
                     hs = list(out.hidden_states)

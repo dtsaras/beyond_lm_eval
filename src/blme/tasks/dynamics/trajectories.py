@@ -1,3 +1,4 @@
+from .._tokens import strip_trailing_special
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from .._precision import effective_dtype_meta, fp32_compute
@@ -167,6 +168,8 @@ class LatentInterpolationTask(DiagnosticTask):
                         text = s if isinstance(s, str) else s['text']
                         inp = tokenizer(text, return_tensors="pt", truncation=True,
                                         max_length=max_tokens).to(device)
+                        # An appended EOS is not the context's last state.
+                        inp, _ = strip_trailing_special(inp, tokenizer)
                     elif 'input_ids' in s:
                         inp = {'input_ids': torch.tensor(s['input_ids'][:max_tokens]).long().unsqueeze(0).to(device)}
                     else: continue

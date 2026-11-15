@@ -717,6 +717,8 @@ def collect_prediction_stats(model, tokenizer, dataset, num_samples=100, use_dis
                     text = sample.get("text", "")
                 inputs = tokenizer(text, return_tensors="pt", truncation=True,
                                    max_length=512).to(model.device)
+                # As the cache route does: an appended EOS is not a prediction target.
+                inputs, _ = strip_trailing_special(inputs, tokenizer)
 
                 # Skip empty / single-token docs: they yield no (T-1) labels to
                 # score and an empty forward pass crashes ("cannot reshape tensor

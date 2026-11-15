@@ -46,6 +46,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .._tokens import strip_trailing_special
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._precision import effective_dtype_meta, fp32_compute
@@ -150,6 +151,7 @@ class GradientFlowTask(DiagnosticTask):
             text = sample["text"] if isinstance(sample, dict) else str(sample)
             enc = tokenizer(text, return_tensors="pt",
                             truncation=True, max_length=64).to(device)
+            enc, _ = strip_trailing_special(enc, tokenizer)
             if enc["input_ids"].shape[1] < 2:
                 continue
             encodings.append(enc)

@@ -17,6 +17,7 @@ References:
 import torch
 import numpy as np
 
+from .._tokens import strip_trailing_special
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_final_norm, get_lm_head, get_embeddings
@@ -272,6 +273,7 @@ class RepresentationSensitivityTask(DiagnosticTask):
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
+                inputs, _ = strip_trailing_special(inputs, tokenizer)
                 input_ids = inputs["input_ids"]
                 if input_ids.shape[1] < 2:
                     continue
