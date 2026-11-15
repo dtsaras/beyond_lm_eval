@@ -3,8 +3,10 @@
 Grounding:
   * Li et al. 2025 — "Cognitive Activation and Chaotic Dynamics in Large
     Language Models: A Quasi-Lyapunov Analysis of Reasoning Mechanisms",
-    arXiv:2503.13530. Defines a quasi-Lyapunov exponent: the growth rate
-    of hidden-state divergence across layers under small perturbations.
+    arXiv:2503.13530. Defines a quasi-Lyapunov exponent (Eq. 9):
+    lambda = 1/(n - m) * ln(||delta_{m,n}|| / |delta_m|), the per-layer growth
+    rate of the divergence at layer n caused by a perturbation delta_m at
+    layer m. The divergence is not divided by the state norm.
   * Fernando & Guitchounts 2025/2026 — residual-stream dynamical-systems
     line (arXiv:2502.12131, 2605.14258): layer-Jacobian spectra shape how
     perturbations amplify or contract through depth.
@@ -18,14 +20,17 @@ divergence d_l = E_t ||h_l - h'_l||. Reported:
   * ``growth_log_ratio_relative`` (headline): log(r_L / r_0) with
     r_l = E_t ||h_l - h'_l|| / ||h_l||, the divergence's growth relative to the
     state's own norm growth. Positive = perturbations amplify; negative =
-    contract.
+    contract. This is a BLME formulation, NOT the quasi-Lyapunov exponent:
+    Eq. 9 has no state-norm normalisation and is a per-layer rate.
   * ``_meta_growth_log_ratio_absolute``: log(d_L / d_0). In pre-LN stacks it
     mostly tracks residual-norm growth, so its sign does not mean
     amplification.
   * ``perturbation_growth_per_layer``: log(d_l / d_0) profile.
   * ``_meta_growth_slope``: least-squares slope of log d_l against
     normalised depth in [0, 1].
-  * ``_meta_growth_rate_per_block``: growth_log_ratio / L.
+  * ``_meta_growth_rate_per_block``: log(d_L / d_0) / L, the absolute ratio
+    per block. The closest analogue of Eq. 9 (m the first tracked state, n the
+    last), on BLME's all-token perturbation and token-mean divergence.
   * ``_meta_initial_divergence``: d_0, set by rel_eps and the embedding scale.
 
 Analytic anchor: for a purely linear layer stack h_{l+1} = a * h_l the
@@ -118,8 +123,13 @@ class PerturbationGrowthTask(DiagnosticTask):
         "relative amplification growth_log_ratio_relative = log(r_L / r_0), r_l the token "
         "mean of ||h_l - h'_l|| / ||h_l||, which identity-block insertion leaves "
         "bit-identical; the absolute log(d_L / d_0) mostly tracks residual-norm growth and "
-        "is _meta_, as are the per-block rate and the normalised-depth slope. The forward passes run in fp32 arithmetic, because bf16 rounding "
-        "is a noise floor of the same order as the perturbation."
+        "is _meta_, as are the per-block rate and the normalised-depth slope. "
+        "growth_log_ratio_relative is a BLME formulation, not the quasi-Lyapunov exponent: "
+        "Li et al.'s Eq. 9 is lambda = 1/(n - m) * ln(||delta_{m,n}|| / |delta_m|), a "
+        "per-layer rate with no state-norm normalisation. Its closest analogue here is "
+        "_meta_growth_rate_per_block = log(d_L / d_0) / L, which keeps BLME's all-token "
+        "perturbation and token-mean divergence. The forward passes run in fp32 arithmetic, "
+        "because bf16 rounding is a noise floor of the same order as the perturbation."
     )
     HEADLINE_KEYS = ("growth_log_ratio_relative",)
     SIZE_INVARIANT = {
