@@ -361,3 +361,15 @@ def stop_ids(model, tokenizer):
     if getattr(tokenizer, "eos_token_id", None) is not None:
         ids.add(tokenizer.eos_token_id)
     return ids
+
+
+def relative_depth(hidden_state_index: int, n_layers: int) -> float:
+    """Depth of an HF hidden state as a fraction of the stack: index / L.
+
+    Index 0 is the embedding output and L the last block's output, so block
+    ``b``'s output is ``b + 1``. Every peak-depth key uses this convention
+    (test_relative_depth.py).
+    """
+    if hidden_state_index < 0 or n_layers <= 0:
+        return float("nan")
+    return float(hidden_state_index) / float(n_layers)

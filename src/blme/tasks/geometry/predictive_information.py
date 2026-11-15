@@ -28,7 +28,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_max_positions
+from ..common import get_max_positions, relative_depth
 from .utils import safe_unit_rows_torch
 
 logger = logging.getLogger("blme")
@@ -196,7 +196,7 @@ class PredictiveInformationTask(DiagnosticTask):
             "_meta_n_special_target_positions_excluded": int(n_special_excluded),
             "predictive_info_profile": profile,
             "predictive_info_peak": float(profile[peak]),
-            "predictive_info_peak_depth": (peak + 1) / L,
+            "predictive_info_peak_depth": relative_depth(peak + 1, L),
             "predictive_info_last_layer": float(profile[-1]),
             "_meta_predictive_info_peak_layer": peak + 1,
             "_meta_H_Y": hy,

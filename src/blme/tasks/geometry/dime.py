@@ -32,7 +32,7 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_max_positions
+from ..common import get_max_positions, relative_depth
 from .utils import safe_unit_rows_torch
 
 logger = logging.getLogger("blme")
@@ -271,7 +271,7 @@ class DiMETask(DiagnosticTask):
             "dime_profile": profile,
             "dime_peak": float(profile[peak]),
             "dime_last_layer": float(profile[-1]),
-            "dime_peak_depth": peak / L if L else 0.0,
+            "dime_peak_depth": relative_depth(peak, L) if L else 0.0,
             "_meta_dime_peak_layer": peak,
             "_meta_dime_profile_without_pos0": profile_np,
             "_meta_dime_peak_without_pos0": float(np.nanmax(profile_np)),

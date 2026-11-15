@@ -23,7 +23,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_max_positions
+from ..common import get_max_positions, relative_depth
 from .gride import _gride_scaling, _unique_rows
 
 logger = logging.getLogger("blme")
@@ -208,7 +208,7 @@ class PromptIntrinsicDimTask(DiagnosticTask):
             "_meta_prompt_log_id_surprisal_pearson_at_peak": r[i_peak] if i_peak >= 0 else float("nan"),
             "_meta_prompt_log_id_surprisal_pearson_last_layer": r[-1],
             "_meta_prompt_id_peak_layer": i_peak + 1,
-            "_meta_prompt_id_peak_depth": (i_peak + 1) / L if i_peak >= 0 else float("nan"),
+            "_meta_prompt_id_peak_depth": relative_depth(i_peak + 1 if i_peak >= 0 else -1, L),
             "_meta_prompt_id_std_profile": [float(v) for v in A.std(axis=0)],
             "_meta_prompt_id_median_profile": [float(v) for v in np.median(A, axis=0)],
             "_meta_prompt_id_median_normalised_profile": [float(v) for v in (A / med).mean(axis=0)],

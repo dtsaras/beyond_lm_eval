@@ -24,6 +24,7 @@ import numpy as np
 import torch
 
 from ...registry import register_task
+from ..common import relative_depth
 from ...tasks.base import DiagnosticTask
 from .._windows import window_options
 from ._sequence_points import DEFAULT_N_SEQUENCES, readout_for, readout_meta, sequence_clouds
@@ -221,7 +222,9 @@ class GrideProfileTask(DiagnosticTask):
             "gride_id_profile": [float(v) for v in arr],
             "gride_id_peak": float(np.nanmax(arr)) if finite.any() else float("nan"),
             "gride_id_last_layer": float(arr[-1]),
-            "_meta_gride_peak_layer_frac": (float(np.nanargmax(arr) / max(1, len(arr) - 1))
+            # Profile entry i is hidden state i + 1 (block i's output).
+            "_meta_gride_peak_layer": int(np.nanargmax(arr)) + 1 if finite.any() else -1,
+            "_meta_gride_peak_layer_frac": (relative_depth(int(np.nanargmax(arr)) + 1, len(arr))
                                             if finite.any() else float("nan")),
             "_meta_gride_scaling_per_layer": scaling,
             "_meta_gride_scale_n2": n2,
