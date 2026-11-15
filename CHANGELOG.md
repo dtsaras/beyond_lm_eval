@@ -17,7 +17,7 @@
 - `geometry_procrustes_linearity`: all 17 keys are fitted without position 0 and the massive-activation rows (token policy `exclude_sinks`, one mask per token shared by every layer, as `geometry_cka`). Position-0 rows hold 94% of the centred sum of squares on gpt2 and set every key: `procrustes_linearity_mean` is 0.978 with them and 0.919 without. The every-position values of the released notebook are `_meta_incl_pos0_procrustes_linearity_*`.
 - `topology_zigzag_persistence`: each point is the last token of a 20-word window of a passage, as in the other topology tasks. It used to be the last token of the whole passage. `zz_true_adjacent_mean` and `zz_true_mean_bar_len` change; `points_readout: passage` restores whole passages. Sites, tokenisation without special tokens and the barcode are unchanged.
 - `geometry_unembedding`: `unembedding_eff_rank` and `unembedding_eff_rank_centered` read only the rows the tokenizer can emit (ids below `len(tokenizer)`). Models whose unembedding has padded rows change; the all-rows values are `_meta_unembedding_eff_rank_all_rows` and `_meta_unembedding_eff_rank_centered_all_rows`, beside `_meta_n_unused_rows`.
-- `geometry_schatten`: every model scores the first 256 tokens of the long WikiText validation articles `geometry_positional_decay` reads (`seq_tokens`; `documents: dataset` scores the run's passages in the same window). It used to score each full passage, so the token count followed the passage and the tokenizer. Every key changes. `_meta_schatten_seq_tokens` and `_meta_schatten_documents` replace `_meta_schatten_max_length`.
+- `geometry_schatten`: every model scores the first 256 tokens of the long WikiText-103 train articles `geometry_positional_decay` reads (`seq_tokens`; `documents: dataset` scores the run's passages in the same window). It used to score each full passage, so the token count followed the passage and the tokenizer. Every key changes. `_meta_schatten_seq_tokens` and `_meta_schatten_documents` replace `_meta_schatten_max_length`.
 - Long articles are selected by whitespace-word count (`load_long_documents(min_words=)`), so every tokenizer gets the same articles:
   - `geometry_phd_dimension` keeps articles of ≥ 512 words (it kept ≥ 300 tokens);
   - `dynamics_fractal` keeps articles of ≥ 4096 words (it kept ≥ 4096 tokens);
@@ -33,7 +33,13 @@
   - `dynamics_generation_diversity`, `dynamics_coe`, `dynamics_sharpness`, `geometry_neural_collapse` (both routes) and `geometry_cknna` (fallback route) also strip it. Each records `_meta_n_trailing_special_stripped`.
 - `geometry_categories`: both words of a relation pair use one token form, so `{relation}_consistency` changes.
 - `geometry_collapse`: `qdl_entropy_min` reads the first 64 tokens of every passage. The whole-passage value is `_meta_qdl_entropy_min_whole_passage`.
-- `geometry_positional_decay`: `positional_decay_nosink_write_weighted` scores the first 256 content tokens of long WikiText documents (`documents: dataset` keeps the run's passages).
+- `geometry_positional_decay`: `positional_decay_nosink_write_weighted` scores the first 256 content tokens of long WikiText-103 train articles (`documents: dataset` keeps the run's passages).
+- Long articles for `geometry_schatten` and `geometry_positional_decay` come from the train split (`doc_split: train`, 28,831 articles of at least 257 words), as for `geometry_phd_dimension` and `dynamics_fractal`. The document-level validation split holds 60, so any `num_samples` above 60 used to return an error; the study's `geometry_schatten` (200 articles) failed on every model. Selection is otherwise unchanged:
+  - the articles are in nested order, so the k-article draw is a prefix of the n-article draw;
+  - every tokenizer gets the same list;
+  - a draw comes from one split only, and a split that is too short is an error that names it.
+  
+  The split used is `_meta_schatten_doc_split` / `_meta_doc_split`. `doc_split: validation` reproduces the earlier articles for N ≤ 60.
   - Qwen3.5's linear-attention blocks are skipped, so the key is no longer NaN on those models.
   - An output projection called with a keyword input is captured.
 - `dynamics_perturbation_growth`: the headline is now the relative growth `growth_log_ratio_relative` = log(r_L / r_0); see the renames below.
