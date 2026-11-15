@@ -132,7 +132,8 @@ class LipschitzContinuityTask(DiagnosticTask):
         "embedding-scale convention. Since any uniform mean over blocks falls as L/(L+n) "
         "under n inserted identity blocks, the headlines are the depth-additive "
         "e2e_log_norm_growth (telescoping) and total_angular_path (an identity update has "
-        "angle 0)."
+        "angle 0), which identity blocks after any block leave unchanged (one before block 0 "
+        "makes the embedding output the path's first state)."
     )
     HEADLINE_KEYS = ("e2e_log_norm_growth", "total_angular_path", "relative_change_max",
                      "embedding_relative_change")

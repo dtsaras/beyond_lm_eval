@@ -214,7 +214,8 @@ class BettiCurveTask(DiagnosticTask):
         "hop metric depends on neighbour order only, so every key is unchanged by a rescale or a "
         "width change. At N = 1000, beta_0 is 1 at nearly every layer of gpt2 and pythia-160m/410m "
         "(its first/last values and their ratio are _meta_); the loop count and the reciprocal hop "
-        "diameter vary, and as maxima over layers they ignore inserted identity blocks."
+        "diameter vary, and as maxima over layers they ignore identity blocks after any block "
+        "(one before block 0 adds the embedding cloud, which can set the maximum)."
     )
     # N = 1000, three models, 800-point draws: max_betti_1 between/within SD
     # 2.46; h1_max_persistence 0.60 (kept as a feature, not a headline).

@@ -251,8 +251,9 @@ class InformationImbalanceTask(DiagnosticTask):
         "point's nearest neighbour in A, over N/2 (k = 1, Euclidean, full-rank neighbour lists, "
         "as in Cheng et al.'s scripts). BLME scores the last token of a 20-word window of "
         "each of 1000 passages at every HF hidden state after the embeddings, and reports the two "
-        "directions between the first and last layer, which identity blocks leave unchanged, "
-        "and their difference. The full profiles to and from the last layer are kept; values "
+        "directions between the first and last layer, which identity blocks after any block "
+        "leave unchanged (one before block 0 makes the embedding the first layer), and their "
+        "difference. The full profiles to and from the last layer are kept; values "
         "for an index-selected middle layer move when blocks are added and are _meta_. Ranks "
         "are unchanged by zero-padding, isometric embedding and rescaling at fixed N."
     )
@@ -305,10 +306,12 @@ class NeighborhoodOverlapTask(DiagnosticTask):
         "in A that are also among its k nearest in B (DADApy return_data_overlap, the default "
         "k). BLME scores the clouds of geometry_gride and geometry_information_imbalance (the "
         "last token of a 20-word window of each of 1000 passages at every HF hidden state "
-        "after the embeddings) and reports the overlap between the first and the last layer, and the "
-        "smallest overlap between adjacent layers, the largest single reorganisation of the "
-        "neighbourhoods. Identity blocks add adjacent pairs with overlap 1 and leave both "
-        "unchanged; the mean adjacent overlap rises with them and is _meta_. Neighbour ranks "
+        "after the embeddings) and reports the overlap between the first and the last layer, "
+        "and the smallest overlap between adjacent layers, the largest single reorganisation of the "
+        "neighbourhoods. Identity blocks between blocks add adjacent pairs with overlap 1 and "
+        "leave both unchanged (one before block 0 adds the embedding state, which can move "
+        "both, one after the last block the pre-norm state, which can move the minimum); the mean "
+        "adjacent overlap rises with them and is _meta_. Neighbour ranks "
         "are unchanged by zero-padding, isometric embedding and rescaling at fixed N."
     )
     HEADLINE_KEYS = ("nn_overlap_first_last", "nn_overlap_adjacent_min")

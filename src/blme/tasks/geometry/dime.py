@@ -189,7 +189,9 @@ class DiMETask(DiagnosticTask):
         "length code two views share (Llama-3.2-1B: a length-only control scores 0.32 against "
         "0.43), so _meta_dime_profile_without_pos0 is the sink-free twin and models with and "
         "without a BOS compare only through it. dime_peak and dime_last_layer are unchanged by "
-        "identity blocks and width padding; dime_peak_depth (argmax / L) moves by design."
+        "width padding and by identity blocks between blocks or before block 0 (one after the "
+        "last block adds the pre-norm state, which can move the peak); dime_peak_depth "
+        "(argmax / L) moves by design."
     )
     HEADLINE_KEYS = ("dime_peak", "dime_last_layer", "dime_peak_depth")
     SIZE_INVARIANT = {

@@ -121,8 +121,10 @@ class PromptIntrinsicDimTask(DiagnosticTask):
         "float32 loss (1e-7 apart). Position 0 stays in the cloud, as in the "
         "release; the profile without it is _meta_. The release's ESS (k = 10) and TLE (k = 20) "
         "cross-checks are not ported. The ID of a cloud pinned at 1024 points is a distance-ratio "
-        "statistic, so the peak and the last-layer value are unchanged by identity blocks, "
-        "zero-padding and rescaling; the peak's depth moves when blocks are added and is _meta_."
+        "statistic, so the peak and the last-layer value are unchanged by identity blocks "
+        "between blocks, zero-padding and rescaling (a block before block 0 adds the embedding "
+        "state, one after the last block the pre-norm state, and either can move the peak); "
+        "the peak's depth moves when blocks are added and is _meta_."
     )
     HEADLINE_KEYS = ("prompt_id_peak", "prompt_id_last_layer")
     SIZE_INVARIANT = {

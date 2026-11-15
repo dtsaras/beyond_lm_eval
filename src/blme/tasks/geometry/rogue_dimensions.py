@@ -72,7 +72,9 @@ class RogueDimensionsTask(DiagnosticTask):
         "computes the same expectation over all distinct pairs exactly, which removes the "
         "Monte Carlo noise (class 2). Headline: the largest top-1 and top-3 shares over the "
         "layers and the top-1 share of the output representation. Duplicated layers (identity "
-        "blocks), zero-padded coordinates and rescaling leave them unchanged; a rotation of the "
+        "blocks between blocks or before block 0), zero-padded coordinates and rescaling leave "
+        "them unchanged (a block after the last one adds the pre-norm state, which can raise the "
+        "maxima); a rotation of the "
         "basis does not, since rogue dimensions are coordinates by definition. The shares "
         "without each document's first token, a sink in many models, are _meta_."
     )
