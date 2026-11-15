@@ -51,27 +51,42 @@ def _row_distance_correlation(attn_row: np.ndarray) -> float | None:
 
 _ATTN_ATTRS = ("self_attn", "attn", "attention", "self_attention")
 _OUT_ATTRS = ("o_proj", "c_proj", "dense", "out_proj")
+# Token mixers that return no attention matrix (Qwen3.5's Gated DeltaNet):
+# such a block has no row to score, so it carries no write site.
+_NON_SOFTMAX_ATTRS = ("linear_attn",)
 
 
 def _write_sites(model):
-    """Each block's attention output projection, or None if any is missing."""
+    """The output projection of every block that returns an attention matrix,
+    in block order (the order of ``out.attentions``).
+
+    Returns ``(sites, n_skipped, reason)``. ``n_skipped`` counts the blocks
+    whose only token mixer is a non-softmax one; ``sites`` is None with
+    ``reason`` naming the missing attribute when a block has neither
+    (tests/tasks/test_positional_decay_zoo_sites.py covers the study zoo).
+    """
     from ..common import get_layers
     blocks = get_layers(model)
     if not blocks:
-        return None
-    sites = []
-    for b in blocks:
+        return None, 0, "no block list found (common.get_layers)"
+    sites, skipped = [], 0
+    for i, b in enumerate(blocks):
         attn = next((getattr(b, a) for a in _ATTN_ATTRS
                      if isinstance(getattr(b, a, None), torch.nn.Module)), None)
-        proj = None
-        if attn is not None:
-            proj = next((getattr(attn, a) for a in _OUT_ATTRS
-                         if isinstance(getattr(attn, a, None), torch.nn.Module)
-                         and getattr(getattr(attn, a), "weight", None) is not None), None)
+        if attn is None:
+            if any(isinstance(getattr(b, a, None), torch.nn.Module) for a in _NON_SOFTMAX_ATTRS):
+                skipped += 1
+                continue
+            return None, skipped, (f"block {i} ({type(b).__name__}) has none of the attention "
+                                   f"attributes {_ATTN_ATTRS} or {_NON_SOFTMAX_ATTRS}")
+        proj = next((getattr(attn, a) for a in _OUT_ATTRS
+                     if isinstance(getattr(attn, a, None), torch.nn.Module)
+                     and getattr(getattr(attn, a), "weight", None) is not None), None)
         if proj is None:
-            return None
+            return None, skipped, (f"block {i}: {type(attn).__name__} has none of the output "
+                                   f"projections {_OUT_ATTRS}")
         sites.append(proj)
-    return sites
+    return sites, skipped, None
 
 
 def _capture_input(store, i):
@@ -129,6 +144,11 @@ class PositionalAttentionDecayTask(DiagnosticTask):
     Computes the Spearman correlation between target-source token distance
     and attention probability to measure the structural integrity of
     positional encodings.
+
+    Blocks without softmax attention (Qwen3.5's Gated DeltaNet layers) return
+    no attention matrix and are left out of every aggregate, counted in
+    ``_meta_n_blocks_without_softmax_attention``. A NaN headline carries
+    ``_meta_positional_decay_nan_reason``.
     """
     # The key at position 0 (the attention sink) is dropped from every row of
     # the headline correlation; the inclusive value is _meta_.
@@ -186,7 +206,7 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         # (write norm, correlation) per (layer, head, query) row, for the
         # write-weighted depth aggregation (see _write_weighted_mean).
         _w_incl, _w_nosink = [], []
-        _sites = _write_sites(model)
+        _sites, _n_mixer_skipped, _nan_reason = _write_sites(model)
         _zcap = {}
         _n_layers_weighted = _n_layer_slots = 0
         _n_attn_layers = 0
@@ -229,6 +249,9 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                     }
 
                 _n_attn_layers = max(_n_attn_layers, len(out.attentions))
+                if _sites is not None and len(out.attentions) != len(_sites) and _nan_reason is None:
+                    _nan_reason = (f"{len(out.attentions)} attention matrices for "
+                                   f"{len(_sites)} write sites")
                 for li, attn_entry in enumerate(out.attentions):
                     if attn_entry is None:
                         continue
@@ -239,6 +262,12 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                     a = attn_matrix.float().cpu().numpy()
                     _wn = (_head_write_norms(_zcap.get(li), _sites[li], a.shape[0])
                            if _sites is not None and li < len(_sites) else None)
+                    if _wn is None and _nan_reason is None:
+                        _nan_reason = (
+                            f"layer {li}: no input captured at its output projection"
+                            if _sites is not None and li < len(_sites) and _zcap.get(li) is None
+                            else f"layer {li}: the output projection does not split into "
+                                 f"{a.shape[0]} heads")
                     _n_layers_weighted += int(_wn is not None)
                     _n_layer_slots += 1
                     _n_nonfinite_rows += int(
@@ -331,9 +360,15 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         # HEADLINE: the sink-excluded correlation, each row weighted by what its
         # head writes into the residual stream.
         complete = bool(_sites is not None and _n_layer_slots > 0
-                        and _n_layers_weighted == _n_layer_slots)
+                        and _n_layers_weighted == _n_layer_slots and _nan_reason is None)
         out["positional_decay_nosink_write_weighted"] = (
             _write_weighted_mean(_w_nosink) if complete else float("nan"))
+        if complete and not np.isfinite(out["positional_decay_nosink_write_weighted"]):
+            _nan_reason = "every scored row has zero write norm, or no row was scored"
+        elif not complete and _nan_reason is None:
+            _nan_reason = "no attention layer scored"
+        out["_meta_positional_decay_nan_reason"] = _nan_reason
+        out["_meta_n_blocks_without_softmax_attention"] = int(_n_mixer_skipped)
         out["_meta_positional_decay_inclusive_write_weighted"] = (
             _write_weighted_mean(_w_incl) if complete else float("nan"))
         out["_meta_write_weight_site"] = (
