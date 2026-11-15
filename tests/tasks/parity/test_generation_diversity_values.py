@@ -38,7 +38,8 @@ class _Scripted(torch.nn.Module):
         self.w = torch.nn.Parameter(torch.zeros(1))
         self.tok, self.calls = tok, 0
 
-    def generate(self, input_ids, max_new_tokens, **kw):
+    def generate(self, input_ids, generation_config, **kw):
+        max_new_tokens = generation_config.max_new_tokens
         n = input_ids.shape[0]
         eos = self.tok.eos_token_id
         rows = []

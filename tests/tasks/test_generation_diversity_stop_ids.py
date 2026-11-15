@@ -62,3 +62,22 @@ def test_model_generation_config_does_not_apply():
     assert plain["_meta_ignored_generation_config"] == {}
     assert shipped["_meta_ignored_generation_config"] == {
         "no_repeat_ngram_size": 2, "repetition_penalty": 1.3, "top_k": 5}
+
+
+def test_generate_gets_no_generation_kwargs_next_to_the_config():
+    """max_new_tokens rides on the task's GenerationConfig: transformers
+    deprecates a generation kwarg passed together with generation_config."""
+    model, tok = fd.tiny_gpt2(), fd.tokenizer()
+    calls, generate = [], model.generate
+
+    def spy(**kwargs):
+        calls.append(kwargs)
+        return generate(**kwargs)
+
+    model.generate = spy
+    r = GenerationDiversityTask(config={"seed": 0, "num_prompts": 2, "n_samples_per_prompt": 4,
+                                        "max_new_tokens": 12}).evaluate(model, tok, None)
+    assert "error" not in r and len(calls) == 2
+    for kwargs in calls:
+        assert set(kwargs) == {"input_ids", "generation_config"}
+        assert kwargs["generation_config"].max_new_tokens == 12

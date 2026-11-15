@@ -340,7 +340,7 @@ class GenerationDiversityTask(DiagnosticTask):
                     with _no_model_generation_defaults(model):
                         outputs = model.generate(
                             input_ids=enc["input_ids"].expand(n_samples, -1),
-                            max_new_tokens=max_new_tokens, generation_config=gen_cfg)
+                            generation_config=gen_cfg)
                 except Exception as e:
                     logger.info(f"  generate() failed: {e}")
                     _n_failed_prompts[0] += 1

@@ -38,6 +38,7 @@ one protocol; the last-prompt-token chain BLME used before is
 ``_meta_coe_*_last_prompt``.
 """
 
+import copy
 import logging
 
 import numpy as np
@@ -289,11 +290,14 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 P = int(input_ids.shape[1])
                 if P < 1 or ctx - P < 1:
                     continue
+                # The per-prompt budget goes on a copy of the config: a
+                # max_new_tokens kwarg next to generation_config is deprecated.
+                call_cfg = copy.deepcopy(gen_cfg)
+                call_cfg.max_new_tokens = min(max_new_tokens, ctx - P)
                 with _no_model_generation_defaults(model):
                     seq = model.generate(input_ids=input_ids,
                                          attention_mask=torch.ones_like(input_ids),
-                                         generation_config=gen_cfg,
-                                         max_new_tokens=min(max_new_tokens, ctx - P))
+                                         generation_config=call_cfg)
                 T = int(seq.shape[1]) - P
                 if T < 1:
                     continue

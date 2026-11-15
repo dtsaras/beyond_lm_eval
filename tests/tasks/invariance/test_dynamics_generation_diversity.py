@@ -34,7 +34,8 @@ class _ScriptedModel(torch.nn.Module):
         self.tok = tok
         self.calls = 0
 
-    def generate(self, input_ids, max_new_tokens, **kw):
+    def generate(self, input_ids, generation_config, **kw):
+        max_new_tokens = generation_config.max_new_tokens
         n, P = input_ids.shape
         eos = self.tok.eos_token_id
         rows = []
@@ -97,9 +98,9 @@ def test_default_collection_is_texygens_500(monkeypatch):
     sizes = []
     orig = model.generate
 
-    def gen(input_ids, max_new_tokens, **kw):
+    def gen(input_ids, **kw):
         sizes.append(int(input_ids.shape[0]))
-        return orig(input_ids, max_new_tokens, **kw)
+        return orig(input_ids, **kw)
 
     model.generate = gen
     out = GenerationDiversityTask(config={"max_new_tokens": 4, "seed": 0}).evaluate(

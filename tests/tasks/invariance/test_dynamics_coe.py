@@ -163,3 +163,26 @@ def test_raw_magnitudes_are_meta_only():
     for k in ("coe_r", "coe_c", "ang_norm_mean"):
         assert b[k] == pytest.approx(a[k], rel=1e-12)
     assert np.mean(b["angles"]) == pytest.approx(np.mean(a["angles"]), rel=1e-12)
+
+
+def test_generate_gets_no_generation_kwargs_next_to_the_config():
+    """The per-prompt budget min(max_new_tokens, ctx - P) rides on a copy of the
+    task's GenerationConfig: transformers deprecates a generation kwarg passed
+    together with generation_config."""
+    model, tok = tiny_gpt2(), tokenizer()
+    ctx = int(model.config.n_positions)
+    calls, generate = [], model.generate
+
+    def spy(**kwargs):
+        calls.append(kwargs)
+        return generate(**kwargs)
+
+    model.generate = spy
+    out = _run(model, tok, {"num_samples": 3, "max_new_tokens": ctx + 100})
+    assert len(calls) == 3
+    for kwargs in calls:
+        assert set(kwargs) == {"input_ids", "attention_mask", "generation_config"}
+        P = int(kwargs["input_ids"].shape[1])
+        assert kwargs["generation_config"].max_new_tokens == ctx - P
+    assert out["_meta_max_new_tokens"] == ctx + 100
+    assert len({id(k["generation_config"]) for k in calls}) == 3
