@@ -44,8 +44,8 @@ monosemanticity method. Only `interpretability_logit_lens_kl` and
 * **Critical Info**: High centralization at index 0 is a useful attention-sink-like signal, but it is a proxy; confirm with Sinkε or intervention-based analyses before making mechanistic claims. Defaults: `num_samples: 10`. No headline keys or size-invariances are declared.
 
 ## 3. Attention Effective Rank (BLME head-capacity proxy)
-* **What are we measuring**: The effective rank of attention-head value/output representations as a proxy for how much capacity a head uses across samples.
-* **How are we measuring**: By computing the Singular Value Entropy (Effective Rank) of the isolated value-projection outputs corresponding to specific heads.
+* **What are we measuring**: The effective rank of the combined attention output over a sequence, as a proxy for how much capacity the attention mechanism uses.
+* **How are we measuring**: By computing the singular-value entropy (effective rank) of the combined attention output projection over a sequence. It is not a per-head metric; `interpretability_attention_rank` reports per-head attention-matrix rank.
 * **Hypothesis**: Higher effective rank suggests a head is using a broader subspace; lower rank suggests a more constrained or collapsed head. This is not a direct concept-level polysemanticity measurement.
 * **Citation/Paper**: BLME proxy inspired by effective-rank diagnostics and the superposition literature (`Elhage et al. 2022`; closest concept-level benchmark: `Templeton et al. 2024`, Scaling Monosemanticity).
 * **File & Function**: `src/blme/tasks/interpretability/attention_polysemanticity.py` -> `AttentionEffectiveRankTask`
@@ -69,7 +69,7 @@ monosemanticity method. Only `interpretability_logit_lens_kl` and
 
 ## 6. Token Attribution (Gradient-based)
 * **What are we measuring**: How much each preceding input token contributed to the likelihood of generating a specific target token.
-* **How are we measuring**: Computing the gradient of the predicted logit with respect to the input embeddings, taking the L2 norm (InputXGradient).
+* **How are we measuring**: Computing the next-token cross-entropy loss for each sample and attributing it to input tokens with |gradient x input embedding| (input x gradient).
 * **Hypothesis**: Not all context tokens are equal. Saliency mapping reveals which entities heavily bias the model's specific outputs.
 * **Citation/Paper**: `Simonyan, K., Vedaldi, A., & Zisserman, A. (2013). Deep inside convolutional networks: Visualising image classification models and saliency maps.` (General Saliency)
 * **File & Function**: `src/blme/tasks/interpretability/attribution.py` -> `ComponentAttributionTask`
@@ -145,7 +145,7 @@ monosemanticity method. Only `interpretability_logit_lens_kl` and
 * **Hypothesis**: These metrics describe emergent bias-token and compression mechanisms that often appear in modern LLMs.
 * **Citation/Paper**: `Xiao et al. (2023). Efficient Streaming Language Models with Attention Sinks.` [ArXiv: 2309.17453]; `Gu et al. (2025). When Attention Sink Emerges in Language Models.` [ICLR 2025, ArXiv: 2410.10781]; `Sun et al. (2024). Massive Activations in Large Language Models.` [ArXiv: 2402.17762]; `Arroyo et al. (2025). Attention Sinks and Compression Valleys in LLMs are Two Sides of the Same Coin.` [ArXiv: 2510.06477]
 * **File & Function**: `src/blme/tasks/interpretability/activation_sinks.py` -> `ActivationSinksTask`
-* **Critical Info**: Sinkε is formula-faithful; the compression-valley output is a BLME matrix-entropy proxy, not the full paper pipeline. Defaults: `num_samples: 10`, `max_length: 128`, `sink_epsilon: 0.3`, `massive_threshold_ratio: 100.0`. No headline keys or size-invariances are declared.
+* **Critical Info**: Sinkε follows the paper's formula; the compression-valley output is a BLME matrix-entropy proxy, not the full paper pipeline. Defaults: `num_samples: 10`, `max_length: 128`, `sink_epsilon: 0.3`, `massive_threshold_ratio: 100.0`. No headline keys or size-invariances are declared.
 
 ## 16. Logit-Lens KL and Decision Depth (interpretability_logit_lens_kl)
 * **What are we measuring**: When, through depth, the next-token distribution settles: how far each layer's decoded distribution is from the output, how much it moves in total along the stack, and from which normalized depth the final top-1 token is locked in.
