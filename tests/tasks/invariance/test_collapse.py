@@ -62,12 +62,14 @@ def tiny_states(tiny):
 
 def test_qdl_profile_is_eq1_per_sequence_uncentred(tiny_states):
     """Every profile entry is the per-sequence mean of Eq. (1) on the raw
-    (uncentred, position-0-inclusive) states; the headline is its minimum."""
-    r = inv.run_task_on_states(TASK, tiny_states)
+    (uncentred, position-0-inclusive) first `qdl_tokens` rows; the headline is
+    its minimum. The fixture's documents are short, so the window is theirs."""
+    T = min(len(x) for x in tiny_states.blocks[0])
+    r = inv.run_task_on_states(TASK, tiny_states, {"qdl_tokens": T})
     prof = r["_meta_qdl_entropy_per_layer"]
     assert len(prof) == tiny_states.n_layers
     for li, h in enumerate(prof):
-        want = _qdl_reference([np.asarray(x, dtype=np.float32) for x in tiny_states.blocks[li]])
+        want = _qdl_reference([np.asarray(x, dtype=np.float32)[:T] for x in tiny_states.blocks[li]])
         assert h == pytest.approx(want, rel=1e-9, abs=1e-12), li
     assert r["qdl_entropy_min"] == min(prof)
     assert r["_meta_qdl_n_docs"] == tiny_states.n_docs
@@ -87,8 +89,9 @@ def test_qdl_valley_follows_a_position0_sink(tiny_states):
         return y
     sunk = inv.States(blocks={li: [sink(x, li) for x in docs] for li, docs in S.blocks.items()},
                       final_norm=S.final_norm, embedding=S.embedding)
-    base = inv.run_task_on_states(TASK, S)
-    r = inv.run_task_on_states(TASK, sunk)
+    T = {"qdl_tokens": min(len(x) for x in S.blocks[0])}
+    base = inv.run_task_on_states(TASK, S, T)
+    r = inv.run_task_on_states(TASK, sunk, T)
     assert r["_meta_qdl_entropy_per_layer"][mid] < 0.05
     assert r["qdl_entropy_min"] == r["_meta_qdl_entropy_per_layer"][mid]
     assert r["_meta_qdl_entropy_min_layer_frac"] == pytest.approx(mid / (S.n_layers - 1))

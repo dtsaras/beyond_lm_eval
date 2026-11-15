@@ -113,7 +113,9 @@ class RepresentationCollapseTask(DiagnosticTask):
         "Queipo-de-Llano et al. instead compute, per sequence and without centring, the "
         "entropy of s_j^2/||X||_F^2 with the BOS/first-token row kept, and that row "
         "produces the compression valley; qdl_entropy_min reports that valley as the paper "
-        "does. In the pooled cloud the same row carries most of the centred variance at "
+        "does, on the first 64 tokens of every passage that has them: at the valley the "
+        "entropy grows with the number of rows, so whole passages would add a tokenizer "
+        "term (the whole-passage value is _meta_). In the pooled cloud the same row carries most of the centred variance at "
         "middle blocks, so the Roy-Vetterli keys drop position 0 and massive-norm rows "
         "(Sun et al. 2024) with one mask for all layers, and then measure non-sink "
         "dimensional spread (gpt2 collapse_ratio 0.398 -> 0.825). On 28 bank models they "
@@ -208,16 +210,34 @@ class RepresentationCollapseTask(DiagnosticTask):
         # compression valley is the profile minimum.
         _qpol = ("all" if self.QDL_TOKEN_POLICY.startswith("paper_protocol")
                  else self.QDL_TOKEN_POLICY)
-        qdl_profile, qdl_n_docs = [], 0
-        for idx in layers:
-            rows = [select_rows([Z], _qpol)[0] for Z in per_doc[idx]]
-            hs = [h for h in (_qdl_entropy(Z) for Z in rows) if np.isfinite(h)]
-            qdl_n_docs = max(qdl_n_docs, len(hs))
-            qdl_profile.append(float(np.mean(hs)) if hs else float("nan"))
-        _qdl = np.asarray(qdl_profile, dtype=np.float64)
+        # The valley entropy grows with the number of rows, so the headline
+        # reads the first `qdl_tokens` rows of every passage that has them (in
+        # a causal LM those rows do not depend on what follows); the whole
+        # passage is _meta_ (test_collapse_fixed_tokens.py).
+        T_fix = int(self.config.get("qdl_tokens", 64))
+
+        def _profile(cut):
+            prof, n_docs, norm = [], 0, []
+            for idx in layers:
+                rows = [select_rows([Z], _qpol)[0] for Z in per_doc[idx]]
+                if cut:
+                    rows = [Z[:T_fix] for Z in rows if Z.shape[0] >= T_fix]
+                hs = [h for h in (_qdl_entropy(Z) for Z in rows) if np.isfinite(h)]
+                n_docs = max(n_docs, len(hs))
+                prof.append(float(np.mean(hs)) if hs else float("nan"))
+                if cut and rows:
+                    norm.append(prof[-1] / float(np.log(min(T_fix, rows[0].shape[1]))))
+                else:
+                    norm.append(float("nan"))
+            return np.asarray(prof, dtype=np.float64), n_docs, np.asarray(norm)
+
+        _qdl, qdl_n_docs, _qdl_norm = _profile(True)
+        _qdl_whole, _qdl_n_whole, _ = _profile(False)
+        qdl_profile = _qdl.tolist()
         _qdl_ok = np.isfinite(_qdl)
         qdl_min = float(np.min(_qdl[_qdl_ok])) if _qdl_ok.any() else float("nan")
         qdl_argmin = int(np.nanargmin(_qdl)) if _qdl_ok.any() else -1
+        _w_ok = np.isfinite(_qdl_whole)
 
         return {
             # Queipo-de-Llano Eq. (1) valley depth: the headline of this family.
@@ -227,6 +247,12 @@ class RepresentationCollapseTask(DiagnosticTask):
                 qdl_argmin / (len(layers) - 1) if qdl_argmin >= 0 and len(layers) > 1
                 else float("nan")),
             "_meta_qdl_n_docs": int(qdl_n_docs),
+            "_meta_qdl_tokens": T_fix,
+            "_meta_qdl_entropy_min_norm": (float(_qdl_norm[qdl_argmin])
+                                           if qdl_argmin >= 0 else float("nan")),
+            "_meta_qdl_entropy_min_whole_passage": (
+                float(np.min(_qdl_whole[_w_ok])) if _w_ok.any() else float("nan")),
+            "_meta_qdl_n_docs_whole_passage": int(_qdl_n_whole),
             "max_erank": max_erank,
             "min_erank": min_erank,
             "collapse_ratio": collapse_ratio,
