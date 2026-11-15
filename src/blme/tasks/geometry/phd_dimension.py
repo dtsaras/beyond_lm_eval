@@ -341,7 +341,7 @@ class PHDimensionTask(DiagnosticTask):
     }
     HEADLINE_KEYS = ("phd_dimension", "phd_dimension_std")
     # Distance-only per text; the per-text point count is pinned by truncating
-    # >= 300-token articles at 512 tokens. Depth: one (output) layer.
+    # >= 512-word articles at 512 tokens. Depth: one (output) layer.
     SIZE_INVARIANT = dict.fromkeys(
         HEADLINE_KEYS,
         (("zero_pad", "embed_isometric", "rescale"),
@@ -354,6 +354,10 @@ class PHDimensionTask(DiagnosticTask):
         num_samples = int(cfg.get("num_samples", 100))
         # The notebook truncates every text at 512 tokens (cell 6).
         max_length = int(cfg.get("max_length", 512))
+        # Articles of >= max_length words, counted before the context clamp, so
+        # every model scores the same articles at the full window
+        # (test_long_document_selection.py).
+        min_doc_words = int(cfg.get("min_doc_words", max_length))
         # A window past the model's context indexes off its position table
         # (test_phd_dimension_protocol.py::test_window_is_clamped_to_the_model_context).
         _ctx = (getattr(getattr(model, "config", None), "max_position_embeddings", None)
@@ -381,9 +385,9 @@ class PHDimensionTask(DiagnosticTask):
         text_n_points = int(cfg.get("text_n_points", 9))
         min_text_tokens = int(cfg.get("min_text_tokens", 50))
 
-        # Texts of >= 300 tokens (the paper's texts are ~300 tokens; short ones
-        # blow up: a 62-token passage gives PHD 540): whole WikiText-103
-        # articles in a fixed nested order, unless documents="dataset".
+        # Whole WikiText-103 articles of >= min_doc_words words in a fixed
+        # nested order (short texts blow up: a 62-token passage gives PHD 540),
+        # unless documents="dataset".
         # The notebook's preprocess_text (newlines -> spaces) is applied.
         source = cfg.get("documents", "long_documents")
         if source == "dataset":
@@ -392,9 +396,8 @@ class PHDimensionTask(DiagnosticTask):
         else:
             doc_split = cfg.get("doc_split", "train")
             try:
-                texts = load_long_documents(num_samples,
-                                            min_tokens=int(cfg.get("min_doc_tokens", 300)),
-                                            tokenizer=tokenizer, split=doc_split)
+                texts = load_long_documents(num_samples, min_words=min_doc_words,
+                                            split=doc_split)
             except (ValueError, RuntimeError) as e:
                 return {"error": f"geometry_phd_dimension: long documents unavailable: {e}"}
             source_name = f"wikitext_document_level:{doc_split}"
@@ -507,6 +510,8 @@ class PHDimensionTask(DiagnosticTask):
             out["_meta_phd_n_end_rows_dropped"] = int(_slice_stats.get("rows_dropped", 0))
             out["_meta_phd_n_texts_seen"] = int(_n_seen)
             out["_meta_phd_documents"] = source_name
+            out["_meta_phd_min_doc_words"] = (
+                int(min_doc_words) if source != "dataset" else None)
             out["_meta_phd_n_texts_too_short"] = int(_n_short)
             out["_meta_phd_n_texts_ungriddable"] = int(_n_ungriddable)
             out["_meta_phd_n_texts_nonfinite"] = int(_n_nonfinite)

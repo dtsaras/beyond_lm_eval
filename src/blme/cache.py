@@ -697,16 +697,20 @@ def load_long_documents(
     min_tokens: Optional[int] = None,
     tokenizer: Any = None,
     split: str = "validation",
+    min_words: Optional[int] = None,
 ) -> list:
     """Whole WikiText-103 articles as ``[{"text": ...}, ...]``.
 
     From ``EleutherAI/wikitext_document_level`` (``wikitext-103-raw-v1``),
     stripped, in :func:`nested_order` over the articles of ``split``, so draws
-    nest and spread evenly. With ``min_tokens`` (which needs ``tokenizer``)
-    articles shorter than ``min_tokens`` tokens -- counted as the model sees
-    them, special tokens included -- are skipped in that order; the result is
-    still nested for a fixed tokenizer. Raises ``ValueError`` if fewer than
-    ``n`` articles qualify. The validation split holds 60 articles.
+    nest and spread evenly. With ``min_words`` articles of fewer than
+    ``min_words`` whitespace-separated words are skipped in that order; the
+    selection needs no tokenizer, so every model gets the same articles. With
+    ``min_tokens`` (which needs ``tokenizer``) articles shorter than
+    ``min_tokens`` tokens -- counted as the model sees them, special tokens
+    included -- are skipped; the result is then nested for a fixed tokenizer
+    only. Raises ``ValueError`` if fewer than ``n`` articles qualify. The
+    validation split holds 60 articles.
     """
     n = int(n)
     if n < 0:
@@ -720,13 +724,17 @@ def load_long_documents(
         if len(out) >= n:
             break
         text = docs[i]
+        if min_words is not None and len(text.split()) < int(min_words):
+            continue
         if min_tokens is not None:
             n_tok = len(tokenizer(text, verbose=False)["input_ids"])
             if n_tok < int(min_tokens):
                 continue
         out.append({"text": text})
     if len(out) < n:
-        need = f" of >= {min_tokens} tokens" if min_tokens is not None else ""
+        need = "".join(
+            f" of >= {v} {unit}" for v, unit in ((min_words, "words"), (min_tokens, "tokens"))
+            if v is not None)
         raise ValueError(
             f"load_long_documents: {n} articles requested, but {path} {split} has "
             f"{len(out)}{need}.")

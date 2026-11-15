@@ -26,9 +26,10 @@ Headline finding: language is self-similar and long-range dependent
 bits-per-byte for predicting downstream performance — which makes H a
 mandatory comparison baseline for capability-prediction studies.
 
-PROTOCOL: natural documents of >= 4K tokens (whole WikiText-103 articles,
-``cache.load_long_documents``), the first min(use_tokens, model context)
-tokens of each scored in ONE forward pass, a 128-token burn-in prefix dropped,
+PROTOCOL: natural long documents (whole WikiText-103 articles of >= 4096
+words, the same for every tokenizer; ``cache.load_long_documents``), the
+first min(use_tokens, model context) tokens of each scored in ONE forward
+pass, a 128-token burn-in prefix dropped,
 and the three parameters fitted on the pooled per-document statistics
 (per-document means as ``*_perdoc``). The concatenated-stream values are
 ``_meta_*_concat_legacy``.
@@ -210,8 +211,9 @@ class FractalLikelihoodTask(DiagnosticTask):
         # paper (Q2: the paper's definition wins).
         eps = float(self.config.get("holder_eps", PAPER_HOLDER_EPS))
         # Paper protocol (Sec. 2.1): documents longer than 4K tokens, first 2K
-        # tokens of each.
-        min_doc_tokens = int(self.config.get("min_doc_tokens", 4096))
+        # tokens of each. Length is counted in words, so the article list does
+        # not depend on the tokenizer (test_long_document_selection.py).
+        min_doc_words = int(self.config.get("min_doc_words", 4096))
         use_tokens = int(self.config.get("use_tokens", 2048))
         # The first tokens' NLL is a deterministic transient (no left context);
         # the notebook drops the first 128 scored tokens.
@@ -232,8 +234,8 @@ class FractalLikelihoodTask(DiagnosticTask):
             source_name = "dataset"
         else:
             try:
-                docs = load_long_documents(num_samples, min_tokens=min_doc_tokens,
-                                           tokenizer=tokenizer, split=doc_split)
+                docs = load_long_documents(num_samples, min_words=min_doc_words,
+                                           split=doc_split)
             except (ValueError, RuntimeError) as e:
                 return {"error": f"dynamics_fractal: long documents unavailable: {e}"}
             texts = [d["text"] for d in docs]
@@ -297,7 +299,7 @@ class FractalLikelihoodTask(DiagnosticTask):
                                                 for d in per_doc)),
             "_meta_n_documents": len(per_doc),
             "_meta_document_source": source_name,
-            "_meta_min_doc_tokens": int(min_doc_tokens),
+            "_meta_min_doc_words": int(min_doc_words),
             "_meta_segment_len": int(seg_len),
             "_meta_burn_in": int(burn_in),
             "protocol": "per_document_paper_protocol",

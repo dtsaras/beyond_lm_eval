@@ -116,14 +116,15 @@ def test_per_text_grid_is_the_notebook_grid():
 
 
 def test_texts_are_long_documents_preprocessed_as_the_notebook(monkeypatch):
-    """By default the texts are whole articles of >= 300 tokens (the paper's
-    texts are ~300 tokens), with the notebook's preprocess_text applied
+    """By default the texts are whole articles of >= 512 words (the window,
+    counted without a tokenizer), with the notebook's preprocess_text applied
     (newlines -> spaces), not the corpus passages handed to the task."""
     import blme.tasks.geometry.phd_dimension as phd
     calls, seen = [], []
 
-    def fake_long_documents(n, min_tokens=None, tokenizer=None, split="validation"):
-        calls.append((n, min_tokens, split))
+    def fake_long_documents(n, min_tokens=None, tokenizer=None, split="validation",
+                            min_words=None):
+        calls.append((n, min_tokens, min_words, tokenizer, split))
         return [{"text": f"Title\n\n  body  of\n doc {i}"} for i in range(n)]
 
     class _SeeingTok(_Tok):
@@ -135,7 +136,8 @@ def test_texts_are_long_documents_preprocessed_as_the_notebook(monkeypatch):
     cfg = {k: v for k, v in CFG.items() if k != "documents"}
     data = [{"text": f"passage {i}"} for i in range(cfg["num_samples"])]
     out = phd.PHDimensionTask(cfg).evaluate(_CloudModel(), _SeeingTok(), data, cache=None)
-    assert calls == [(cfg["num_samples"], 300, "train")]
+    assert calls == [(cfg["num_samples"], None, 512, None, "train")]
+    assert out["_meta_phd_min_doc_words"] == 512
     assert out["_meta_phd_documents"] == "wikitext_document_level:train"
     assert seen and not any(t.startswith("passage") for t in seen)
     # text.replace('\n', ' ').replace('  ', ' '), verbatim (one pass).

@@ -417,12 +417,13 @@ geometry_vendi_score:
 
 geometry_phd_dimension:
   num_samples: 100
-  # GPTID protocol: whole WikiText-103 articles of >= 300 tokens (train split,
-  # nested order), truncated at 512 tokens, each estimated on tokens [1:-1]
-  # with the notebook's adaptive grid (min 40, 7 steps, 9 subsamples per size).
+  # GPTID protocol: whole WikiText-103 articles of >= 512 words (train split,
+  # nested order; counted in words, so every model gets the same articles),
+  # truncated at 512 tokens, each estimated on tokens [1:-1] with the
+  # notebook's adaptive grid (min 40, 7 steps, 9 subsamples per size).
   documents: long_documents
   doc_split: train
-  min_doc_tokens: 300
+  min_doc_words: 512
   min_subsample: 40
   intermediate_points: 7
   text_n_points: 9
@@ -628,12 +629,13 @@ geometry_prompt_id:
   range_max: 64
 
 dynamics_fractal:
-  # num_samples counts natural DOCUMENTS of >= min_doc_tokens tokens (whole
-  # WikiText-103 articles from doc_split; validation has only 23 such for gpt2).
+  # num_samples counts natural DOCUMENTS of >= min_doc_words words (whole
+  # WikiText-103 articles from doc_split, the same ones for every tokenizer;
+  # 8,419 of the 29,145 train articles qualify).
   num_samples: 100
   documents: long_documents
   doc_split: train
-  min_doc_tokens: 4096
+  min_doc_words: 4096
   # Pinned across models. seg_len = min(use_tokens, model context) otherwise
   # gives 1024-context models ~895 usable tokens and >=2048-context models
   # ~1919, and the Joseph exponent moves +0.021 across that split -- a

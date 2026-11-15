@@ -207,8 +207,9 @@ class PositionalAttentionDecayTask(DiagnosticTask):
         if source == "long":
             from ...cache import load_long_documents
             try:
+                # Counted in words, so the article list does not depend on the tokenizer.
                 samples = load_long_documents(
-                    num_samples, min_tokens=seq_tokens + 1, tokenizer=tokenizer,
+                    num_samples, min_words=seq_tokens + 1,
                     split=self.config.get("doc_split", "validation"))
             except (ValueError, RuntimeError) as e:
                 return {"error": f"geometry_positional_decay: long documents unavailable: {e}"}
