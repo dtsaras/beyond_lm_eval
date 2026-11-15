@@ -65,6 +65,10 @@
 - Gemma 3n / 4: the final logit softcap is read from the text config. This changes the tasks that decode through `common.apply_lm_head`: `interpretability_logit_lens`, `interpretability_logit_lens_kl` and `convexity_gap`.
 - `_meta_` only: `_meta_gride_peak_layer_frac` uses the hidden-state index / L, as the other peak depths do.
 - `_meta_` only: `_meta_correlation_dimension_under_resolved` compares the reported fixed-window `correlation_dimension` with the Eckmann-Ruelle bound 2 log10 N. It used to compare the demoted plateau fit.
+- `geometry_lm_head_free_energy`: the float32 Gram and `eigvalsh` run on the CPU wherever the weights are, so a model on a GPU gets the CPU value. gpt2 in bfloat16 on an RTX 3090 returned `lm_head_bfe_w = NaN`: the float32 rounding of WᵀW (0.026) exceeds its smallest eigenvalue (0.020), and cuSOLVER returned that eigenvalue non-positive.
+  - When the float32 spectrum has a non-positive eigenvalue but the float64 spectrum is positive beyond its rounding, the headline is the float64 value and `_meta_lm_head_bfe_w_from_float64` is True.
+  - Every NaN headline carries `_meta_lm_head_bfe_w_nan_reason`. `_meta_lm_head_min_eigenvalue_float32` is new.
+  - Values that were finite on the CPU are unchanged, bit for bit.
 - Crash only: `topology_persistence_landscape` returns an error, as `topology_betti_curve` and `topology_persistence_entropy` do, when no passage holds a 20-word window. It used to raise `ValueError`.
 
 ### Key renames and demotions to `_meta_`
