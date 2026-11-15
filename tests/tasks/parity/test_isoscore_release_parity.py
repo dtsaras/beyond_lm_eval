@@ -50,3 +50,21 @@ def test_isoscore_keys_match_the_release(release, seed):
     assert 0.05 < iota < 0.95
     assert res["isoscore"] == pytest.approx(iota, rel=1e-6)
     assert res["isoscore_effective_dims"] == pytest.approx(iota * (D - 1) + 1, rel=1e-6)
+
+
+@pytest.mark.parametrize("k", range(1, 10))
+def test_reproduces_table_2_subspace_scores(k):
+    """Rudman et al. (2022) Table 2: points isotropic in a k-dimensional
+    subspace of R^9 (covariance I_9^(k), here randomly rotated) score
+    (k - 1) / 8, so isoscore_effective_dims reads k. Through evaluate() on
+    5000 points the largest error over k is 2.1e-3 (k = 9); the tolerance
+    0.005 is the sampling error of a 5000-point covariance."""
+    from scipy.stats import ortho_group
+    g = np.random.default_rng(k)
+    Q = ortho_group.rvs(9, random_state=k)
+    mask = np.arange(9) < k
+    final = [((g.standard_normal((100, 9)) * mask) @ Q).astype(np.float32) for _ in range(50)]
+    blocks = {li: [g.standard_normal((100, 9)) for _ in range(50)] for li in range(3)}
+    res = inv.run_task_on_states("geometry_isoscore", blocks, final_norm=final)
+    assert res["isoscore"] == pytest.approx((k - 1) / 8, abs=0.005)
+    assert res["isoscore_effective_dims"] == pytest.approx(k, abs=0.04)
