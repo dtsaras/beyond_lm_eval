@@ -97,10 +97,24 @@ def _rankme(eigen: np.ndarray, eps: float = RANKME_EPS) -> float:
     return float(np.exp(-np.sum(p * np.log(p))))
 
 
+def _finite_rows(X):
+    """``X`` as (N, D) float64 without its rows that hold a non-finite value,
+    and how many were masked: one such row would make the centred cloud, and
+    so the whole spectrum, non-finite (tests/tasks/test_alpha_req_nonfinite_rows.py)."""
+    if isinstance(X, torch.Tensor):
+        X = X.detach().to(torch.float64).cpu().numpy()
+    X = np.asarray(X, dtype=np.float64)
+    X = X.reshape(X.shape[0], -1)
+    keep = np.isfinite(X).all(axis=1)
+    return (X if keep.all() else X[keep]), int((~keep).sum())
+
+
 def _spectral_stats(X):
-    eig = _eigenspectrum(X)
+    X, n_masked = _finite_rows(X)
+    eig = _eigenspectrum(X) if X.shape[0] >= 2 else np.zeros(0)
     alpha, r2 = _powerlaw_alpha(eig)
-    return {"alpha": alpha, "r2": r2, "rankme": _rankme(eig), "n_eig": int(eig.size)}
+    return {"alpha": alpha, "r2": r2, "rankme": _rankme(eig), "n_eig": int(eig.size),
+            "n_masked": n_masked}
 
 
 @register_task("geometry_alpha_req")
@@ -166,6 +180,7 @@ class AlphaReQTask(DiagnosticTask):
             "_meta_n_points": int(sc.n_points),
             **readout_meta(sc),
             "_meta_n_eigenvalues": st["n_eig"],
+            "_meta_n_nonfinite_rows_masked": st["n_masked"],
             "_meta_fit_ranks": [int(FIT_RANGE[0]) + 1, int(FIT_RANGE[-1]) + 1],
         }
         if st["n_eig"] <= int(FIT_RANGE[-1]):
@@ -181,6 +196,7 @@ class AlphaReQTask(DiagnosticTask):
             per = [_spectral_stats(prof.last[k]) for k in sorted(prof.last)]
             out["alpha_req_per_layer"] = [p["alpha"] for p in per]
             out["rankme_per_layer"] = [p["rankme"] for p in per]
+            out["_meta_n_nonfinite_rows_masked_per_layer"] = [p["n_masked"] for p in per]
             out["_meta_profile_last_entry_is_block_output"] = bool(
                 prof.info.get("last_is_block", False))
         return out
