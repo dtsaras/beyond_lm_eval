@@ -462,6 +462,53 @@ def test_identity_layout():
         inv.identity_layout(3, [3])
 
 
+def test_identity_placements():
+    assert inv.identity_placements(4, [0, 1, 2, 2]) == {"interior"}
+    assert inv.identity_placements(4, [-1, 1]) == {"leading", "interior"}
+    assert inv.identity_placements(4, [3]) == {"trailing"}
+    with pytest.raises(ValueError):
+        inv.identity_placements(4, [4])
+
+
+def _hidden_states(model, x):
+    with inv.limit_threads(1), torch.no_grad():
+        return model(input_ids=x, output_hidden_states=True, use_cache=False).hidden_states
+
+
+@pytest.mark.parametrize("end", ["leading", "trailing"])
+def test_end_identity_block_is_exact_and_adds_an_end_state(arch_model, end):
+    """A block before block 0 or after the last one is as exact as an interior
+    block, but it does not duplicate an existing hidden state: block 0's
+    output becomes the embedding output (leading), or the raw last-block
+    output gets an entry of its own ahead of the final norm (trailing)."""
+    name, m = arch_model
+    blocks = mt._arch(m).get_blocks(m)
+    L = len(blocks)
+    new = inv.insert_end_identity_block(m, end, verify_on=_ids(m))
+    assert len(mt._arch(new).get_blocks(new)) == L + 1
+    x = _ids(m)[2][None]
+    raw = []
+    hook = blocks[-1].register_forward_hook(
+        lambda mod, i, o: raw.append((o[0] if isinstance(o, tuple) else o).detach().clone()))
+    try:
+        hs0 = _hidden_states(m, x)
+    finally:
+        hook.remove()
+    hs1 = _hidden_states(new, x)
+    if end == "leading":
+        expected = (hs0[0],) + tuple(hs0)
+        added, replaced = hs1[1], hs0[1]
+    else:
+        expected = tuple(hs0[:L]) + (raw[0], hs0[L])
+        added, replaced = hs1[L], hs0[L]
+    assert len(hs1) == len(expected) == L + 2
+    assert all(torch.equal(a, b) for a, b in zip(hs1, expected))
+    # The added block-output state is not the one it displaces.
+    assert not torch.equal(added, replaced)
+    with pytest.raises(ValueError):
+        inv.insert_end_identity_block(m, "middle")
+
+
 def test_redecompose_is_exact_or_refused(arch_model):
     name, m = arch_model
     if name == "neox_parallel":

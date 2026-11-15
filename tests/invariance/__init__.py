@@ -30,7 +30,8 @@ from .driver import (
     run_task_on_model, run_task_on_states,
 )
 from .model_transforms import (
-    MaskedPaddedLinear, final_norm_unembedding_gauge, identity_layout,
+    IDENTITY_PLACEMENTS, MaskedPaddedLinear, final_norm_unembedding_gauge,
+    identity_layout, identity_placements, insert_end_identity_block,
     insert_identity_blocks, is_tied, logits, max_logit_delta, pad_vocabulary,
     redecompose, residual_scale_gauge, untie_embeddings, zero_pad_weight_matrices,
 )

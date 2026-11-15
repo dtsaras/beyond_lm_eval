@@ -8,8 +8,9 @@ Exactness, max |dlogit| on single-threaded fp32 CPU forwards (tiny random
 gpt2/neox/llama/qwen3, gpt2, pythia-160m, TinyLlama-1.1B):
 
   insert_identity_blocks        exact, 0.0: an inserted block adds exact zeros
-                                to the residual stream.
-  redecompose                   exact, 0.0, for sequential blocks (GPT-2,
+                                to the residual stream, between two blocks or
+                                at either end of the stack (see below).
+  redecompose                  exact, 0.0, for sequential blocks (GPT-2,
                                 Llama, GPT-NeoX with use_parallel_residual=
                                 False). Impossible for parallel-residual blocks
                                 (Pythia): the MLP reads the block input, which
@@ -182,6 +183,27 @@ def _layer_types(model) -> Optional[list]:
 # Depth transforms
 # --------------------------------------------------------------------------
 
+IDENTITY_PLACEMENTS = ("leading", "interior", "trailing")
+
+
+def identity_placements(n_layers: int, after_indices: Iterable[int]) -> frozenset:
+    """Where ``insert_identity_blocks(model, after_indices)`` puts its blocks.
+
+    "interior": between two existing blocks (0 <= i <= n_layers - 2), which
+    duplicates an existing entry of HF's hidden_states. "leading" (i = -1):
+    before block 0, so block 0's output becomes the embedding output.
+    "trailing" (i = n_layers - 1): after the last block, so the raw last-block
+    output, ahead of the final norm, becomes an entry of its own. A
+    declaration ``identity_blocks_interior`` covers interior layouts only.
+    """
+    out = set()
+    for i in after_indices:
+        if not -1 <= i < n_layers:
+            raise ValueError(f"after index {i} out of range for {n_layers} blocks")
+        out.add("leading" if i == -1 else "trailing" if i == n_layers - 1 else "interior")
+    return frozenset(out)
+
+
 def identity_layout(n_layers: int, after_indices: Iterable[int]) -> List[Tuple[str, int]]:
     """Block order produced by ``insert_identity_blocks``.
 
@@ -208,7 +230,9 @@ def insert_identity_blocks(model, after_indices: Iterable[int], verify_on=None):
     output projection and MLP down-projection (weights and biases) zeroed, so
     block(x) = x + 0 + 0 = x exactly. Its attention and MLP still run. Placement
     follows ``identity_layout``; repeated indices insert several blocks. Exact:
-    max |dlogit| = 0.0 (asserted when ``verify_on`` inputs are given).
+    max |dlogit| = 0.0 (asserted when ``verify_on`` inputs are given). The
+    logits do not tell the placements apart; the hidden states do (see
+    ``identity_placements``).
     """
     new = copy.deepcopy(model).eval()
     a = _arch(new)
@@ -230,6 +254,22 @@ def insert_identity_blocks(model, after_indices: Iterable[int], verify_on=None):
     if verify_on is not None:
         _verify(model, new, verify_on, atol=0.0, what="insert_identity_blocks")
     return new
+
+
+def insert_end_identity_block(model, end: str, verify_on=None):
+    """One exact identity block before block 0 (``end="leading"``) or after the
+    last block (``end="trailing"``); ``insert_identity_blocks`` otherwise.
+
+    Function-preserving like an interior block (max |dlogit| = 0.0, asserted
+    with ``verify_on``), but HF's hidden_states gain a state no interior block
+    adds: a leading block's output is the embedding output, a trailing block
+    splits the last entry into the raw last-block output and its final norm.
+    """
+    if end not in ("leading", "trailing"):
+        raise ValueError(f"end must be 'leading' or 'trailing', got {end!r}")
+    n = len(_arch(model).get_blocks(model))
+    return insert_identity_blocks(model, [-1] if end == "leading" else [n - 1],
+                                  verify_on=verify_on)
 
 
 def redecompose(model, block_idx: int, verify_on=None):
