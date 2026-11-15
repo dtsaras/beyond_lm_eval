@@ -337,13 +337,13 @@ class CorrelationDimensionTask(DiagnosticTask):
             "_meta_correlation_dimension_scaling_region_raw": (
                 float(sr_slope) if sr_slope is not None else float("nan")),
             "_meta_correlation_dimension_min_decades": float(_MIN_SCALING_DECADES),
-            # Eckmann-Ruelle 2 log10(N), for interpretation only: an estimate
-            # above it is under-resolved and biased LOW, not invalid.
+            # Eckmann-Ruelle 2 log10(N), for interpretation only: a headline
+            # above it is under-resolved and biased LOW, not invalid
+            # (test_correlation_dimension_protocol.py::test_under_resolved_reads_the_headline).
             "_meta_correlation_dimension_eckmann_ruelle_slope_bound": float(
                 2.0 * np.log10(max(N, 10))),
             "_meta_correlation_dimension_under_resolved": bool(
-                sr_slope is not None and np.isfinite(sr_slope)
-                and float(sr_slope) > 2.0 * np.log10(max(N, 10))),
+                np.isfinite(_primary) and float(_primary) > 2.0 * np.log10(max(N, 10))),
             # R^2 of the plateau fit: _meta_ with the plateau it describes.
             "_meta_correlation_dimension_scaling_r2": (
                 float(sr_r2) if sr_r2 is not None else float("nan")),

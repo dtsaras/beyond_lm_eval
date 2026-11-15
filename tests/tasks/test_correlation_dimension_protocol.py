@@ -144,3 +144,23 @@ def test_reproduces_grassberger_procaccia_1983(system, published):
         assert out["_meta_correlation_dimension_fit_window"] == "du_tanaka_ishii_2025_appA"
         vals.append(out["correlation_dimension"])
     assert np.mean(vals) == pytest.approx(published, abs=0.07), vals
+
+
+@pytest.mark.parametrize("d", [2, 32])
+def test_under_resolved_reads_the_headline(d, monkeypatch):
+    """The Eckmann-Ruelle flag describes the reported fixed-window D2, not the
+    demoted plateau fit: a plateau that disagrees cannot set or clear it."""
+    import blme.tasks.geometry.correlation_dimension as cd
+    X = _gauss(n=200, d=d)
+    real = _run(X)
+    bound = real["_meta_correlation_dimension_eckmann_ruelle_slope_bound"]
+    want = bool(real["correlation_dimension"] > bound)
+    assert real["_meta_correlation_dimension_under_resolved"] is want
+    # The plateau on the other side of the bound from the headline.
+    fake = 0.0 if want else 10.0 * bound
+    monkeypatch.setattr(cd, "_gp_correlation_dimension_plateau",
+                        lambda *a, **k: (fake, 1.0, "ok", (0, 1)))
+    moved = _run(X)
+    assert moved["_meta_correlation_dimension_plateau"] == fake
+    assert moved["correlation_dimension"] == real["correlation_dimension"]
+    assert moved["_meta_correlation_dimension_under_resolved"] is want
