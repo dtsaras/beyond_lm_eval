@@ -373,6 +373,8 @@ class PersistenceLandscapeTask(DiagnosticTask):
             model, tokenizer, dataset, cache, num_samples=num_samples, layers=role_layers,
             policy=rows_policy(self.TOKEN_POLICY), use_cache=use_cache,
             points=window_options(self.config))
+        if not pts or min(len(X) for X in pts.values()) < 3:
+            return {"error": "Need at least 3 samples for persistence landscape"}
         target_layers = sorted(pts)
         layer_reps: Dict[int, List[np.ndarray]] = {l: list(pts[l]) for l in target_layers}
         _last_is_block = bool(pinfo["last_is_block"])
