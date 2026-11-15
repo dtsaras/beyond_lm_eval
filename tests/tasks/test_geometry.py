@@ -1177,25 +1177,25 @@ def test_effective_rank_consistent_convention():
 def test_trajectory_curvature_collinear_is_zero():
     """Collinear points x_t = t·u: every difference vector is u, so
     every angle is exactly 0."""
-    from blme.tasks.geometry.trajectory_curvature import _mean_curvature
+    from blme.tasks.geometry.trajectory_curvature import _pooled_layer_curvature
 
     u = np.array([1.0, 2.0, -0.5, 3.0])
     X = np.stack([t * u for t in range(10)])
-    assert np.isclose(_mean_curvature(X), 0.0, atol=1e-6)
+    assert np.isclose(_pooled_layer_curvature([X], skip_first=0), 0.0, atol=1e-6)
 
 
 def test_trajectory_curvature_right_angle_zigzag():
     """Planar right-angle zigzag: consecutive difference vectors
     alternate between (1,0) and (0,1) — every angle is pi/2."""
     from blme.tasks.geometry.trajectory_curvature import (
-        _mean_curvature, _trajectory_angles,
+        _pooled_layer_curvature, _trajectory_angles,
     )
 
     X = np.array([[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]], dtype=np.float64)
     angles = _trajectory_angles(X)
     assert angles.shape == (3,)
     assert np.allclose(angles, np.pi / 2, atol=1e-9)
-    assert np.isclose(_mean_curvature(X), np.pi / 2, atol=1e-9)
+    assert np.isclose(_pooled_layer_curvature([X], skip_first=0), np.pi / 2, atol=1e-9)
 
 
 def test_trajectory_curvature_hexagon():

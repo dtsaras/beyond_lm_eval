@@ -3,7 +3,8 @@ Hosseini & Fedorenko curvature computation.
 
 TASK: geometry_trajectory_curvature
 BLME: src/blme/tasks/geometry/trajectory_curvature.py
-      (_trajectory_angles, _mean_curvature, _pooled_layer_curvature)
+      (_trajectory_angles, _pooled_layer_curvature: the two kernels
+      evaluate() calls)
 
 Paper: Hosseini & Fedorenko, "Large language models implicitly learn to
        straighten neural sentence trajectories to construct a predictive
@@ -24,7 +25,6 @@ import pytest
 
 from blme.tasks.geometry.trajectory_curvature import (  # noqa: E402
     _trajectory_angles,
-    _mean_curvature,
     _pooled_layer_curvature,
 )
 
@@ -98,12 +98,20 @@ def test_layer_aggregation_matches_paper_mean_of_sentence_means():
     )
 
 
-def test_mean_curvature_analytic_anchors():
+def test_layer_curvature_analytic_anchors():
+    """A straight sentence is 0, a right-angle one pi/2, and the layer value
+    is their per-sentence mean pi/4 whatever their lengths (a pooled mean
+    over the 4 + 1 angles would give pi/10)."""
     line = np.stack([np.arange(6.0), np.zeros(6)], axis=1)
-    assert _mean_curvature(line) == pytest.approx(0.0, abs=1e-9)
+    assert _pooled_layer_curvature([line], skip_first=0) == pytest.approx(0.0, abs=1e-9)
 
     right = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
-    assert _mean_curvature(right) == pytest.approx(np.pi / 2, abs=1e-9)
+    assert _pooled_layer_curvature([right], skip_first=0) == pytest.approx(np.pi / 2, abs=1e-9)
+
+    assert _pooled_layer_curvature([line, right], skip_first=0) == pytest.approx(
+        np.pi / 4, abs=1e-9)
+    # skip_first drops the leading rows: the right angle loses its only angle.
+    assert _pooled_layer_curvature([line, right], skip_first=1) == pytest.approx(0.0, abs=1e-9)
 
 
 if __name__ == "__main__":
