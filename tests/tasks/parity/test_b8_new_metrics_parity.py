@@ -5,7 +5,10 @@ dynamics_fractal (Alabdulmohsin 2402.01825), geometry_effective_depth
 (ShortGPT 2403.03853 / Csordas 2505.13898), dynamics_perturbation_growth
 (QLE grounding 2503.13530).
 Extensions: spectral official PL-MLE alpha (vs LIVE weightwatcher),
-MP lower edge (Staats 2410.17770), critical sharpness (Kalra 2601.16979),
+MP lower edge of the ACTIVATION covariance (a BLME construct, _meta_; Staats
+et al. 2410.17770 analyse WEIGHT matrices -- that statistic is
+geometry_ww_randomized's frac_below_bulk_min_mean), critical sharpness
+(Kalra 2601.16979),
 scale-stratified PH (Fay 2505.20435).
 
 Every quantity is pinned against an analytic anchor, a live official
@@ -269,8 +272,9 @@ class TestMPLowerEdge:
         assert core["lower_outlier_frac"] == pytest.approx(0.0, abs=0.01)
 
     def test_correlated_dims_produce_lower_outliers(self):
-        """Near-duplicate dimensions push eigenvalues BELOW the bulk (the
-        Staats et al. small-singular-value signal)."""
+        """Near-duplicate dimensions push eigenvalues of the activation
+        covariance BELOW the Marchenko-Pastur bulk. (Staats et al. report the
+        analogous signal for weight matrices, not for activations.)"""
         from blme.tasks.geometry.rmt_bulk import _mp_metrics_core
         rng = np.random.default_rng(0)
         B = rng.standard_normal((1600, 380))
