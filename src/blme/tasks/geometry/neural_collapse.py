@@ -326,10 +326,11 @@ class NeuralCollapseTask(DiagnosticTask):
 
     Classes are next tokens: every position t < T-1 of every corpus text is a
     sample, its feature the post-final-norm hidden state and its label the
-    token at t+1 (linguistic-collapse lib/collection.py). NC1 is reported as
-    Wu & Papyan's CDNV (Eq. 4: Galanti's CDNV with one more power of the
-    squared class-mean distance; analyze.py dist_exp=2) and, beside it, the
-    scale-free Galanti CDNV. The previous topic-label construct (5 bundled
+    token at t+1 (linguistic-collapse lib/collection.py). The headline NC1 is
+    the scale-free Galanti CDNV; Wu & Papyan's CDNV (Eq. 4: Galanti's CDNV
+    with one more power of the squared class-mean distance; analyze.py
+    dist_exp=2) scales as 1/c^2 with the feature scale and is
+    ``_meta_nc1_cdnv``. The previous topic-label construct (5 bundled
     topics x 8 sentences, Papyan NC1) is kept as ``_meta_topic_*``; a
     dataset of ``{text, label}`` items still selects that supervised path.
     """
@@ -344,17 +345,19 @@ class NeuralCollapseTask(DiagnosticTask):
         "Neural collapse was defined for image classifiers; for an LM the "
         "classifier is the unembedding, so, following Wu & Papyan 2024, every "
         "corpus position t < T-1 is a sample whose feature is the post-final-norm "
-        "hidden state and whose class is the next token. NC1 is their CDNV "
-        "(Eq. 4, dist_exp 2) with Galanti's scale-free CDNV beside it. The corpus "
+        "hidden state and whose class is the next token. The headline NC1 is "
+        "Galanti's scale-free CDNV; their Eq. 4 CDNV (dist_exp 2) scales as 1/c^2 "
+        "with the feature scale and is _meta_nc1_cdnv. The corpus "
         "is the run's documents (1000 by default, the same N for every model) "
         "rather than TinyStories, so classes need at least min_per_class samples "
         "(default 10), a threshold the paper leaves open. The previous construct, "
         "Papyan NC1 of 40 mean-pooled sentences grouped by 5 topics, answers a "
         "different question (does the last layer cluster sequences by topic) and "
         "is kept as _meta_topic_*.")
-    HEADLINE_KEYS = ("nc1_cdnv", "nc1_cdnv_galanti")
-    # nc1_cdnv divides by one more squared distance, so it scales as 1/c^2 with
-    # the feature scale (the final norm's gain); the Galanti twin does not.
+    HEADLINE_KEYS = ("nc1_cdnv_galanti",)
+    # Eq. 4 divides by one more squared distance, so it scales as 1/c^2 with
+    # the feature scale (the final norm's gain) and is _meta_nc1_cdnv; the
+    # Galanti twin does not.
     SIZE_INVARIANT = {
         "nc1_cdnv_galanti": (
             ("final_norm_gauge_scalar",),
@@ -392,12 +395,12 @@ class NeuralCollapseTask(DiagnosticTask):
                  for d in list(dataset)[:num_samples]]
         st = _next_token_class_stats(model, tokenizer, texts, min_per_class)
         if st is None or len(st["counts"]) < 2:
-            out.update({"nc1_cdnv": float("nan"), "nc1_cdnv_galanti": float("nan"),
+            out.update({"_meta_nc1_cdnv": float("nan"), "nc1_cdnv_galanti": float("nan"),
                         "_meta_nc_reason": "fewer than 2 next-token classes "
                                            f"with >= {min_per_class} samples"})
             return out
         out.update({
-            "nc1_cdnv": _cdnv(st["means"], st["variances"], dist_exp=2.0),
+            "_meta_nc1_cdnv": _cdnv(st["means"], st["variances"], dist_exp=2.0),
             "nc1_cdnv_galanti": _cdnv(st["means"], st["variances"], dist_exp=1.0),
             "_meta_nc_n_classes": int(len(st["counts"])),
             "_meta_nc_n_classes_seen": int(st["n_classes_seen"]),

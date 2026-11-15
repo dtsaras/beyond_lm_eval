@@ -1,7 +1,8 @@
 """Numeric-parity test: geometry_neural_collapse's Papyan NC1 kernel vs the NC library.
 
-Scope: the headline is Wu & Papyan's (2024) next-token CDNV (``nc1_cdnv``,
-``nc1_cdnv_galanti``), pinned in tests/tasks/invariance/test_neural_collapse.py
+Scope: the headline is the next-token CDNV of Wu & Papyan (2024) in Galanti's
+scale-free form (``nc1_cdnv_galanti``; their Eq. 4 is ``_meta_nc1_cdnv``),
+pinned in tests/tasks/invariance/test_neural_collapse.py
 ::test_next_token_classes_and_cdnv. The kernel tested here,
 ``_neural_collapse_metrics``, now feeds only the ``_meta_topic_*`` construct
 (5 bundled topics x 8 sentences, or a ``{text, label}`` dataset).

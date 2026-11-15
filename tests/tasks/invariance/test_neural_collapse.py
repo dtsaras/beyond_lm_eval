@@ -59,7 +59,7 @@ def test_next_token_classes_and_cdnv(tiny):
     want, n_cls = _reference_cdnv(model, tok, 2, 2.0)
     want_g, _ = _reference_cdnv(model, tok, 2, 1.0)
     assert r["_meta_nc_n_classes"] == n_cls
-    assert r["nc1_cdnv"] == pytest.approx(want, rel=1e-6)
+    assert r["_meta_nc1_cdnv"] == pytest.approx(want, rel=1e-6)
     assert r["nc1_cdnv_galanti"] == pytest.approx(want_g, rel=1e-6)
     # The topic proxy survives as _meta_ only.
     assert "nc1_within_class_collapse" not in r
@@ -75,7 +75,11 @@ def test_galanti_twin_is_free_of_the_feature_scale(tiny):
     base = _run(model, tok)
     gauged = _run(inv.final_norm_unembedding_gauge(model, D=2.0), tok)
     inv.assert_invariant(base, gauged, ["nc1_cdnv_galanti"], rtol=1e-12)
-    assert gauged["nc1_cdnv"] == pytest.approx(base["nc1_cdnv"] / 4.0, rel=1e-9)
+    assert gauged["_meta_nc1_cdnv"] == pytest.approx(base["_meta_nc1_cdnv"] / 4.0, rel=1e-9)
+    # ... which is why Eq. 4 is _meta_ and the Galanti twin is the headline.
+    from blme.tasks.geometry.neural_collapse import NeuralCollapseTask as N
+    assert N.HEADLINE_KEYS == ("nc1_cdnv_galanti",)
+    assert "nc1_cdnv" not in base
 
 
 def test_declarations():
