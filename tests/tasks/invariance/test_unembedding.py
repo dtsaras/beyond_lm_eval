@@ -69,14 +69,32 @@ def _width_padded_head(model, k=2):
 @pytest.mark.parametrize("key", sorted(UnembeddingDiagnosticsTask.SIZE_INVARIANT))
 def test_size_invariant_entry(key, tiny, base):
     """Zero-padding W_out's width keeps its nonzero spectrum, so the erank does
-    not move; erank / width (the refuted /d form) halves (known negative)."""
+    not move; erank / width (the refuted /d form) halves (known negative).
+    Rows appended past len(tokenizer) are never read."""
     transforms, node = UnembeddingDiagnosticsTask.SIZE_INVARIANT[key]
-    assert transforms == ("zero_pad",) and node.endswith(f"[{key}]")
+    assert transforms == ("zero_pad", "pad_vocabulary") and node.endswith(f"[{key}]")
     model, tok = tiny
     pad = _run(_width_padded_head(model), tok)
     inv.assert_invariant(base, pad, [key], rtol=1e-6)
     m = model.get_output_embeddings().weight.shape[1]
     assert (pad[key] / (2 * m)) == pytest.approx(0.5 * base[key] / m, rel=1e-6)
+    vpad = _run(inv.pad_vocabulary(model, 200, kind="small_random", rel_scale=1.0), tok)
+    inv.assert_invariant(base, vpad, [key], rtol=1e-6)
+
+
+def test_padded_rows_do_not_enter_the_erank(tiny, base):
+    """A model with init-scale rows padded past len(tokenizer) gives the same
+    headline as the same model without them; the all-rows erank (the previous
+    headline) moves and stays as _meta_."""
+    model, tok = tiny
+    keys = ("unembedding_eff_rank", "unembedding_eff_rank_centered")
+    padded = _run(inv.pad_vocabulary(model, 200, kind="small_random", rel_scale=1.0), tok)
+    for k in keys:
+        assert padded[k] == pytest.approx(base[k], rel=1e-6), k
+    assert base["_meta_n_unused_rows"] == 0 and padded["_meta_n_unused_rows"] == 200
+    for k in keys:
+        assert base[f"_meta_{k}_all_rows"] == base[k]
+        inv.assert_moves(base, padded, f"_meta_{k}_all_rows", min_rel=1e-4)
 
 
 def test_declarations(base):

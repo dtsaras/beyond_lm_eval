@@ -65,16 +65,19 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
         "Purity depends on which words the tokenizer maps to single tokens, so it is a "
         "within-tokenizer _meta_ diagnostic, scored on every labelled token unless "
         "purity_num_queries caps it. On a tied model the alignment compares a row with its "
-        "own final-normed copy, so it measures the final norm. Unused padded rows enter "
-        "the erank and the alignment and move them slightly."
+        "own final-normed copy, so it measures the final norm. The erank reads only the "
+        "rows the tokenizer can emit (ids below len(tokenizer)), so padded rows no token "
+        "reaches do not enter it, and the all-rows values are kept as _meta_; those rows "
+        "still enter the alignment and move it slightly."
     )
     HEADLINE_KEYS = ("unembedding_eff_rank", "unembedding_eff_rank_centered",
 )
-    # Width: zero-padding the hidden dimension of W_out keeps its spectrum. The
-    # alignment keys have no size-free form (the final norm re-centres over
-    # padded coordinates; unused rows move them).
-    SIZE_INVARIANT = {k: (("zero_pad",), "tests/tasks/invariance/test_unembedding.py::"
-                                         f"test_size_invariant_entry[{k}]")
+    # Width: zero-padding the hidden dimension of W_out keeps its spectrum. V:
+    # rows past len(tokenizer) are never read. The alignment keys have no
+    # size-free form (the final norm re-centres over padded coordinates).
+    SIZE_INVARIANT = {k: (("zero_pad", "pad_vocabulary"),
+                          "tests/tasks/invariance/test_unembedding.py::"
+                          f"test_size_invariant_entry[{k}]")
                       for k in ("unembedding_eff_rank", "unembedding_eff_rank_centered")}
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Unembedding Diagnostics...")
@@ -106,28 +109,38 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                 is_tied = np.allclose(W_out_np, E_in_np, atol=1e-5)
         
         # Roy-Vetterli effective rank of the RAW matrix (their definition; a
-        # centred copy is a separate key). The (V, d) SVD runs on a GPU when
-        # one is present; safe_svdvals is exact near the float32 maximum.
+        # centred copy is a separate key) over the emittable rows only: padded
+        # rows past len(tokenizer) are never produced
+        # (tests/tasks/invariance/test_unembedding.py::test_padded_rows_do_not_enter_the_erank).
+        # The (V, d) SVD runs on a GPU when one is present; safe_svdvals is
+        # exact near the float32 maximum.
+        from .categories import _n_emittable
+        n_emit = _n_emittable(tokenizer, W_out.shape[0])
+
+        def _eranks(W):
+            S_t = safe_svdvals(W)
+            raw = _effective_rank(S_t.detach().cpu().numpy())
+            # Centred variant, centred in double (float32 overflows near the
+            # top of the range).
+            _Wc = W.double()
+            _Wc = _Wc - _Wc.mean(dim=0, keepdim=True)
+            return raw, _effective_rank(safe_svdvals(_Wc).detach().cpu().numpy())
+
         try:
             W_dev = W_out.detach().float()
             if torch.cuda.is_available() and not W_dev.is_cuda:
                 W_dev = W_dev.cuda()
-            S_t = safe_svdvals(W_dev)
-            S = S_t.detach().cpu().numpy()
-            eff_rank = _effective_rank(S)
-            # Centred variant, centred in double (float32 overflows near the
-            # top of the range).
-            _Wc = W_dev.double()
-            _Wc = _Wc - _Wc.mean(dim=0, keepdim=True)
-            eff_rank_centered = _effective_rank(
-                safe_svdvals(_Wc).detach().cpu().numpy())
-            del W_dev, _Wc, S_t
+            eff_rank, eff_rank_centered = _eranks(W_dev[:n_emit])
+            eff_rank_all, eff_rank_centered_all = (
+                (eff_rank, eff_rank_centered) if n_emit == W_dev.shape[0]
+                else _eranks(W_dev))
+            del W_dev
         except Exception as _e:
             # NaN, not 0.0, for a failed SVD (e.g. GPU OOM); every other key
             # is still computed (tests/tasks/test_unembedding_svd_failure.py).
             logger.info(f"  unembedding SVD failed: {type(_e).__name__}: {_e}")
-            eff_rank = float("nan")
-            eff_rank_centered = float("nan")
+            eff_rank = eff_rank_centered = float("nan")
+            eff_rank_all = eff_rank_centered_all = float("nan")
             
         # Category purity: for each labelled token, the fraction of its top-k
         # nearest unembedding rows in the same category (labelled tokens are
@@ -223,6 +236,10 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
             "unembedding_is_tied": is_tied,
             "unembedding_eff_rank": float(eff_rank),
             "unembedding_eff_rank_centered": float(eff_rank_centered),
+            # Every row of W_out, padded rows included (the previous headline).
+            "_meta_unembedding_eff_rank_all_rows": float(eff_rank_all),
+            "_meta_unembedding_eff_rank_centered_all_rows": float(eff_rank_centered_all),
+            "_meta_n_unused_rows": int(W_out.shape[0] - n_emit),
             # _meta_: the task itself flags purity as not comparable across
             # models (which words map to single tokens is a tokenizer property).
             "_meta_unembedding_purity_mean": float(purity_mean),
