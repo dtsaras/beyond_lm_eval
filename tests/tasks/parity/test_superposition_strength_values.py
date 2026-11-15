@@ -6,11 +6,14 @@ squared overlap is computed by the released liuyz0/SuperpositionScaling
 LLMs/overlap-0.py, whose pair loop is executed verbatim on the same matrix.
 Centring removes mu exactly (the ETF rows sum to zero), so the centred
 overlap is the Welch bound and its ratio is 1. The row-norm keys follow from
-the row norms of c * S + mu. Skips without the clone (fails under
-BLME_REQUIRE_REFS=1).
+the row norms of c * S + mu. On pythia-70m-deduped (27 padding rows past
+the tokenizer) the release's loop runs on the real head: the headline on the
+emittable rows, ``_meta_mean_squared_overlap_all_rows`` on every row. Skips
+without the clone (fails under BLME_REQUIRE_REFS=1).
 """
 import ast
 import os
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +21,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from blme.tasks.geometry import superposition_strength as SS
 from blme.tasks.geometry.superposition_strength import SuperpositionStrengthTask
 
 _SCRIPT = Path(os.environ.get("BLME_REFREPOS", os.path.expanduser("~/.cache/blme-refrepos"))) \
@@ -84,3 +88,34 @@ def test_headline_keys_match_the_release_and_the_welch_bound():
     assert 0.0 < want["frac_norm_above_half_max"] < 1.0
     for key, v in want.items():
         assert res[key] == pytest.approx(v, rel=1e-5), key
+
+
+def test_sources_pin_the_cloned_commit():
+    repo = _SCRIPT.parents[1]
+    if not repo.is_dir():
+        _missing(repo)
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    assert ("@" + head) in SS.SuperpositionStrengthTask.SOURCES["code"]
+
+
+def test_pythia_head_matches_the_release_on_emittable_and_all_rows():
+    """The release reads every row of embed_out in float32 (CUDA there, CPU
+    here); BLME accumulates the Gram in float64, hence rel 1e-5."""
+    transformers = pytest.importorskip("transformers")
+    name = "EleutherAI/pythia-70m-deduped"
+    try:
+        tok = transformers.AutoTokenizer.from_pretrained(name)
+        model = transformers.AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32).eval()
+    except OSError as e:  # pragma: no cover - environment dependent
+        pytest.skip(f"{name} not cached: {e}")
+    res = SuperpositionStrengthTask(config={}).evaluate(model, tok, dataset=None)
+    W = model.embed_out.weight.detach().float()
+    n_tok = len(tok)
+    assert res["_meta_n_unused_rows"] == W.shape[0] - n_tok > 0
+    with torch.no_grad():
+        emittable = _official_mean_sq_overlap(W[:n_tok])
+        every_row = _official_mean_sq_overlap(W)
+    assert res["mean_squared_overlap"] == pytest.approx(emittable, rel=1e-5)
+    assert res["_meta_mean_squared_overlap_all_rows"] == pytest.approx(every_row, rel=1e-5)
+    assert abs(emittable - every_row) > 1e-4 * emittable
