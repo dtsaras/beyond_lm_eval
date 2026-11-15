@@ -93,19 +93,6 @@ def test_betti_is_invariant_to_exact_duplicate_rows():
             "5 exact copies changed the Betti numbers of a 42-point circle")
 
 
-def test_persistent_homology(mock_model, mock_tokenizer):
-    """Persistent homology via Vietoris-Rips complex."""
-    from blme.tasks.topology.homology import PersistentHomologyTask
-
-    task = PersistentHomologyTask(config={"num_samples": 5})
-    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
-
-    assert isinstance(results, dict)
-    # May error if get_layers returns None for this architecture
-    if "error" not in results:
-        assert any("persistence_h0" in k for k in results.keys())
-
-
 def _window_docs():
     """16 passages of 31-39 words, so the shipped readout (the last token of a
     20-word window of each passage) places one point per passage. The mock
@@ -250,36 +237,77 @@ def test_persistence_entropy(arch):
         assert {0, 1} <= set(counts)
 
 
-def test_persistent_homology_normalized_summaries(mock_model, mock_tokenizer):
-    """The scale-normalized persistence keys must equal raw / mean-pairwise-
-    distance (the cross-model normalization stated in the paper appendix)."""
+def _homology_results(arch):
     from blme.tasks.topology.homology import PersistentHomologyTask
 
-    task = PersistentHomologyTask(config={"num_samples": 5})
-    results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
-    if "error" in results:
-        pytest.skip("architecture not supported by get_layers")
+    fd, docs = _window_docs()
+    model = fd.tiny_gpt2() if arch == "gpt2" else fd.tiny_llama()
+    results = PersistentHomologyTask(config={"num_samples": len(docs)}).evaluate(
+        model, fd.tokenizer(), dataset=docs)
+    assert "error" not in results, results
+    assert results["_meta_points_readout"] == "last_token_of_20_word_window"
+    assert results["_meta_n_points"] == len(docs)
+    return results
 
-    norm_keys = [k for k in results if k.endswith("_mean_persistence_h0_norm")]
-    assert norm_keys, "normalized persistence keys missing"
-    for key in norm_keys:
-        prefix = key[: -len("_mean_persistence_h0_norm")]
-        # The mean pairwise distance is a RAW SCALE, so it is emitted under
-        # `_meta_` only (2026-09-05); the depth-aligned `first/mid/last_layer_*`
-        # names added the same day sit alongside the absolute-index ones.
-        _mpd_key = f"{prefix}_mean_pairwise_distance"
-        if _mpd_key not in results:
-            _alt = (f"_meta_{prefix}_mean_pairwise_distance"
-                    if not prefix.startswith("_meta_")
-                    else prefix[len("_meta_"):] + "_mean_pairwise_distance")
-            _mpd_key = _alt
-        mpd = results[_mpd_key]
-        assert mpd > 0
+
+@pytest.mark.parametrize("arch", ["gpt2", "llama"])
+def test_persistent_homology(arch):
+    """evaluate() on the shipped window readout. The headline is the H1 bar
+    count and the mean-pairwise-distance twins of the H0 / H1 lifetimes at the
+    first / middle / last layer: the H0 twins are finite and positive, and the
+    H1 mean lifetime is NaN exactly when the layer has no H1 bar."""
+    pytest.importorskip("ripser")
+    from blme.tasks.topology.homology import PersistentHomologyTask
+
+    results = _homology_results(arch)
+    assert set(PersistentHomologyTask.HEADLINE_KEYS) <= set(results)
+    # The raw lifetimes are in the representation's units: _meta_ only.
+    assert not [k for k in results if not k.startswith("_meta_")
+                and "persistence_h" in k and not k.endswith("_norm")]
+
+    counts = []
+    for role in ("first", "mid", "last"):
+        loops = results[f"{role}_layer_num_loops_h1"]
+        assert isinstance(loops, int) and loops >= 0
+        counts.append(loops)
+        mean_h0 = results[f"{role}_layer_mean_persistence_h0_norm"]
+        max_h0 = results[f"{role}_layer_max_persistence_h0_norm"]
+        assert np.isfinite(mean_h0) and np.isfinite(max_h0)
+        assert 0.0 < mean_h0 <= max_h0
+        mean_h1 = results[f"{role}_layer_mean_persistence_h1_norm"]
+        if loops == 0:
+            assert np.isnan(mean_h1)
+        else:
+            assert np.isfinite(mean_h1) and mean_h1 > 0.0
+    # gpt2 has H1 bars at every role; the llama reaches the empty-barcode
+    # (NaN) branch.
+    if arch == "gpt2":
+        assert min(counts) >= 1
+    else:
+        assert 0 in counts and max(counts) >= 1
+
+
+@pytest.mark.parametrize("arch", ["gpt2", "llama"])
+def test_persistent_homology_normalized_summaries(arch):
+    """The scale-normalized persistence keys must equal raw / mean-pairwise-
+    distance (the cross-model normalization stated in the paper appendix).
+    The mean pairwise distance and the raw lifetimes are raw scales, emitted
+    under `_meta_` only."""
+    pytest.importorskip("ripser")
+    results = _homology_results(arch)
+
+    for role in ("first", "mid", "last"):
+        mpd = results[f"_meta_{role}_layer_mean_pairwise_distance"]
+        assert np.isfinite(mpd) and mpd > 0
         for stat in ("mean_persistence_h0", "max_persistence_h0",
                      "mean_persistence_h1"):
-            # The raw role-named lifetimes are _meta_ (the representation's units).
-            raw = results.get(f"{prefix}_{stat}", results.get(f"_meta_{prefix}_{stat}"))
-            assert results[f"{prefix}_{stat}_norm"] == pytest.approx(raw / mpd, rel=1e-9)
+            raw = results[f"_meta_{role}_layer_{stat}"]
+            norm = results[f"{role}_layer_{stat}_norm"]
+            if stat.endswith("h1") and results[f"{role}_layer_num_loops_h1"] == 0:
+                assert np.isnan(raw) and np.isnan(norm)
+            else:
+                assert np.isfinite(raw) and raw > 0
+                assert norm == pytest.approx(raw / mpd, rel=1e-9)
 
 
 def test_zigzag_duplicate_points_do_not_inflate_components():
