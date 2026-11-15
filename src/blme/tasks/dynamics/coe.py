@@ -47,8 +47,8 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from ..common import _no_model_generation_defaults
 from .._tokens import strip_trailing_special
-from .generation_diversity import _no_model_generation_defaults
 
 logger = logging.getLogger("blme")
 

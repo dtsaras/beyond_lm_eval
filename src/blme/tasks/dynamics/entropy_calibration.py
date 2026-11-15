@@ -25,8 +25,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import get_max_positions, stop_ids
-from .generation_diversity import _ignored_generation_settings, _no_model_generation_defaults
+from ..common import (_ignored_generation_settings, _no_model_generation_defaults,
+                      get_max_positions, stop_ids)
 
 logger = logging.getLogger("blme")
 
