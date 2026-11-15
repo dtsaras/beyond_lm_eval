@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blme"
-version = "0.1.0"
+version = "0.2.0"
 description = "Beyond LM Eval — Intrinsic diagnostics for language models"
 readme = "README.md"
 authors = [
@@ -20,7 +20,8 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0.0",
-    "transformers>=4.35.0",
+    # 5.2.0 and 5.10.2 are tested; 5.11 is not.
+    "transformers>=5.2.0,<5.11",
     "numpy",
     "tqdm",
     "scipy",
@@ -30,12 +31,9 @@ dependencies = [
     # mahalanobis, intrinsic_dim, categories) need it.
     "scikit-learn",
     # Pinned. dionysus 2.1.1 bundles fast_zigzag (Dey-Hou) under BSD-3-Clause,
-    # which topology_zigzag_persistence needs for the paper's true multi-layer
-    # barcode. It was declared under an OPTIONAL extra, so a production install
-    # silently fell back to the GF(2) pairwise approximation and dropped the
-    # paper's own metric without any error (adversarial review, 2026-09-03).
-    # On glibc 2.34-2.38 an UNPINNED install falls through to an sdist that
-    # fails to build against Boost 1.74.
+    # which topology_zigzag_persistence needs for the paper's multi-layer
+    # barcode. On glibc 2.34-2.38 an unpinned install falls through to an
+    # sdist that fails to build against Boost 1.74.
     "dionysus==2.1.1",
 ]
 
