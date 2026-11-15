@@ -155,7 +155,8 @@ class PositionalAttentionDecayTask(DiagnosticTask):
     HEADLINE_KEYS = ("positional_decay_nosink_write_weighted",)
     SIZE_INVARIANT = {
         "positional_decay_nosink_write_weighted": (
-            ("insert_identity_blocks", "residual_scale_gauge"),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing",
+             "residual_scale_gauge"),
             "tests/tasks/invariance/test_geometry_positional_decay.py::"
             "test_weighted_mean_is_invariant_under_identity_blocks"),
     }

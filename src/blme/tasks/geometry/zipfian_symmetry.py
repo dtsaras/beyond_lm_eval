@@ -81,7 +81,7 @@ class ZipfianSymmetryTask(DiagnosticTask):
                      "zipf_sym1_unembedding", "zipf_sym2_unembedding")
     SIZE_INVARIANT = dict.fromkeys(
         HEADLINE_KEYS,
-        (("insert_identity_blocks",),
+        (("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
          "tests/tasks/parity/test_zipfian_symmetry_parity.py::"
          "test_headline_invariant_under_identity_blocks"))
 

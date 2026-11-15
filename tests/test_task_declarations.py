@@ -2,9 +2,11 @@
 
 The declarations are TOKEN_POLICY, SOURCES, ADAPTATION_NOTE, HEADLINE_KEYS
 and SIZE_INVARIANT. Each rule is one test, parametrised by task, so a new or
-edited task fails on the declaration it got wrong.
+edited task fails on the declaration it got wrong. The identity-block rule
+covers every registered task that declares SIZE_INVARIANT.
 """
 import ast
+import importlib.util
 import inspect
 import json
 import pathlib
@@ -14,11 +16,16 @@ import sys
 import pytest
 
 from blme.core import _register_all_tasks
-from blme.registry import get_task
+from blme.registry import get_task, list_tasks
 from blme.task_metadata import TASK_CERTIFICATION
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAPER_CORE = json.loads((ROOT / "tests" / "fixtures" / "paper_core_tasks.json").read_text())
+
+# An identity-block transform names where the blocks go: between existing
+# blocks, before block 0, or after the last block.
+IDENTITY_TRANSFORMS = {"identity_blocks_interior", "identity_blocks_leading",
+                       "identity_blocks_trailing"}
 
 PLAIN_POLICIES = {"exclude_pos0", "exclude_sinks", "last_per_sequence", "not_token_based"}
 # Policies that select token rows, so the task must read the attribute: a
@@ -120,3 +127,40 @@ def test_size_invariant_entries_point_at_real_tests(task):
         path = ROOT / file
         assert path.is_file(), f"{task}[{key}]: {file} does not exist"
         assert _defines(path, test), f"{task}[{key}]: {file} defines no {test}"
+
+
+def _end_of_stack_record():
+    path = ROOT / "tests" / "tasks" / "invariance" / "_end_of_stack.py"
+    spec = importlib.util.spec_from_file_location("_end_of_stack", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+EOS = _end_of_stack_record()
+DECLARING = sorted(t for t in list_tasks()
+                   if isinstance(getattr(get_task(t), "SIZE_INVARIANT", None), dict))
+
+
+@pytest.mark.parametrize("task", DECLARING)
+def test_identity_block_transforms_name_their_placement(task):
+    """``identity_blocks_interior``: unchanged by identity blocks between
+    existing blocks. ``identity_blocks_leading`` / ``_trailing``: also by one
+    before block 0 / after the last block, declared exactly where
+    tests/tasks/invariance/_end_of_stack.py records the key as structurally
+    invariant at that end (run in test_end_of_stack_identity_blocks.py)."""
+    for key, (transforms, _node) in get_task(task).SIZE_INVARIANT.items():
+        ident = {t for t in transforms if "identity" in t}
+        assert ident <= IDENTITY_TRANSFORMS, (
+            f"{task}[{key}]: {sorted(ident - IDENTITY_TRANSFORMS)} does not say where the "
+            f"blocks go; use one of {sorted(IDENTITY_TRANSFORMS)}")
+        if not ident:
+            continue
+        assert "identity_blocks_interior" in ident, f"{task}[{key}]: end blocks without interior"
+        assert key in EOS.OUTCOMES.get(task, {}), (
+            f"{task}[{key}]: record its end-of-stack outcome in _end_of_stack.OUTCOMES")
+        for end, outcome in zip(("leading", "trailing"), EOS.OUTCOMES[task][key]):
+            declared = f"identity_blocks_{end}" in ident
+            assert declared == (outcome == EOS.INVARIANT), (
+                f"{task}[{key}]: {end} block recorded as {outcome!r}, "
+                f"declared={declared}")

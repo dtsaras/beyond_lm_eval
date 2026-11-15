@@ -408,7 +408,8 @@ class MagnitudeTask(DiagnosticTask):
     _INV = "tests/tasks/invariance/test_geometry_magnitude.py::"
     SIZE_INVARIANT = dict.fromkeys(
         HEADLINE_KEYS,
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+        (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+          "identity_blocks_leading", "identity_blocks_trailing"),
          _INV + "test_headline_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

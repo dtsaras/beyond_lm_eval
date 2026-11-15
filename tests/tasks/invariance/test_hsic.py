@@ -174,7 +174,7 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_state
     """Each declared transform's direct test, plus the known negative: the
     uniform layer mean under identity blocks, the biased twin under N."""
     from _family_c import check_size_invariant_entry
-    negatives = {"identity_blocks": "_meta_avg_adjacent_hsic"}
+    negatives = {"identity_blocks_interior": "_meta_avg_adjacent_hsic"}
     if key in _NEG_N:
         negatives["N"] = _NEG_N[key]
     check_size_invariant_entry(TASK, HSICDependenceTask, key, tiny_states, tiny_identity_states,

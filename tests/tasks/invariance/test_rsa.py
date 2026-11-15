@@ -126,7 +126,7 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
     from _family_c import check_size_invariant_entry
     check_size_invariant_entry(
         TASK, RepresentationalSimilarityTask, key, tiny_states, tiny_identity_states,
-        negatives={"identity_blocks": "_meta_rsa_adjacent_mean_corrdist"}, rtol_width=1e-9)
+        negatives={"identity_blocks_interior": "_meta_rsa_adjacent_mean_corrdist"}, rtol_width=1e-9)
 
 
 def test_declarations():

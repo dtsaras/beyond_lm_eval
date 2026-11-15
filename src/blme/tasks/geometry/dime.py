@@ -192,10 +192,13 @@ class DiMETask(DiagnosticTask):
         "identity blocks and width padding; dime_peak_depth (argmax / L) moves by design."
     )
     HEADLINE_KEYS = ("dime_peak", "dime_last_layer", "dime_peak_depth")
-    SIZE_INVARIANT = dict.fromkeys(
-        ("dime_peak", "dime_last_layer"),
-        (("insert_identity_blocks", "zero_pad_width"),
-         "tests/tasks/invariance/test_geometry_dime.py::test_headline_invariant"))
+    SIZE_INVARIANT = {
+        k: (ends + ("zero_pad_width",),
+            "tests/tasks/invariance/test_geometry_dime.py::test_headline_invariant")
+        for k, ends in (
+            ("dime_peak", ("identity_blocks_interior", "identity_blocks_leading")),
+            ("dime_last_layer",
+             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing")))}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running DiME (augmentation invariance)...")

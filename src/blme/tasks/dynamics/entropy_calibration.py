@@ -140,7 +140,7 @@ class EntropyCalibrationTask(DiagnosticTask):
     HEADLINE_KEYS = ("entropy_calibration_error", "entropy_calibration_ratio")
     SIZE_INVARIANT = dict.fromkeys(
         HEADLINE_KEYS,
-        (("insert_identity_blocks",),
+        (("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
          "tests/tasks/invariance/test_dynamics_entropy_calibration.py::test_headline_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

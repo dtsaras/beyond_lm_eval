@@ -88,7 +88,8 @@ class GradientFlowTask(DiagnosticTask):
     HEADLINE_KEYS = ("gradient_flow_log_ratio_in_out",)
     SIZE_INVARIANT = {
         "gradient_flow_log_ratio_in_out": (
-            ("insert_identity_blocks", "residual_scale_gauge(rescale_eps=True)"),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing",
+             "residual_scale_gauge(rescale_eps=True)"),
             "tests/tasks/invariance/test_dynamics_gradient_flow.py::"
             "test_end_to_end_log_ratio_invariant_under_identity_blocks",
         ),

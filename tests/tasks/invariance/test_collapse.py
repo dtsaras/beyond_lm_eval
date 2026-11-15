@@ -183,7 +183,9 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
     assert node.endswith(f"test_size_invariant_entry[{key}]")
     base = inv.run_task_on_states(TASK, tiny_states)
     for t in transforms:
-        if t == "identity_blocks":
+        if t in ("identity_blocks_leading", "identity_blocks_trailing"):
+            continue  # test_end_of_stack_identity_blocks.py
+        if t == "identity_blocks_interior":
             ins = inv.run_task_on_states(TASK, tiny_identity_states)
             inv.assert_invariant(base, ins, [key], rtol=1e-9)
             assert inv.rel_change(inv.uniform_layer_mean(base["_meta_erank_per_layer"]),

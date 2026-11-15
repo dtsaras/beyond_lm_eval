@@ -100,7 +100,7 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states, null_state
     copy of an isometric embedding is numerically full-rank). Known
     negatives: the adjusted mean under identity blocks, the raw form under N."""
     from _family_c import check_size_invariant_entry
-    negatives = {"identity_blocks": "procrustes_linearity_adjusted_mean"}
+    negatives = {"identity_blocks_interior": "procrustes_linearity_adjusted_mean"}
     if "_adjusted_" in key:
         negatives["N"] = key.replace("_adjusted_", "_")
     check_size_invariant_entry(TASK, ProcrustesLinearityTask, key, tiny_states,

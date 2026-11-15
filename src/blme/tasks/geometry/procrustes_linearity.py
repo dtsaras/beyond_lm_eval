@@ -252,12 +252,17 @@ class ProcrustesLinearityTask(DiagnosticTask):
     # min/first/last survive them.
     SIZE_INVARIANT = {
         **{f"procrustes_linearity_{s}": (
-            ("identity_blocks", "zero_pad", "isometry", "rescale"),
-            _SI_NODE.format(f"procrustes_linearity_{s}")) for s in ("min", "first", "last")},
+            ("identity_blocks_interior",) + ends + ("zero_pad", "isometry", "rescale"),
+            _SI_NODE.format(f"procrustes_linearity_{s}"))
+           for s, ends in (("min", ("identity_blocks_leading", "identity_blocks_trailing")),
+                           ("first", ("identity_blocks_trailing",)),
+                           ("last", ("identity_blocks_leading",)))},
         **{f"procrustes_linearity_adjusted_{s}": (
-            ("N", "identity_blocks", "zero_pad", "isometry", "rescale"),
+            ("N", "identity_blocks_interior") + ends + ("zero_pad", "isometry", "rescale"),
             _SI_NODE.format(f"procrustes_linearity_adjusted_{s}"))
-           for s in ("min", "first", "last")},
+           for s, ends in (("min", ("identity_blocks_leading", "identity_blocks_trailing")),
+                           ("first", ("identity_blocks_trailing",)),
+                           ("last", ("identity_blocks_leading",)))},
         **{f"procrustes_linearity_adjusted_{s}": (
             ("N", "zero_pad", "isometry", "rescale"),
             _SI_NODE.format(f"procrustes_linearity_adjusted_{s}"))

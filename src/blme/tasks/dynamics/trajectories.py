@@ -90,7 +90,7 @@ class LatentInterpolationTask(DiagnosticTask):
     HEADLINE_KEYS = ("convexity_gap",)
     SIZE_INVARIANT = {
         "convexity_gap": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/invariance/test_dynamics_interpolation.py::"
             "test_convexity_gap_invariant_under_identity_blocks",
         ),

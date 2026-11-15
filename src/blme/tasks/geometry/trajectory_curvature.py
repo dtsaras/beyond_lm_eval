@@ -187,7 +187,9 @@ class TrajectoryCurvatureTask(DiagnosticTask):
     HEADLINE_KEYS = ("straightening_ratio", "curvature_mean_first_layer",
                      "curvature_mean_last_layer")
     SIZE_INVARIANT = {
-        k: (("insert_identity_blocks", "embed_isometric", "zero_pad", "rescale"),
+        k: (("identity_blocks_interior", "identity_blocks_trailing")
+            + (("identity_blocks_leading",) if k == "curvature_mean_last_layer" else ())
+            + ("embed_isometric", "zero_pad", "rescale"),
             "tests/tasks/invariance/test_geometry_trajectory_curvature.py::"
             "test_endpoints_invariant_under_identity_blocks")
         for k in ("straightening_ratio", "curvature_mean_first_layer",

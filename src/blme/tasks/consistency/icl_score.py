@@ -82,7 +82,9 @@ class ICLScoreTask(DiagnosticTask):
     HEADLINE_KEYS = ("icl_score", "icl_score_byte_anchored")
     _INV = "tests/tasks/invariance/test_consistency_icl_score.py::"
     SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS, (("insert_identity_blocks",), _INV + "test_headline_invariant"))
+        HEADLINE_KEYS,
+        (("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+         _INV + "test_headline_invariant"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Olsson ICL score...")

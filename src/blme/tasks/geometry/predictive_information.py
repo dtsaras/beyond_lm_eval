@@ -96,9 +96,12 @@ class PredictiveInformationTask(DiagnosticTask):
     HEADLINE_KEYS = ("predictive_info_peak", "predictive_info_peak_depth",
                      "predictive_info_last_layer")
     _INV = "tests/tasks/invariance/test_geometry_predictive_information.py::"
-    SIZE_INVARIANT = dict.fromkeys(
-        ("predictive_info_peak", "predictive_info_last_layer"),
-        (("insert_identity_blocks",), _INV + "test_headline_invariant"))
+    SIZE_INVARIANT = {
+        "predictive_info_peak": (("identity_blocks_interior",), _INV + "test_headline_invariant"),
+        "predictive_info_last_layer": (
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_headline_invariant"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Predictive Information I(Z_l; Y)...")

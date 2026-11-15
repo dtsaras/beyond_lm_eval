@@ -159,10 +159,12 @@ class LayerSkipEffectTask(DiagnosticTask):
                      "skip_output_effect_total", "skip_output_effect_max")
     _INV = "tests/tasks/invariance/test_causality_layer_skip.py::"
     SIZE_INVARIANT = {
-        "skip_output_effect_total": (("insert_identity_blocks",),
-                                     _INV + "test_output_effects_under_identity_blocks"),
-        "skip_output_effect_max": (("insert_identity_blocks",),
-                                   _INV + "test_output_effects_under_identity_blocks"),
+        "skip_output_effect_total": (
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_output_effects_under_identity_blocks"),
+        "skip_output_effect_max": (
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_output_effects_under_identity_blocks"),
     }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

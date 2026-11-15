@@ -161,7 +161,8 @@ class CorrelationDimensionTask(DiagnosticTask):
     HEADLINE_KEYS = ("correlation_dimension",)
     SIZE_INVARIANT = {
         "correlation_dimension": (
-            ("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+            ("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+             "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/invariance/test_geometry_correlation_dimension.py::test_headline_invariant"),
     }
 

@@ -77,10 +77,11 @@ class RogueDimensionsTask(DiagnosticTask):
         "without each document's first token, a sink in many models, are _meta_."
     )
     HEADLINE_KEYS = ("rogue_top1_share_max", "rogue_top3_share_max", "rogue_top1_share_last")
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("insert_identity_blocks",),
-         "tests/tasks/invariance/test_geometry_rogue_dimensions.py::test_headline_invariant"))
+    SIZE_INVARIANT = {
+        k: (("identity_blocks_interior", "identity_blocks_leading")
+            + (("identity_blocks_trailing",) if k == "rogue_top1_share_last" else ()),
+            "tests/tasks/invariance/test_geometry_rogue_dimensions.py::test_headline_invariant")
+        for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Rogue Dimensions...")

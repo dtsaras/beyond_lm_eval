@@ -136,7 +136,9 @@ def test_size_invariant_entry(key, tiny_states, tiny_identity_states):
     base = inv.run_task_on_states(TASK, tiny_states)
     d = tiny_states.d
     for t in transforms:
-        S = tiny_identity_states if t == "identity_blocks" else _WIDTH[t](tiny_states)
+        if t in ("identity_blocks_leading", "identity_blocks_trailing"):
+            continue  # test_end_of_stack_identity_blocks.py
+        S = tiny_identity_states if t == "identity_blocks_interior" else _WIDTH[t](tiny_states)
         other = inv.run_task_on_states(TASK, S)
         inv.assert_invariant(base, other, [key], rtol=1e-5)
         if t == "zero_pad":

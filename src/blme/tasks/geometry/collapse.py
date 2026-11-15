@@ -125,7 +125,8 @@ class RepresentationCollapseTask(DiagnosticTask):
     HEADLINE_KEYS = ("qdl_entropy_min", "max_erank", "min_erank", "collapse_ratio")
     # Depth (identity blocks) and width (zero-padding, isometry) plus scale.
     # Not N: the pooled erank grows with N up to min(N-1, d).
-    SIZE_INVARIANT = {k: (("identity_blocks", "zero_pad", "isometry", "rescale"),
+    SIZE_INVARIANT = {k: (("identity_blocks_interior", "identity_blocks_trailing",
+                           "zero_pad", "isometry", "rescale"),
                           _SI_NODE.format(k)) for k in HEADLINE_KEYS}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

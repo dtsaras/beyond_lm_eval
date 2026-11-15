@@ -85,7 +85,7 @@ class RepresentationDispersionTask(DiagnosticTask):
     HEADLINE_KEYS = ("representation_dispersion",)
     SIZE_INVARIANT = {
         "representation_dispersion": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/invariance/test_geometry_representation_dispersion.py::"
             "test_headline_invariant"),
     }

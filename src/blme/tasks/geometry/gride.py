@@ -193,10 +193,13 @@ class GrideProfileTask(DiagnosticTask):
         "rescaling; the peak's layer index moves when blocks are added and is _meta_."
     )
     HEADLINE_KEYS = ("gride_id_peak", "gride_id_last_layer")
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
-         _INV + "test_headline_invariant[geometry_gride-gride_keys]"))
+    SIZE_INVARIANT = {
+        k: (("zero_pad", "embed_isometric", "rescale") + ends,
+            _INV + "test_headline_invariant[geometry_gride-gride_keys]")
+        for k, ends in (
+            ("gride_id_peak", ("identity_blocks_interior",)),
+            ("gride_id_last_layer",
+             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing")))}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running GRIDE intrinsic-dimension profile...")
@@ -256,7 +259,8 @@ class InformationImbalanceTask(DiagnosticTask):
     HEADLINE_KEYS = ("ii_first_to_last", "ii_last_to_first", "ii_asymmetry_first_last")
     SIZE_INVARIANT = dict.fromkeys(
         HEADLINE_KEYS,
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+        (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+          "identity_blocks_trailing"),
          _INV + "test_headline_invariant[geometry_information_imbalance-ii_keys]"))
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
@@ -308,10 +312,12 @@ class NeighborhoodOverlapTask(DiagnosticTask):
         "are unchanged by zero-padding, isometric embedding and rescaling at fixed N."
     )
     HEADLINE_KEYS = ("nn_overlap_first_last", "nn_overlap_adjacent_min")
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
-         _INV + "test_headline_invariant[geometry_neighborhood_overlap-no_keys]"))
+    SIZE_INVARIANT = {
+        k: (("zero_pad", "embed_isometric", "rescale") + ends,
+            _INV + "test_headline_invariant[geometry_neighborhood_overlap-no_keys]")
+        for k, ends in (
+            ("nn_overlap_first_last", ("identity_blocks_interior", "identity_blocks_trailing")),
+            ("nn_overlap_adjacent_min", ("identity_blocks_interior",)))}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running neighbourhood overlap between layers...")

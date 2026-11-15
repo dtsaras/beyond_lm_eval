@@ -97,8 +97,11 @@ def check_size_invariant_entry(task, task_cls, key, states, identity_states,
     """Run the direct test for every transform ``task_cls.SIZE_INVARIANT[key]``
     declares, and its known negative.
 
-    * ``identity_blocks`` -- exact identity blocks inserted (``identity_states``):
-      ``key`` bit-stable (rtol 1e-9); ``negatives["identity_blocks"]`` moves.
+    * ``identity_blocks_interior`` -- exact identity blocks inserted between
+      blocks (``identity_states``): ``key`` bit-stable (rtol 1e-9);
+      ``negatives["identity_blocks_interior"]`` moves.
+    * ``identity_blocks_leading`` / ``_trailing`` -- run for every declaring
+      task by ``test_end_of_stack_identity_blocks.py``.
     * ``zero_pad`` / ``isometry`` / ``rescale`` -- ``key`` within ``rtol_width``.
     * ``N`` -- on a row-permutation null (population value 0), ``key`` stays
       within ``null_bound`` of 0 at 3 documents (two draws) and at all of them,
@@ -113,11 +116,13 @@ def check_size_invariant_entry(task, task_cls, key, states, identity_states,
 
     base = run(states)
     for t in transforms:
-        if t == "identity_blocks":
+        if t == "identity_blocks_interior":
             ins = run(identity_states)
             inv.assert_invariant(base, ins, [key], rtol=1e-9)
             if t in negatives:
                 inv.assert_moves(base, ins, negatives[t], 1e-3)
+        elif t in ("identity_blocks_leading", "identity_blocks_trailing"):
+            continue
         elif t in WIDTH_TRANSFORMS:
             other = run(WIDTH_TRANSFORMS[t](states))
             inv.assert_invariant(base, other, [key], rtol=rtol_width)

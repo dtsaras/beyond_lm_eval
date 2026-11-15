@@ -85,10 +85,15 @@ class DeltaHyperbolicityTask(DiagnosticTask):
         "embedding value and the last layer are unchanged by inserted identity blocks."
     )
     HEADLINE_KEYS = ("delta_rel_input_embedding", "delta_rel_last_layer", "delta_rel_min")
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("insert_identity_blocks",),
-         "tests/tasks/invariance/test_geometry_delta_hyperbolicity.py::test_headline_invariant"))
+    SIZE_INVARIANT = {
+        k: (ends, "tests/tasks/invariance/test_geometry_delta_hyperbolicity.py::"
+                  "test_headline_invariant")
+        for k, ends in (
+            ("delta_rel_input_embedding",
+             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing")),
+            ("delta_rel_last_layer",
+             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing")),
+            ("delta_rel_min", ("identity_blocks_interior",)))}
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running delta-hyperbolicity...")

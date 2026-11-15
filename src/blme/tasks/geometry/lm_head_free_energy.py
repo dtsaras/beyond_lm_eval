@@ -89,7 +89,7 @@ class LMHeadFreeEnergyTask(DiagnosticTask):
     HEADLINE_KEYS = ("lm_head_bfe_w",)
     SIZE_INVARIANT = {
         "lm_head_bfe_w": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/parity/test_lm_head_free_energy_parity.py::"
             "test_headline_invariant_under_identity_blocks"),
     }

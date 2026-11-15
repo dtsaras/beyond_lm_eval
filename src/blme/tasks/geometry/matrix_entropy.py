@@ -220,7 +220,8 @@ class MatrixEntropyTask(DiagnosticTask):
     # H / ln d (Def. 4.3) carries 1/ln d, so it falls under zero-padding; the
     # raw H is the twin. Not N- or T-free: H <= ln(T - 1) per document.
     SIZE_INVARIANT = {"matrix_entropy_raw": (
-        ("zero_pad", "isometry", "rescale", "identity_blocks"),
+        ("zero_pad", "isometry", "rescale", "identity_blocks_interior", "identity_blocks_leading",
+         "identity_blocks_trailing"),
         "tests/tasks/invariance/test_matrix_entropy.py::test_size_invariant_entry"
         "[matrix_entropy_raw]")}
 

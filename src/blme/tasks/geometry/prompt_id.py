@@ -125,9 +125,12 @@ class PromptIntrinsicDimTask(DiagnosticTask):
         "zero-padding and rescaling; the peak's depth moves when blocks are added and is _meta_."
     )
     HEADLINE_KEYS = ("prompt_id_peak", "prompt_id_last_layer")
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("insert_identity_blocks", "zero_pad", "rescale"), _INV + "test_headline_invariant"))
+    SIZE_INVARIANT = {
+        k: (ends + ("zero_pad", "rescale"), _INV + "test_headline_invariant")
+        for k, ends in (
+            ("prompt_id_peak", ("identity_blocks_interior",)),
+            ("prompt_id_last_layer",
+             ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing")))}
 
     def _texts(self, dataset, num_samples):
         min_bytes = int(self.config.get("min_bytes", _MIN_BYTES))

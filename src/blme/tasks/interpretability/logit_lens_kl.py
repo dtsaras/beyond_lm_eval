@@ -199,7 +199,7 @@ class LogitLensKLTask(DiagnosticTask):
     )
     HEADLINE_KEYS = ("kl_churn", "kl_to_final_auc", "decision_depth")
     SIZE_INVARIANT = {
-        "kl_churn": (("insert_identity_blocks",),
+        "kl_churn": (("identity_blocks_interior", "identity_blocks_trailing"),
                      _INV + "test_churn_is_exact_under_identity_blocks"),
     }
 

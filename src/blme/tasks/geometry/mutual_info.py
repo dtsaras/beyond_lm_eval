@@ -105,9 +105,11 @@ class HSICDependenceTask(DiagnosticTask):
     # Biased keys: depth- and width-free, but carry the d_eff/N floor at the
     # token cap; the debiased twins add sample-size invariance.
     SIZE_INVARIANT = {
-        **{k: (("identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+        **{k: (("identity_blocks_interior", "identity_blocks_trailing",
+                "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
            for k in ("min_adjacent_hsic", "hsic_compression_ratio")},
-        **{k: (("N", "identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+        **{k: (("N", "identity_blocks_interior", "identity_blocks_trailing",
+                "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
            for k in ("min_adjacent_hsic_debiased", "hsic_compression_ratio_debiased")},
     }
 

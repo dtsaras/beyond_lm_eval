@@ -198,10 +198,15 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
     _INV = "tests/tasks/invariance/test_geometry_lid.py::"
     # lid_mid_layer is an index-selected depth: it moves under identity-block
     # insertion (test_mid_layer_moves_under_identity_insertion).
-    SIZE_INVARIANT = dict.fromkeys(
-        ("lid_mean", "lid_std", "lid_max", "lid_median", "lid_first_layer"),
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
-         _INV + "test_width_scale_and_depth_invariant"))
+    SIZE_INVARIANT = {
+        **dict.fromkeys(("lid_mean", "lid_std", "lid_max", "lid_median"), (
+            ("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+             "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_width_scale_and_depth_invariant")),
+        "lid_first_layer": (("zero_pad", "embed_isometric", "rescale",
+                             "identity_blocks_interior", "identity_blocks_trailing"),
+                            _INV + "test_width_scale_and_depth_invariant"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Local Intrinsic Dimensionality (LID) Analysis...")

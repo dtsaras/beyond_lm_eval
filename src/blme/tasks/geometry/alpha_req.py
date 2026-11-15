@@ -132,10 +132,13 @@ class AlphaReQTask(DiagnosticTask):
     )
     HEADLINE_KEYS = ("alpha_req", "rankme")
     _INV = "tests/tasks/invariance/test_geometry_alpha_req.py::"
-    SIZE_INVARIANT = dict.fromkeys(
-        HEADLINE_KEYS,
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
-         _INV + "test_headline_invariant"))
+    SIZE_INVARIANT = {
+        "alpha_req": (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior"),
+                      _INV + "test_headline_invariant"),
+        "rankme": (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+                    "identity_blocks_leading", "identity_blocks_trailing"),
+                   _INV + "test_headline_invariant"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running alpha-ReQ / RankMe Analysis...")

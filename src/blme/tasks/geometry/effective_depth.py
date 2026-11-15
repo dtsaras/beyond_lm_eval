@@ -126,10 +126,12 @@ class EffectiveDepthTask(DiagnosticTask):
     HEADLINE_KEYS = ("effective_depth_90", "total_block_influence", "max_block_influence")
     _INV = "tests/tasks/invariance/test_geometry_effective_depth.py::"
     SIZE_INVARIANT = {
-        "total_block_influence": (("insert_identity_blocks",),
-                                  _INV + "test_depth_additive_keys_under_identity_blocks"),
-        "max_block_influence": (("insert_identity_blocks",),
-                                _INV + "test_depth_additive_keys_under_identity_blocks"),
+        "total_block_influence": (
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_depth_additive_keys_under_identity_blocks"),
+        "max_block_influence": (
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
+            _INV + "test_depth_additive_keys_under_identity_blocks"),
     }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):

@@ -54,9 +54,11 @@ class IntrinsicDimensionTask(DiagnosticTask):
     # lid_mid_layer is an index-selected depth and moves under identity-block
     # insertion; intrinsic_dimension counts vocabulary rows (V-dependent).
     SIZE_INVARIANT = {
-        "lid_first_layer": (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+        "lid_first_layer": (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+                             "identity_blocks_trailing"),
                             _INV + "test_endpoints_invariant"),
-        "lid_last_layer": (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
+        "lid_last_layer": (("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+                            "identity_blocks_leading", "identity_blocks_trailing"),
                            _INV + "test_endpoints_invariant"),
     }
 

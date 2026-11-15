@@ -67,7 +67,7 @@ class RepresentationalSimilarityTask(DiagnosticTask):
     # and isometric embedding move it slightly (<= 6e-4 in the dossier); only
     # identity blocks and a global rescale are exact.
     SIZE_INVARIANT = {
-        k: (("identity_blocks", "rescale"),
+        k: (("identity_blocks_interior", "identity_blocks_trailing", "rescale"),
             f"tests/tasks/invariance/test_rsa.py::test_size_invariant_entry[{k}]")
         for k in ("rsa_adjacent_min_corrdist", "rsa_early_late_corrdist")
     }

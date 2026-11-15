@@ -237,10 +237,16 @@ class VendiScoreTask(DiagnosticTask):
     _INV = "tests/tasks/invariance/test_geometry_vendi_score.py::"
     # vendi_mean_mid_layer is an index-selected depth and moves under
     # identity-block insertion.
-    SIZE_INVARIANT = dict.fromkeys(
-        ("vendi_mean_first_layer", "vendi_mean_last_layer", "vendi_max"),
-        (("zero_pad", "embed_isometric", "rescale", "insert_identity_blocks"),
-         _INV + "test_endpoints_and_max_invariant"))
+    SIZE_INVARIANT = {
+        **dict.fromkeys(("vendi_mean_first_layer", "vendi_max"), (
+            ("zero_pad", "embed_isometric", "rescale", "identity_blocks_interior",
+             "identity_blocks_trailing"),
+            _INV + "test_endpoints_and_max_invariant")),
+        "vendi_mean_last_layer": (("zero_pad", "embed_isometric", "rescale",
+                                   "identity_blocks_interior", "identity_blocks_leading",
+                                   "identity_blocks_trailing"),
+                                  _INV + "test_endpoints_and_max_invariant"),
+    }
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Vendi Score Diversity Analysis...")

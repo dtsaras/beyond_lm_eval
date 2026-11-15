@@ -143,13 +143,13 @@ class LipschitzContinuityTask(DiagnosticTask):
     # tests/test_invariance_harness.py::test_isometry_and_scale_invariant_tasks.
     SIZE_INVARIANT = {
         "e2e_log_norm_growth": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_trailing"),
             _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
         "total_angular_path": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_trailing"),
             _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
         "relative_change_max": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_trailing"),
             _INV + "test_depth_additive_keys_invariant_under_identity_insertion"),
     }
 

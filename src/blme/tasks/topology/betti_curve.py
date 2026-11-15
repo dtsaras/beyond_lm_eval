@@ -176,7 +176,8 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
 _HEADLINES = ("max_betti_1", "h1_max_persistence")
 # A kNN graph and its hop metric depend on neighbour order only.
 _SIZE_INVARIANT = {
-    k: (("embed_isometric", "zero_pad", "rescale", "insert_identity_blocks"),
+    k: (("embed_isometric", "zero_pad", "rescale", "identity_blocks_interior",
+         "identity_blocks_trailing"),
         "tests/tasks/invariance/test_topology_betti_curve.py::"
         "test_hop_metric_keys_are_width_and_scale_free")
     for k in _HEADLINES}

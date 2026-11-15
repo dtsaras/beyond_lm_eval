@@ -195,9 +195,11 @@ class CKATask(DiagnosticTask):
     # Biased keys: depth- and width-free, but carry the d_eff/N floor; the
     # debiased twins add sample-size invariance.
     SIZE_INVARIANT = {
-        **{k: (("identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+        **{k: (("identity_blocks_interior", "identity_blocks_trailing",
+                "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
            for k in ("early_late_cka", "min_offdiag_cka", "min_adjacent_cka")},
-        **{k: (("N", "identity_blocks", "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
+        **{k: (("N", "identity_blocks_interior", "identity_blocks_trailing",
+                "zero_pad", "isometry", "rescale"), _SI_NODE.format(k))
            for k in ("early_late_cka_debiased", "min_offdiag_cka_debiased",
                      "min_adjacent_cka_debiased")},
     }

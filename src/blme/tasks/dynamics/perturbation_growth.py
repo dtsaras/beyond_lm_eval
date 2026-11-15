@@ -105,7 +105,7 @@ class PerturbationGrowthTask(DiagnosticTask):
     HEADLINE_KEYS = ("growth_log_ratio",)
     SIZE_INVARIANT = {
         "growth_log_ratio": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_leading", "identity_blocks_trailing"),
             "tests/tasks/invariance/test_dynamics_perturbation_growth.py::"
             "test_growth_log_ratio_invariant_under_identity_blocks",
         ),

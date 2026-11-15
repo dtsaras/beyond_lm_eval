@@ -213,7 +213,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
     # refinement of the chain, and the raw magnitudes move under a residual rescale).
     SIZE_INVARIANT = {
         "coe_r_sum": (
-            ("insert_identity_blocks",),
+            ("identity_blocks_interior", "identity_blocks_leading"),
             "tests/tasks/invariance/test_dynamics_coe.py::"
             "test_coe_r_sum_invariant_under_identity_blocks",
         ),
