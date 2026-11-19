@@ -234,9 +234,31 @@ class RepresentationCollapseTask(DiagnosticTask):
         _qdl, qdl_n_docs, _qdl_norm = _profile(True)
         _qdl_whole, _qdl_n_whole, _ = _profile(False)
         qdl_profile = _qdl.tolist()
-        _qdl_ok = np.isfinite(_qdl)
-        qdl_min = float(np.min(_qdl[_qdl_ok])) if _qdl_ok.any() else float("nan")
-        qdl_argmin = int(np.nanargmin(_qdl)) if _qdl_ok.any() else -1
+        # Which blocks the valley is read over. "all" (default): every block,
+        # as the profile minimum. "interior": blocks 1..L-2, the paper's
+        # mid-depth compression valley without the final pre-norm block, where
+        # some models (pythia-160m) have their minimum for a different reason.
+        # The other choice is always recorded (_meta_qdl_entropy_min_<other>).
+        qdl_layers = str(self.config.get("qdl_layers", "all"))
+        if qdl_layers not in ("all", "interior"):
+            return {"error": f"geometry_collapse: qdl_layers must be 'all' or 'interior', got {qdl_layers!r}"}
+
+        def _valley(mask):
+            ok = np.isfinite(_qdl) & mask
+            if not ok.any():
+                return float("nan"), -1
+            vals = np.where(ok, _qdl, np.inf)
+            i = int(np.argmin(vals))
+            return float(_qdl[i]), i
+
+        _all = np.ones(len(_qdl), dtype=bool)
+        _interior = _all.copy()
+        if len(_qdl) > 2:
+            _interior[[0, -1]] = False
+        _masks = {"all": _all, "interior": _interior}
+        qdl_min, qdl_argmin = _valley(_masks[qdl_layers])
+        _other = "interior" if qdl_layers == "all" else "all"
+        qdl_min_other, qdl_argmin_other = _valley(_masks[_other])
         _w_ok = np.isfinite(_qdl_whole)
 
         return {
@@ -247,6 +269,11 @@ class RepresentationCollapseTask(DiagnosticTask):
                 qdl_argmin / (len(layers) - 1) if qdl_argmin >= 0 and len(layers) > 1
                 else float("nan")),
             "_meta_qdl_n_docs": int(qdl_n_docs),
+            "_meta_qdl_layers": qdl_layers,
+            f"_meta_qdl_entropy_min_{_other}": qdl_min_other,
+            f"_meta_qdl_entropy_min_{_other}_layer_frac": (
+                qdl_argmin_other / (len(layers) - 1) if qdl_argmin_other >= 0 and len(layers) > 1
+                else float("nan")),
             "_meta_qdl_tokens": T_fix,
             "_meta_qdl_entropy_min_norm": (float(_qdl_norm[qdl_argmin])
                                            if qdl_argmin >= 0 else float("nan")),
