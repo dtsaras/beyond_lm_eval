@@ -343,6 +343,22 @@ class ChainOfEmbeddingTask(DiagnosticTask):
         if not sample_results:
             return {"error": "Failed to extract layer trajectory"}
 
+        # Which state ends the chain. "final_norm" (default): ln_f(h_L), as the
+        # release's inference.py reads HF hidden_states. "block_output": the raw
+        # deepest block output. The release's normaliser divides by the
+        # first-to-last displacement, so with "final_norm" a model whose last
+        # block leaves a large residual has its coe_c dominated by the final
+        # norm's compression (smollm2-1.7b: 1.64 vs 0.074 at the block output).
+        # The other chain is always recorded as _meta_coe_{r,c}_<other>.
+        chain_end = str(self.config.get("chain_end", "final_norm"))
+        if chain_end not in ("final_norm", "block_output"):
+            return {"error": f"dynamics_coe: chain_end must be 'final_norm' or 'block_output', got {chain_end!r}"}
+        _other_chain, _other_tag = _blockout_results, "blockout"
+        if chain_end == "block_output":
+            if not _blockout_results:
+                return {"error": "dynamics_coe: chain_end='block_output' but the deepest block could not be hooked"}
+            sample_results, _other_chain, _other_tag = _blockout_results, sample_results, "final_norm"
+
         # Aggregate across samples. For Eq. 5 / Eq. 7 the paper reports
         # mean (and later uses this for ROC-AUC) — we report mean + std.
         def _mean(key, results=sample_results):
@@ -403,12 +419,13 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             "_meta_chain_length_per_sample": int(chain_length or 0),
             # False by construction: the headline chain ends at ln_f(...), as in
             # inference.py; the hooked raw block output feeds only *_blockout.
-            "_meta_last_entry_is_block_output": False,
+            "_meta_last_entry_is_block_output": chain_end == "block_output",
+            "_meta_chain_end": chain_end,
             "_meta_blockout_hook_fired": bool(_used_hook[0]),
-            # Disclosure: coe_r / coe_c with the raw deepest block output in
-            # place of ln_f(...).
-            "_meta_coe_r_blockout": _mean("coe_r", _blockout_results),
-            "_meta_coe_c_blockout": _mean("coe_c", _blockout_results),
+            # Disclosure: coe_r / coe_c on the other chain end (the raw deepest
+            # block output by default, ln_f(...) with chain_end=block_output).
+            f"_meta_coe_r_{_other_tag}": _mean("coe_r", _other_chain),
+            f"_meta_coe_c_{_other_tag}": _mean("coe_c", _other_chain),
             # Smallest log10(Z_Mag / (eps_storage * max|chain|)) over samples:
             # <= 0 means a normaliser below the stored states' resolution.
             "_meta_z_mag_margin_log10_min": float(np.min(
