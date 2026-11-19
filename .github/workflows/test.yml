@@ -35,6 +35,10 @@ jobs:
           pip install -e ".[test]"
 
       - name: Prepare offline test fixtures
+        env:
+          # The public distilgpt2 alias serves the pinned weights over HTTP.
+          # Its Xet token endpoint returns 404 for the same revision.
+          HF_HUB_DISABLE_XET: "1"
         run: |
           export HF_HOME="$RUNNER_TEMP/blme-hub"
           export NLTK_DATA="$RUNNER_TEMP/blme-nltk"
