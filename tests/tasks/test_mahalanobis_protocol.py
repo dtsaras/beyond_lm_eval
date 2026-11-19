@@ -150,3 +150,27 @@ def test_split_rows_keeps_documents_whole_and_matches_the_old_permutation_withou
     fi, si = _split_rows(None, 30, 15, np.random.default_rng(7))
     perm = np.random.default_rng(7).permutation(30)
     assert fi.tolist() == sorted(perm[:15].tolist()) and si.tolist() == sorted(perm[15:].tolist())
+
+
+def test_a_failing_eigensolver_falls_back(monkeypatch):
+    """sklearn's LedoitWolf inverts with scipy pinvh, whose default MRRR
+    eigensolver raised "Internal Error." on SmolLM3-3B's shrunk covariance
+    (32 x 2048; d - n_fit equal eigenvalues). The split was dropped with an
+    INFO log, so AUROC averaged 4 splits instead of 5. Now the precision comes
+    from the divide-and-conquer solver and every split is kept."""
+    import scipy.linalg
+
+    cfg = {"n_splits": 3}
+    clean = _run(1.0, cfg)
+
+    def failing_pinvh(*a, **k):
+        raise np.linalg.LinAlgError("Internal Error.")
+
+    monkeypatch.setattr(scipy.linalg, "pinvh", failing_pinvh)
+    out = _run(1.0, cfg)
+    assert "error" not in out, out.get("error")
+    assert out["_meta_n_auroc_splits"] == 3
+    assert out["_meta_n_precision_fallbacks"] == 3 and out["_meta_n_failed_splits"] == 0
+    assert clean["_meta_n_precision_fallbacks"] == 0
+    for key in ("auroc", "mahalanobis_sq_per_dim_id", "mahalanobis_sq_per_dim_ood"):
+        assert out[key] == pytest.approx(clean[key], rel=1e-9), key

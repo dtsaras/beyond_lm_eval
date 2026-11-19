@@ -34,7 +34,7 @@ def test_pooled_keys_match_a_ledoit_wolf_refit(monkeypatch):
     fits, scored = [], []
     real_fit, real_score = M._fit_gaussian, M._mahalanobis_scores
     monkeypatch.setattr(M, "_fit_gaussian",
-                        lambda X, diag=None: fits.append(np.array(X)) or real_fit(X, diag))
+                        lambda X, diag=None, **kw: fits.append(np.array(X)) or real_fit(X, diag, **kw))
     monkeypatch.setattr(M, "_mahalanobis_scores",
                         lambda X, mu, P: scored.append(np.array(X)) or real_score(X, mu, P))
 

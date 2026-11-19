@@ -184,16 +184,39 @@ def _as_id_list(x) -> list:
     return [int(v) for v in x]
 
 
-def _fit_gaussian(X_train, diag=None):
+def _pinvh_divide_and_conquer(a):
+    """``scipy.linalg.pinvh(a)`` (default cutoffs) through LAPACK's
+    divide-and-conquer eigensolver (``driver="evd"``) instead of MRRR."""
+    import scipy.linalg
+    s, u = scipy.linalg.eigh(a, driver="evd", check_finite=False)
+    cutoff = np.max(np.abs(s)) * max(a.shape) * np.finfo(u.dtype).eps
+    keep = np.abs(s) > cutoff
+    return (u[:, keep] * (1.0 / s[keep])) @ u[:, keep].conj().T
+
+
+def _fit_gaussian(X_train, diag=None, stats=None):
     """Centroid and precision of ``X_train``: Ledoit-Wolf shrinkage (the
     empirical covariance is rank-deficient at n_fit << d), else a ridge-
     regularised sample covariance. ``diag`` receives the realised shrinkage
-    (it differs by an order of magnitude across models), d and n_fit."""
+    (it differs by an order of magnitude across models), d and n_fit;
+    ``stats["precision_fallbacks"]`` counts the fallback below."""
     mu = np.mean(X_train, axis=0)
     if HAS_SKLEARN:
         lw = LedoitWolf()
-        lw.fit(X_train)
-        inv_cov = lw.precision_
+        try:
+            lw.fit(X_train)
+            inv_cov = lw.precision_
+        except np.linalg.LinAlgError:
+            # sklearn inverts with scipy pinvh, whose default MRRR eigensolver
+            # ("evr") can fail ("Internal Error.") on a shrunk covariance: at
+            # n_fit < d it has d - n_fit equal eigenvalues (SmolLM3-3B, 32 x
+            # 2048, eigenvalues 0.05-10.5). The same covariance through the
+            # divide-and-conquer solver; successful fits are unchanged
+            # (tests/tasks/test_mahalanobis_protocol.py::test_a_failing_eigensolver_falls_back).
+            lw = LedoitWolf(store_precision=False).fit(X_train)
+            inv_cov = _pinvh_divide_and_conquer(lw.covariance_)
+            if stats is not None:
+                stats["precision_fallbacks"] = stats.get("precision_fallbacks", 0) + 1
         if diag is not None:
             diag["shrinkage"] = float(getattr(lw, "shrinkage_", float("nan")))
     else:
@@ -518,6 +541,8 @@ class MahalanobisOODTask(DiagnosticTask):
         _per_split_auroc = []
         _shared_groups = []
         _fit_sizes = []
+        _fit_stats = {}
+        _n_failed_splits = 0
         for _k in range(_n_splits):
             if _k == 0:
                 _fi, _si = _fit_idx, _score_idx
@@ -531,11 +556,13 @@ class MahalanobisOODTask(DiagnosticTask):
             # deterministic, so this is what two separate fits returned).
             _ood_k = X_ood_full[_si] if _paired_ood else X_ood
             try:
-                _mu, _P = _fit_gaussian(X_id[_fi], diag=_diag if _k == 0 else None)
+                _mu, _P = _fit_gaussian(X_id[_fi], diag=_diag if _k == 0 else None,
+                                        stats=_fit_stats)
                 _d_id = _mahalanobis_scores(X_id[_si], _mu, _P)
                 _d_ood = _mahalanobis_scores(_ood_k, _mu, _P)
             except Exception as e:
-                logger.info(f"Error computing Mahalanobis: {e}")
+                logger.warning(f"geometry_mahalanobis: split {_k} failed and is left out: {e!r}")
+                _n_failed_splits += 1
                 _d_id, _d_ood = [], []
             if _d_id and _d_ood:
                 _acc_id.append(np.asarray(_d_id, dtype=float))
@@ -588,6 +615,10 @@ class MahalanobisOODTask(DiagnosticTask):
             "_meta_n_split_groups": (int(len(np.unique(_groups))) if _groups is not None else None),
             "_meta_split_groups_shared_max": (max(_shared_groups) if _shared_groups else None),
             "_meta_n_id_fit_mean": float(np.mean(_fit_sizes)),
+            # Derived: splits that fell back to the divide-and-conquer
+            # eigensolver, and splits that still failed (left out of every mean).
+            "_meta_n_precision_fallbacks": int(_fit_stats.get("precision_fallbacks", 0)),
+            "_meta_n_failed_splits": int(_n_failed_splits),
         }
 
         # dist^2/d: dist^2 ~ chi2(d) under a correctly specified Gaussian, so
