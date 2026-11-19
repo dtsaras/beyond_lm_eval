@@ -12,7 +12,7 @@
   - LID defaults to layerwise mode too. Before, `lid_mean` read the post-norm output by default but the deepest raw block output in layerwise mode (gpt2: 7.62 vs 21.75), so the key changed meaning with the flag. **Values change** for runs that relied on the old default.
   - Intrinsic dimension's `_meta_` token cloud runs only when CUDA is available (`token_cloud: auto`). On the CPU ball tree it exceeded `task_timeout`, which discarded the headlines.
   - Hubness can drop near-duplicate rows of its draw (`drop_near_duplicates`, default off), i.e. untrained in-vocabulary rows such as Llama-3's reserved tokens or Qwen3's never-emitted byte tokens; their count and the other choice's values are recorded. Superposition has the same switch, opt-in.
-  - One-point-per-sequence clouds count windows whose last token carries a massive activation (`_meta_n_massive_points`); `massive_points: drop` removes them at every depth.
+  - One-point-per-sequence clouds count windows whose last token carries a massive activation (`_meta_window_n_massive_points`); `massive_points: drop` removes them at every depth.
 - `repe_steering_effectiveness`: `directional_consistency`, `directional_success_rate` and `steering_sign_reversal` become `_meta_` (same values, `_meta_` names). They summarise projections onto the steering direction and sit near 1 by construction, so they do not show whether steering works.
 - Docs: magnitude's headline uses magnipy's 30-scale grid and cosine distance, not `n_scales`; CKNNA's outlier clamp, what the HSIC headlines are, and spectral's module set are now stated.
 

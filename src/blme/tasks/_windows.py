@@ -152,8 +152,8 @@ def _apply_massive_rule(rows, info, mode):
     """Count massive windows; with ``mode == "drop"`` remove them at every depth."""
     flag, max_ratio = massive_window_mask(rows)
     n_massive = int(flag.sum())
-    meta = {"_meta_massive_points": mode, "_meta_n_massive_points": n_massive,
-            "_meta_massive_points_max_ratio": max_ratio}
+    meta = {"_meta_window_massive_points": mode, "_meta_window_n_massive_points": n_massive,
+            "_meta_window_massive_points_max_ratio": max_ratio}
     info = dict(info, massive_meta=meta)
     if mode != "drop" or not n_massive:
         return rows, info

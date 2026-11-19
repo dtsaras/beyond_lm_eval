@@ -381,7 +381,7 @@ def test_hubness(mock_model, mock_tokenizer):
 def test_intrinsic_dim(mock_model, mock_tokenizer):
     from blme.tasks.geometry.intrinsic_dim import IntrinsicDimensionTask
 
-    task = IntrinsicDimensionTask(config={})
+    task = IntrinsicDimensionTask(config={"layerwise": False})
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert "intrinsic_dimension" in results
@@ -525,7 +525,7 @@ def test_intrinsic_dim_never_below_one():
     )
     model = GPT2LMHeadModel(config).eval()
 
-    task = IntrinsicDimensionTask(config={})
+    task = IntrinsicDimensionTask(config={"layerwise": False})
     out = task.evaluate(model, tokenizer=None, dataset=None)
     d = out["intrinsic_dimension"]
     assert np.isfinite(d), f"ID is not finite: {d}"

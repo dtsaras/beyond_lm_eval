@@ -53,8 +53,8 @@ def test_mask_flags_middle_depth_outliers_only():
 def test_keep_counts_and_leaves_the_rows():
     rows = _rows(massive_at=(3, 17))
     out, _, info = _call(rows)
-    assert info["massive_meta"]["_meta_n_massive_points"] == 2
-    assert info["massive_meta"]["_meta_massive_points"] == "keep"
+    assert info["massive_meta"]["_meta_window_n_massive_points"] == 2
+    assert info["massive_meta"]["_meta_window_massive_points"] == "keep"
     assert all(out[k] is rows[k] for k in rows)
 
 
@@ -73,5 +73,5 @@ def test_drop_removes_the_same_windows_at_every_depth():
 def test_no_massive_window_is_a_no_op_for_drop():
     rows = _rows()
     out, _, info = _call(rows, massive_points="drop")
-    assert info["massive_meta"]["_meta_n_massive_points"] == 0
+    assert info["massive_meta"]["_meta_window_n_massive_points"] == 0
     assert all(out[k] is rows[k] for k in rows)
