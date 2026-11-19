@@ -92,14 +92,14 @@ def test_sources_pin_the_cloned_commit():
 
 
 def test_single_layer_lid_matches_mle_batch(mle_batch, clouds):
-    """The packaged default (layerwise: false): one last-token point per
+    """Single-layer mode (layerwise: false): one last-token point per
     sequence from the final (post-norm) entry, every point a query."""
     g = np.random.default_rng(7)
     final = [np.vstack([g.standard_normal((2, D)), clouds[-1][i:i + 1]]).astype(np.float32)
              for i in range(N_DOCS)]
     blocks = {li: [g.standard_normal((3, D)).astype(np.float32) for _ in range(N_DOCS)]
               for li in range(L)}
-    res = inv.run_task_on_states("geometry_lid", blocks, final_norm=final)
+    res = inv.run_task_on_states("geometry_lid", blocks, {"layerwise": False}, final_norm=final)
     assert res["_meta_lid_mode"] == "single_layer"
     est = mle_batch(clouds[-1], clouds[-1], 20)
     want = {"lid_mean": est.mean(), "lid_std": est.std(), "lid_max": est.max(),

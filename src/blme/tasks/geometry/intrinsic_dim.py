@@ -69,7 +69,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
 
         # Static mode measures the input-embedding rows; layerwise mode the
         # hidden-state profile over block outputs.
-        layerwise = self.config.get("layerwise", False)
+        layerwise = self.config.get("layerwise", True)
 
         if layerwise:
             logger.info("  Mode: Layer-wise Activations")
@@ -79,6 +79,15 @@ class IntrinsicDimensionTask(DiagnosticTask):
             n_seq = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
             seed = int(self.config.get("subsample_seed", 42))
 
+            # The token-cloud diagnostic (_meta_ only) runs its 2-NN search on
+            # up to 20000 rows per layer: seconds on the GPU branch of
+            # _two_nearest_neighbor_distances, but the CPU ball tree takes more
+            # than evaluate's task_timeout and the headlines are lost with it.
+            # token_cloud: "auto" (run only when CUDA is available), true, false.
+            tc = self.config.get("token_cloud", "auto")
+            run_tokens = torch.cuda.is_available() if tc == "auto" else bool(tc)
+            token_docs = int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)) if run_tokens else 0
+
             logger.info("  Collecting hidden states...")
             # One point per sequence (Q1): the last token of a 20-word window of
             # each of n_seq passages, at every block output (the deepest one the
@@ -86,7 +95,7 @@ class IntrinsicDimensionTask(DiagnosticTask):
             sc = sequence_clouds(
                 model, tokenizer, dataset, cache, n=n_seq, layer="all",
                 replace_final_norm=True, use_cache=use_cache,
-                token_docs=int(self.config.get("token_cloud_docs", DEFAULT_TOKEN_DOCS)),
+                token_docs=token_docs,
                 readout=readout_for(self.TOKEN_POLICY),
                 points=window_options(self.config))
             if not sc.last:
@@ -129,6 +138,8 @@ class IntrinsicDimensionTask(DiagnosticTask):
             results["_meta_cache_rejected"] = sc.info.get("cache_rejected")
             results.update(sc.meta())
             results["_meta_intrinsic_dim_mode"] = "layerwise"
+            results["_meta_token_cloud"] = ("run" if token_docs > 0 else
+                                            "skipped_no_cuda" if tc == "auto" else "off")
             return results
 
         else:

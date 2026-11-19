@@ -78,7 +78,7 @@ def test_replaced_depth_summaries_move_under_identity_insertion(tiny, states):
 def test_sink_diagnostics_are_emitted(states):
     """The token cloud follows the sink policy, and the shares of the centred
     sum of squares in position 0 / massive rows are reported."""
-    base = inv.run_task_on_states(TASK, states)
+    base = inv.run_task_on_states(TASK, states, {"token_cloud": True})
     assert 0.0 <= base["_meta_position0_share"] <= 1.0
     assert 0.0 <= base["_meta_massive_token_share"] <= 1.0
     assert base["_meta_sink_n_depths"] >= 1 and base["_meta_token_cloud_n_docs"] == len(TEXTS)

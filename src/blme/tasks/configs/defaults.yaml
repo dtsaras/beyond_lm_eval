@@ -25,6 +25,9 @@ geometry_hubness:
   batch_size: 2000
 
 geometry_collapse:
+  # qdl_entropy_min over every block ("all") or blocks 1..L-2 ("interior");
+  # the other is recorded as _meta_.
+  qdl_layers: all
   num_samples: 100
 
 geometry_lid:
@@ -32,7 +35,12 @@ geometry_lid:
   # One point per sequence (last content token), N pinned at 1000 documents;
   # the token cloud of the first 200 (20000 rows) is _meta_.
   num_samples: 1000
-  layerwise: false
+  # true (default; the study's setting, and Ma et al. compute LID at every
+  # layer): every block output, the deepest one the raw block output, and
+  # lid_mean/std/max/median are that deepest layer's. false: HF's post-norm
+  # output only, so lid_mean then reads a different representation and
+  # lid_first_layer/lid_mid_layer are absent. _meta_lid_mode records it.
+  layerwise: true
   token_cloud_docs: 200
   token_cloud_points: 20000
 
@@ -113,11 +121,18 @@ geometry_unembedding:
   categories_path: null
 
 geometry_intrinsic_dim:
-  layerwise: false
+  # true (default): TwoNN per layer on one point per sequence; the headline
+  # keys lid_first/mid/last_layer exist only in this mode, and it is what the
+  # study runs. false: the static vocabulary-embedding estimate
+  # (intrinsic_dimension, not a headline; ~40 min on gpt2 on 2 CPU threads).
+  layerwise: true
   # Layerwise mode: one point per sequence (last content token), N pinned at
   # 1000 documents for every model; the token cloud of the first 200 is _meta_.
   num_samples: 1000
   token_cloud_docs: 200
+  # The token cloud is _meta_ only. auto: run it only when CUDA is available
+  # (seconds on the GPU 2-NN path; the CPU ball tree exceeds task_timeout).
+  token_cloud: auto
 
 geometry_hsic:
   num_samples: 100
@@ -295,6 +310,12 @@ dynamics_stability:
   reference_model_path: null
 
 dynamics_sharpness:
+  # Hutchinson stopping: pyhessian (default, reference) or rse (stop at a
+  # relative SE <= hutchinson_rse_target after hutchinson_min_probes probes;
+  # n_hutchinson stays the cap).
+  hutchinson_stop: pyhessian
+  hutchinson_rse_target: 0.05
+  hutchinson_min_probes: 10
   param_scope: last_layer
   # PyHessian's loops: at most 100 HVPs per estimator, stopping once the
   # estimate changes by less than 1e-3 (relative).
@@ -327,6 +348,9 @@ dynamics_coe:
   # Greedy generation, then the mean over the output tokens' emitting states
   # (Wang et al. 2025 Sec. 2.1); 128 is the release's setting for base models.
   max_new_tokens: 128
+  # Chain end: final_norm = ln_f(h_L), the release (default); block_output =
+  # the raw deepest block output. The other is recorded as _meta_.
+  chain_end: final_norm
 
 dynamics_generation_diversity:
   # SEED PINNED (2026-09-04). This task SAMPLES, and with no seed three runs of

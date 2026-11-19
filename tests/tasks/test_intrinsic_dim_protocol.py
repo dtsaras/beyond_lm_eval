@@ -70,8 +70,9 @@ def test_headline_is_one_point_per_sequence(tiny):
     and the point count is the document count."""
     model, tok = tiny
     S = inv.states_from_model(model, tok, TEXTS)
-    base = inv.run_task_on_states("geometry_intrinsic_dim", S)
-    edited = inv.run_task_on_states("geometry_intrinsic_dim", _replace_all_but_last(S))
+    cfg = {"token_cloud": True}
+    base = inv.run_task_on_states("geometry_intrinsic_dim", S, cfg)
+    edited = inv.run_task_on_states("geometry_intrinsic_dim", _replace_all_but_last(S), cfg)
     keys = ["lid_first_layer", "lid_mid_layer", "lid_last_layer", "lid_trend"]
     inv.assert_invariant(base, edited, keys, rtol=0.0)
     assert base["_meta_n_points"] == len(TEXTS)

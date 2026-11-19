@@ -213,7 +213,7 @@ class LocalIntrinsicDimensionalityTask(DiagnosticTask):
         k = int(self.config.get("k", 20))
         num_samples = int(self.config.get("num_samples", DEFAULT_N_SEQUENCES))
         use_cache = self.config.get("use_cache", True)
-        layerwise = self.config.get("layerwise", False)
+        layerwise = self.config.get("layerwise", True)
         token_points = int(self.config.get("token_cloud_points", _TOKEN_CLOUD_POINTS))
         seed_offset = int(self.config.get("seed_offset", 0))
         if dataset is None:
