@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .utils import gpu_linalg_device
 from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
                        position0_share, select_rows, sink_keep_masks, sink_meta)
 
@@ -42,6 +43,11 @@ def _linear_cka(X: torch.Tensor, Y: torch.Tensor,
     # Numerator and denominator are fourth powers of the data scale; dividing
     # each matrix by its own max keeps them inside float32 (CKA is invariant to
     # a positive rescale of either view; tests/test_scale_invariance.py).
+    if X.is_cuda:
+        # GPU path: accumulate in float64. The float32 GEMMs of the CPU path
+        # are 1e-5..6e-5 (relative) off the exact value at these N (blind review
+        # C; GPU-vs-CPU A/B, 2026-11-20), and float64 is cheap on the GPU.
+        X, Y = X.double(), Y.double()
     _gx = X.abs().amax()
     _gy = Y.abs().amax()
     _tiny = torch.finfo(X.dtype).tiny
@@ -241,6 +247,22 @@ class CKATask(DiagnosticTask):
             centered_acts[idx] = X
             norms[idx] = _max_relative_gram_norm(X)
 
+        # The pair loop is one D x D GEMM per layer pair: on the GPU when the
+        # centred layers fit (same float32 arithmetic; only reduction order
+        # differs), else on the CPU (tests/blind reviews ran the CPU path).
+        _linalg_device = "cpu"
+        _dev = gpu_linalg_device()
+        if _dev is not None:
+            try:
+                centered_acts = {k_: v_.to(_dev) for k_, v_ in centered_acts.items()}
+                _linalg_device = "cuda"
+            except (torch.cuda.OutOfMemoryError, RuntimeError):
+                centered_acts = {k_: v_.cpu() for k_, v_ in centered_acts.items()}
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
         logger.info("  Computing CKA Matrix...")
         cka_matrix = np.zeros((n_layers, n_layers))
         dbg_matrix = np.zeros((n_layers, n_layers))
@@ -311,6 +333,7 @@ class CKATask(DiagnosticTask):
         # (an identity pair reads 1.0) and the index-based first-middle pair
         # are _meta_ profile summaries (test_cka.py identity-insertion test).
         results = {
+            "_meta_linalg_device": _linalg_device,
             "min_adjacent_cka": _stat(diagonal_off1, np.nanmin),
             "min_offdiag_cka": _stat(off_diag, np.nanmin),
             # max_offdiag_cka is not emitted: the most similar pair is an

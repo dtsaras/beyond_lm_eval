@@ -301,6 +301,114 @@ def _offload_view(path, tag, shape):
     return torch.from_numpy(np.memmap(path, dtype=np.dtype(tag), mode="c", shape=shape))
 
 
+# Large float64 linear algebra runs on the GPU when one is available: the
+# token clouds, vocabularies and layer pairs these tasks reduce made the sweep
+# CPU-bound (single-threaded LAPACK/numpy) with the GPUs idle. The GPU path
+# computes the same quantities in the same precision; only the reduction order
+# differs. BLME_CPU_LINALG=1 forces the CPU path (the tests, the parity
+# fixtures and the blind reviews ran it); a CUDA out-of-memory falls back to it.
+_GPU_MIN_NUMEL = 1 << 16
+
+
+def gpu_linalg_device():
+    """The CUDA device for large linear algebra, or None (no CUDA, or BLME_CPU_LINALG=1)."""
+    import os as _os
+    if _os.environ.get("BLME_CPU_LINALG") == "1" or not torch.cuda.is_available():
+        return None
+    return torch.device("cuda")
+
+
+# A failed GPU step is recomputed on the CPU, so the result never depends on it:
+# CUDA out-of-memory and the RuntimeErrors CUDA raises (allocation, cuSOLVER).
+_GPU_FALLBACK = (torch.cuda.OutOfMemoryError, RuntimeError)
+
+
+def to_gpu_linalg(*tensors, min_numel: int = _GPU_MIN_NUMEL):
+    """CUDA copies of CPU tensors when the GPU path applies and the largest is big enough.
+
+    Returns ``(tensors, moved)``; on a CUDA out-of-memory the tensors come back
+    unchanged on the CPU, so the caller's arithmetic is the CPU path.
+    """
+    dev = gpu_linalg_device()
+    if dev is None or not tensors or max(int(t.numel()) for t in tensors) < min_numel \
+            or any(t.device.type != "cpu" for t in tensors):
+        return tensors, False
+    try:
+        return tuple(t.to(dev) for t in tensors), True
+    except _GPU_FALLBACK:
+        _empty_cache()
+        return tensors, False
+
+
+def _empty_cache():
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _linalg_on_gpu(fn, *tensors, **kw):
+    """``fn(*tensors, **kw)`` on the GPU when the GPU path applies, results
+    back on the inputs' device; the CPU on a CUDA out-of-memory."""
+    moved, on_gpu = to_gpu_linalg(*tensors)
+    if on_gpu:
+        try:
+            out = fn(*moved, **kw)
+            return tuple(o.cpu() for o in out) if isinstance(out, tuple) else out.cpu()
+        except _GPU_FALLBACK:
+            _empty_cache()
+    return fn(*tensors, **kw)
+
+
+def gpu_svdvals(A):
+    """``torch.linalg.svdvals`` on the GPU when it applies (see to_gpu_linalg)."""
+    return _linalg_on_gpu(torch.linalg.svdvals, A)
+
+
+def gpu_svd(A, full_matrices: bool = False):
+    """``torch.linalg.svd`` on the GPU when it applies; returns (U, S, Vh)."""
+    return _linalg_on_gpu(lambda M: tuple(torch.linalg.svd(M, full_matrices=full_matrices)), A)
+
+
+def gpu_eigh(A):
+    """``torch.linalg.eigh`` on the GPU when it applies; returns (eigenvalues, eigenvectors)."""
+    return _linalg_on_gpu(lambda M: tuple(torch.linalg.eigh(M)), A)
+
+
+def knn_sorted_batched(U, queries, k: int, batch: int = 64):
+    """The ``k`` nearest other rows of ``U`` for each query row, nearest first.
+
+    Distances are direct chord distances in float64 (no dot-product
+    cancellation) with the query's own row excluded; ties go to the lower index
+    (a stable sort), matching ``np.lexsort((arange, d2))[:k]``. Runs on the GPU
+    in batches of queries when one is available, else on the CPU. Returns an
+    ``(n_queries, k)`` int64 numpy array.
+    """
+    import numpy as _np
+    dev = gpu_linalg_device() or torch.device("cpu")
+    if dev.type == "cpu":
+        return _knn_sorted(U, queries, k, batch, dev)
+    try:
+        return _knn_sorted(U, queries, k, batch, dev)
+    except _GPU_FALLBACK:
+        _empty_cache()
+        return _knn_sorted(U, queries, k, batch, torch.device("cpu"))
+
+
+def _knn_sorted(U, queries, k, batch, dev):
+    import numpy as _np
+    Ut = torch.as_tensor(_np.asarray(U)).to(dev, torch.float64)
+    q = torch.as_tensor(_np.asarray(queries, dtype=_np.int64), device=dev)
+    out = []
+    for s in range(0, len(q), batch):
+        qq = q[s:s + batch]
+        d = torch.cdist(Ut[qq], Ut, compute_mode="donot_use_mm_for_euclid_dist")
+        d[torch.arange(len(qq), device=dev), qq] = float("inf")
+        out.append(torch.sort(d, dim=1, stable=True).indices[:, :k].cpu())
+        del d
+    return torch.cat(out).numpy() if out else _np.zeros((0, k), dtype=_np.int64)
+
+
 def safe_svdvals(M):
     """Singular values that do not overflow at the top of the float32 range.
 
@@ -328,13 +436,32 @@ def safe_svdvals(M):
     # +1e6 the old order gave official alpha 1.249006646 against a 100-digit
     # SVD reference's 1.163063736 (+7.39%) (gpt-5.6-sol round 9, 2026-09-07).
     Ad = A.double()
+    (Ad,), on_gpu = to_gpu_linalg(Ad)
+    try:
+        gd = Ad.abs().amax()
+        gf = float(gd)
+        if not _np.isfinite(gf) or gf == 0.0:
+            S = torch.linalg.svdvals(Ad)
+        else:
+            S = torch.linalg.svdvals(Ad / gd) * gd
+    except _GPU_FALLBACK:
+        if not on_gpu:
+            raise
+        _empty_cache()
+        return _svdvals_cpu(A, _is_torch)
+    if on_gpu:
+        S = S.cpu()
+    return S if _is_torch else S.cpu().numpy()
+
+
+def _svdvals_cpu(A, is_torch):
+    """safe_svdvals on the CPU (the OOM fallback of the GPU path)."""
+    import numpy as _np
+    Ad = A.double().cpu()
     gd = Ad.abs().amax()
     gf = float(gd)
-    if not _np.isfinite(gf) or gf == 0.0:
-        S = torch.linalg.svdvals(Ad)
-        return S if _is_torch else S.cpu().numpy()
-    S = torch.linalg.svdvals(Ad / gd) * gd
-    return S if _is_torch else S.cpu().numpy()
+    S = torch.linalg.svdvals(Ad) if (not _np.isfinite(gf) or gf == 0.0) else torch.linalg.svdvals(Ad / gd) * gd
+    return S if is_torch else S.numpy()
 
 
 def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=-1,

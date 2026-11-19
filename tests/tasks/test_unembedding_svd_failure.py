@@ -58,5 +58,7 @@ def test_a_gpu_svd_failure_is_retried_on_the_cpu(monkeypatch, mock_model_tokeniz
     monkeypatch.setattr(torch.Tensor, "to", to)
     got = U.UnembeddingDiagnosticsTask({}).evaluate(model, tok, None)
     monkeypatch.undo()
-    assert got["unembedding_eff_rank"] == want["unembedding_eff_rank"]
+    # On a GPU host `want` used the GPU SVD (BLME >= 0.2.1) and `got` the CPU
+    # fallback: the same value up to float64 round-off.
+    assert got["unembedding_eff_rank"] == pytest.approx(want["unembedding_eff_rank"], rel=1e-12)
     assert got["_meta_unembedding_svd_error"] is None

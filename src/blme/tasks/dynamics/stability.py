@@ -1,7 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings
-from ..geometry.utils import safe_unit_rows
+from ..geometry.utils import gpu_linalg_device, knn_sorted_batched, safe_unit_rows
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -140,8 +140,19 @@ class NeighborhoodStabilityTask(DiagnosticTask):
         sample_idx = rng.choice(n_vocab, min(n_sample, n_vocab), replace=False)
 
         jaccards = []
+        _gpu = gpu_linalg_device() is not None
+        if _gpu:
+            # All queries at once on the GPU: float64 direct chord distances and
+            # the same stable index tie-break as the loop below (which is the
+            # CPU path, in float32). Neighbour sets agree with it except where
+            # two candidates tie within float32 rounding at rank k.
+            nn1_all = knn_sorted_batched(E1_norm, sample_idx, k)
+            nn2_all = knn_sorted_batched(E2_norm, sample_idx, k)
+            for a_, b_ in zip(nn1_all, nn2_all):
+                s1, s2 = set(a_.tolist()), set(b_.tolist())
+                jaccards.append(len(s1 & s2) / len(s1 | s2))
 
-        for idx in tqdm(sample_idx, desc="Stability Jaccard"):
+        for idx in ([] if _gpu else tqdm(sample_idx, desc="Stability Jaccard")):
             # Direct chord distances (no near-1 dot-product cancellation) with a
             # stable index tie-break, for both embeddings.
             def _knn(E):
@@ -175,4 +186,5 @@ class NeighborhoodStabilityTask(DiagnosticTask):
             "_meta_n_rows_excluded": int(n_rows_total - n_vocab),
             "_meta_k": int(k),
             "stability_mode": stability_mode,
+            "_meta_knn_device": "cuda_float64" if _gpu else "cpu_float32",
         }

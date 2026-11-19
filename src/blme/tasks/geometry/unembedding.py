@@ -1,7 +1,7 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
 from ..common import get_embeddings, get_final_norm, get_lm_head
-from .utils import effective_rank as _effective_rank, safe_svdvals, safe_unit_rows
+from .utils import effective_rank as _effective_rank, gpu_linalg_device, knn_sorted_batched, safe_svdvals, safe_unit_rows
 import torch
 import numpy as np
 import json
@@ -194,6 +194,14 @@ class UnembeddingDiagnosticsTask(DiagnosticTask):
                         )
 
                     scores = []
+                    _q = [i for i in query_ids if i < W_norm.shape[0]]
+                    if gpu_linalg_device() is not None and _q:
+                        # All queries at once on the GPU (float64 chord distances,
+                        # same stable index tie-break as the CPU loop below).
+                        for idx, top_k_idx in zip(_q, knn_sorted_batched(W_norm, _q, k)):
+                            my_cat = cat_labels[idx]
+                            scores.append(sum(1 for t in top_k_idx if cat_labels.get(int(t)) == my_cat) / k)
+                        query_ids = []
                     for idx in query_ids:
                         if idx >= W_norm.shape[0]:
                             continue

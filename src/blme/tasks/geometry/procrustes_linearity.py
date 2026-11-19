@@ -37,7 +37,7 @@ Metric definition (verified against the reference code — quoted below):
     (LLM_microscope.ipynb cell 3 / llm_microscope/functions.py:86-115):
 
         def get_est_svd(X, Y):
-            U, S, Vh = torch.linalg.svd(X, full_matrices=False)
+            U, S, Vh = gpu_svd(X, full_matrices=False)
             A_estimation = Vh.T * (1 / S)[None, ...] @ U.T @ Y  # Y=XA
             Y_est =  X @ A_estimation
             return Y_est
@@ -90,7 +90,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from ..common import get_num_layers
-from .utils import as_numpy
+from .utils import as_numpy, gpu_eigh, gpu_svd
 from .._tokens import (hidden_states_for_task, massive_token_share, middle_depth_layers,
                        position0_share, select_rows, sink_keep_masks, sink_meta)
 
@@ -141,7 +141,7 @@ def _procrustes_similarity(X, Y, rank_aware: bool = False, return_rank: bool = F
         Yc = Yc / ny
 
         # 3. Unconstrained linear map A = X^+ Y via the thin SVD, then Y_est.
-        U, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+        U, S, Vh = gpu_svd(Xc, full_matrices=False)
         if S.numel() == 0:
             return float("nan")
         if rank_aware:
@@ -410,7 +410,7 @@ def _rank_errors(x_train, y_train, x_test, y_test, cutoffs):
     x_mean, y_mean = x_train.mean(0), y_train.mean(0)
     target = y_test - y_mean
     baseline_sse = float(target.square().sum())
-    u, s, vh = torch.linalg.svd(x_train - x_mean, full_matrices=False)
+    u, s, vh = gpu_svd(x_train - x_mean, full_matrices=False)
     left = (x_test - x_mean) @ vh.T
     right = u.T @ (y_train - y_mean)
     errors_by_rank = {0: baseline_sse}
@@ -437,7 +437,7 @@ def _gram_rank_errors(x_train, y_train, x_test, y_test, cutoffs, device):
     y = y - y_mean
     residual = y_test - y_mean
     baseline = float(residual.square().sum())
-    eigenvalues, vectors = torch.linalg.eigh(x.T @ x)
+    eigenvalues, vectors = gpu_eigh(x.T @ x)
     # A singular value on a cutoff boundary can round to either side after
     # squaring. Use the reference decision for such spectra.
     top = eigenvalues[-1]

@@ -54,7 +54,7 @@ import torch
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._tokens import strip_trailing_special
-from .utils import safe_svdvals
+from .utils import gpu_svdvals, safe_svdvals
 from .utils import pow2_rescale as _pow2_rescale
 
 logger = logging.getLogger("blme")
@@ -213,7 +213,7 @@ def _per_sentence_measurements(Z: torch.Tensor) -> Dict[str, float]:
             _e_r = int(max(-126, min(127, round(_m.log2(_rmax_r)))))
             _Zr = torch.ldexp(Z, torch.tensor(-_e_r, dtype=torch.int32))
             _sc_r = float(2.0) ** _e_r
-        S_raw = (torch.linalg.svdvals(_Zr).detach().cpu().numpy()
+        S_raw = (gpu_svdvals(_Zr).detach().cpu().numpy()
                  .astype(np.float64) * float(_sc_r))
     except Exception:
         logger.warning("schatten: per-sentence measurement failed",

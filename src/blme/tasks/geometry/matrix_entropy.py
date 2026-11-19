@@ -22,7 +22,7 @@ from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 from .._tokens import (hidden_states_for_task, massive_token_share, position0_share,
                        strip_trailing_special)
-from .utils import pow2_rescale as _pow2_rescale
+from .utils import gpu_svdvals, pow2_rescale as _pow2_rescale
 
 logger = logging.getLogger("blme")
 
@@ -103,7 +103,7 @@ def _matrix_entropy(Z: torch.Tensor) -> dict:
 
     # A = Zᵀ Z / N. Use SVD on Z to avoid materialising a d×d matrix
     # when N < d. Squared singular values / N are the eigenvalues of A.
-    S = torch.linalg.svdvals(Z)
+    S = gpu_svdvals(Z)
     lam = (S ** 2) / float(Z.shape[0])
     trace = float(lam.sum().item())
     if not math.isfinite(trace) or trace <= 0:
