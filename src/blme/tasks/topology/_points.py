@@ -116,7 +116,8 @@ def _window_points(model, tokenizer, dataset, cache, num_samples, layers, opts, 
                  "n_layers": n_layers, "positions": winfo["positions"],
                  "n_docs": len(winfo["positions"]), "cache_rejected": None,
                  "readout_label": f"last_token_of_{ws.n_words}_word_window",
-                 "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]))}
+                 "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]),
+                                     **winfo.get("massive_meta", {}))}
 
 
 def _last_token_points(model, tokenizer, dataset, cache, *, num_samples, layers, policy,

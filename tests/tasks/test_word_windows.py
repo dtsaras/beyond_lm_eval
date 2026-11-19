@@ -63,7 +63,7 @@ def test_punctuation_final_windows_are_kept_and_can_be_dropped():
 
 def test_options_default_to_windows_and_reject_unknown_readouts():
     assert window_options({}) == {"readout": "window", "n_words": 20, "seed": 0,
-                                  "drop_punct_final": False}
+                                  "drop_punct_final": False, "massive_points": "keep"}
     assert window_options({"points_readout": "passage"})["readout"] == "passage"
     with pytest.raises(ValueError):
         window_options({"points_readout": "mean"})

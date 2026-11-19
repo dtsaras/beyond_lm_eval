@@ -183,7 +183,8 @@ def sequence_clouds(
                 "token_cloud_source": tc.info.get("source"),
                 "last_is_block": winfo["last_is_block"], "layer_keys": sorted(last),
                 "readout_label": f"last_token_of_{ws.n_words}_word_window",
-                "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]))}
+                "window_meta": dict(ws.meta(), **token_count_meta(winfo["n_tokens"]),
+                                    **winfo.get("massive_meta", {}))}
         out = SequenceClouds(last=last, tokens=tc.tokens, keep=tc.keep,
                              sink_info=tc.sink_info, mid=tc.mid, info=info)
     if out.n_points < n:
