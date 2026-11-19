@@ -118,7 +118,7 @@ Ethayarajh 2019 contextualization profile (self-similarity, intra-sentence simil
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Shared pools pin the MEV and anisotropy conventions using sklearn PCA and TruncatedSVD. A full run of the original contextual extraction pipeline on identical sentences is outstanding.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match on raw similarities; MEV within 7e-4; size-matched baselines not reproduced (random draws) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Run the original contextual extraction pipeline on exactly the same sentences and token pools.
 
 **Parameters (shipped defaults).** `layers: null`, `min_word_occurrences: 5`, `num_samples: 1000`.
@@ -161,10 +161,13 @@ Block-Influence profile + effective-depth ratio (forward pass only).
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. ShortGPT block influence and Csordás release expressions agree on matched, equal-length inputs. Unequal-document weighting and the BLME effective-depth threshold require distinct interpretation.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match; headline degenerate on small models (block 0 holds 59-69%) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Compare document weighting and threshold choices on variable-length passages.
 
 **Parameters (shipped defaults).** `max_length: 512`, `num_samples: 20`.
+
+**Decision: What effective_depth_90 accumulates.** Default: The per-block mean relative update ||h_(l+1) - h_l|| / ||h_l|| (Csordas et al., analyze_norms.py), not Block Influence.
+Why: Kept; on gpt2 and pythia block 0 holds 59-69% of the total, so the headline takes only a couple of values on small models (a resolvability question for the study).
 
 ### `geometry_hsic`
 
@@ -337,7 +340,7 @@ Computes the Mahalanobis distance between an In-Distribution (ID) reference data
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. A separate sklearn Ledoit–Wolf refit reproduces BLME’s pooled clean/shuffled distances. Whole articles go to the fit or the held-out half (a passage-level split leaked sibling passages into the fit and inflated AUROC by up to 0.18 on 8 models), and a failing MRRR eigensolver falls back to divide-and-conquer instead of dropping the split. Lee’s class-conditional Gaussian detector has different classes, covariance and evaluation inputs.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match within the spread of 200 random splits (passages cut at 128 tokens) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Compare the pooled clean/shuffled readout with a class-conditional detector on labelled OOD data.
 
 **Parameters (shipped defaults).** `id_corpus: wikitext`, `num_samples: 2000`, `ood_strategy: shuffle`.
@@ -505,7 +508,7 @@ Computes the Razzhigaev et al. (ACL 2024, arXiv:2405.12250) linearity (a.k.a. "p
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. The 17 in-sample summaries have notebook and rank-aware comparisons. The held-out fit chooses truncation with an inner document split and refits the affine map on all outer training documents. Both stages learn sink thresholds and means from their own fit documents.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (1e-9) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: An independent lab cohort and a prospectively chosen target are needed for a new predictive claim. Retain the training-selected cutoff and report both document splits.
 
 **Parameters (shipped defaults).** `num_samples: 100`.
@@ -665,7 +668,7 @@ Computes the Hosseini & Fedorenko (NeurIPS 2023, arXiv:2311.04930) discrete traj
 **Verification.**
 
 - Kernel: Transcription of the released code or its official fixtures. A transcription and analytic turning paths test mean angles and per-sentence aggregation. Tokenization and sentence lengths affect a pooled LM comparison.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (gpt2, Llama) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Compare tokenization and sentence-length matched estimates on fresh sentences.
 
 **Parameters (shipped defaults).** `num_samples: 100`, `skip_first_tokens: auto`.
@@ -770,7 +773,7 @@ Implements a Topological Data Analysis (TDA) task. Takes a set of hidden represe
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Rips persistence and headline summaries agree with GUDHI on the test clouds. Filtration, distances, sampling and treatment of infinite bars specify the result.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Check sampling convergence across filtrations and treatment of infinite bars.
 
 **Parameters (shipped defaults).** `num_samples: 1000`.
@@ -790,7 +793,7 @@ Computes Persistence Entropy at early, middle, and late layers.
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Shannon entropy of finite lifetimes is cross-checked with independent topology and entropy implementations. A release-to-release giotto-tda run was not part of this audit.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Run the giotto-tda release on identical diagrams and vary the point budget.
 
 **Parameters (shipped defaults).** `num_samples: 1000`.
@@ -810,10 +813,13 @@ Persistence landscapes (Bubenik 2015) at early / mid / late layers.
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Exact persim landscapes and analytic tent areas agree on fixtures. Number of points, filtration truncation and integration conventions govern the experimental values.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match exactly including the subsample draws; seed SD ~4.5% (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Measure precision on independent point draws beyond the 50-point study setting.
 
 **Parameters (shipped defaults).** `n_landscapes: 5`, `n_points: 200`, `n_subsamples: 16`, `num_samples: 1000`, `subsample_size: 500`.
+
+**Decision: Subsample seed.** Default: seed 42.
+Why: Seed-to-seed SD of the headline ~4.5% on gpt2 (seed 42 is a low draw on the first layer): compare models at a common seed.
 
 ### `topology_zigzag_persistence`
 
@@ -828,7 +834,7 @@ Zigzag persistence of topological features across layers.
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. Release postprocessing runs on raw pairs. The barcode construction is checked against a transcription and independent topology calculations. The study’s default small cloud needs reliability testing.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match exactly (reduced pool) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Repeat barcode construction across larger point budgets than the study's 40.
 
 **Parameters (shipped defaults).** `n_neighbors: 4`, `num_samples: 8000`, `num_subsets: 16`, `persistence_frac: 0.1`, `subset_size: 500`.
@@ -848,7 +854,7 @@ Wang et al. 2025 Chain-of-Embedding scores (Eq. 3/5/7).
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (gpt2, pythia, Llama with BOS; ~1e-7) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Match both collectors on multi-token prompts and quantify the first-state contribution.
 
 **Parameters (shipped defaults).** `chain_end: final_norm`, `max_new_tokens: 128`, `num_samples: 5`.
@@ -871,7 +877,7 @@ Hurst / Joseph / self-similarity exponents of the model's per-token NLL stream o
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. The original notebook estimators are checked at matched scales and offsets. BLME pools long articles and corrects the Joseph accumulator across scales. Corpus and sequence-length sensitivity remain.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: likelihood stream matches; lag grid then undocumented (now documented) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Repeat across corpora, aggregation units and fitting scales.
 
 **Parameters (shipped defaults).** `doc_split: train`, `documents: long_documents`, `holder_eps: 0.005`, `min_doc_words: 4096`, `num_samples: 100`, `use_tokens: 1024`.
@@ -889,7 +895,7 @@ Distinct-n, Self-BLEU, and entropy collapse over generated tokens.
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Scripted completions anchor diversity and repetition. Self-BLEU uses the Texygen NLTK smoothing convention. Sampling entropy uses the processed logits and each completion’s own content-token quarters.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match exactly on BLME's samples (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Quantify sampling variability across prompts and random seeds for the intended generation budget.
 
 **Parameters (shipped defaults).** `max_new_tokens: 32`, `n_completions: 500`, `seed: 42`, `temperature: 0.8`, `top_k: 0`.
@@ -972,15 +978,23 @@ Loss-landscape sharpness via Hessian + SAM metrics.
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. PyHessian is compared on the same start and probes. SAM and ASAM have quadratic anchors. With identical Gemma-4 weights and 64 passages, the trace estimate on four RTX 3090s was 5.34% above the L20X estimate. The stopping rule used 27 and 23 probes, with estimated relative standard errors of 6.49% and 7.18%. All nine headlines repeated on the four-card layout within 2.31e-9 relative difference.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: trace and top eigenvalue match PyHessian/Lanczos; SAM/ASAM off 0.1-0.15% by a float32 norm (fixed); ASAM normaliser now a parameter (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Check stability across data batches, probes, parameter scopes and perturbation norms.
 
-**Parameters (shipped defaults).** `hutchinson_min_probes: 10`, `hutchinson_rse_target: 0.05`, `hutchinson_stop: pyhessian`, `hutchinson_tol: 0.001`, `n_hutchinson: 100`, `n_power_iter: 100`, `num_samples: 4`, `param_scope: last_layer`, `power_iter_tol: 0.001`, `sam_rho: 0.05`.
+**Parameters (shipped defaults).** `asam_eta: 0.01`, `asam_variant: invariant`, `hutchinson_min_probes: 10`, `hutchinson_rse_target: 0.05`, `hutchinson_stop: pyhessian`, `hutchinson_tol: 0.001`, `n_hutchinson: 100`, `n_power_iter: 100`, `num_samples: 4`, `param_scope: last_layer`, `power_iter_tol: 0.001`, `sam_rho: 0.05`.
 
 **Decision: When the Hutchinson trace estimator stops (parameter `hutchinson_stop`).** Default: pyhessian: stop once the running mean changes by < hutchinson_tol (PyHessian trace(maxIter, tol)).
 Alternatives: rse: stop at a relative standard error <= hutchinson_rse_target (0.05) after hutchinson_min_probes (10); n_hutchinson stays the cap.
 Recorded in every run: `_meta_hutchinson_trace_rel_se`, `_meta_hutchinson_n_used`, `_meta_hutchinson_stop`, `_meta_hutchinson_pyhessian_n`, `_meta_hutchinson_trace_pyhessian_stop`.
 Why: PyHessian's rule does not control precision: phi-2 stopped at 29 probes with a 27% relative SE and pythia-160m hit the 100-probe cap at 38%, against 0.9-7% elsewhere. An RSE run reports PyHessian's stopping point on the same probe sequence.
+
+**Decision: ASAM normaliser (parameter `asam_variant`).** Default: invariant: T_w = |w| on every parameter, no eta (exactly invariant to function-preserving rescales).
+Alternatives: release: the released asam.py rule, T_w = |w| + asam_eta (0.01) on tensors named weight and T_w = 1 elsewhere.
+Recorded in every run: `_meta_asam_sharpness_release`, `_meta_asam_sharpness_invariant`, `_meta_asam_variant`.
+Why: asam_sharpness is the scale-invariant twin of sam_sharpness; the release's training rule is not scale-invariant and gives 0.01374 instead of 0.00500 on gpt2 (blind review D). Both are recorded; the cost is one perturbed forward.
+
+**Decision: Resolution of critical_step_size.** Default: Doubling from eta0, then 6 bisection steps on 'loss strictly increases' (Kalra et al. Def. 2.1); the bracket midpoint is returned.
+Why: Six halvings of the factor-2 bracket resolve eta* to +-0.8%, so moving eta0 (it depends on the gradient norm) moves the result by up to that much (gpt2: 1.414 vs 1.426 after the float64-norm fix). Negligible against the cross-model spread (0.006-0.87 on the panel).
 
 ### `dynamics_stability`
 
@@ -1017,10 +1031,13 @@ RepE LAT concept reading of truthfulness (Zou et al. 2023, arXiv:2310.01405).
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. The released PCA reader and held-out direction/choice checks cover a reading vector. What counts as a concept depends on the positive and negative pairs.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: protocol matches the LAT release; exact folds not identified; headline seed SD 0.064 (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Repeat with unseen concepts, prompt templates and matched negative pairs.
 
 **Parameters (shipped defaults).** `num_samples: 20`.
+
+**Decision: Seed of the within-pair flips.** Default: seed 42.
+Why: lat_test_acc spans 0.60-0.81 over 20 seeds on gpt2 (SD 0.064): compare models at a common seed; a seed-averaged estimate is the alternative if the study needs it.
 
 ### `repe_refusal_direction`
 
@@ -1035,7 +1052,7 @@ Refusal direction (Arditi et al. 2024) on instruct models.
 **Verification.**
 
 - Kernel: Released code executed on the same inputs. Released direction selection and prompt format are checked in the tested cases. A direction on a dataset does not establish universal behaviour across prompts or models.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match on Llama-3.2-1B-Instruct (layer, position, norm, bypass, induce, KL) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Validate the direction across domains with matched harmless prompts and behaviour controls.
 
 **Parameters (shipped defaults).** `enable_thinking: False`, `is_instruct: null`.
@@ -1078,7 +1095,7 @@ Geometry of the RepE reading vector v = mean(h+) - mean(h-) per layer.
 **Verification.**
 
 - Kernel: Transcription of the released code or its official fixtures. The tested object is a difference-of-means activation direction with study-specific norm/consensus summaries. Other papers use function vectors or parameter-space task vectors.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match; headlines near 0 on gpt2 (5 pairs) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Test the activation direction on held-out task prompts and compare with matched control directions.
 
 **Parameters (shipped defaults).** `num_samples: 5`.
@@ -1096,7 +1113,7 @@ Computes language-model calibration diagnostics.
 **Verification.**
 
 - Kernel: Independent implementation or scientific library. Equal-width ECE agrees with torchmetrics and analytic bins. The next-token event and top-label Brier convention define this adaptation. Treat it as a performance control.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (1e-5) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Check reliability diagrams and Brier conventions against observed outcomes on a held-out domain.
 
 **Parameters (shipped defaults).** `n_bins: 10`, `num_samples: 100`, `use_cache: False`.
@@ -1114,7 +1131,7 @@ Computes the entropy of the output probability distribution at each token positi
 **Verification.**
 
 - Kernel: Equations and analytic cases (no external reference exists). Shannon entropy measures dispersion of the predictive distribution. Calibration also needs observed outcomes.
-- Pipeline: not yet independently re-implemented end to end.
+- Pipeline: match (2e-5) (batchD, 2026-11-19, library 510e9e0).
 - Next scientific check: Compare with realised accuracy and calibration on independent outcomes.
 
 **Parameters (shipped defaults).** `num_samples: 100`.

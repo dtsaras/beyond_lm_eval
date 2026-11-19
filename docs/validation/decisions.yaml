@@ -63,6 +63,18 @@ tasks:
       alternatives: ["rse: stop at a relative standard error <= hutchinson_rse_target (0.05) after hutchinson_min_probes (10); n_hutchinson stays the cap"]
       recorded: [_meta_hutchinson_trace_rel_se, _meta_hutchinson_n_used, _meta_hutchinson_stop, _meta_hutchinson_pyhessian_n, _meta_hutchinson_trace_pyhessian_stop]
       why: "PyHessian's rule does not control precision: phi-2 stopped at 29 probes with a 27% relative SE and pythia-160m hit the 100-probe cap at 38%, against 0.9-7% elsewhere. An RSE run reports PyHessian's stopping point on the same probe sequence."
+    - choice: ASAM normaliser
+      parameter: asam_variant
+      default: "invariant: T_w = |w| on every parameter, no eta (exactly invariant to function-preserving rescales)"
+      alternatives: ["release: the released asam.py rule, T_w = |w| + asam_eta (0.01) on tensors named weight and T_w = 1 elsewhere"]
+      recorded: [_meta_asam_sharpness_release, _meta_asam_sharpness_invariant, _meta_asam_variant]
+      why: "asam_sharpness is the scale-invariant twin of sam_sharpness; the release's training rule is not scale-invariant and gives 0.01374 instead of 0.00500 on gpt2 (blind review D). Both are recorded; the cost is one perturbed forward."
+    - choice: Resolution of critical_step_size
+      parameter: null
+      default: "Doubling from eta0, then 6 bisection steps on 'loss strictly increases' (Kalra et al. Def. 2.1); the bracket midpoint is returned"
+      alternatives: []
+      recorded: []
+      why: "Six halvings of the factor-2 bracket resolve eta* to +-0.8%, so moving eta0 (it depends on the gradient norm) moves the result by up to that much (gpt2: 1.414 vs 1.426 after the float64-norm fix). Negligible against the cross-model spread (0.006-0.87 on the panel)."
   geometry_intrinsic_dim:
     - choice: Static (vocabulary embedding) or layerwise (per-layer point clouds) mode
       parameter: layerwise
@@ -153,3 +165,26 @@ tasks:
       alternatives: []
       recorded: []
       why: "Exploratory task; the draw sits in the upper tail of re-draws (gpt2 one-sided p = 0.018), shifting inter by +0.002-0.012."
+
+  geometry_effective_depth:
+    - choice: What effective_depth_90 accumulates
+      parameter: null
+      default: "The per-block mean relative update ||h_(l+1) - h_l|| / ||h_l|| (Csordas et al., analyze_norms.py), not Block Influence"
+      alternatives: []
+      recorded: []
+      why: "Kept; on gpt2 and pythia block 0 holds 59-69% of the total, so the headline takes only a couple of values on small models (a resolvability question for the study)."
+  repe_concept_separability:
+    - choice: Seed of the within-pair flips
+      parameter: null
+      default: "seed 42"
+      alternatives: []
+      recorded: []
+      why: "lat_test_acc spans 0.60-0.81 over 20 seeds on gpt2 (SD 0.064): compare models at a common seed; a seed-averaged estimate is the alternative if the study needs it."
+  topology_persistence_landscape:
+    - choice: Subsample seed
+      parameter: null
+      default: "seed 42"
+      alternatives: []
+      recorded: []
+      why: "Seed-to-seed SD of the headline ~4.5% on gpt2 (seed 42 is a low draw on the first layer): compare models at a common seed."
+

@@ -32,7 +32,7 @@ proxy because BLME does not know the model's actual training set.
 * **Hypothesis**: Over-parameterized LLMs often suffer from severe overconfidence, assigning 99% probability even when hallucinating. A well-calibrated geometric space prevents the probabilities from skewing uncontrollably.
 * **Citation/Paper**: `Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). On calibration of modern neural networks.` [ICML 2017, ArXiv: 1706.04599]
 * **File & Function**: `src/blme/tasks/consistency/calibration.py` -> `CalibrationTask`
-* **Critical Info**: This adapts Guo et al.'s classifier calibration to next-token prediction; it is not downstream QA correctness calibration. Reports `ece`, `brier_score`, `calibration_slope` and `calibration_intercept`. Defaults: `num_samples: 100`, `n_bins: 10`. No headline keys or size-invariances are declared.
+* **Critical Info**: This adapts Guo et al.'s classifier calibration to next-token prediction; it is not downstream QA correctness calibration. Reports `ece`, `brier_score`, `calibration_slope` and `calibration_intercept`. Defaults: `num_samples: 100`, `n_bins: 10`. No headline keys or size-invariances are declared. `calibration_slope` and `calibration_intercept` are an unweighted least-squares line through the per-bin (confidence, accuracy) points, over bins that hold samples (at least 3).
 
 ## 3. Logical Contradiction / Consistency
 * **What are we measuring**: Whether a premise increases the likelihood of an entailed conclusion.

@@ -58,4 +58,27 @@ batches:
       geometry_cknna: "match (exact vs platonic-rep)"
       geometry_hsic: "match (6e-16; subsample reproduced)"
       geometry_rsa: "match (exact); noisy at 200 tokens"
+  batchD:
+    date: 2026-11-19
+    library: 510e9e0
+    verdict: "17 of 18 reproduced end to end; the one mismatch (sharpness SAM/ASAM, 0.1-0.15%) was a float32 gradient norm, fixed (safe_norm accumulates in float64)."
+    tasks:
+      dynamics_coe: "match (gpt2, pythia, Llama with BOS; ~1e-7)"
+      geometry_mahalanobis: "match within the spread of 200 random splits (passages cut at 128 tokens)"
+      geometry_effective_depth: "match; headline degenerate on small models (block 0 holds 59-69%)"
+      geometry_procrustes_linearity: "match (1e-9)"
+      geometry_trajectory_curvature: "match (gpt2, Llama)"
+      geometry_contextualization: "match on raw similarities; MEV within 7e-4; size-matched baselines not reproduced (random draws)"
+      dynamics_sharpness: "trace and top eigenvalue match PyHessian/Lanczos; SAM/ASAM off 0.1-0.15% by a float32 norm (fixed); ASAM normaliser now a parameter"
+      repe_concept_separability: "protocol matches the LAT release; exact folds not identified; headline seed SD 0.064"
+      repe_refusal_direction: "match on Llama-3.2-1B-Instruct (layer, position, norm, bypass, induce, KL)"
+      repe_task_vectors: "match; headlines near 0 on gpt2 (5 pairs)"
+      topology_homology: match
+      topology_persistence_entropy: match
+      topology_persistence_landscape: "match exactly including the subsample draws; seed SD ~4.5%"
+      topology_zigzag_persistence: "match exactly (reduced pool)"
+      dynamics_fractal: "likelihood stream matches; lag grid then undocumented (now documented)"
+      dynamics_generation_diversity: "match exactly on BLME's samples"
+      consistency_calibration: "match (1e-5)"
+      interpretability_prediction_entropy: "match (2e-5)"
 
