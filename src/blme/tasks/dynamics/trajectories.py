@@ -75,9 +75,10 @@ class LatentInterpolationTask(DiagnosticTask):
     Interpolates between two hidden states in latent space.
     Measures entropy of decoded predictions along the path (convexity check).
     Uses norm-corrected linear interpolation and slerp for comparison.
-    Contexts are cut at ``max_tokens`` tokens (default 128). Context pairs are
-    distinct, drawn without replacement, so at most n(n-1)/2 of the
-    ``num_samples`` passages are used (``_meta_num_pairs_used``).
+    Contexts are cut at ``max_tokens`` tokens (default 128). By default every
+    distinct pair of the ``num_samples`` passages is scored (n(n-1)/2 pairs,
+    ``_meta_pair_selection = "all"``); an integer ``num_pairs`` draws that many
+    distinct pairs with the seeded sampler (``"sampled"``).
     """
 
     # Reads one state per context, its last token (the state whose next-token
@@ -114,7 +115,11 @@ class LatentInterpolationTask(DiagnosticTask):
 
     def evaluate(self, model, tokenizer, dataset, cache=None):
         logger.info("Running Latent Interpolation...")
-        num_pairs = self.config.get("num_pairs", 50)
+        # None (the default): every distinct pair of the pool, in canonical
+        # order -- the gap is then exact over the pool, with no pair-sampling
+        # noise (200 of 1225 pairs had a seed-to-seed sd of ~7% of the gap on
+        # gpt2). An integer draws that many distinct pairs with the seeded sampler.
+        num_pairs = self.config.get("num_pairs", None)
         steps = self.config.get("steps", 10)
         num_samples = self.config.get("num_samples", 10)
         max_tokens = int(self.config.get("max_tokens", 128))
@@ -147,9 +152,17 @@ class LatentInterpolationTask(DiagnosticTask):
         ctx_lens = []
         # Attempts are capped so unusable rows cannot spin the loop forever
         # (tests/tasks/test_dynamics.py::test_interpolation_does_not_hang_on_unusable_samples).
-        max_attempts = max(20, num_pairs * 20)
         n_distinct = len(samples) * (len(samples) - 1) // 2
-        pairs = _distinct_pairs(len(samples), min(n_distinct, max_attempts), _rng)
+        num_pairs_requested = None if num_pairs is None else int(num_pairs)
+        if num_pairs is None or int(num_pairs) >= n_distinct:
+            num_pairs = n_distinct
+            pair_selection = "all"
+            pairs = [(i, j) for i in range(len(samples)) for j in range(i + 1, len(samples))]
+        else:
+            num_pairs = int(num_pairs)
+            pair_selection = "sampled"
+            max_attempts = max(20, num_pairs * 20)
+            pairs = _distinct_pairs(len(samples), min(n_distinct, max_attempts), _rng)
         # fp32 arithmetic for the forward pass AND the LM-head decode of the
         # interpolant: bf16 moves the gap by +21% on pythia-160m and is not even
         # reproducible across thread counts
@@ -255,8 +268,9 @@ class LatentInterpolationTask(DiagnosticTask):
         results.update(effective_dtype_meta(_prec))
         results["_meta_max_tokens"] = max_tokens
         results["_meta_num_pairs_used"] = int(count)
-        results["_meta_num_pairs_requested"] = int(num_pairs)
+        results["_meta_num_pairs_requested"] = num_pairs_requested
         results["_meta_num_distinct_pairs"] = int(n_distinct)
+        results["_meta_pair_selection"] = pair_selection
         results["_meta_context_tokens_mean"] = float(np.mean(ctx_lens))
 
         return results

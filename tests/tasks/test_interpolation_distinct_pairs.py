@@ -51,3 +51,18 @@ def test_drawn_pairs_are_distinct_unordered_pairs():
     big = _distinct_pairs(10_000, 500, random.Random(0))
     assert len({tuple(sorted(p)) for p in big}) == 500
     assert all(0 <= a < 10_000 and 0 <= b < 10_000 and a != b for a, b in big)
+
+
+def test_the_default_scores_every_distinct_pair_whatever_the_seed(tiny):
+    """num_pairs defaults to every distinct pair of the pool: the gap is the
+    exact pool mean, so the seed no longer matters (200 sampled pairs of the
+    study's 1225 had a seed-to-seed sd of ~7% of the gap on gpt2)."""
+    model, tok = tiny
+    data = fd.dataset(N)
+    a = _run(model, tok, data, num_pairs=None, seed=0)
+    b = _run(model, tok, data, num_pairs=None, seed=7)
+    assert a["_meta_pair_selection"] == "all" and a["_meta_num_pairs_used"] == 10
+    assert a["convexity_gap"] == b["convexity_gap"]
+    per_pair = [_run(model, tok, [data[i], data[j]], num_pairs=1)["convexity_gap"]
+                for i, j in combinations(range(N), 2)]
+    assert a["convexity_gap"] == pytest.approx(float(np.mean(per_pair)), rel=1e-9, abs=1e-12)

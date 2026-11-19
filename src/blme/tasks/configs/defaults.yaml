@@ -312,7 +312,10 @@ dynamics_interpolation:
   # document pool 10 -> 50 -> 200 left it at 0.110/0.110/0.106. At 50 pairs
   # the within-model seed sd (0.126) was half the between-model sd (0.268)
   # and pythia-160m vs pythia-70m ordered by coin flip (4/8 seeds).
-  num_pairs: 200
+  # null: every distinct pair of the num_samples pool (exact over the pool;
+  # 1225 pairs for the study's 50 passages, ~5 min per model). An integer
+  # keeps the seeded pair sampler.
+  num_pairs: null
   steps: 10
   num_samples: 10
 
