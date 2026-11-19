@@ -205,6 +205,7 @@ class WeightSpectralTask(DiagnosticTask):
         _lm_ids = _language_model_modules(model, _out_emb)
         modules_to_scan, _n_excluded = [], 0
         _n_outside_lm, _n_below_min_evals = 0, 0
+        _n_failed = 0
         for name, module in model.named_modules():
             if isinstance(module, TARGET_MODULES):
                 if "weight" in module._parameters and module.weight is not None:
@@ -324,7 +325,9 @@ class WeightSpectralTask(DiagnosticTask):
                     _sr_norms.append(_sr_norm)
 
             except Exception as e:
-                logger.info(f"Error analyzing {name}: {e}")
+                # The module is left out of every average; counted below.
+                _n_failed += 1
+                logger.warning(f"geometry_spectral: {name} left out: {e!r}")
                 continue
 
         # Singular values the rank envelope resolved to zero (0 on every
@@ -352,6 +355,8 @@ class WeightSpectralTask(DiagnosticTask):
         results["_meta_tail_fraction"] = tail_fraction
 
         results["_meta_n_modules_scanned"] = int(len(modules_to_scan))
+        # Derived: scanned modules whose analysis raised (not in any average).
+        results["_meta_n_modules_failed"] = int(_n_failed)
         results["_meta_n_modules_outside_lm"] = int(_n_outside_lm)
         results["_meta_n_modules_below_min_evals"] = int(_n_below_min_evals)
         results["_meta_n_head_modules_tagged"] = int(_n_excluded)
