@@ -183,24 +183,40 @@ def _power_iteration_top_eigenvalue(hvp, v, n_iter: int = 100, status=None,
 
 
 def _hutchinson_trace(hvp, params, generator=None, n_iter: int = 100,
-                      tol: float = 1e-3, status=None) -> List[float]:
-    """Hutchinson trace samples v^T H v by PyHessian's ``trace(maxIter, tol)``
-    loop: Rademacher probes, stop once the running mean changes by less than
-    ``tol`` (relative; PyHessian's +1e-6 in the denominator is not reproduced).
-    Returns the samples; their mean is the estimate."""
+                      tol: float = 1e-3, status=None, stop: str = "pyhessian",
+                      rse_target: float = 0.05, min_probes: int = 10) -> List[float]:
+    """Hutchinson trace samples v^T H v with Rademacher probes, at most ``n_iter``.
+
+    ``stop="pyhessian"`` (default): PyHessian's ``trace(maxIter, tol)`` rule,
+    stop once the running mean changes by less than ``tol`` (relative;
+    PyHessian's +1e-6 in the denominator is not reproduced). That rule does not
+    control precision (phi-2 stopped at 29 probes with a 27% relative SE).
+    ``stop="rse"``: stop once at least ``min_probes`` samples give a relative
+    standard error <= ``rse_target``. The probes come from the same generator,
+    so the PyHessian stopping point is a prefix and is reported in ``status``
+    (``pyhessian_n``). Returns the samples; their mean is the estimate."""
     samples: List[float] = []
     trace = 0.0
     converged = False
+    pyhessian_n = None
     for _ in range(max(1, int(n_iter))):
         v = _make_random_vec(params, rademacher=True, generator=generator)
         samples.append(_dot(hvp(v), v))
         mean = float(np.mean(samples))
-        if _relative_change(trace, mean) < tol:
-            converged = True
-            break
+        if pyhessian_n is None and _relative_change(trace, mean) < tol:
+            pyhessian_n = len(samples)
+            if stop == "pyhessian":
+                converged = True
+                break
         trace = mean
+        if stop == "rse" and len(samples) >= max(2, int(min_probes)):
+            se = float(np.std(samples, ddof=1)) / np.sqrt(len(samples))
+            if mean != 0.0 and abs(se / mean) <= rse_target:
+                converged = True
+                break
     if status is not None:
-        status.update(n_iter=len(samples), converged=converged)
+        status.update(n_iter=len(samples), converged=converged, stop=stop,
+                      pyhessian_n=pyhessian_n)
     return samples
 
 
@@ -428,6 +444,13 @@ class LossSharpnessTask(DiagnosticTask):
         n_hutchinson = int(self.config.get("n_hutchinson", 100))
         n_power_iter = int(self.config.get("n_power_iter", 100))
         hutchinson_tol = float(self.config.get("hutchinson_tol", 1e-3))
+        # Stopping rule: "pyhessian" (default, the reference) or "rse" (stop at a
+        # relative SE <= hutchinson_rse_target after hutchinson_min_probes).
+        hutchinson_stop = str(self.config.get("hutchinson_stop", "pyhessian"))
+        if hutchinson_stop not in ("pyhessian", "rse"):
+            return {"error": f"dynamics_sharpness: hutchinson_stop must be 'pyhessian' or 'rse', got {hutchinson_stop!r}"}
+        hutchinson_rse_target = float(self.config.get("hutchinson_rse_target", 0.05))
+        hutchinson_min_probes = int(self.config.get("hutchinson_min_probes", 10))
         power_iter_tol = float(self.config.get("power_iter_tol", 1e-3))
         sam_rho = self.config.get("sam_rho", 0.05)
         # The adaptive twin uses the same radius by default, so it differs from
@@ -524,7 +547,9 @@ class LossSharpnessTask(DiagnosticTask):
             _tr_status = {}
             trace_estimates = _hutchinson_trace(H, params, generator=gen,
                                                 n_iter=n_hutchinson, tol=hutchinson_tol,
-                                                status=_tr_status)
+                                                status=_tr_status, stop=hutchinson_stop,
+                                                rse_target=hutchinson_rse_target,
+                                                min_probes=hutchinson_min_probes)
             mean_trace = float(np.mean(trace_estimates))
             trace_per_param = mean_trace / max(1, n_params)
             # Monte Carlo uncertainty of the trace, reported as a relative SE.
@@ -582,6 +607,13 @@ class LossSharpnessTask(DiagnosticTask):
             "_meta_hutchinson_trace_rel_se": _tr_rel_se,
             "_meta_hutchinson_n_used": int(_tr_status.get("n_iter", 0)),
             "_meta_hutchinson_converged": bool(_tr_status.get("converged", False)),
+            "_meta_hutchinson_stop": hutchinson_stop,
+            # Where PyHessian's rule stops on the same probe sequence (None if it
+            # never did), and its estimate when the run went further.
+            "_meta_hutchinson_pyhessian_n": _tr_status.get("pyhessian_n"),
+            "_meta_hutchinson_trace_pyhessian_stop": (
+                float(np.mean(trace_estimates[:_tr_status["pyhessian_n"]]))
+                if _tr_status.get("pyhessian_n") else float("nan")),
             "_meta_power_iter_rel_change": float(_pi_status.get("rel_change", float("nan"))),
             "_meta_power_iter_converged": bool(_pi_status.get("converged", False)),
             "_meta_power_iter_n_used": int(_pi_status.get("n_iter", 0)),
