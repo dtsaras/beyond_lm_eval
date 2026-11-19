@@ -13,6 +13,7 @@ and the full suite passed at 2635 green while it was live, because no test drove
 float64 through the offload path. Hence this guard.
 """
 import json
+import math
 import os
 
 import pytest
@@ -95,18 +96,29 @@ def test_no_task_headline_moves_under_offload(gpt2, restore_offload):
         if cls is None:
             continue
         cfg = resolve_task_config(name, {"num_samples": 12, "use_cache": False})
+        if name == "geometry_intrinsic_dim":
+            # Exercise the activation collector's disk path on these short passages.
+            cfg.update(layerwise=True, points_readout="passage")
+        if name == "geometry_hubness":
+            # The weight-only control needs enough neighbours for the largest k=100.
+            cfg["n_rows"] = 512
         a, b = run(cls, cfg, "0"), run(cls, cfg, "1")
+        if name == "geometry_intrinsic_dim":
+            assert all(math.isfinite(result["lid_last_layer"]) for result in (a, b))
         # A task that declines identically on both routes declines for its own
         # reasons, not because of the offload -- no allow-list needed.
         if "error" in a or "error" in b:
+            if a.get("error") != b.get("error"):
+                moved.append(f"{name}: {a.get('error')!r} -> {b.get('error')!r}")
             continue
-        for k, x in a.items():
-            if not isinstance(x, float) or k.startswith("_meta_") or x != x:
+        for k in sorted(a.keys() | b.keys()):
+            x, y = a.get(k), b.get(k)
+            if k.startswith("_meta_") or not (isinstance(x, float) or isinstance(y, float)):
                 continue
-            y = b.get(k)
-            if not isinstance(y, float) or y != y or \
-                    abs(x - y) > 1e-9 * max(abs(x), 1e-30):
-                moved.append(f"{name}.{k}: {x!r} -> {y!r}")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                if math.isnan(x) and math.isnan(y) or math.isclose(x, y, rel_tol=1e-9, abs_tol=1e-39):
+                    continue
+            moved.append(f"{name}.{k}: {x!r} -> {y!r}")
     assert not moved, (
         "disk offload changed task outputs (it must change only WHERE bytes "
         "live):\n  " + "\n  ".join(moved[:12]))

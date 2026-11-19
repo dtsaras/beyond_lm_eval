@@ -161,6 +161,12 @@ class PerturbationGrowthTask(DiagnosticTask):
         if emb_layer is None:
             return {"error": "Model does not expose input embeddings"}
 
+        # Gemma's per-layer token embeddings are a second, token-identity input.
+        # Look them up from the original IDs for both forwards. The text model
+        # still projects the perturbed main embedding inside each forward.
+        per_layer_model = next((m for m in model.modules() if
+                                getattr(m, "hidden_size_per_layer_input", 0) and
+                                callable(getattr(m, "get_per_layer_inputs", None))), None)
         gen = torch.Generator(device="cpu").manual_seed(seed)
         clean_acc, pert_acc = None, None
         _realized = []
@@ -208,6 +214,8 @@ class PerturbationGrowthTask(DiagnosticTask):
                     kw = {}
                     if "attention_mask" in enc:
                         kw["attention_mask"] = enc["attention_mask"]
+                    if per_layer_model is not None:
+                        kw["per_layer_inputs"] = per_layer_model.get_per_layer_inputs(enc["input_ids"], E)
                     out_c = model(inputs_embeds=E, output_hidden_states=True, **kw)
                     _sink_c = dict(_sink)
                     out_p = model(inputs_embeds=E_pert, output_hidden_states=True, **kw)

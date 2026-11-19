@@ -82,9 +82,9 @@ proxy because BLME does not know the model's actual training set.
 * **File & Function**: `src/blme/tasks/consistency/format_robustness.py` -> `FormatRobustnessTask`
 * **Critical Info**: This is an intrinsic likelihood diagnostic; it does not run the benchmark suites used in the paper. Defaults: `num_samples: 12`. No headline keys or size-invariances are declared.
 
-## 9. Self-Consistency
+## 9. First-token sampling stability (self-consistency)
 * **What are we measuring**: Agreement among multiple sampled completions for the same prompt.
-* **How are we measuring**: Sampling completions with temperature and reporting first-token agreement, uniqueness, and entropy.
+* **How are we measuring**: The task draws independent completions with full-vocabulary temperature sampling (top_k=0, top_p=1, one beam). It reports the first token’s plurality fraction, inverse distinct-token count, and entropy in nats. The task controls decoding even when the checkpoint saves a different policy. Before sampling, it removes tokenizer-appended EOS and SEP markers. Hugging Face special-token masks preserve a leading BOS and terminal tokens written in the prompt. Empty prompts and template-only Hugging Face encodings contribute no sample.
 * **Hypothesis**: Concentrated, stable samples indicate more consistent generation under stochastic decoding.
 * **Citation/Paper**: `Wang, X., Wei, J., Schuurmans, D., Le, Q., Chi, E., Zhou, D. (2022). Self-Consistency Improves Chain of Thought Reasoning in Language Models.` [ArXiv: 2203.11171]
 * **File & Function**: `src/blme/tasks/consistency/self_consistency.py` -> `SelfConsistencyTask`

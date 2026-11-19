@@ -15,6 +15,7 @@ trajectory_curvature) ran fine with NO cache and refused with an unusable one.
 The guard is therefore executed, not read.
 """
 import json
+import math
 import os
 
 import pytest
@@ -66,6 +67,8 @@ def test_no_task_is_destroyed_by_an_unusable_cache(gpt2_and_attention_only_cache
             return f"RAISED {type(e).__name__}: {e}"[:110]
         if isinstance(res, dict) and "error" in res:
             return f"ERROR {res['error']}"[:110]
+        if name == "geometry_intrinsic_dim":
+            assert math.isfinite(res["lid_last_layer"]), "the cache guard needs an activation-based estimate"
         return "ok"
 
     broken = []
@@ -74,6 +77,11 @@ def test_no_task_is_destroyed_by_an_unusable_cache(gpt2_and_attention_only_cache
         if cls is None:
             continue
         cfg = resolve_task_config(name, {"num_samples": 10, "use_cache": True})
+        if name == "geometry_intrinsic_dim":
+            # The vocabulary-only mode never reads the hidden-state cache.
+            cfg.update(layerwise=True, points_readout="passage")
+        if name == "geometry_hubness":
+            cfg["n_rows"] = 512
         with_cache = outcome(name, cls, cfg, cache)
         if with_cache == "ok":
             continue

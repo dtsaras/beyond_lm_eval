@@ -1,0 +1,1276 @@
+{
+  "id": "2026-11-19-numerical-fixes",
+  "base_commit": "1115c399693996f1a50c0feeb834bcfb5e9644f8",
+  "study_base": "ad43339c7a9703bc3323c75ca70179b78aefd747",
+  "study_sources_sha256": {
+    "configs/analysis_keys.yaml": "f707479ef9c04c663d73c3c9ae5a25bf5239e4c9c5605d237c06e36ce87c73e9",
+    "configs/tasks.yaml": "59b2d28a448ce4a0d864659252bf35e55f47d1652611caff4ad807f2c5270561",
+    "verification/metric_updates_2026-11-18/procrustes_conditioning.json": "ac7a3b367b8a01d6e1a7f511ec22aec53da3fe0c0a912b60a4e5d835ba3344d0",
+    "verification/numerical_fixes_2026-11-19/fixed_floor_pilot.json": "0b2bdeed71f66c614b6599b58c2a013d9e37e12798b4f7ced99453af41a34b1b",
+    "verification/numerical_fixes_2026-11-19/grid_check.py": "4ee915e1b17ce57041d0fe308d439882c9e2998c0f0efa82e4e8ac5017d80d00",
+    "verification/numerical_fixes_2026-11-19/measure.py": "dfd9a24f4d75624b61b31b2de4f69a8fe7ff17e1c00f87e8464eb3b1c5191978"
+  },
+  "configuration_sources": {
+    "src/blme/tasks/configs/defaults.yaml": "fbe6e0ec454e5d1b29f28d237b028d28c01b1bad09201f34e84fe790c29fe72c",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf"
+  },
+  "hashes": {
+    "src/blme/cache.py": "980aee450ae0e7c6cfacdc207e50e844ab65b3344d938397d77b179362e50468",
+    "src/blme/core.py": "6ecc38d142b2e920e3e274e4882fbc79e2327be0ffd3ec044fdb14111a00619d",
+    "src/blme/experts.py": "2408fbffa2aa0c238a2005d1e755793c738a612d81336c75147f640d8324621f",
+    "src/blme/models/wrapper.py": "40a060c70dcbaec31904f8943fbc48c92ac9634935336063b44e066022432dcd",
+    "src/blme/normalization.py": "51644a6730a3ba080981966326cb53ebd90c10fca402ce45b6f9dafb1232c4df",
+    "src/blme/registry.py": "e7e292b09f15a41e55bfe72698d32479ed823128b849cccc89f9e2d1132a31df",
+    "src/blme/results.py": "76c4ef6fd3a0261a3c1157ab0739e476b915f5dcd3c84ce2e0becc2e3d406394",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf",
+    "src/blme/tasks/_precision.py": "4f132a41602e64ef766a3b9667a8702a13969fda9733b0e8c44b465f3874c447",
+    "src/blme/tasks/_tokens.py": "66a5604dc4ac733daf734fc88bf9542d748accda51d2b1d22f726593cf177ee0",
+    "src/blme/tasks/_windows.py": "77c200209727ba6f5bd8bc9938362e04acd0069e77509b02a90421e96dd84669",
+    "src/blme/tasks/base.py": "470287c7a90d601d665673fce253851f2ea5ee093eb807d5dcfe00e50d3bc70d",
+    "src/blme/tasks/benchmarks.py": "200336b709bdda6abf9d2a15c3ea6575f33228e7e59b9447fec32d6117097250",
+    "src/blme/tasks/common.py": "adbda9b36b7504a0523f4ad73a43ae710e57dfe5ecc7d140d1ff39bef2a5d59f",
+    "src/blme/tasks/config_loader.py": "ffedc91dda126370410939bac976f08fe55e44489d7e54b7e94e9b6b618a88d1",
+    "src/blme/tasks/dynamics/generation_diversity.py": "7cb711f53c3172965ab16fbaa068406e6193a206e5689904966378765de57aee",
+    "src/blme/tasks/geometry/procrustes_linearity.py": "ccb8bb336b4e02751fe689522926f8c5a1ab42cf99b6860c374d96a28d2e2a15",
+    "src/blme/tasks/geometry/utils.py": "ca35ae24acdbd5f7e24b0fb235ed8890635c3c28311906fc46034c2279c09f27",
+    "src/blme/tasks/repe/__init__.py": "b16d75f246c47d956d5545e79633a5f8a46e90745a743ca3b5b3366b295b99b7",
+    "src/blme/tasks/repe/_common.py": "744f3f3c7a1a4433a7a06d6916de274538203d7459fb3406c07a7f5d49d29bbd",
+    "src/blme/tasks/representation_engineering.py": "cd3b0abb0f69bdaf220377199b2325c64695eed89df6d7f43fa46a2caf012714",
+    "src/blme/utils.py": "a2eb55d73fcde5e176c315df66803c35b06525385f8b342db863920496cd971a",
+    "tests/adversarial_fixtures.py": "28ea183f4183004ba37b545fb244fe01182832605a02fad77d030b995032f7fe",
+    "tests/conftest.py": "384bdf1421cdeb9a266fd733bb5ecca67b0824bbcd499d300509bb4e0f772026",
+    "tests/fixtures/paper_core_tasks.json": "483dd81bea6b5a55f3f0566b0310bae1c5897cb60f317627be926557a9cdd0b6",
+    "tests/fixtures/reference_parity/formula_fixtures.json": "dadb0ebaa54976d967eb5249de958462383eb0c49cea48544fe3721932d06123",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json": "fc8c2a62249c300f331700668e0aa438c5e7866e7e2ba8edbff6f12c1683f999",
+    "tests/fixtures/reference_parity/parity/attention_graph.json": "498cd96a697650b832deca180cc05c42c375b787ab5ad414aa45fd6803678040",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json": "8fddd92066fbad7d09f3c06d85fd56be118e4ef74b9b4b4a1a3c0c6f6146501c",
+    "tests/fixtures/reference_parity/parity/attention_rank.json": "ce5705cc5c1f643b44f58f193d5fd44c3719915d5ef27c79d07319902019bb8f",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json": "d201d8dae718a50c348a1923ba344f7a0bee189382a0cb3a67fc951eb5ab40ce",
+    "tests/fixtures/reference_parity/parity/attribution.json": "3485a7de6e119ff63933ec790832a3180c7eb22e525d1057924c2c8a27ef7ec3",
+    "tests/fixtures/reference_parity/parity/bias_weat.json": "bc6979dec457a59205faa0c6137a921c4ec56e9c6db4a1f93c91f84d8fbdc1d3",
+    "tests/fixtures/reference_parity/parity/cknna.json": "2814ad356d117c24d7d35a7a1d1873ea792e1d001eb01cac7ffb201dd8d12c43",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json": "8af3e2415715e7a1242e2d058a64ed923078a4afe712354dc0f2d6c37ab43f93",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json": "71419ced7c9a989cbfd67a9c712053cce5fbdf18480a4e20a7fb6fc792e72832",
+    "tests/fixtures/reference_parity/parity/head_roles.json": "f251c4a1df1b86b46698a1e801f5383e3b53516ec95b3ad940fdd077b6c6ccd2",
+    "tests/fixtures/reference_parity/parity/hubness.json": "37b622af39b8fa48d87919ab3a0ff2343ffca1c4327384d034961fbac5a265a2",
+    "tests/fixtures/reference_parity/parity/induction_heads.json": "213d439b5812164eae4ec8a37e8760b7effc103aca2ba678e161b7505d94f39d",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json": "588fd25add9ce22acb71b211fd8d80b5e6d20b8db3262e3d3174bd42d17f6a9d",
+    "tests/fixtures/reference_parity/parity/lipschitz.json": "d8b15e7f57011f8aaa6c172f69474ca64c99d45e5ace629b5b07373b5e1f43b4",
+    "tests/fixtures/reference_parity/parity/logit_lens.json": "bec2df07b423da0298b37d67a1a8616ca2c59f584803a5891c8ae45002a5c0ca",
+    "tests/fixtures/reference_parity/parity/magnitude.json": "8488e0a0dc3f5c5d743b24c5259394c61f37a5cc73550c9f50d28efade6643c2",
+    "tests/fixtures/reference_parity/parity/membership_inference.json": "3da2e1d9bf9dd4055084dd9214807f634b6476ce0ad409758271198f2eb97ce6",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json": "4ccdc6daaea47b5f566dcfaaeb713641b7b24cfa4eebae256a4cc86a99215509",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json": "36f8975fb3b95a50f1cce63d0621bc481e51914b93addd07ad3dce9c7af4e6d8",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json": "a431e4f665298a43ae16cdf658ef6fd3533d0620ed38878f07f2c909c6e6cb06",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json": "04938fe1583cff35235183aaff86bd45df65483feaff0052c719aa45354fea5b",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json": "170024b79d1652788ca7ff356c0e12e57c7ec9accc8a486bc9588fe346f7603e",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json": "7a8ee223690e2d1ddc02a08fc59fec6ed980fc48e4b1bbe1f7b1c4a4158a35bd",
+    "tests/fixtures/reference_parity/parity/rsa.json": "8b91e0ed37164de9c9f55a109c5076df93046e3fd30df174746bfa8dc954eb48",
+    "tests/fixtures/reference_parity/parity/sae_features.json": "633c4650263024e7855cfd73ec0fe249e753587cbdab135283f04df87869e652",
+    "tests/fixtures/reference_parity/parity/sharpness.json": "d2cb31e6f970c38c33d2011b51e5373d4b70cf07e7c8e7417fb3c65c92a2ced8",
+    "tests/fixtures/reference_parity/parity/spectral.json": "abb31e8f6b387a2c5c790ff1bec5bde228894c740184d6fcadbb4fe21862050a",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json": "f68ef4e46536aa406b29bf345222e7af82213e615ff87c69ae8363e5484ff562",
+    "tests/fixtures/reference_parity/parity/vendi.json": "db32927d43fd08bfef7525a5e787a6b71cf02b422e8f662e36726af81bd74c9c",
+    "tests/fixtures/reference_parity/parity/zigzag.json": "c6585e25d3f13642b7129261cd245b80c7b68175a8b5da583805928a2ab1942f",
+    "tests/golden/golden_snapshot.py": "59f13f3673dbc605bb866e18b4d87d6ef5287b3fc7fb5215aaf0b79f29d013e5",
+    "tests/invariance/_threads.py": "a9a5125689d9542b1bbaae8bab6a1696460165f9055500396bd0cf3b60de25e9",
+    "tests/invariance/clouds.py": "b6fabba65c447f84720dbc57cfe8dfbb9c777bb8e74da8a437351702eb215f3f",
+    "tests/invariance/compare.py": "a62794aa53c93bd203c4b326acb335b9d24e8218a1deff03ad300634fd89a01e",
+    "tests/invariance/driver.py": "e85edad70a9eaa0297256ff087e4f3280b7387edb6ad718b700e84f22c31ba9d",
+    "tests/invariance/model_transforms.py": "d05c1a51c474e1f742564b60d7ee9142f64b690b3f8b061b7722c5d6de4675ff",
+    "tests/invariance/precision.py": "c6c67c4665610b8a75224fb948cc1bbfee7f5e2af9b17435a742cdf3df8284d4",
+    "tests/invariance/states.py": "4d4bae0a96ace894479bc72cb76a508123679771abfe0617c90f48abb6bfe12c",
+    "tests/precision/lift.py": "afad1fe8b471ddd0c8efb9b2640639dc7821dce7547281feca4399ad7b109ca8",
+    "tests/tasks/invariance/_end_of_stack.py": "bb1adda849b1f330664fce4d807a2bad3ec733063103b705061b72e55bd50e24",
+    "tests/tasks/invariance/_family_c.py": "31d999e81f9c783ba86a3d8385523ca4269af391dd947718ff19345a442bbff4",
+    "tests/tasks/invariance/_family_d.py": "112ea5243e0e070422fd974507b2fa26a7807ea307a72d03cf63c98c1463773d",
+    "tests/tasks/invariance/_nlpaug_side.py": "86c4b891794f9a9b2f3f93d14d18033aebdbb7207cd6b4b9c1bcc9385da551dd",
+    "tests/tasks/invariance/_reference_side.py": "053d6e73c689319d4a5f08a7b529633371d8e24b3611527f25055bfef2538fa3",
+    "tests/tasks/invariance/_sinks.py": "1d8981e4269e0cf70362f46a11a672294b52f461cefd3672d8a3deee4232331c",
+    "tests/tasks/invariance/dynamics_fixtures.py": "28c841021fd3d5523e1a09b2f4e405e149f221b84b8b869e0577534ff7a21f60",
+    "tests/tasks/invariance/repe_width_padding.py": "0d4faf2c2a240100a57ec9bc92995f1d4dc7f2982a8c4633841e0b61359b8b35",
+    "tests/tasks/invariance/test_dynamics_generation_diversity.py": "c4b0eae598239daae0e38f39030909b923cad2545444fc5dd53d73bcb2f36751",
+    "tests/tasks/invariance/test_procrustes_linearity.py": "7ef7c7d4d2ffe712a1466d9a9fb38bff7b6169fd4dd8d0186c5c7fbef60bb3ef",
+    "tests/tasks/parity/test_coverage_gap_parity.py": "ea1932bca121f31d29e71fce6fee6246e6c2e171392d56d4ddcbf1ed4aa41dca",
+    "tests/tasks/parity/test_generation_diversity_values.py": "409f84be70ec9503cce5620941845f9bba64c49f3ec7890fe3a5f61d34f94e1d",
+    "tests/tasks/parity/test_procrustes_heldout_rank.py": "7c95f29b1d6dda937dfb96d38d33d8d5d636fa0e7e681b8548b02259f9fe93f2",
+    "tests/tasks/parity/test_procrustes_linearity_parity.py": "4de5eccd70950e9da6bb888074b6ab4801a9e0c989c52167d90bad1d4871e3a3",
+    "tests/tasks/parity/test_procrustes_linearity_values.py": "5302b1d92a1a820b31b761975d737305890de6e27111ffcf636ad7622ae44c63",
+    "tests/tasks/test_metric_repairs.py": "b69261b2b67b4b948d14c25aa89d7c1a0c5d665c630eac826a87a0c038969985",
+    "tests/tasks/test_reference_parity_formulas.py": "c5cddc471eac5dbe22181f0ace9118fc9cf153c329c59efbe122ff52e785a07c"
+  },
+  "common_inputs": [
+    "src/blme/cache.py",
+    "src/blme/core.py",
+    "src/blme/experts.py",
+    "src/blme/models/wrapper.py",
+    "src/blme/normalization.py",
+    "src/blme/registry.py",
+    "src/blme/results.py",
+    "src/blme/task_metadata.py",
+    "src/blme/tasks/_precision.py",
+    "src/blme/tasks/_tokens.py",
+    "src/blme/tasks/_windows.py",
+    "src/blme/tasks/base.py",
+    "src/blme/tasks/benchmarks.py",
+    "src/blme/tasks/common.py",
+    "src/blme/tasks/config_loader.py",
+    "src/blme/tasks/geometry/utils.py",
+    "src/blme/tasks/repe/__init__.py",
+    "src/blme/tasks/repe/_common.py",
+    "src/blme/tasks/representation_engineering.py",
+    "src/blme/utils.py",
+    "tests/adversarial_fixtures.py",
+    "tests/conftest.py",
+    "tests/fixtures/paper_core_tasks.json",
+    "tests/fixtures/reference_parity/formula_fixtures.json",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json",
+    "tests/fixtures/reference_parity/parity/attention_graph.json",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json",
+    "tests/fixtures/reference_parity/parity/attention_rank.json",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json",
+    "tests/fixtures/reference_parity/parity/attribution.json",
+    "tests/fixtures/reference_parity/parity/bias_weat.json",
+    "tests/fixtures/reference_parity/parity/cknna.json",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json",
+    "tests/fixtures/reference_parity/parity/head_roles.json",
+    "tests/fixtures/reference_parity/parity/hubness.json",
+    "tests/fixtures/reference_parity/parity/induction_heads.json",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json",
+    "tests/fixtures/reference_parity/parity/lipschitz.json",
+    "tests/fixtures/reference_parity/parity/logit_lens.json",
+    "tests/fixtures/reference_parity/parity/magnitude.json",
+    "tests/fixtures/reference_parity/parity/membership_inference.json",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json",
+    "tests/fixtures/reference_parity/parity/rsa.json",
+    "tests/fixtures/reference_parity/parity/sae_features.json",
+    "tests/fixtures/reference_parity/parity/sharpness.json",
+    "tests/fixtures/reference_parity/parity/spectral.json",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json",
+    "tests/fixtures/reference_parity/parity/vendi.json",
+    "tests/fixtures/reference_parity/parity/zigzag.json",
+    "tests/golden/golden_snapshot.py",
+    "tests/invariance/_threads.py",
+    "tests/invariance/clouds.py",
+    "tests/invariance/compare.py",
+    "tests/invariance/driver.py",
+    "tests/invariance/model_transforms.py",
+    "tests/invariance/precision.py",
+    "tests/invariance/states.py",
+    "tests/precision/lift.py",
+    "tests/tasks/invariance/_end_of_stack.py",
+    "tests/tasks/invariance/_family_c.py",
+    "tests/tasks/invariance/_family_d.py",
+    "tests/tasks/invariance/_nlpaug_side.py",
+    "tests/tasks/invariance/_reference_side.py",
+    "tests/tasks/invariance/_sinks.py",
+    "tests/tasks/invariance/dynamics_fixtures.py",
+    "tests/tasks/invariance/repe_width_padding.py"
+  ],
+  "tasks": {
+    "dynamics_generation_diversity": {
+      "source": "src/blme/tasks/dynamics/generation_diversity.py",
+      "inputs": [
+        "src/blme/tasks/dynamics/generation_diversity.py",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py",
+        "tests/tasks/parity/test_coverage_gap_parity.py",
+        "tests/tasks/parity/test_generation_diversity_values.py",
+        "tests/tasks/test_reference_parity_formulas.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_generation_diversity_values.py",
+        "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing*"
+      ],
+      "readout_selectors": {
+        "distinct_1": [
+          "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean"
+        ],
+        "distinct_2": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions"
+        ],
+        "distinct_3": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions"
+        ],
+        "mean_distinct_1": [
+          "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference"
+        ],
+        "mean_distinct_2": [
+          "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference"
+        ],
+        "mean_distinct_3": [
+          "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference"
+        ],
+        "mean_phrase_repetition_rate": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions"
+        ],
+        "mean_sampling_entropy_first_quarter": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions",
+          "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass",
+          "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos"
+        ],
+        "mean_sampling_entropy_last_quarter": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions",
+          "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass",
+          "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos"
+        ],
+        "mean_self_bleu": [
+          "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_reported_at_texygen_orders_2_to_5",
+          "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing"
+        ],
+        "sampling_entropy_collapse_delta": [
+          "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions",
+          "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos"
+        ]
+      },
+      "headlines": [
+        "distinct_1",
+        "distinct_2",
+        "distinct_3",
+        "mean_distinct_1",
+        "mean_distinct_2",
+        "mean_distinct_3",
+        "mean_phrase_repetition_rate",
+        "mean_sampling_entropy_first_quarter",
+        "mean_sampling_entropy_last_quarter",
+        "mean_self_bleu",
+        "sampling_entropy_collapse_delta"
+      ],
+      "declaration": "parity-ready",
+      "metadata_sha256": "09ceedab6328287e8d57e22c3c80c29fd82deaa52e29a024422dcbdc9e30b88e",
+      "defaults_sha256": "8c3097bad62b318b39c009de234ee97a07d2572fe5138cf844ca0b46f34923d9"
+    },
+    "geometry_procrustes_linearity": {
+      "source": "src/blme/tasks/geometry/procrustes_linearity.py",
+      "inputs": [
+        "src/blme/tasks/geometry/procrustes_linearity.py",
+        "tests/tasks/invariance/test_procrustes_linearity.py",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py",
+        "tests/tasks/parity/test_procrustes_linearity_values.py",
+        "tests/tasks/test_metric_repairs.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_procrustes_linearity_values.py",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py",
+        "tests/tasks/test_metric_repairs.py::test_procrustes*",
+        "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_ignores_position0",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py"
+      ],
+      "readout_selectors": {
+        "procrustes_linearity_adjusted_first": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_last": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_max": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_mean": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_min": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_q25": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_q50": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_adjusted_q75": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_first": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_last": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_max": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_mean": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_min": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_q25": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_q50": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_q75": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_slope": [
+          "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release"
+        ],
+        "procrustes_linearity_heldout_r2_mean": [
+          "tests/tasks/test_metric_repairs.py::test_procrustes*",
+          "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+          "tests/tasks/parity/test_procrustes_heldout_rank.py"
+        ]
+      },
+      "headlines": [
+        "procrustes_linearity_adjusted_first",
+        "procrustes_linearity_adjusted_last",
+        "procrustes_linearity_adjusted_max",
+        "procrustes_linearity_adjusted_mean",
+        "procrustes_linearity_adjusted_min",
+        "procrustes_linearity_adjusted_q25",
+        "procrustes_linearity_adjusted_q50",
+        "procrustes_linearity_adjusted_q75",
+        "procrustes_linearity_first",
+        "procrustes_linearity_heldout_r2_mean",
+        "procrustes_linearity_last",
+        "procrustes_linearity_max",
+        "procrustes_linearity_mean",
+        "procrustes_linearity_min",
+        "procrustes_linearity_q25",
+        "procrustes_linearity_q50",
+        "procrustes_linearity_q75",
+        "procrustes_linearity_slope"
+      ],
+      "declaration": "parity-ready",
+      "metadata_sha256": "9782bc8972f90b9d849662911882fe6896dd42ee60d75c98da1c3d67237a65ca",
+      "defaults_sha256": "8af3bf5d65c4ad4f55e154ee7de6f73af84bc8d68017d5c8e5c2587ec8867f11"
+    }
+  },
+  "runs": {
+    "5.2.0": {
+      "junit_sha256": {
+        "pytest-5.2.0.xml": "b99e716edf70b2225b83e484fbf9843e958f33692c2f6a6d5deafc2ba173712f"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_default_collection_is_texygens_500": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_reported_at_texygen_orders_2_to_5": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_scores_the_first_sample_size_completions": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_word_unit_metrics_do_not_depend_on_the_tokenizer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_adjusted_twin_removes_the_chance_fit": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_declarations": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_evaluate_on_a_model_reads_the_sink_free_rows": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_ignores_position0": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_survives_an_exact_isometric_embedding": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_massive_row_is_dropped_at_every_layer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_max]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_mean]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_min]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q25]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q50]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q75]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_min]": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype0]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype1]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype2]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[-1-1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[1-2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype0]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_zero_training_rank_uses_training_mean_and_records_rank_for_undefined_r2": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_independent_is_low": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_orthogonal_map_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_scale_invariance_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_blme_matches_official_reference_primary": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_conditioning_ill_conditioned_still_bit_exact": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_degenerate_inputs_return_nan": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_rank_deficient_independent_target_headline_is_the_projection": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_wide_matrix_headline_is_the_minimum_norm_fit": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_position_twin_matches_the_release": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_completions_are_cut_at_every_generation_stop_id": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_generate_gets_no_generation_kwargs_next_to_the_config": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_model_generation_config_does_not_apply": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection": "passed",
+        "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing": "passed"
+      }
+    },
+    "5.10.2": {
+      "junit_sha256": {
+        "pytest-5.10.2.xml": "07bd31fdff97df70f3122eee63a12eb32f7cbd6e3423523b00c268ddb8e2c213"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_default_collection_is_texygens_500": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_reported_at_texygen_orders_2_to_5": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_scores_the_first_sample_size_completions": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_word_unit_metrics_do_not_depend_on_the_tokenizer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_adjusted_twin_removes_the_chance_fit": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_declarations": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_evaluate_on_a_model_reads_the_sink_free_rows": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_ignores_position0": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_survives_an_exact_isometric_embedding": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_massive_row_is_dropped_at_every_layer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_max]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_mean]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_min]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q25]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q50]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q75]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_min]": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype0]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype1]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype2]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[-1-1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[1-2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype0]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_zero_training_rank_uses_training_mean_and_records_rank_for_undefined_r2": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_independent_is_low": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_orthogonal_map_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_scale_invariance_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_blme_matches_official_reference_primary": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_conditioning_ill_conditioned_still_bit_exact": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_degenerate_inputs_return_nan": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_rank_deficient_independent_target_headline_is_the_projection": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_wide_matrix_headline_is_the_minimum_norm_fit": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_position_twin_matches_the_release": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_completions_are_cut_at_every_generation_stop_id": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_generate_gets_no_generation_kwargs_next_to_the_config": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_model_generation_config_does_not_apply": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection": "passed",
+        "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing": "passed"
+      }
+    },
+    "5.22.2": {
+      "junit_sha256": {
+        "pytest-5.22.2.xml": "53bcc2acff94b605d34cae86f8ded634edeac752796c6018db8104131c73c43a"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_default_collection_is_texygens_500": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_reported_at_texygen_orders_2_to_5": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_scores_the_first_sample_size_completions": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_word_unit_metrics_do_not_depend_on_the_tokenizer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_adjusted_twin_removes_the_chance_fit": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_declarations": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_evaluate_on_a_model_reads_the_sink_free_rows": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_ignores_position0": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_survives_an_exact_isometric_embedding": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_massive_row_is_dropped_at_every_layer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_max]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_mean]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_min]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q25]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q50]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q75]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_min]": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype0]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype1]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype2]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[-1-1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[1-2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype0]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_zero_training_rank_uses_training_mean_and_records_rank_for_undefined_r2": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_independent_is_low": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_orthogonal_map_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_scale_invariance_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_blme_matches_official_reference_primary": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_conditioning_ill_conditioned_still_bit_exact": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_degenerate_inputs_return_nan": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_rank_deficient_independent_target_headline_is_the_projection": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_wide_matrix_headline_is_the_minimum_norm_fit": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_position_twin_matches_the_release": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_completions_are_cut_at_every_generation_stop_id": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_generate_gets_no_generation_kwargs_next_to_the_config": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_model_generation_config_does_not_apply": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection": "passed",
+        "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing": "passed"
+      }
+    },
+    "5.23.0": {
+      "junit_sha256": {
+        "pytest-5.23.0.xml": "867e91d8da13fcdd2bc755e3a8e76d2fe67a60a008899162c65447e7c2dcf777"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_default_collection_is_texygens_500": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_reported_at_texygen_orders_2_to_5": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_self_bleu_scores_the_first_sample_size_completions": "passed",
+        "tests/tasks/invariance/test_dynamics_generation_diversity.py::test_word_unit_metrics_do_not_depend_on_the_tokenizer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_adjusted_twin_removes_the_chance_fit": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_declarations": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_evaluate_on_a_model_reads_the_sink_free_rows": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_ignores_position0": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_headline_survives_an_exact_isometric_embedding": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_massive_row_is_dropped_at_every_layer": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_max]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_mean]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_min]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q25]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q50]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_adjusted_q75]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_first]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_last]": "passed",
+        "tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry[procrustes_linearity_min]": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean": "passed",
+        "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_entropy_quarters_follow_content_positions_through_pad_and_eos": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_inline_keys_match_their_definitions": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype0]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype1]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype2]": "passed",
+        "tests/tasks/parity/test_generation_diversity_values.py::test_sampling_entropy_nonuniform_masked_and_point_mass[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[-1-1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_training_documents_choose_cutoff_before_outer_refit[1-2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype0]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype1]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype2]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_weak_training_direction_cannot_explode_on_unseen_documents[dtype3]": "passed",
+        "tests/tasks/parity/test_procrustes_heldout_rank.py::test_zero_training_rank_uses_training_mean_and_records_rank_for_undefined_r2": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_independent_is_low": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_orthogonal_map_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_anchor_scale_invariance_is_exactly_one": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_blme_matches_official_reference_primary": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_conditioning_ill_conditioned_still_bit_exact": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_degenerate_inputs_return_nan": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_rank_deficient_independent_target_headline_is_the_projection": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_parity.py::test_wide_matrix_headline_is_the_minimum_norm_fit": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_headline_key_matches_the_release": "passed",
+        "tests/tasks/parity/test_procrustes_linearity_values.py::test_every_position_twin_matches_the_release": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_completions_are_cut_at_every_generation_stop_id": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_generate_gets_no_generation_kwargs_next_to_the_config": "passed",
+        "tests/tasks/test_generation_diversity_stop_ids.py::test_model_generation_config_does_not_apply": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[article_id-uint64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[doc_id-int32-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-private]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak[document_id-int64-shared]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection": "passed",
+        "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing": "passed"
+      }
+    }
+  },
+  "execution": {
+    "host": "pod1",
+    "device": "CPU",
+    "source_export": "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/qualified/final",
+    "raw_directory": "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/qualified/runs",
+    "source_basis": "Current pod1 working tree on 1115c39 including earlier input-boundary fixes. The November 19 export contains the training-document rank selection, streaming float64 entropy, aligned padding positions and the regressions for these changes.",
+    "prelaunch_pin_sha256": "f476012dfcaa41adf21948456f44ff57e64c4332e0baced61e318722f7c9a3dd",
+    "run_recipe_sha256": "e8d2db109db03f9a4a5c90fb79cefa4cc71f50749cd5b5101c71ce183bbf8ddf",
+    "stacks": {
+      "5.2.0": {
+        "python": "3.12.15",
+        "packages": {
+          "transformers": "5.2.0",
+          "tokenizers": "0.22.2",
+          "torch": "2.8.0+cu128",
+          "numpy": "2.2.6",
+          "scipy": "1.13.0",
+          "datasets": "4.5.0",
+          "pytest": "9.0.2"
+        }
+      },
+      "5.10.2": {
+        "python": "3.12.15",
+        "packages": {
+          "transformers": "5.10.2",
+          "tokenizers": "0.22.2",
+          "torch": "2.8.0+cu128",
+          "numpy": "2.2.6",
+          "scipy": "1.13.0",
+          "datasets": "4.5.0",
+          "pytest": "9.0.2"
+        }
+      },
+      "5.22.2": {
+        "python": "3.12.15",
+        "packages": {
+          "transformers": "5.22.2",
+          "tokenizers": "0.23.3",
+          "torch": "2.8.0+cu128",
+          "numpy": "2.2.6",
+          "scipy": "1.13.0",
+          "datasets": "4.5.0",
+          "pytest": "9.0.2"
+        }
+      },
+      "5.23.0": {
+        "python": "3.12.15",
+        "packages": {
+          "transformers": "5.23.0",
+          "tokenizers": "0.23.3",
+          "torch": "2.8.0+cu128",
+          "numpy": "2.2.6",
+          "scipy": "1.13.0",
+          "datasets": "4.5.0",
+          "pytest": "9.0.2"
+        }
+      }
+    },
+    "commands": {
+      "5.2.0": [
+        {
+          "label": "pytest",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-lm-eval/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/pytest-5.2.0.xml",
+            "tests/tasks/parity/test_procrustes_heldout_rank.py",
+            "tests/tasks/parity/test_procrustes_linearity_parity.py",
+            "tests/tasks/parity/test_procrustes_linearity_values.py",
+            "tests/tasks/invariance/test_procrustes_linearity.py",
+            "tests/tasks/parity/test_generation_diversity_values.py",
+            "tests/tasks/test_generation_diversity_stop_ids.py",
+            "tests/tasks/invariance/test_dynamics_generation_diversity.py",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean",
+            "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection",
+            "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "measure",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-lm-eval/bin/python",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/final-measure.py",
+            "--tiny",
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/fixed-gpt2",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/measure-5.2.0.json"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-1t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-lm-eval/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-1t-5.2.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 1,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-4t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-lm-eval/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-4t-5.2.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 4,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-8t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-lm-eval/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-8t-5.2.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 8,
+          "exit_code": 0
+        }
+      ],
+      "5.10.2": [
+        {
+          "label": "pytest",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-struct-tf5102/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/pytest-5.10.2.xml",
+            "tests/tasks/parity/test_procrustes_heldout_rank.py",
+            "tests/tasks/parity/test_procrustes_linearity_parity.py",
+            "tests/tasks/parity/test_procrustes_linearity_values.py",
+            "tests/tasks/invariance/test_procrustes_linearity.py",
+            "tests/tasks/parity/test_generation_diversity_values.py",
+            "tests/tasks/test_generation_diversity_stop_ids.py",
+            "tests/tasks/invariance/test_dynamics_generation_diversity.py",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean",
+            "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection",
+            "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "measure",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-struct-tf5102/bin/python",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/final-measure.py",
+            "--tiny",
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/fixed-gpt2",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/measure-5.10.2.json"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-1t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-struct-tf5102/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-1t-5.10.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 1,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-4t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-struct-tf5102/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-4t-5.10.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 4,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-8t",
+          "argv": [
+            "/home/dtsaras/hara-venvs/beyond-struct-tf5102/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-8t-5.10.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 8,
+          "exit_code": 0
+        }
+      ],
+      "5.22.2": [
+        {
+          "label": "pytest",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.22.2/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/pytest-5.22.2.xml",
+            "tests/tasks/parity/test_procrustes_heldout_rank.py",
+            "tests/tasks/parity/test_procrustes_linearity_parity.py",
+            "tests/tasks/parity/test_procrustes_linearity_values.py",
+            "tests/tasks/invariance/test_procrustes_linearity.py",
+            "tests/tasks/parity/test_generation_diversity_values.py",
+            "tests/tasks/test_generation_diversity_stop_ids.py",
+            "tests/tasks/invariance/test_dynamics_generation_diversity.py",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean",
+            "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection",
+            "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "measure",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.22.2/bin/python",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/final-measure.py",
+            "--tiny",
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/fixed-gpt2",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/measure-5.22.2.json",
+            "--fresh-panels"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-1t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.22.2/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-1t-5.22.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 1,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-4t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.22.2/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-4t-5.22.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 4,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-8t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.22.2/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-8t-5.22.2.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 8,
+          "exit_code": 0
+        }
+      ],
+      "5.23.0": [
+        {
+          "label": "pytest",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/pytest-5.23.0.xml",
+            "tests/tasks/parity/test_procrustes_heldout_rank.py",
+            "tests/tasks/parity/test_procrustes_linearity_parity.py",
+            "tests/tasks/parity/test_procrustes_linearity_values.py",
+            "tests/tasks/invariance/test_procrustes_linearity.py",
+            "tests/tasks/parity/test_generation_diversity_values.py",
+            "tests/tasks/test_generation_diversity_stop_ids.py",
+            "tests/tasks/invariance/test_dynamics_generation_diversity.py",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_matches_independent_reference",
+            "tests/tasks/parity/test_coverage_gap_parity.py::test_distinct_n_corpus_is_a_collection_ratio_not_a_mean",
+            "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_matches_numpy_on_unseen_documents_and_permuted_chunks",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_affine_recovery_and_independent_wide_noise",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_degenerate_and_training_only_sink_thresholds",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_wikitext_articles_are_grouped_before_passage_selection",
+            "tests/tasks/test_metric_repairs.py::test_public_evaluator_grouped_documents_and_attribution_labels",
+            "tests/tasks/test_metric_repairs.py::test_procrustes_numpy_parent_ids_never_leak"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "measure",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/final-measure.py",
+            "--tiny",
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/fixed-gpt2",
+            "/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/measure-5.23.0.json",
+            "--fresh-panels"
+          ],
+          "threads": 2,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-1t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-1t-5.23.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 1,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-4t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-4t-5.23.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 4,
+          "exit_code": 0
+        },
+        {
+          "label": "entropy-8t",
+          "argv": [
+            "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--disable-warnings",
+            "--tb=short",
+            "--junitxml=/public_data/dtsaras/hara/artifacts/pod1/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/entropy-8t-5.23.0.xml",
+            "tests/tasks/parity/test_generation_diversity_values.py"
+          ],
+          "threads": 8,
+          "exit_code": 0
+        }
+      ]
+    },
+    "suites": {
+      "5.2.0": {
+        "counts": {
+          "passed": 61,
+          "failure": 0,
+          "error": 0,
+          "skipped": 0
+        },
+        "junit_sha256": "b99e716edf70b2225b83e484fbf9843e958f33692c2f6a6d5deafc2ba173712f",
+        "cases": 61
+      },
+      "5.10.2": {
+        "counts": {
+          "passed": 61,
+          "failure": 0,
+          "error": 0,
+          "skipped": 0
+        },
+        "junit_sha256": "07bd31fdff97df70f3122eee63a12eb32f7cbd6e3423523b00c268ddb8e2c213",
+        "cases": 61
+      },
+      "5.22.2": {
+        "counts": {
+          "passed": 61,
+          "failure": 0,
+          "error": 0,
+          "skipped": 0
+        },
+        "junit_sha256": "53bcc2acff94b605d34cae86f8ded634edeac752796c6018db8104131c73c43a",
+        "cases": 61
+      },
+      "5.23.0": {
+        "counts": {
+          "passed": 61,
+          "failure": 0,
+          "error": 0,
+          "skipped": 0
+        },
+        "junit_sha256": "867e91d8da13fcdd2bc755e3a8e76d2fe67a60a008899162c65447e7c2dcf777",
+        "cases": 61
+      }
+    },
+    "fresh_process_entropy": {
+      "5.2.0": {
+        "1": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "deca9d7e570c496cc52c4f8c1650d8afc2e0ab760de724e6def2a2ce4c1c9ad1",
+          "cases": 6
+        },
+        "4": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "ee6282340212ce4ccf4b979aae093905e6d1d592f1698ef8484c3b3289628b1f",
+          "cases": 6
+        },
+        "8": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "981fce1945fd78582f554a0fae26efe390440ff5520b6141a86c091d579d51f1",
+          "cases": 6
+        }
+      },
+      "5.10.2": {
+        "1": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "e6ef4a8bde2ecc66c29a520ec591ed26e8c0c0810126d9b5ffb6fa0de2c563d4",
+          "cases": 6
+        },
+        "4": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "530d64f173cc802abf086476b8d9fae871ee1050c36324c8acf95d6bc8e656d0",
+          "cases": 6
+        },
+        "8": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "8bacec3cda6052ca6de433fe1f7f7b54dc5d26fa1ac4c404cf4ed8211d735310",
+          "cases": 6
+        }
+      },
+      "5.22.2": {
+        "1": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "057e70702e7d0427f099135bb00d7c323df553b9eaa58be7314f7635e55a3cee",
+          "cases": 6
+        },
+        "4": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "0c2236630a2c1839401e07c6c703ed1828e89ffd048aa69ffaed716c53f26d1e",
+          "cases": 6
+        },
+        "8": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "4f8ec4555958aff5abdce7ff889c95c41c4759a7f9be0e01f406dd72262420ae",
+          "cases": 6
+        }
+      },
+      "5.23.0": {
+        "1": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "beacfa9b813e2c38eac1e2044e6957c12be5fdc134392462e3d317d6a7587d1f",
+          "cases": 6
+        },
+        "4": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "4d2b5c5aab28c7b59146216d7d7d869aea107dad861d8a3ca5cc0f1f4fbb93b4",
+          "cases": 6
+        },
+        "8": {
+          "counts": {
+            "passed": 6,
+            "failure": 0,
+            "error": 0,
+            "skipped": 0
+          },
+          "junit_sha256": "7d16f0dabc69072f0aed34530242a4e0cf9c2ac32bfb4564010066436c3e1baa",
+          "cases": 6
+        }
+      }
+    },
+    "study_outputs_sha256": {
+      "verification/numerical_fixes_2026-11-19/measure-5.2.0.json": "89c2ec5dc9e4ccc96fa935c8c99b107e77e4eccbfe8a5591e79642c083afc77a",
+      "verification/numerical_fixes_2026-11-19/measure-5.10.2.json": "f2c34d016e012e16aa4ff68d3ac0ff5b61784aa657af184d353e854affa7e2f3",
+      "verification/numerical_fixes_2026-11-19/measure-5.22.2.json": "873a4a5e76698abbb676533a1a6bbae1581c541ddfb3ebdf1ec9955ebb4c83cb",
+      "verification/numerical_fixes_2026-11-19/measure-5.23.0.json": "0090a827fcc1798739aa340e79c185d30bf5cef1e5e11f5c9161bb09eada1baf",
+      "verification/numerical_fixes_2026-11-19/refined-grid.json": "7d7ae989e5389f0c22c2607ffab5095869a660d0165b4f89b437775051283cf9",
+      "verification/numerical_fixes_2026-11-19/grid_check.py": "4ee915e1b17ce57041d0fe308d439882c9e2998c0f0efa82e4e8ac5017d80d00"
+    },
+    "environment": {
+      "HF_HUB_OFFLINE": "1",
+      "HF_DATASETS_OFFLINE": "1",
+      "BLME_REQUIRE_REFS": "1",
+      "CUDA_VISIBLE_DEVICES": "",
+      "OMP_NUM_THREADS": "2",
+      "MKL_NUM_THREADS": "2",
+      "OPENBLAS_NUM_THREADS": "2",
+      "NLTK_DATA": "/home/dtsaras/.cache/blme-sideinstalls/nltk_data",
+      "PYTHONPATH": "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/qualified/final/src"
+    },
+    "earlier_measurement_attempt": {
+      "directory": "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/confirm/runs",
+      "observation": "The initial measurement verifier compared string parent IDs without their JSON quotes. It stopped at the first test-title assertion on 5.22.2 and 5.23.0. The corrected verifier and all four suites were replayed with unchanged estimator source hashes."
+    },
+    "pre_fix": {
+      "version": "5.10.2",
+      "source_export": "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/qualified/before",
+      "counts": {
+        "passed": 0,
+        "failure": 13,
+        "error": 0,
+        "skipped": 0
+      },
+      "junit_sha256": "d0d83c063dc455425f50cf718d7410b8f43bda9e97c1e214e9c2883b0abfda39",
+      "cases": 13,
+      "failures": {
+        "test_weak_training_direction_cannot_explode_on_unseen_documents[dtype0]": "assert -499618.1201814056 == 1.0 ± 1.0e-12",
+        "test_weak_training_direction_cannot_explode_on_unseen_documents[dtype1]": "assert -499618.1201814056 == 1.0 ± 1.0e-12",
+        "test_weak_training_direction_cannot_explode_on_unseen_documents[dtype2]": "assert -499999.00291038305 == 1.0 ± 1.0e-12",
+        "test_weak_training_direction_cannot_explode_on_unseen_documents[dtype3]": "assert -499999.0000000001 == 1.0 ± 1.0e-12",
+        "test_zero_training_rank_uses_training_mean_and_records_rank_for_undefined_r2": "KeyError: 'pair_fit_rank'",
+        "test_training_documents_choose_cutoff_before_outer_refit[1-2]": "KeyError: 'rank_fit_documents'",
+        "test_training_documents_choose_cutoff_before_outer_refit[-1-1]": "KeyError: 'rank_fit_documents'",
+        "test_inline_keys_match_their_definitions": "assert 1.0782288312911987 == 1.0782289475376927 ± 1.0e-12",
+        "test_sampling_entropy_nonuniform_masked_and_point_mass[dtype0]": "assert 0.2911301553249359 == 0.29113014687246147 ± 1.0e-12",
+        "test_sampling_entropy_nonuniform_masked_and_point_mass[dtype1]": "assert 0.2911301553249359 == 0.29113014687246147 ± 1.0e-12",
+        "test_sampling_entropy_nonuniform_masked_and_point_mass[dtype2]": "assert 0.2911301553249359 == 0.29113014687246147 ± 1.0e-12",
+        "test_sampling_entropy_nonuniform_masked_and_point_mass[dtype3]": "assert 0.5493061542510986 == 0.29113014687246147 ± 1.0e-12",
+        "test_entropy_quarters_follow_content_positions_through_pad_and_eos": "assert 0.0 == 2.0794415416798357 ± 1.0e-12"
+      }
+    },
+    "refined_grid": {
+      "stack": "5.23.0",
+      "argv": [
+        "/home/dtsaras/hara-artifacts/blme/metrics-update-20261118-jyigIr/env-5.23.0/bin/python",
+        "grid_check.py",
+        "/home/dtsaras/hara-artifacts/blme/numerical-fixes-20261119-SXqIiL/qualified/runs/refined-grid.json"
+      ],
+      "prelaunch_hashes": [
+        "4ee915e1b17ce57041d0fe308d439882c9e2998c0f0efa82e4e8ac5017d80d00  grid_check.py",
+        "dfd9a24f4d75624b61b31b2de4f69a8fe7ff17e1c00f87e8464eb3b1c5191978  measure.py"
+      ]
+    }
+  }
+}

@@ -110,7 +110,7 @@ def test_pythia_head_matches_the_release_on_emittable_and_all_rows():
     except OSError as e:  # pragma: no cover - environment dependent
         pytest.skip(f"{name} not cached: {e}")
     res = SuperpositionStrengthTask(config={}).evaluate(model, tok, dataset=None)
-    W = model.embed_out.weight.detach().float()
+    W = model.get_output_embeddings().weight.detach().float()
     n_tok = len(tok)
     assert res["_meta_n_unused_rows"] == W.shape[0] - n_tok > 0
     with torch.no_grad():
@@ -119,3 +119,22 @@ def test_pythia_head_matches_the_release_on_emittable_and_all_rows():
     assert res["mean_squared_overlap"] == pytest.approx(emittable, rel=1e-5)
     assert res["_meta_mean_squared_overlap_all_rows"] == pytest.approx(every_row, rel=1e-5)
     assert abs(emittable - every_row) > 1e-4 * emittable
+
+
+def test_neox_masked_vocabulary_extends_the_active_head():
+    from transformers import GPTNeoXConfig, GPTNeoXForCausalLM
+    from tests.invariance.model_transforms import pad_vocabulary
+
+    config = GPTNeoXConfig(vocab_size=48, hidden_size=32, intermediate_size=64,
+                           num_attention_heads=4, num_hidden_layers=2, tie_word_embeddings=False)
+    with torch.random.fork_rng(devices=[]), torch.no_grad():
+        torch.manual_seed(1)
+        original = GPTNeoXForCausalLM(config).eval()
+        padded = pad_vocabulary(original, extra_rows=3, kind="masked")
+        ids = torch.tensor([[4, 8, 5]])
+        expected = original(ids).logits
+        obtained = padded(ids).logits
+    assert expected.shape[-1] == 48
+    assert obtained.shape[-1] == padded.get_output_embeddings().out_features == 51
+    torch.testing.assert_close(obtained[..., :48], expected, rtol=0, atol=0)
+    assert torch.isneginf(obtained[..., 48:]).all()

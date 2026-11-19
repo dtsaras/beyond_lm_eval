@@ -868,6 +868,18 @@ def _tokenizer_preserves_byte_count(tokenizer, ids, corpus) -> bool:
         return False
 
 
+def _scored_suffix_is_full_text(tokenizer, ids, corpus):
+    """Prove that the sole unscored token is an inserted BOS and the suffix preserves the source."""
+    if not ids or ids[0] != getattr(tokenizer, "bos_token_id", None):
+        return False
+    try:
+        tagged = tokenizer(corpus, truncation=False, return_special_tokens_mask=True)
+        return (list(tagged["input_ids"]) == ids and tagged["special_tokens_mask"][0] == 1
+                and tokenizer.decode(ids[1:], skip_special_tokens=True, clean_up_tokenization_spaces=False) == corpus)
+    except (AttributeError, KeyError, TypeError, ValueError, IndexError, NotImplementedError):
+        return False
+
+
 def _exact_token_bytes(tokenizer, ids, corpus):
     """Raw UTF-8 bytes owned by each token, or ``None`` if not establishable.
 
@@ -1237,7 +1249,11 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
         if _scored_pos == set(range(1, n_total)):
             n_bytes = max(1, len(corpus_bytes))
             n_chars = max(1, len(corpus))
-            _byte_mode = "full_corpus_upper_bound"
+            # A verified added BOS owns zero source bytes. If every other
+            # token was scored and decodes to the source verbatim, the total is
+            # exact even when individual pieces share a character offset.
+            _byte_mode = ("scored_full_text" if _scored_suffix_is_full_text(
+                tokenizer, input_ids_all[0].tolist(), corpus) else "full_corpus_upper_bound")
         else:
             n_bytes, n_chars = 0, 0
     # `max_length` is the window ACTUALLY used after the context clamp. The

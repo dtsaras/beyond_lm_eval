@@ -70,18 +70,18 @@ def test_adjusted_twin_removes_the_chance_fit(null_states):
 
 
 HEADLINE = tuple(ProcrustesLinearityTask.HEADLINE_KEYS)
-INCL = tuple("_meta_incl_pos0_" + k for k in HEADLINE)
+INCL = tuple("_meta_incl_pos0_" + k for k in HEADLINE if k != "procrustes_linearity_heldout_r2_mean")
 
 
 def test_headline_ignores_position0(tiny_states):
-    """Position-0 rows scaled x1000 (a synthetic sink) leave all 17 headline
+    """Position-0 rows scaled x1000 (a synthetic sink) leave all 18 headline
     keys bit-stable; the every-position values of the released notebook, kept
     as _meta_incl_pos0_*, move (known negative)."""
     from _family_c import scale_position0
     f64 = {"store_dtype": torch.float64}
     base = inv.run_task_on_states(TASK, tiny_states, **f64)
     sunk = inv.run_task_on_states(TASK, scale_position0(tiny_states, 1e3), **f64)
-    assert len(HEADLINE) == 17 and set(HEADLINE) <= set(base)
+    assert len(HEADLINE) == 18 and len(INCL) == 17 and set(HEADLINE) <= set(base)
     assert set(INCL) <= set(base)
     assert not any(k.startswith("_meta_excl_pos0_") for k in base)
     inv.assert_invariant(base, sunk, list(HEADLINE), rtol=1e-9)

@@ -30,7 +30,6 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
@@ -51,6 +50,14 @@ _DIVERSITY_PROMPTS: List[str] = [
     "When asked about the meaning of life, she said",
     "A good software engineer should always",
 ]
+
+
+def _sampling_entropy(step_scores: torch.Tensor) -> torch.Tensor:
+    """Shannon entropy in nats for each row of processed generation scores."""
+    if step_scores.device.type == "mps":
+        step_scores = step_scores.cpu()  # MPS does not implement float64.
+    probs = torch.softmax(step_scores, dim=-1, dtype=torch.float64)
+    return torch.special.entr(probs).sum(dim=-1)  # entr(0) = 0 for masked logits.
 
 
 def _distinct_n(tokens: List[int], n: int) -> float:
@@ -109,21 +116,20 @@ def _word_tokenize(text: str):
         return nltk.word_tokenize(text, preserve_line=True), "nltk_treebank_no_punkt"
 
 
-def _trim_completion(tokens: List[int], stops, pad_token_id: Optional[int]) -> List[int]:
-    """Cut at the first stop id (one id or a set: every id generation stops
-    on, ``common.stop_ids``) and drop pad tokens."""
+def _content_positions(tokens: List[int], stops, pad_token_id: Optional[int]) -> List[int]:
+    """Indices of non-padding tokens before the first generation stop."""
     if stops is None:
         stops = ()
     elif isinstance(stops, int):
         stops = (stops,)
-    trimmed = []
-    for token in tokens:
+    positions = []
+    for index, token in enumerate(tokens):
         if token in stops:
             break
         if pad_token_id is not None and token == pad_token_id:
             continue
-        trimmed.append(token)
-    return trimmed
+        positions.append(index)
+    return positions
 
 
 def _ngram_overlap(ref_ngrams: Counter, hyp_ngrams: Counter, n: int) -> float:
@@ -353,10 +359,11 @@ class GenerationDiversityTask(DiagnosticTask):
                 # (tests/tasks/test_generation_diversity_stop_ids.py).
                 rows = gen_ids.tolist()
                 _n_cut[0] += sum(any(t in stops for t in r) for r in rows)
-                completions = [
-                    _trim_completion(r, stops, getattr(tokenizer, "pad_token_id", None))
+                content_positions = [
+                    _content_positions(r, stops, getattr(tokenizer, "pad_token_id", None))
                     for r in rows
                 ]
+                completions = [[row[i] for i in positions] for row, positions in zip(rows, content_positions)]
 
                 # Word units (Texygen): decode, then nltk.word_tokenize. A
                 # tokenizer without decode() leaves the ids as the units.
@@ -414,17 +421,16 @@ class GenerationDiversityTask(DiagnosticTask):
                 # after each sequence's EOS/pad so uneven completion lengths
                 # do not bias the quarter summaries.
                 if hasattr(outputs, "scores") and outputs.scores:
-                    scores_stack = torch.stack(outputs.scores, dim=1).float()  # (N, L, V)
-                    log_probs = F.log_softmax(scores_stack, dim=-1)
-                    probs = log_probs.exp()
-                    # entr(p) = -p log p with entr(0) = 0: processed scores hold
-                    # -inf entries, where -(p * log p) would be NaN.
-                    per_token_H = torch.special.entr(probs).sum(dim=-1)  # (N, L)
-                    for row_idx, comp in enumerate(completions):
-                        valid_len = len(comp)
+                    # Reduce one vocabulary slice at a time. Only the small
+                    # (completion, step) array survives in double precision.
+                    per_token_H = torch.stack(
+                        [_sampling_entropy(step) for step in outputs.scores], dim=1
+                    ).cpu().numpy()
+                    for row_idx, positions in enumerate(content_positions):
+                        valid_len = len(positions)
                         if valid_len < 4:
                             continue
-                        h_row = per_token_H[row_idx, :valid_len].cpu().numpy()
+                        h_row = per_token_H[row_idx, positions]
                         q1 = float(h_row[:valid_len // 4].mean())
                         q4 = float(h_row[3 * valid_len // 4:].mean())
                         all_entropy_first_q.append(q1)

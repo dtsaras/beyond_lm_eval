@@ -79,3 +79,39 @@ def test_s_unit_matches_autograd_on_the_unit_gain_state(build):
     assert res["S_unit"] == pytest.approx(want, rel=1e-4)
     # Not the raw-h sensitivity: the gain gauge moves that one.
     assert abs(res["_meta_representation_sensitivity_raw"] - want) > 1e-3 * want
+
+
+def test_softcapped_gemma_matches_autograd_through_its_actual_logits():
+    from transformers import Gemma2Config, Gemma2ForCausalLM
+
+    torch.manual_seed(7)
+    cfg = Gemma2Config(vocab_size=1024, hidden_size=32, intermediate_size=64, num_hidden_layers=2,
+                       num_attention_heads=4, num_key_value_heads=2, head_dim=8,
+                       final_logit_softcapping=0.08, attn_implementation="eager")
+    model = Gemma2ForCausalLM(cfg).eval()
+    norm, tok = model.model.norm, fd.tokenizer()
+    with torch.no_grad():
+        norm.weight.copy_(torch.linspace(-0.3, 0.4, norm.weight.numel()))
+    expected = []
+    for text in TEXTS:
+        ids = tok(text, return_tensors="pt", truncation=True, max_length=128)["input_ids"]
+        seen = {}
+
+        def capture(module, args, state):
+            seen["state"] = state.detach().requires_grad_(True)
+            return seen["state"]
+
+        hook = norm.register_forward_hook(capture)
+        try:
+            logits = model(ids).logits[0, :-1]
+            logp = logits.log_softmax(-1).gather(1, ids[0, 1:, None]).sum()
+            grad, = torch.autograd.grad(logp, seen["state"])
+        finally:
+            hook.remove()
+        gain = 1 + norm.weight.detach()
+        unit = seen["state"].detach()[0, :-1] / gain
+        expected.append((unit.square().sum(-1) * (grad[0, :-1] * gain).square().sum(-1)).mean().item())
+    result = RepresentationSensitivityTask({"num_samples": len(TEXTS)}).evaluate(model, tok, TEXTS)
+    assert result["S_unit"] == pytest.approx(float(np.mean(expected)), rel=1e-4)
+    assert result["_meta_final_logit_softcapping"] == cfg.final_logit_softcapping
+    assert result["_meta_head_guard_max_rel"] < 1e-4

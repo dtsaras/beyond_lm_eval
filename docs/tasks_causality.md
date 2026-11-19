@@ -48,7 +48,7 @@ not a full implementation of ACDC or causal scrubbing.
 * **File & Function**: `src/blme/tasks/causality/circuit_quality.py` -> `CircuitQualityTask`
 * **Critical Info**: A layer-level heuristic (`diagnostic_method: layer_mean_ablation_circuit_proxy`), not ACDC or causal scrubbing. Defaults: `num_samples: 3`, `top_k_pct: 25`. No headline keys or size-invariances are declared. Requires several forward passes per layer for the importance ranking plus further passes for the faithfulness evaluation.
 
-## 5. Edge Attribution Patching (simplified per-layer proxy)
+## 5. Layer attribution
 * **What are we measuring**: How concentrated a first-order attribution score is across layers for a clean/corrupted prompt pair.
 * **How are we measuring**: Computing `(h_clean - h_corrupted) · grad(target_logit | h_clean)` per layer, where the corrupted input is a reproducible token shuffle.
 * **Hypothesis**: If the attribution mass is concentrated in a small set of layers, those layers are likely carrying most of the first-order contribution to the target prediction.
@@ -56,7 +56,7 @@ not a full implementation of ACDC or causal scrubbing.
 * **File & Function**: `src/blme/tasks/causality/edge_attribution.py` -> `EdgeAttributionTask`
 * **Critical Info**: This is not the full paper method: BLME aggregates per layer and uses shuffled-token corruption, so report it as an attribution proxy (`diagnostic_method: residual_layer_gradient_patch_proxy`) and not as recovered circuit edges. Defaults: `num_samples: 10`. No headline keys or size-invariances are declared.
 
-## 6. Knowledge Neurons
+## 6. Neuron saliency
 * **What are we measuring**: Which MLP intermediate activations have high saliency for factual target-token logits.
 * **How are we measuring**: Capturing MLP down-projection inputs and backpropagating the target logit to score neuron-level attribution concentration.
 * **Hypothesis**: Factual predictions often rely on sparse MLP directions; strong concentration suggests a few neurons/layers dominate the target logit.

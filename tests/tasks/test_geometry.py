@@ -758,13 +758,13 @@ def test_information_geometry(mock_model, mock_tokenizer):
     results = task.evaluate(mock_model, mock_tokenizer, dataset=None)
 
     assert isinstance(results, dict)
-    if "error" in results:
-        # Only the fail-closed linearity guard may decline (the BERT toy's
-        # transform head); any other error is a regression.
-        assert "not purely linear" in results["error"], results
+    if mock_model.config.model_type == "bert":
+        # The transform in this masked-LM head invalidates the reconstructed logits.
+        assert "recomputed logits deviate" in results.get("error", ""), results
         assert "S_unit" not in results
         return
     # The headline is the gauge-free S_unit; the raw value is _meta_.
+    assert "error" not in results, results
     assert RepresentationSensitivityTask.HEADLINE_KEYS == ("S_unit",)
     assert np.isfinite(results["S_unit"]) and results["S_unit"] >= 0
     assert "_meta_representation_sensitivity_raw" in results
@@ -1771,8 +1771,13 @@ def test_every_geometry_task_actually_runs():
         if cls is None:
             continue
         try:
-            cls(config={"num_samples": 3, "use_cache": False}).evaluate(
-                model, tok, dataset, cache=None)
+            config = {"num_samples": 3, "use_cache": False}
+            if name in {"geometry_domain_bpb", "geometry_paraphrase_lidar"}:
+                from pathlib import Path
+                config["panel_path"] = str(Path(__file__).resolve().parents[2] / "examples/recipes/example_panel.json")
+            result = cls(config=config).evaluate(model, tok, dataset, cache=None)
+            if "panel_path" in config:
+                assert np.isfinite(result[cls.HEADLINE_KEYS[0]])
         except Exception as exc:  # noqa: BLE001 - we want the type and message
             failures.append(f"{name}: {type(exc).__name__}: {exc}")
     assert not failures, "geometry tasks that raise on a minimal input:\n" + "\n".join(failures)

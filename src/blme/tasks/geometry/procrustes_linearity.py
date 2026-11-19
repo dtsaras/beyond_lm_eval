@@ -77,7 +77,9 @@ Implementation notes (BLME):
       hold most of the centred sum of squares, so with them the fit scores the
       sink and not the content tokens. The released notebook keeps every
       position; that value is emitted as ``_meta_incl_pos0_*``.
-    * Only summary scalars are emitted; the slope is on normalised depth.
+    * An additional BLME score selects a truncated-SVD affine map using
+      training documents and measures predictive R-squared against the training
+      target mean on unseen documents. The splits, cutoffs and ranks are recorded.
 """
 
 import logging
@@ -258,7 +260,8 @@ class ProcrustesLinearityTask(DiagnosticTask):
         ("mean", "min", "max", "first", "last", "slope", "q25", "q50", "q75")
     ) + tuple(
         f"procrustes_linearity_adjusted_{s}" for s in
-        ("mean", "min", "max", "first", "last", "q25", "q50", "q75"))
+        ("mean", "min", "max", "first", "last", "q25", "q50", "q75")) + (
+        "procrustes_linearity_heldout_r2_mean",)
     # Raw keys are width- and scale-free but carry the r/(N-1) chance fit; the
     # adjusted twins add N. Identity blocks add pairs scoring exactly 1, so only
     # min/first/last survive them.
@@ -290,7 +293,7 @@ class ProcrustesLinearityTask(DiagnosticTask):
         if dataset is None and not (cache is not None and use_cache
                                     and getattr(cache, "is_populated", False)):
             from ...cache import load_default_corpus
-            dataset = load_default_corpus(num_samples)
+            dataset = load_default_corpus(num_samples, include_document_ids=True)
         # Embedding output first, raw deepest block last: all L transitions.
         per_doc, _info = hidden_states_for_task(
             model, tokenizer, dataset, cache, num_samples=num_samples,
@@ -311,6 +314,11 @@ class ProcrustesLinearityTask(DiagnosticTask):
         n_blocks = int(get_num_layers(model) or 0)
         _blocks = layers[1:] if (n_blocks > 0 and n_layers == n_blocks + 1) else layers
         _keys = middle_depth_layers({k: per_doc[k] for k in _blocks})
+        # Backfilling the held-out readout does not require the three in-sample SVDs.
+        heldout = _document_heldout_profile(
+            per_doc, layers, _keys, gram_device=self.config.get("heldout_gram_device"))
+        if self.config.get("heldout_only", False):
+            return heldout
         masks, _sink_info = sink_keep_masks([per_doc[k] for k in _keys])
         layer_states, _rows_meta = {}, None
         for li in layers:
@@ -322,7 +330,7 @@ class ProcrustesLinearityTask(DiagnosticTask):
         _sref = np.asarray(sims_ref, dtype=np.float64)
         finite = np.isfinite(sim)
         if not np.any(finite):
-            return {"error": "No adjacent layer pair yielded a valid linearity score"}
+            return {"error": "No adjacent layer pair yielded a valid linearity score", **heldout}
 
         n_pairs = sim.size
         finite_sim = sim[finite]
@@ -330,6 +338,7 @@ class ProcrustesLinearityTask(DiagnosticTask):
         _d_over_n = (float(_d_model) / float(n_tokens)) if n_tokens else float("nan")
 
         out = _profile_summary(sim, "procrustes_linearity")
+        out.update(heldout)
         # Size-free twin: the chance fit r/(N-1) removed pair by pair (the
         # slope's twin is not defined; test_procrustes_linearity.py N test).
         _adj = _profile_summary(np.asarray(sims_adj, dtype=np.float64),
@@ -384,6 +393,177 @@ class ProcrustesLinearityTask(DiagnosticTask):
                 if np.any(np.isfinite(_sref) & finite) else float("nan")),
         })
         return out
+
+
+# Cached activations are float32. Keep training covariance eigenvalues above
+# float32 epsilon relative to the largest, using their square roots in the SVD.
+# Coarser half-decade cutoffs are candidates for document validation.
+_HELDOUT_RCOND = torch.finfo(torch.float32).eps ** 0.5
+_VALIDATION_CUTOFFS = (1e-3, 10**-2.5, 1e-2, 10**-1.5, 1e-1)
+
+
+def _rank_errors(x_train, y_train, x_test, y_test, cutoffs):
+    """Squared prediction errors at several truncations of one training SVD."""
+    x_train, y_train, x_test, y_test = (
+        t.detach().to("cpu", torch.float64) for t in (x_train, y_train, x_test, y_test)
+    )
+    x_mean, y_mean = x_train.mean(0), y_train.mean(0)
+    target = y_test - y_mean
+    baseline_sse = float(target.square().sum())
+    u, s, vh = torch.linalg.svd(x_train - x_mean, full_matrices=False)
+    left = (x_test - x_mean) @ vh.T
+    right = u.T @ (y_train - y_mean)
+    errors_by_rank = {0: baseline_sse}
+    fits = {}
+    for cutoff in cutoffs:
+        rank = int((s > s[0] * cutoff).sum())
+        if rank not in errors_by_rank:
+            prediction = (left[:, :rank] / s[:rank]) @ right[:rank]
+            errors_by_rank[rank] = float((target - prediction).square().sum())
+        fits[cutoff] = (rank, errors_by_rank[rank])
+    return baseline_sse, fits
+
+
+def _gram_rank_errors(x_train, y_train, x_test, y_test, cutoffs, device):
+    """Same truncated affine fit, using the float64 training Gram eigensystem.
+
+    The held-out numerical floor keeps eigenvalues above eps32 times the
+    leading eigenvalue. This path is only used for the held-out fit.
+    """
+    x, y, x_test, y_test = (a.detach().to(device=device, dtype=torch.float64)
+                            for a in (x_train, y_train, x_test, y_test))
+    x_mean, y_mean = x.mean(0), y.mean(0)
+    x = x - x_mean
+    y = y - y_mean
+    residual = y_test - y_mean
+    baseline = float(residual.square().sum())
+    eigenvalues, vectors = torch.linalg.eigh(x.T @ x)
+    # A singular value on a cutoff boundary can round to either side after
+    # squaring. Use the reference decision for such spectra.
+    top = eigenvalues[-1]
+    thresholds = top * eigenvalues.new_tensor(cutoffs).square()
+    tolerance = top * (8 * max(x.shape) * torch.finfo(x.dtype).eps)
+    if top > 0 and ((eigenvalues[:, None] - thresholds).abs() <= tolerance).any():
+        return _rank_errors(x_train, y_train, x_test, y_test, cutoffs)
+    ranks = {c: int((eigenvalues > eigenvalues[-1] * c**2).sum()) for c in cutoffs}
+    max_rank = max(ranks.values())
+    errors = {0: baseline}
+    if max_rank:
+        # Accumulate descending eigenspaces once across nested candidate ranks.
+        vectors = vectors[:, -max_rank:].flip((1,))
+        values = eigenvalues[-max_rank:].flip((0,))
+        left = (x_test - x_mean) @ vectors
+        right = (vectors.T @ (x.T @ y)) / values[:, None]
+        previous = 0
+        for rank in sorted(set(ranks.values()) - {0}):
+            residual.addmm_(left[:, previous:rank], right[previous:rank], alpha=-1)
+            errors[rank] = float(residual.square().sum())
+            previous = rank
+    return baseline, {c: (rank, errors[rank]) for c, rank in ranks.items()}
+
+
+def _split_layer_rows(per_doc, layers, mask_layers, groups, fit_docs, score_docs):
+    """Yield aligned fit and score tensors with sink thresholds learned on fit_docs."""
+    fit_chunks = [group in fit_docs for group in groups]
+    score_chunks = [group in score_docs for group in groups]
+    masks, _ = sink_keep_masks([per_doc[k] for k in mask_layers], reference_chunks=fit_chunks)
+    first = None
+    for layer in layers:
+        states, rows = select_rows(per_doc[layer], "exclude_sinks", doc_ids=range(len(groups)), keep=masks)
+        if first is None:
+            first = rows
+            fit, score = torch.tensor(fit_chunks)[rows.doc], torch.tensor(score_chunks)[rows.doc]
+        elif not (torch.equal(first.doc, rows.doc) and torch.equal(first.position, rows.position)):
+            raise ValueError("Procrustes requires matching document and token positions across layers")
+        yield states[fit], states[score]
+
+
+def _document_heldout_profile(per_doc, layers, mask_layers, *, rank_floor=_HELDOUT_RCOND, gram_device=None):
+    """Use the same deterministic document split for every block transition."""
+    first = per_doc[layers[0]]
+    index = range(len(first))
+    def identifiers(chunks):
+        ids = getattr(chunks, "doc_ids", None)
+        ids = tuple(int(i) for i in ids) if ids is not None else tuple(range(len(chunks)))
+        parents = getattr(chunks, "document_groups", None)
+        groups = tuple(parents) if parents is not None else tuple(f"record:{i}" for i in ids)
+        if len(ids) != len(chunks) or len(groups) != len(chunks):
+            raise ValueError("Each Procrustes chunk needs one document identifier")
+        return ids, groups
+
+    row_ids, groups = identifiers(first)
+    if any(identifiers(per_doc[layer]) != (row_ids, groups) for layer in layers[1:]):
+        raise ValueError("Procrustes requires identical document order across layers")
+    _, last = select_rows(first, "last", doc_ids=index)
+    eligible = sorted({groups[i] for i in last.doc[last.position > 0].tolist()})
+    test = set(eligible[::5])
+    train = set(eligible) - test
+    inner_val = set(sorted(train)[::5]) if len(train) >= 2 else set()
+    inner_train = train - inner_val
+    candidates = (rank_floor, *(c for c in _VALIDATION_CUTOFFS if c > rank_floor))
+    if gram_device is None:
+        solve = _rank_errors
+    else:
+        from functools import partial
+        if rank_floor < _HELDOUT_RCOND:
+            raise ValueError("The Gram solver requires at least the float32 covariance floor")
+        solve = partial(_gram_rank_errors, device=gram_device)
+    key = "procrustes_linearity_heldout_r2_mean"
+    meta = {
+        "split": "every fifth sorted eligible document ID, starting with the first",
+        "train_documents": sorted(train), "test_documents": sorted(test),
+        "train_tokens": 0, "test_tokens": 0, "pair_r2": [],
+        "rank_relative_floor": rank_floor, "candidate_cutoffs": list(candidates),
+        "rank_fit_documents": sorted(inner_train), "rank_validation_documents": sorted(inner_val),
+        "rank_fit_tokens": 0, "rank_validation_tokens": 0, "rank_selection": "numerical floor only",
+        "pair_relative_cutoff": [], "pair_fit_rank": [],
+        "baseline": "training target mean", "status": "fewer than two eligible documents",
+    }
+    out = {key: float("nan"), "_meta_procrustes_heldout": meta}
+    if not train or not test:
+        return out
+    outer = _split_layer_rows(per_doc, layers, mask_layers, groups, train, test)
+    x_fit, x_test = next(outer)
+    meta.update(train_tokens=len(x_fit), test_tokens=len(x_test))
+    if meta["train_tokens"] < 2 or meta["test_tokens"] == 0:
+        meta["status"] = "insufficient rows after token selection"
+        return out
+    inner = None
+    if inner_val:
+        inner = _split_layer_rows(per_doc, layers, mask_layers, groups, inner_train, inner_val)
+        x_inner, x_val = next(inner)
+        meta.update(rank_fit_tokens=len(x_inner), rank_validation_tokens=len(x_val))
+        if len(x_inner) >= 2 and len(x_val):
+            meta["rank_selection"] = "minimum inner-document squared prediction error"
+        else:
+            inner = None
+    valid = []
+    for y_fit, y_test in outer:
+        cutoff = rank_floor
+        if inner is not None:
+            y_inner, y_val = next(inner)
+            baseline, fits = solve(x_inner, y_inner, x_val, y_val, candidates)
+            best = min(error for _, error in fits.values())
+            # Increasing cutoffs alter the estimator only when validation
+            # distinguishes them beyond double-precision roundoff.
+            tolerance = 64 * torch.finfo(torch.float64).eps * max(best, baseline)
+            cutoff = next(c for c in candidates if fits[c][1] <= best + tolerance)
+            x_inner, x_val = y_inner, y_val
+        baseline, fits = solve(x_fit, y_fit, x_test, y_test, (cutoff,))
+        rank, error = fits[cutoff]
+        r2 = 1 - error / baseline if baseline else float("nan")
+        meta["pair_relative_cutoff"].append(cutoff)
+        meta["pair_fit_rank"].append(rank)
+        meta["pair_r2"].append(r2 if np.isfinite(r2) else None)
+        if np.isfinite(r2):
+            valid.append(r2)
+        x_fit, x_test = y_fit, y_test
+    if valid:
+        out[key] = float(np.mean(valid))
+        meta["status"] = "ok"
+    else:
+        meta["status"] = "zero held-out baseline sum of squares"
+    return out
 
 
 def _profile_summary(sim: np.ndarray, prefix: str) -> dict:

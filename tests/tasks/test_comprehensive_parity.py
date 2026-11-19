@@ -2259,6 +2259,7 @@ def test_consistency_self_consistency():
                 do_sample=True,
                 temperature=TEMP,
                 top_p=1.0,
+                top_k=0,
                 pad_token_id=tok.eos_token_id,
             )
             first = out[:, plen].tolist()
@@ -6683,26 +6684,22 @@ def test_repe_steering_effectiveness():
     # --- Parity assertions --------------------------------------------------
     # Per-layer KL agrees to float32 precision (BLME accumulates the KL in fp32
     # via F.kl_div; we use fp64) — abs tol covers the ~1e-7 gap.
+    rel_tol, abs_tol = 1e-4, 1e-6
     assert set(blme_kl) == set(ref_mean)
     for l in ref_mean:
-        assert blme_kl[l] == pytest.approx(ref_mean[l], rel=1e-4, abs=1e-6)
+        assert blme_kl[l] == pytest.approx(ref_mean[l], rel=rel_tol, abs=abs_tol)
 
     assert out["_meta_best_steering_layer"] == ref_best
-    assert out["_meta_best_steering_kl"] == pytest.approx(ref_mean[ref_best], rel=1e-4, abs=1e-6)
+    assert out["_meta_best_steering_kl"] == pytest.approx(ref_mean[ref_best], rel=rel_tol, abs=abs_tol)
     assert out["_meta_steering_success_rate"] == pytest.approx(ref_success, abs=1e-9)
 
-    # Sanity: the two layers carry clearly different steering effect, so the
-    # argmax (best layer) assertion above is actually discriminative.
-    # The argmax assertion above only means something if the layers differ, but
-    # the 5x threshold was calibrated against the PRE-hook reference, where the
-    # deepest "layer" was ln_f and therefore wildly different. With the
-    # corrected reference the toy model's two layers differ by 1.34x
-    # (0.00041378 vs 0.00030949), which is still a strict ordering and still
-    # makes the argmax discriminative. Assert separation, not a magnitude that
-    # only held because of the artifact.
-    _vals = sorted(ref_mean.values())
-    assert _vals[-1] > _vals[0] * 1.1, (
-        f"layers too close for the argmax assertion to discriminate: {ref_mean}")
+    # Prove that swapping the top two layer labels would fail parity. The
+    # intervals use the same errors allowed above and must be disjoint.
+    runner_up, best = sorted(ref_mean.values())[-2:]
+    upper = runner_up + max(abs_tol, rel_tol * abs(runner_up))
+    lower = best - max(abs_tol, rel_tol * abs(best))
+    assert lower > upper, f"the two best layers overlap at the tested precision: {ref_mean}"
+
 
 # === repe_task_vectors  [NUMERIC_PARITY / strong_independent_numeric / ref=analytic] ===
 def test_repe_task_vectors():

@@ -72,11 +72,14 @@ def test_betti_curve_decay_rate_uses_normalised_depth():
     assert "np.arange(num_layers, dtype=np.float64) / float(denom)" in src
 
 
-def test_generation_diversity_uses_log_softmax_not_log_clamp():
-    """generation_diversity must use log_softmax directly rather than
-    softmax + log(clamp) so low-prob tail isn't silently zeroed."""
-    from blme.tasks.dynamics import generation_diversity
-    src = inspect.getsource(generation_diversity)
-    # The old pattern is softmax then torch.log(probs.clamp(min=1e-12)).
-    assert "torch.log(probs.clamp(min=1e-12))" not in src
-    assert "F.log_softmax(scores_stack" in src
+def test_generation_diversity_preserves_low_probability_entropy():
+    """Terms below 1e-12 still contribute their full Shannon information."""
+    import math
+    import torch
+    from blme.tasks.dynamics.generation_diversity import _sampling_entropy
+
+    gap = 32.0
+    p = 1 / (1 + math.exp(gap))
+    expected = -(1 - p) * math.log1p(-p) - p * math.log(p)
+    actual = _sampling_entropy(torch.tensor([[0.0, -gap, -math.inf]], dtype=torch.float32)).item()
+    assert math.isclose(actual, expected, rel_tol=1e-3)

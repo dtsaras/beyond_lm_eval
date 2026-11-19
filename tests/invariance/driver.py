@@ -77,6 +77,8 @@ STATE_DRIVABLE_TASKS: Dict[str, Dict[str, Any]] = {
 
 # Tasks the stub cache cannot drive, grouped by reason.
 NOT_STATE_DRIVABLE: Dict[str, str] = {
+    "geometry_domain_bpb": "scores byte-normalized likelihood on labeled domain documents",
+    "geometry_paraphrase_lidar": "collects pooled model states for labeled paraphrases and matched negatives",
     **{t: "runs its own forward pass to collect hidden states" for t in (
         "geometry_contextualization", "geometry_correlation_dimension",
         "geometry_effective_depth", "geometry_mahalanobis",

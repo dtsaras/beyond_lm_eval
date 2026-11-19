@@ -1,4 +1,4 @@
-"""geometry_procrustes_linearity: every headline key through evaluate().
+"""geometry_procrustes_linearity: the 17 in-sample headline keys through evaluate().
 
 The reference pair score is LLM-Microscope's released ``procrustes_similarity``
 (LLM_microscope.ipynb, taken with ``ast``), computed in float64 as the task

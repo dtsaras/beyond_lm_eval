@@ -1,0 +1,1417 @@
+{
+  "id": "2026-11-19-final-parity",
+  "base_commit": "1115c399693996f1a50c0feeb834bcfb5e9644f8",
+  "study_base": "ad43339c7a9703bc3323c75ca70179b78aefd747",
+  "study_sources_sha256": {
+    "configs/analysis_keys.yaml": "f707479ef9c04c663d73c3c9ae5a25bf5239e4c9c5605d237c06e36ce87c73e9",
+    "configs/tasks.yaml": "59b2d28a448ce4a0d864659252bf35e55f47d1652611caff4ad807f2c5270561",
+    "scripts/collect_results.py": "834e70e4db40ccbad7d6b25c8c3d64d654d3c5d7aeb55d5f5c3429f82b77d5cd",
+    "scripts/correlation/features.py": "c81a459389f35a87151d3baa5c4ee0fec026897a16192e416df631a2fad13334",
+    "scripts/repair_blme_tasks.py": "48fc1f1ae9b6319532df85a545ed123ba2d751abea99fb4647251b0ed2f407a7",
+    "scripts/run_blme.py": "d7e6de0b1f423c1ed54b55773774173ecaf66eec89c618ab5e9153e5dd4aa590",
+    "verification/runner_readiness_2026-11-19/PROTOCOL.md": "7877976b2d0f7c46dfb283d0dd0327110cc9d431b39ec5999cdfd1bba070feec",
+    "verification/runner_readiness_2026-11-19/architecture_replays.json": "a0022ee906fe31b30ae4d0dbae0d27e4432cdf4c792fedb3265f1980300479a4",
+    "verification/study_patches_2026-10-31/headline_predictors.patch": "bf59338c053e66231444e1467792511984f8134ef2c455a8290c75f741dc7afa",
+    "verification/study_patches_2026-10-31/study_config.patch": "8830dbf098aa7aeaeb9aac1f95fd1239d0a1a7c60d4316aa76ad9aaafcf76551"
+  },
+  "configuration_sources": {
+    "src/blme/tasks/configs/defaults.yaml": "fbe6e0ec454e5d1b29f28d237b028d28c01b1bad09201f34e84fe790c29fe72c",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf",
+    "src/blme/runner.py": "49b40844111934601af641b737634746aebbca0538d9b6a1e49130f5dcaf18a1",
+    "examples/recipes/default_all.yaml": "831b0824940a2930a770f3e29c1ec7d39b18fdee5d81610d47773b09644a0558",
+    "examples/recipes/example_panel.json": "a16576f76e7b3506397818ea191d4a98046f9f3d1ec1a67674d7b9eaf256274d"
+  },
+  "hashes": {
+    "src/blme/assets/categories.json": "520ff14c5933da58aac0d97d8f1f5c3cf5d85921573bdd83bd395c7d239da075",
+    "src/blme/cache.py": "980aee450ae0e7c6cfacdc207e50e844ab65b3344d938397d77b179362e50468",
+    "src/blme/core.py": "6ecc38d142b2e920e3e274e4882fbc79e2327be0ffd3ec044fdb14111a00619d",
+    "src/blme/experts.py": "2408fbffa2aa0c238a2005d1e755793c738a612d81336c75147f640d8324621f",
+    "src/blme/models/wrapper.py": "40a060c70dcbaec31904f8943fbc48c92ac9634935336063b44e066022432dcd",
+    "src/blme/normalization.py": "51644a6730a3ba080981966326cb53ebd90c10fca402ce45b6f9dafb1232c4df",
+    "src/blme/registry.py": "e7e292b09f15a41e55bfe72698d32479ed823128b849cccc89f9e2d1132a31df",
+    "src/blme/results.py": "76c4ef6fd3a0261a3c1157ab0739e476b915f5dcd3c84ce2e0becc2e3d406394",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf",
+    "src/blme/tasks/_precision.py": "4f132a41602e64ef766a3b9667a8702a13969fda9733b0e8c44b465f3874c447",
+    "src/blme/tasks/_tokens.py": "66a5604dc4ac733daf734fc88bf9542d748accda51d2b1d22f726593cf177ee0",
+    "src/blme/tasks/_windows.py": "77c200209727ba6f5bd8bc9938362e04acd0069e77509b02a90421e96dd84669",
+    "src/blme/tasks/base.py": "470287c7a90d601d665673fce253851f2ea5ee093eb807d5dcfe00e50d3bc70d",
+    "src/blme/tasks/benchmarks.py": "200336b709bdda6abf9d2a15c3ea6575f33228e7e59b9447fec32d6117097250",
+    "src/blme/tasks/causality/ablation.py": "0bc6f090b739ab279354d2fdc17b06fc4f2857f44d359d33eb369016f8f7d1ba",
+    "src/blme/tasks/causality/attention_knockout.py": "2db04406464c5cfef97385adf35dd27ae0acb22a338c414e1c27ff6e930167c0",
+    "src/blme/tasks/causality/circuit_quality.py": "a8bb1ac3891d5e9656913d6915973a2294159bc702f65b03e856ef15a749b267",
+    "src/blme/tasks/common.py": "adbda9b36b7504a0523f4ad73a43ae710e57dfe5ecc7d140d1ff39bef2a5d59f",
+    "src/blme/tasks/config_loader.py": "ffedc91dda126370410939bac976f08fe55e44489d7e54b7e94e9b6b618a88d1",
+    "src/blme/tasks/consistency/contrastive.py": "525d4993312eced2d479f3f28130e69a7e0d2322c9dc81d75dc862b785fae4cc",
+    "src/blme/tasks/consistency/format_robustness.py": "2f952dc009e3985c95efc2385fcd684c0db4c55a980fb73680fb86b1b284f5b2",
+    "src/blme/tasks/consistency/icl_slope.py": "c0492692aa07a0012632c195383bac6eb71301bc91a749b7e593d20a3de933d5",
+    "src/blme/tasks/consistency/knowledge_capacity.py": "adacefd672e14d6de82572a193e336d17bd5124b9921d1730650feafb5eb6902",
+    "src/blme/tasks/consistency/logical.py": "d7a1a689152ad5a3c0ab91f2eb3168bda2b0f67b0e454a601fa6ed844a981267",
+    "src/blme/tasks/consistency/paraphrase.py": "81d5da228ee53625473a30a2864076b9c28d937c82bc8618f2c5899fc632b314",
+    "src/blme/tasks/consistency/position_sensitivity.py": "24d0c8be37de4dc2a8e8bf864996dd6db07f3e54cad2cf898b59d7b6b5d371f6",
+    "src/blme/tasks/consistency/self_consistency.py": "da148a78045a372f3c1c001ad40d2da0f89ff17960f9512af13630d34191baef",
+    "src/blme/tasks/dynamics/stability.py": "9ba23ece33f4218b39599dc85b26f6c0926cd0ea419cb103c7abea6b14abce0a",
+    "src/blme/tasks/geometry/categories.py": "f69220c106faf91983f25d987a3dd03e65d0d87942ad4436b9ccbd48b7f07849",
+    "src/blme/tasks/geometry/collapse.py": "e4e5791c280e45daeaacf5c80ba241593dbccd1828382962b5015b373521d49a",
+    "src/blme/tasks/geometry/information_geometry.py": "0acc2dc24b146e75dd66b424f5eabdd85f6ec33455c9ffd476e8fab2db49551a",
+    "src/blme/tasks/geometry/isotropy.py": "5f588e4472c9afdc6036671f3f18be3ff6c1b7389e83a0a74e2f2a975d11501c",
+    "src/blme/tasks/geometry/lipschitz.py": "2c640926cf45dcc6a73f2f13d098b230625cd0a86f0a4a39ff821acdc5b7b387",
+    "src/blme/tasks/geometry/perplexity.py": "bf73b3f18458fd2e96dc27e327a18b99e33e4eb6bb9401636e7caf8717d8798b",
+    "src/blme/tasks/geometry/positional_decay.py": "ee2aa0589618157f602abd827c28220982e2d4e497425dbe2c87f9afb7855a18",
+    "src/blme/tasks/geometry/spectral.py": "a1f580ba353b14b544dd153f97bbc84b11644d40cfd00c8397754ceda1eb65b2",
+    "src/blme/tasks/geometry/tokenizer_efficiency.py": "2abc23d115b2b42faf9abccb740f2573406a9827d88450d833dc82fac44a8022",
+    "src/blme/tasks/geometry/utils.py": "ca35ae24acdbd5f7e24b0fb235ed8890635c3c28311906fc46034c2279c09f27",
+    "src/blme/tasks/geometry/weight_norms.py": "1c4875f479d100ef6d87d55330b2a19b239d5014f5ecddd4c69d4ea876941084",
+    "src/blme/tasks/interpretability/attention_graph.py": "562ad94feaf7e0f146e8a8578c58de1e681f093d164577ee319208207ad81630",
+    "src/blme/tasks/interpretability/attention_polysemanticity.py": "213137b23661c32dfb3e51d1fe84bc766d05f5d46ebfffc12abc355bd093002d",
+    "src/blme/tasks/interpretability/attention_rank.py": "81e8c30cb23b1c52d7d37fe3fa879f34bbbf11133aacacafc165ab7f52578093",
+    "src/blme/tasks/interpretability/prediction_entropy.py": "a5f9a746cf27a776f73c1f8483342b1d93f744844dca85a4af28e6701ddf38ce",
+    "src/blme/tasks/interpretability/probing.py": "c9c7c4ca5f9f7856f3f75d7c3f390889b6d09e48d329194136819fcf94d2e0a9",
+    "src/blme/tasks/interpretability/sparsity.py": "d2dc26ac3c6a2e3fb5ce3d59ad6389970915be21c56c8c7247656135c42a600e",
+    "src/blme/tasks/interpretability/superposition.py": "1eba453253b1c92e2ea39ee3bbd52f34bdd045d6f6ffff1cc69eac2272163eed",
+    "src/blme/tasks/interpretability/weight_activation_alignment.py": "012dcf22ddc6bd36ccb1bdcec31ea469831f084368c3cf928ae4482556eae289",
+    "src/blme/tasks/repe/__init__.py": "b16d75f246c47d956d5545e79633a5f8a46e90745a743ca3b5b3366b295b99b7",
+    "src/blme/tasks/repe/_common.py": "744f3f3c7a1a4433a7a06d6916de274538203d7459fb3406c07a7f5d49d29bbd",
+    "src/blme/tasks/repe/steering.py": "c5e82e8f5907afb6d6978114c475a885ec3653805c4f17d9a4a0ad3a2d629681",
+    "src/blme/tasks/representation_engineering.py": "cd3b0abb0f69bdaf220377199b2325c64695eed89df6d7f43fa46a2caf012714",
+    "src/blme/tasks/topology/_points.py": "7fc8bff7f749b0f92cc7cbe1c7d37fafe8d4c85d443d72ba85426a26635bb3c4",
+    "src/blme/tasks/topology/betti_curve.py": "b792d887d7fe532bd79aed683185e7af8390842d2c52beb744401a9540507327",
+    "src/blme/utils.py": "a2eb55d73fcde5e176c315df66803c35b06525385f8b342db863920496cd971a",
+    "tests/adversarial_fixtures.py": "28ea183f4183004ba37b545fb244fe01182832605a02fad77d030b995032f7fe",
+    "tests/conftest.py": "384bdf1421cdeb9a266fd733bb5ecca67b0824bbcd499d300509bb4e0f772026",
+    "tests/fixtures/paper_core_tasks.json": "483dd81bea6b5a55f3f0566b0310bae1c5897cb60f317627be926557a9cdd0b6",
+    "tests/fixtures/reference_parity/formula_fixtures.json": "dadb0ebaa54976d967eb5249de958462383eb0c49cea48544fe3721932d06123",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json": "fc8c2a62249c300f331700668e0aa438c5e7866e7e2ba8edbff6f12c1683f999",
+    "tests/fixtures/reference_parity/parity/attention_graph.json": "498cd96a697650b832deca180cc05c42c375b787ab5ad414aa45fd6803678040",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json": "8fddd92066fbad7d09f3c06d85fd56be118e4ef74b9b4b4a1a3c0c6f6146501c",
+    "tests/fixtures/reference_parity/parity/attention_rank.json": "ce5705cc5c1f643b44f58f193d5fd44c3719915d5ef27c79d07319902019bb8f",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json": "d201d8dae718a50c348a1923ba344f7a0bee189382a0cb3a67fc951eb5ab40ce",
+    "tests/fixtures/reference_parity/parity/attribution.json": "3485a7de6e119ff63933ec790832a3180c7eb22e525d1057924c2c8a27ef7ec3",
+    "tests/fixtures/reference_parity/parity/bias_weat.json": "bc6979dec457a59205faa0c6137a921c4ec56e9c6db4a1f93c91f84d8fbdc1d3",
+    "tests/fixtures/reference_parity/parity/cknna.json": "2814ad356d117c24d7d35a7a1d1873ea792e1d001eb01cac7ffb201dd8d12c43",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json": "8af3e2415715e7a1242e2d058a64ed923078a4afe712354dc0f2d6c37ab43f93",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json": "71419ced7c9a989cbfd67a9c712053cce5fbdf18480a4e20a7fb6fc792e72832",
+    "tests/fixtures/reference_parity/parity/head_roles.json": "f251c4a1df1b86b46698a1e801f5383e3b53516ec95b3ad940fdd077b6c6ccd2",
+    "tests/fixtures/reference_parity/parity/hubness.json": "37b622af39b8fa48d87919ab3a0ff2343ffca1c4327384d034961fbac5a265a2",
+    "tests/fixtures/reference_parity/parity/induction_heads.json": "213d439b5812164eae4ec8a37e8760b7effc103aca2ba678e161b7505d94f39d",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json": "588fd25add9ce22acb71b211fd8d80b5e6d20b8db3262e3d3174bd42d17f6a9d",
+    "tests/fixtures/reference_parity/parity/lipschitz.json": "d8b15e7f57011f8aaa6c172f69474ca64c99d45e5ace629b5b07373b5e1f43b4",
+    "tests/fixtures/reference_parity/parity/logit_lens.json": "bec2df07b423da0298b37d67a1a8616ca2c59f584803a5891c8ae45002a5c0ca",
+    "tests/fixtures/reference_parity/parity/magnitude.json": "8488e0a0dc3f5c5d743b24c5259394c61f37a5cc73550c9f50d28efade6643c2",
+    "tests/fixtures/reference_parity/parity/membership_inference.json": "3da2e1d9bf9dd4055084dd9214807f634b6476ce0ad409758271198f2eb97ce6",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json": "4ccdc6daaea47b5f566dcfaaeb713641b7b24cfa4eebae256a4cc86a99215509",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json": "36f8975fb3b95a50f1cce63d0621bc481e51914b93addd07ad3dce9c7af4e6d8",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json": "a431e4f665298a43ae16cdf658ef6fd3533d0620ed38878f07f2c909c6e6cb06",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json": "04938fe1583cff35235183aaff86bd45df65483feaff0052c719aa45354fea5b",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json": "170024b79d1652788ca7ff356c0e12e57c7ec9accc8a486bc9588fe346f7603e",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json": "7a8ee223690e2d1ddc02a08fc59fec6ed980fc48e4b1bbe1f7b1c4a4158a35bd",
+    "tests/fixtures/reference_parity/parity/rsa.json": "8b91e0ed37164de9c9f55a109c5076df93046e3fd30df174746bfa8dc954eb48",
+    "tests/fixtures/reference_parity/parity/sae_features.json": "633c4650263024e7855cfd73ec0fe249e753587cbdab135283f04df87869e652",
+    "tests/fixtures/reference_parity/parity/sharpness.json": "d2cb31e6f970c38c33d2011b51e5373d4b70cf07e7c8e7417fb3c65c92a2ced8",
+    "tests/fixtures/reference_parity/parity/spectral.json": "abb31e8f6b387a2c5c790ff1bec5bde228894c740184d6fcadbb4fe21862050a",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json": "f68ef4e46536aa406b29bf345222e7af82213e615ff87c69ae8363e5484ff562",
+    "tests/fixtures/reference_parity/parity/vendi.json": "db32927d43fd08bfef7525a5e787a6b71cf02b422e8f662e36726af81bd74c9c",
+    "tests/fixtures/reference_parity/parity/zigzag.json": "c6585e25d3f13642b7129261cd245b80c7b68175a8b5da583805928a2ab1942f",
+    "tests/golden/golden_snapshot.py": "59f13f3673dbc605bb866e18b4d87d6ef5287b3fc7fb5215aaf0b79f29d013e5",
+    "tests/invariance/_threads.py": "a9a5125689d9542b1bbaae8bab6a1696460165f9055500396bd0cf3b60de25e9",
+    "tests/invariance/clouds.py": "b6fabba65c447f84720dbc57cfe8dfbb9c777bb8e74da8a437351702eb215f3f",
+    "tests/invariance/compare.py": "a62794aa53c93bd203c4b326acb335b9d24e8218a1deff03ad300634fd89a01e",
+    "tests/invariance/driver.py": "89d0e21e5ee7a53f98e10d63af7d531e57d5711536a3f85b0434dbb48ec028dc",
+    "tests/invariance/model_transforms.py": "d05c1a51c474e1f742564b60d7ee9142f64b690b3f8b061b7722c5d6de4675ff",
+    "tests/invariance/precision.py": "c6c67c4665610b8a75224fb948cc1bbfee7f5e2af9b17435a742cdf3df8284d4",
+    "tests/invariance/states.py": "4d4bae0a96ace894479bc72cb76a508123679771abfe0617c90f48abb6bfe12c",
+    "tests/precision/lift.py": "afad1fe8b471ddd0c8efb9b2640639dc7821dce7547281feca4399ad7b109ca8",
+    "tests/tasks/invariance/_end_of_stack.py": "bb1adda849b1f330664fce4d807a2bad3ec733063103b705061b72e55bd50e24",
+    "tests/tasks/invariance/_family_c.py": "31d999e81f9c783ba86a3d8385523ca4269af391dd947718ff19345a442bbff4",
+    "tests/tasks/invariance/_family_d.py": "112ea5243e0e070422fd974507b2fa26a7807ea307a72d03cf63c98c1463773d",
+    "tests/tasks/invariance/_nlpaug_side.py": "86c4b891794f9a9b2f3f93d14d18033aebdbb7207cd6b4b9c1bcc9385da551dd",
+    "tests/tasks/invariance/_reference_side.py": "053d6e73c689319d4a5f08a7b529633371d8e24b3611527f25055bfef2538fa3",
+    "tests/tasks/invariance/_sinks.py": "1d8981e4269e0cf70362f46a11a672294b52f461cefd3672d8a3deee4232331c",
+    "tests/tasks/invariance/dynamics_fixtures.py": "28c841021fd3d5523e1a09b2f4e405e149f221b84b8b869e0577534ff7a21f60",
+    "tests/tasks/invariance/repe_width_padding.py": "0d4faf2c2a240100a57ec9bc92995f1d4dc7f2982a8c4633841e0b61359b8b35",
+    "tests/tasks/invariance/test_collapse.py": "a3ca352c4683feaf87492414e304b646ba84f492cb882bfe992c3a9d5586f19d",
+    "tests/tasks/parity/test_attention_graph_parity.py": "85dae49ce5f15b3f2b8b39c5c0c8c9728822750a956d27778627b48aa1cecf7f",
+    "tests/tasks/parity/test_attention_knockout_parity.py": "e5a06bc8e31e1eceb111a3a6615c39fdd762ee77d6caa23bb1237935df57951f",
+    "tests/tasks/parity/test_attention_rank_parity.py": "1d029f0a873bd5a2fa6d2704cb85868bc53ee1d3d652032a9a15032bcff466c9",
+    "tests/tasks/parity/test_b8_new_metrics_parity.py": "32657b76f49a60fb04785e430bb4449e8f437915f5778c93ad61a0b8cd7e732b",
+    "tests/tasks/parity/test_lipschitz_depth_additive_values.py": "ee43903613873632eea673ad30e340c2b357c7cf7b83c9c2c02ce7540aa05acd",
+    "tests/tasks/parity/test_lipschitz_parity.py": "8ec498c18a751a9c1ef6c03475bc22059501c0585a806f96379b00a9038f90c9",
+    "tests/tasks/parity/test_perplexity_parity.py": "fd19fbeb003080a19456999d85a9c24eeccb94474c56d7ec4397602ad1d1de5b",
+    "tests/tasks/parity/test_positional_decay_write_weights.py": "a106e3ad00097afacc69eeb460df5e69eb633377efd54a6aceaf78a38e8f96ef",
+    "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py": "bae9586eb69edabb94d6033defd33ada6400514a5d60b272114f9373bb31961f",
+    "tests/tasks/parity/test_spectral_parity.py": "9a7604ad2e4e00a5c8af79d445b6e51a56ba42de10cff2350c8f2d2e3d4ecaf0",
+    "tests/tasks/parity/test_spectral_sharpness_values.py": "277eadd8447140fdd835fc145d9c73de0756ffe8338d2a85132f217f2be2db44",
+    "tests/tasks/parity/test_svd_ethayarajh_release_parity.py": "28fb5493ea921ca4c32d2e74db4bc1b93fe39bb8bc49a57f9e68b53f07fa61ed",
+    "tests/tasks/parity/test_svd_isotropy_values.py": "e61d5289e0a8bc249fc0ebd1abee52ec9e50a17102638b68f03a4be92e7a9882",
+    "tests/tasks/parity/test_weight_norms_ww_parity.py": "f48da1b1e31ae9692cbb276c7243f0fc8d3e1d194ecb57c34901c54a45f04c65",
+    "tests/tasks/test_comprehensive_parity.py": "f0a72aafa1ec9425743464bcb41bc701193ab8597cb6b264183d2aa5af401f9f",
+    "tests/tasks/test_consistency_diagnostic_semantics.py": "3989c81050e0938514a710b313098d35caa575734cbb797963c8ac01fdbe74cd",
+    "tests/tasks/test_metric_repairs.py": "b69261b2b67b4b948d14c25aa89d7c1a0c5d665c630eac826a87a0c038969985",
+    "tests/tasks/test_reference_parity_formulas.py": "c5cddc471eac5dbe22181f0ace9118fc9cf153c329c59efbe122ff52e785a07c",
+    "tests/tasks/test_representation_sensitivity_guard.py": "37da3b7bd057e9c0706c34305f930baf37d5f3738c170b5c06e1b0dbb5b956a7",
+    "tests/test_reference_parity_guard.py": "c6d1bb091fd18709ebc0e02148a8c85881fa7839a8a8857b8a87b2bc09be4c5f",
+    "tests/test_replacement_candidates.py": "73050c4267161455da1b74c270fd4959d01771d3f4d353330411edde8b567588"
+  },
+  "common_inputs": [
+    "src/blme/cache.py",
+    "src/blme/core.py",
+    "src/blme/experts.py",
+    "src/blme/models/wrapper.py",
+    "src/blme/normalization.py",
+    "src/blme/registry.py",
+    "src/blme/results.py",
+    "src/blme/task_metadata.py",
+    "src/blme/tasks/_precision.py",
+    "src/blme/tasks/_tokens.py",
+    "src/blme/tasks/_windows.py",
+    "src/blme/tasks/base.py",
+    "src/blme/tasks/benchmarks.py",
+    "src/blme/tasks/common.py",
+    "src/blme/tasks/config_loader.py",
+    "src/blme/tasks/geometry/utils.py",
+    "src/blme/tasks/repe/__init__.py",
+    "src/blme/tasks/repe/_common.py",
+    "src/blme/tasks/representation_engineering.py",
+    "src/blme/utils.py",
+    "tests/adversarial_fixtures.py",
+    "tests/conftest.py",
+    "tests/fixtures/paper_core_tasks.json",
+    "tests/fixtures/reference_parity/formula_fixtures.json",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json",
+    "tests/fixtures/reference_parity/parity/attention_graph.json",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json",
+    "tests/fixtures/reference_parity/parity/attention_rank.json",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json",
+    "tests/fixtures/reference_parity/parity/attribution.json",
+    "tests/fixtures/reference_parity/parity/bias_weat.json",
+    "tests/fixtures/reference_parity/parity/cknna.json",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json",
+    "tests/fixtures/reference_parity/parity/head_roles.json",
+    "tests/fixtures/reference_parity/parity/hubness.json",
+    "tests/fixtures/reference_parity/parity/induction_heads.json",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json",
+    "tests/fixtures/reference_parity/parity/lipschitz.json",
+    "tests/fixtures/reference_parity/parity/logit_lens.json",
+    "tests/fixtures/reference_parity/parity/magnitude.json",
+    "tests/fixtures/reference_parity/parity/membership_inference.json",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json",
+    "tests/fixtures/reference_parity/parity/rsa.json",
+    "tests/fixtures/reference_parity/parity/sae_features.json",
+    "tests/fixtures/reference_parity/parity/sharpness.json",
+    "tests/fixtures/reference_parity/parity/spectral.json",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json",
+    "tests/fixtures/reference_parity/parity/vendi.json",
+    "tests/fixtures/reference_parity/parity/zigzag.json",
+    "tests/golden/golden_snapshot.py",
+    "tests/invariance/_threads.py",
+    "tests/invariance/clouds.py",
+    "tests/invariance/compare.py",
+    "tests/invariance/driver.py",
+    "tests/invariance/model_transforms.py",
+    "tests/invariance/precision.py",
+    "tests/invariance/states.py",
+    "tests/precision/lift.py",
+    "tests/tasks/invariance/_end_of_stack.py",
+    "tests/tasks/invariance/_family_c.py",
+    "tests/tasks/invariance/_family_d.py",
+    "tests/tasks/invariance/_nlpaug_side.py",
+    "tests/tasks/invariance/_reference_side.py",
+    "tests/tasks/invariance/_sinks.py",
+    "tests/tasks/invariance/dynamics_fixtures.py",
+    "tests/tasks/invariance/repe_width_padding.py",
+    "tests/tasks/test_comprehensive_parity.py"
+  ],
+  "tasks": {
+    "causality_ablation": {
+      "source": "src/blme/tasks/causality/ablation.py",
+      "inputs": [
+        "src/blme/tasks/causality/ablation.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_causality_ablation*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "eb8ed9824d83afaf59c4b2e893fdd072e42e2403349463493b72caad2114ce23",
+      "defaults_sha256": "1cab51c9f646c12689c5b1df09a95fd43917f0a3405a26f32058f7f4eaec7286"
+    },
+    "causality_attention_knockout": {
+      "source": "src/blme/tasks/causality/attention_knockout.py",
+      "inputs": [
+        "src/blme/tasks/causality/attention_knockout.py",
+        "tests/tasks/parity/test_attention_knockout_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_attention_knockout_parity.py",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_attention_knockout*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "formula-faithful",
+      "metadata_sha256": "1312d670995c5e76851788b60a88751c63bfe8755881a9e807f5b6563b0e1266",
+      "defaults_sha256": "974b715ae3a2981114bb29276d9839505467063a9e33dcabe799ce50dfc78d23"
+    },
+    "causality_circuit_quality": {
+      "source": "src/blme/tasks/causality/circuit_quality.py",
+      "inputs": [
+        "src/blme/tasks/causality/circuit_quality.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "20cfdab2be98041d21c8998c8806fa96ba4700cb89855ec778a840c8d69fce22",
+      "defaults_sha256": "17042a40c221458a521e3ecd507325fb45b46f3d9493fd5dcdb314e6f9e3bcc9"
+    },
+    "consistency_contrastive": {
+      "source": "src/blme/tasks/consistency/contrastive.py",
+      "inputs": [
+        "src/blme/tasks/consistency/contrastive.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "d27216b5aeabbe9c158cf632f67214ec31a7606c1faaae6102c02b9052db1e02",
+      "defaults_sha256": "974b715ae3a2981114bb29276d9839505467063a9e33dcabe799ce50dfc78d23"
+    },
+    "consistency_format_robustness": {
+      "source": "src/blme/tasks/consistency/format_robustness.py",
+      "inputs": [
+        "src/blme/tasks/consistency/format_robustness.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "85cefabcb9337d2694fcca62784015d6b86b6e1fe7986af02e78bfbd3cca8a12",
+      "defaults_sha256": "9f2e84b54f6881ca2b3bc181cfa2216dfd2988c7a2b6f68bfae8139c7b435372"
+    },
+    "consistency_icl_slope": {
+      "source": "src/blme/tasks/consistency/icl_slope.py",
+      "inputs": [
+        "src/blme/tasks/consistency/icl_slope.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "8527c83083a9e8062920ee8cf9943f9113d0b9b79d24626eb4d9f0d78ed4fc75",
+      "defaults_sha256": "88cb81f3a92303bafa4ea6193503fd6ea4a9ff6f0ccd49d15d05456e13d1b042"
+    },
+    "consistency_knowledge_capacity": {
+      "source": "src/blme/tasks/consistency/knowledge_capacity.py",
+      "inputs": [
+        "src/blme/tasks/consistency/knowledge_capacity.py",
+        "tests/tasks/test_consistency_diagnostic_semantics.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity*",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_knowledge_capacity*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "a16ae5cc977f9b7b430f0842ad5d459c846e0c961770c51021b954f037bac2a9",
+      "defaults_sha256": "d4731457b8e5296396d413e7922d7f33229f6a410d3329ebdfbd3cab515dfa6d"
+    },
+    "consistency_logical": {
+      "source": "src/blme/tasks/consistency/logical.py",
+      "inputs": [
+        "src/blme/tasks/consistency/logical.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_logical*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "7ad8f5c87757b8e6d1912405e62b97ca5e2f0b41a6b0df15f1f14ca61e346585",
+      "defaults_sha256": "d4731457b8e5296396d413e7922d7f33229f6a410d3329ebdfbd3cab515dfa6d"
+    },
+    "consistency_paraphrase": {
+      "source": "src/blme/tasks/consistency/paraphrase.py",
+      "inputs": [
+        "src/blme/tasks/consistency/paraphrase.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "061c1bf329de4de5f4a239005e5912a2127a2c48e99c6512c195f35d0eb1dfb6",
+      "defaults_sha256": "d4731457b8e5296396d413e7922d7f33229f6a410d3329ebdfbd3cab515dfa6d"
+    },
+    "consistency_position_sensitivity": {
+      "source": "src/blme/tasks/consistency/position_sensitivity.py",
+      "inputs": [
+        "src/blme/tasks/consistency/position_sensitivity.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "eb5bb80762b05889ebb26bf6a8bd01e9136e05d5185c5646561e65598de2ad38",
+      "defaults_sha256": "67c61dd16b5eca0c9069dc3735a2bc2c4b666eeb618f0ffed9f71e5969c99fcc"
+    },
+    "consistency_self_consistency": {
+      "source": "src/blme/tasks/consistency/self_consistency.py",
+      "inputs": [
+        "src/blme/tasks/consistency/self_consistency.py",
+        "tests/tasks/test_consistency_diagnostic_semantics.py",
+        "tests/tasks/test_metric_repairs.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_self_consistency*",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency*",
+        "tests/tasks/test_metric_repairs.py::test_sampling*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "48c4087db137e7607e2fc864c98b5865c436264462eda8ef1b34d1d6e4417deb",
+      "defaults_sha256": "1162c4e468a81f70d3ecaca167013a711ca238778efdbb39716aa8e041ae4b05"
+    },
+    "dynamics_stability": {
+      "source": "src/blme/tasks/dynamics/stability.py",
+      "inputs": [
+        "src/blme/tasks/dynamics/stability.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability*"
+      ],
+      "readout_selectors": {
+        "stability_mean": [
+          "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability"
+        ]
+      },
+      "headlines": [
+        "stability_mean"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "61bf9b1916317026e5bfc788806931d4243f97c24d9fcdc030d36c2449b58c6b",
+      "defaults_sha256": "df60c660ede3fdbb526be679e6f0cfda0cf96c1d22a3fefb5da6aab96d397417"
+    },
+    "geometry_categories": {
+      "source": "src/blme/tasks/geometry/categories.py",
+      "inputs": [
+        "src/blme/assets/categories.json",
+        "src/blme/tasks/geometry/categories.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_categories*"
+      ],
+      "readout_selectors": {},
+      "headlines": [
+        "{category}_hub_max",
+        "{category}_hub_skew",
+        "{category}_inter",
+        "{category}_intra",
+        "{category}_purity",
+        "{category}_separation",
+        "{relation}_consistency"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "c3053fd67dfef3eb33c40b6cce050f2bb091766913ba3cfb786cdbb1f703d221",
+      "defaults_sha256": "b5ddedbb7640cffadc8453aa7e5daa3c2e801c29e2be5fd162a3122842090b08"
+    },
+    "geometry_collapse": {
+      "source": "src/blme/tasks/geometry/collapse.py",
+      "inputs": [
+        "src/blme/tasks/geometry/collapse.py",
+        "tests/tasks/invariance/test_collapse.py",
+        "tests/tasks/test_reference_parity_formulas.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse*",
+        "tests/tasks/test_reference_parity_formulas.py::test_collapse_task*"
+      ],
+      "readout_selectors": {
+        "collapse_ratio": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse"
+        ],
+        "max_erank": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse"
+        ],
+        "min_erank": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse"
+        ],
+        "qdl_entropy_min": [
+          "tests/tasks/invariance/test_collapse.py::test_qdl_profile_is_eq1_per_sequence_uncentred"
+        ]
+      },
+      "headlines": [
+        "collapse_ratio",
+        "max_erank",
+        "min_erank",
+        "qdl_entropy_min"
+      ],
+      "declaration": "refined-adaptation",
+      "metadata_sha256": "8fdb5c846079a040064210102904654f6c2bfd7f6ca3ffff2ba2f68765728e7a",
+      "defaults_sha256": "8af3bf5d65c4ad4f55e154ee7de6f73af84bc8d68017d5c8e5c2587ec8867f11"
+    },
+    "geometry_lipschitz": {
+      "source": "src/blme/tasks/geometry/lipschitz.py",
+      "inputs": [
+        "src/blme/tasks/geometry/lipschitz.py",
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py",
+        "tests/tasks/parity/test_lipschitz_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py",
+        "tests/tasks/parity/test_lipschitz_parity.py::test_geometry_lipschitz*"
+      ],
+      "readout_selectors": {
+        "e2e_log_norm_growth": [
+          "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms"
+        ],
+        "embedding_relative_change": [
+          "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms"
+        ],
+        "relative_change_max": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz"
+        ],
+        "total_angular_path": [
+          "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms"
+        ]
+      },
+      "headlines": [
+        "e2e_log_norm_growth",
+        "embedding_relative_change",
+        "relative_change_max",
+        "total_angular_path"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "ced74952245010bfcaedd7e10497a5a19ea82726faa913d63af4093c70a7437f",
+      "defaults_sha256": "2664be2bea4aa18cf9dc169166b81014ed59aba26624188eb0774e2bc29e1f71"
+    },
+    "geometry_perplexity": {
+      "source": "src/blme/tasks/geometry/perplexity.py",
+      "inputs": [
+        "src/blme/tasks/geometry/perplexity.py",
+        "tests/tasks/parity/test_perplexity_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_perplexity_parity.py",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline*"
+      ],
+      "readout_selectors": {
+        "bits_per_byte": [
+          "tests/tasks/parity/test_perplexity_parity.py::test_rare_freq_buckets_and_ppls_match_independent_reference"
+        ]
+      },
+      "headlines": [
+        "bits_per_byte"
+      ],
+      "declaration": "formula-faithful",
+      "metadata_sha256": "953a7b8343b5721e94e9966a123c1c9d0246eee5f085ad3ae27312c802b63f96",
+      "defaults_sha256": "8af3bf5d65c4ad4f55e154ee7de6f73af84bc8d68017d5c8e5c2587ec8867f11"
+    },
+    "geometry_positional_decay": {
+      "source": "src/blme/tasks/geometry/positional_decay.py",
+      "inputs": [
+        "src/blme/tasks/geometry/positional_decay.py",
+        "tests/tasks/parity/test_positional_decay_write_weights.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_positional_decay_write_weights.py",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_positional_decay*",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_batched_causal_rows_match_scalar_spearman"
+      ],
+      "readout_selectors": {
+        "positional_decay_nosink_write_weighted": [
+          "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write",
+          "tests/tasks/parity/test_positional_decay_write_weights.py::test_write_weighted_mean_is_the_weighted_average"
+        ]
+      },
+      "headlines": [
+        "positional_decay_nosink_write_weighted"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "a0ca56cde1d334dcba91dcbebef7d51fc48d45eee67138a37ef8663e7ecc21d6",
+      "defaults_sha256": "9068436426d620a72e45b9ea9a982463d01a83568112eaf34a7ab71341f626bd"
+    },
+    "geometry_representation_sensitivity": {
+      "source": "src/blme/tasks/geometry/information_geometry.py",
+      "inputs": [
+        "src/blme/tasks/geometry/information_geometry.py",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py",
+        "tests/tasks/test_representation_sensitivity_guard.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_representation_sensitivity*",
+        "tests/tasks/test_representation_sensitivity_guard.py"
+      ],
+      "readout_selectors": {
+        "S_unit": [
+          "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state",
+          "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_softcapped_gemma_matches_autograd_through_its_actual_logits"
+        ]
+      },
+      "headlines": [
+        "S_unit"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "a90aa1492f09c2f897b86f0d6ca403bd6888bc32366a154e5f69248fae7bb1c5",
+      "defaults_sha256": "2664be2bea4aa18cf9dc169166b81014ed59aba26624188eb0774e2bc29e1f71"
+    },
+    "geometry_spectral": {
+      "source": "src/blme/tasks/geometry/spectral.py",
+      "inputs": [
+        "src/blme/tasks/geometry/spectral.py",
+        "tests/tasks/parity/test_b8_new_metrics_parity.py",
+        "tests/tasks/parity/test_spectral_parity.py",
+        "tests/tasks/parity/test_spectral_sharpness_values.py",
+        "tests/test_reference_parity_guard.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat*",
+        "tests/tasks/parity/test_spectral_parity.py"
+      ],
+      "readout_selectors": {
+        "avg_alpha_hat": [
+          "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted"
+        ],
+        "avg_alpha_official": [
+          "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher",
+          "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n"
+        ],
+        "avg_stable_rank": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_spectral"
+        ],
+        "median_alpha_official": [
+          "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher",
+          "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n"
+        ]
+      },
+      "headlines": [
+        "avg_alpha_hat",
+        "avg_alpha_official",
+        "avg_stable_rank",
+        "median_alpha_official"
+      ],
+      "declaration": "refined-adaptation",
+      "metadata_sha256": "7e5f8d105be874ad293b3cb06a38f9296c283c9bf6faf83b650ae873d9bf2f6c",
+      "defaults_sha256": "837a41af65f9686baf298890de1af3f4c13fa588b2ac2c2a55005c51f16a45a3"
+    },
+    "geometry_svd": {
+      "source": "src/blme/tasks/geometry/isotropy.py",
+      "inputs": [
+        "src/blme/tasks/geometry/isotropy.py",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py",
+        "tests/tasks/parity/test_svd_isotropy_values.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py",
+        "tests/tasks/parity/test_svd_isotropy_values.py"
+      ],
+      "readout_selectors": {
+        "avg_cosine_similarity": [
+          "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions"
+        ],
+        "effective_rank": [
+          "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions"
+        ],
+        "participation_ratio": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_svd"
+        ]
+      },
+      "headlines": [
+        "avg_cosine_similarity",
+        "effective_rank",
+        "participation_ratio"
+      ],
+      "declaration": "refined-adaptation",
+      "metadata_sha256": "6c463b106dc47ae755055590c0280280c573948765c489a663c1dc530ce6dd37",
+      "defaults_sha256": "fb107dc6a04633e2e131ff83e02aa2341fefeb85a20066d66acf6c4ac460ab23"
+    },
+    "geometry_tokenizer_efficiency": {
+      "source": "src/blme/tasks/geometry/tokenizer_efficiency.py",
+      "inputs": [
+        "src/blme/tasks/geometry/tokenizer_efficiency.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency*"
+      ],
+      "readout_selectors": {
+        "fertility": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency"
+        ],
+        "token_entropy": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency"
+        ],
+        "vocab_size": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency"
+        ]
+      },
+      "headlines": [
+        "fertility",
+        "token_entropy",
+        "vocab_size"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "17277e39ac233bb1cca96edbfa6293f2e8f208ebabb18a2a8a8808af92bb86e0",
+      "defaults_sha256": "2664be2bea4aa18cf9dc169166b81014ed59aba26624188eb0774e2bc29e1f71"
+    },
+    "geometry_weight_norms": {
+      "source": "src/blme/tasks/geometry/weight_norms.py",
+      "inputs": [
+        "src/blme/tasks/geometry/weight_norms.py",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_weight_norms_ww_parity.py"
+      ],
+      "readout_selectors": {
+        "mean_frobenius_norm": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms"
+        ],
+        "mean_spectral_norm": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms"
+        ],
+        "mean_stable_rank": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms"
+        ],
+        "norm_uniformity": [
+          "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms"
+        ]
+      },
+      "headlines": [
+        "mean_frobenius_norm",
+        "mean_spectral_norm",
+        "mean_stable_rank",
+        "norm_uniformity"
+      ],
+      "declaration": "formula-faithful",
+      "metadata_sha256": "8c6b7f640f297d308f1eb850b03a00e032cfa1ed8bac7812538db4ea1a4b069b",
+      "defaults_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "interpretability_attention_effective_rank": {
+      "source": "src/blme/tasks/interpretability/attention_polysemanticity.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/attention_polysemanticity.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "4c74e5ff1af476f605bdcb36e72928400e289fee78d1c7d475552f19c5f1208b",
+      "defaults_sha256": "974b715ae3a2981114bb29276d9839505467063a9e33dcabe799ce50dfc78d23"
+    },
+    "interpretability_attention_graph": {
+      "source": "src/blme/tasks/interpretability/attention_graph.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/attention_graph.py",
+        "tests/tasks/parity/test_attention_graph_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph*",
+        "tests/tasks/parity/test_attention_graph_parity.py::test_rollout_and_pagerank*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "789a01259337dc9483e9fe100cd5b85ea7c40d382ddff608f26263416cf60d66",
+      "defaults_sha256": "9b702f3be116631bbf7632a8b1c658f331202e580b98e6026570f0003724feed"
+    },
+    "interpretability_attention_rank": {
+      "source": "src/blme/tasks/interpretability/attention_rank.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/attention_rank.py",
+        "tests/tasks/parity/test_attention_rank_parity.py"
+      ],
+      "selectors": [
+        "tests/tasks/parity/test_attention_rank_parity.py",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_rank*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "formula-faithful",
+      "metadata_sha256": "9e819f1723d7e2cbc6ffbd1f884db76ded20985e9bd99f2717741398bac58ee6",
+      "defaults_sha256": "165ed3d4268f28ee7c5b477db7188eadd79c91ae96e6d850e638ea238521a3ee"
+    },
+    "interpretability_prediction_entropy": {
+      "source": "src/blme/tasks/interpretability/prediction_entropy.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/prediction_entropy.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "formula-faithful",
+      "metadata_sha256": "bb5afef9644d02660bfb5fd8878d86082087c35db425194df7d0a8753609489f",
+      "defaults_sha256": "8af3bf5d65c4ad4f55e154ee7de6f73af84bc8d68017d5c8e5c2587ec8867f11"
+    },
+    "interpretability_probing": {
+      "source": "src/blme/tasks/interpretability/probing.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/probing.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "refined-adaptation",
+      "metadata_sha256": "e95d92461e75d8aafa54dbbc060835db3faaf69e4b16c0ed48448207a70cfe9e",
+      "defaults_sha256": "08c0357a28f69593953dc301f0dfd9f311ab27e75a5337a6963de72888d66f2b"
+    },
+    "interpretability_sparsity": {
+      "source": "src/blme/tasks/interpretability/sparsity.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/sparsity.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "19b5f6bce3aa7e9eba4e5c189a735e73afb9f00dd22c80bd7b5539b4d0d47415",
+      "defaults_sha256": "d4731457b8e5296396d413e7922d7f33229f6a410d3329ebdfbd3cab515dfa6d"
+    },
+    "interpretability_superposition": {
+      "source": "src/blme/tasks/interpretability/superposition.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/sparsity.py",
+        "src/blme/tasks/interpretability/superposition.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "1c3981af518aa4184ba6f90eaae897e380df0a1d3ba0b366325263589f46fcf8",
+      "defaults_sha256": "79b5b1cbbf0673ab732de458c029bf8c426d75b0708882d752810b49375bd81a"
+    },
+    "interpretability_waa": {
+      "source": "src/blme/tasks/interpretability/weight_activation_alignment.py",
+      "inputs": [
+        "src/blme/tasks/interpretability/weight_activation_alignment.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa*"
+      ],
+      "readout_selectors": {},
+      "headlines": [],
+      "declaration": "proxy-only",
+      "metadata_sha256": "33bad7bff8fa48df06a1bb37c9dd2d9e89f5efa3cf7eff69c8259401ef89d449",
+      "defaults_sha256": "d4731457b8e5296396d413e7922d7f33229f6a410d3329ebdfbd3cab515dfa6d"
+    },
+    "repe_steering_effectiveness": {
+      "source": "src/blme/tasks/repe/steering.py",
+      "inputs": [
+        "src/blme/tasks/repe/steering.py"
+      ],
+      "selectors": [
+        "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness*"
+      ],
+      "readout_selectors": {},
+      "headlines": [
+        "best_directional_effect",
+        "best_directional_layer_frac",
+        "directional_consistency",
+        "directional_success_rate",
+        "mean_directional_effect",
+        "steering_beats_random_frac",
+        "steering_concept_over_random",
+        "steering_semantic_effect",
+        "steering_semantic_success_rate",
+        "steering_sign_reversal"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "67f22ac2ac4c2d642a96429fdc5276207ff2155b1087ef0126ca227dbb1fdd58",
+      "defaults_sha256": "cf7fe8609d098de930ec30bb9bf72270c8457865f969a74c9ba78cf4ca969171"
+    },
+    "topology_betti_curve": {
+      "source": "src/blme/tasks/topology/betti_curve.py",
+      "inputs": [
+        "src/blme/tasks/topology/_points.py",
+        "src/blme/tasks/topology/betti_curve.py",
+        "tests/test_replacement_candidates.py"
+      ],
+      "selectors": [
+        "tests/test_replacement_candidates.py::test_betti_1_curve_mean*",
+        "tests/tasks/test_comprehensive_parity.py::test_topology_betti_curve*"
+      ],
+      "readout_selectors": {
+        "betti_1_curve_mean": [
+          "tests/test_replacement_candidates.py::test_betti_1_curve_mean"
+        ]
+      },
+      "headlines": [
+        "betti_1_curve_mean"
+      ],
+      "declaration": "refined-adaptation",
+      "metadata_sha256": "7378ac02a1a9c3c4cf5bc7882d50bc70e400a173aa85e3259908faa76cb4b6ae",
+      "defaults_sha256": "7a5deef143140bddf2ef13c537a939252ac255156687c6a905b8d50b6561378f"
+    }
+  },
+  "runs": {
+    "5.2.0": {
+      "junit_sha256": {
+        "linked-5.2.0.xml": "1b552abf6408d153f1cc2f914377152c640d5dcc3ae906c7038643cc3ec700ac"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_collapse.py::test_qdl_profile_is_eq1_per_sequence_uncentred": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_raw_value_is_meta_only": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_residual_gauge": "passed",
+        "tests/tasks/parity/test_attention_graph_parity.py::test_rollout_and_pagerank_are_different_quantities": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_a_no_head_helps_beyond_noise": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_b_proxy_tracks_ablation_magnitude": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_c_ablation_importances_nonnegative": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_blme_is_direct_ablation_delta_nll": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_reference_provenance": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_closed_form_singular_values_2_1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_near_rank1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_row_stochastic": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_identity_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_orthogonal_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_rank1_anchor_effective_rank_is_one": "passed",
+        "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher": "passed",
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms": "passed",
+        "tests/tasks/parity/test_lipschitz_parity.py::test_geometry_lipschitz_is_relative_change_proxy_not_sigma_max": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_bpc_correct_for_bos_adding_tokenizer": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_empty_text_rows_are_skipped_not_crashing": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_rare_freq_buckets_and_ppls_match_independent_reference": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_batched_causal_rows_match_scalar_spearman": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[conv1d]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[linear]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_write_weighted_mean_is_the_weighted_average": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[gpt2_layernorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[llama_rmsnorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_softcapped_gemma_matches_autograd_through_its_actual_logits": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_hill_equals_independent_hill_exact": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_vs_weightwatcher_delta_recorded": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_fixture_records_proxy_verdict": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_known_exponent_recovery": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_marchenko_pastur_anchor": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_real_task_matches_transcribed_kernel": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[gpt2]": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[llama]": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_avg_cosine_matches_the_release_estimator": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_gpt2_reproduces_the_released_anisotropy_profile": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[gpt2_conv1d]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[llama]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[neox_fused_qkv]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_ablation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_attention_knockout": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_edge_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_knowledge_neurons": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_tracing": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_logical": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_membership_inference": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_self_consistency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_gradient_flow": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_interpolation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_sharpness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_categories": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_correlation_dimension": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_mahalanobis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline_matches_textbook_ppl": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_positional_decay": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_prediction_alignment": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_representation_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_rsa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_spectral": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_svd": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_unembedding": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_head_roles_full_pipeline_matches_paper_definition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_induction_heads": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_logit_lens": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing_full_pipeline_matches_independent_alain_bengio_probe": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sae_features": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity_full_pipeline_matches_independent_l0_and_kurtosis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_concept_separability_full_pipeline_matches_sklearn_cv": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_refusal_direction": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_task_vectors": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_topology_betti_curve": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_knowledge_capacity_reports_likelihood_ratio_not_negative_logprob_ratio": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_is_deterministic_with_seed": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_uses_seeded_sampling_stability_semantics": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_accepts_structured_return_and_restores_rng_and_checkpoint": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_does_not_create_a_scored_prompt": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[literal-eos]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[plain-text]": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_collapse_task_reports_roy_vetterli_convention": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_guard_returns_nan_and_reason_on_a_tensor_error": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_linear_head_is_unchanged": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_unrunnable_guard_gives_nan_with_reason_through_evaluate": "passed",
+        "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n": "passed",
+        "tests/test_replacement_candidates.py::test_betti_1_curve_mean": "passed"
+      }
+    },
+    "5.10.2": {
+      "junit_sha256": {
+        "linked-5.10.2.xml": "02d83bed831d44b592d194521f06b995a94750a8f8abcd083821c14aae1a54fd"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_collapse.py::test_qdl_profile_is_eq1_per_sequence_uncentred": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_raw_value_is_meta_only": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_residual_gauge": "passed",
+        "tests/tasks/parity/test_attention_graph_parity.py::test_rollout_and_pagerank_are_different_quantities": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_a_no_head_helps_beyond_noise": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_b_proxy_tracks_ablation_magnitude": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_c_ablation_importances_nonnegative": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_blme_is_direct_ablation_delta_nll": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_reference_provenance": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_closed_form_singular_values_2_1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_near_rank1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_row_stochastic": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_identity_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_orthogonal_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_rank1_anchor_effective_rank_is_one": "passed",
+        "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher": "passed",
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms": "passed",
+        "tests/tasks/parity/test_lipschitz_parity.py::test_geometry_lipschitz_is_relative_change_proxy_not_sigma_max": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_bpc_correct_for_bos_adding_tokenizer": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_empty_text_rows_are_skipped_not_crashing": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_rare_freq_buckets_and_ppls_match_independent_reference": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_batched_causal_rows_match_scalar_spearman": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[conv1d]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[linear]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_write_weighted_mean_is_the_weighted_average": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[gpt2_layernorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[llama_rmsnorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_softcapped_gemma_matches_autograd_through_its_actual_logits": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_hill_equals_independent_hill_exact": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_vs_weightwatcher_delta_recorded": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_fixture_records_proxy_verdict": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_known_exponent_recovery": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_marchenko_pastur_anchor": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_real_task_matches_transcribed_kernel": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[gpt2]": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[llama]": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_avg_cosine_matches_the_release_estimator": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_gpt2_reproduces_the_released_anisotropy_profile": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[gpt2_conv1d]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[llama]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[neox_fused_qkv]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_ablation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_attention_knockout": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_edge_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_knowledge_neurons": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_tracing": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_logical": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_membership_inference": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_self_consistency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_gradient_flow": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_interpolation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_sharpness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_categories": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_correlation_dimension": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_mahalanobis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline_matches_textbook_ppl": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_positional_decay": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_prediction_alignment": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_representation_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_rsa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_spectral": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_svd": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_unembedding": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_head_roles_full_pipeline_matches_paper_definition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_induction_heads": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_logit_lens": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing_full_pipeline_matches_independent_alain_bengio_probe": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sae_features": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity_full_pipeline_matches_independent_l0_and_kurtosis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_concept_separability_full_pipeline_matches_sklearn_cv": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_refusal_direction": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_task_vectors": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_topology_betti_curve": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_knowledge_capacity_reports_likelihood_ratio_not_negative_logprob_ratio": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_is_deterministic_with_seed": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_uses_seeded_sampling_stability_semantics": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_accepts_structured_return_and_restores_rng_and_checkpoint": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_does_not_create_a_scored_prompt": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[literal-eos]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[plain-text]": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_collapse_task_reports_roy_vetterli_convention": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_guard_returns_nan_and_reason_on_a_tensor_error": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_linear_head_is_unchanged": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_unrunnable_guard_gives_nan_with_reason_through_evaluate": "passed",
+        "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n": "passed",
+        "tests/test_replacement_candidates.py::test_betti_1_curve_mean": "passed"
+      }
+    },
+    "5.22.2": {
+      "junit_sha256": {
+        "linked-5.22.2.xml": "057a0a865fd061a54b3fed8f20c25e7059d45f10271825cb568ff2392baf0d50"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_collapse.py::test_qdl_profile_is_eq1_per_sequence_uncentred": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_raw_value_is_meta_only": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_residual_gauge": "passed",
+        "tests/tasks/parity/test_attention_graph_parity.py::test_rollout_and_pagerank_are_different_quantities": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_a_no_head_helps_beyond_noise": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_b_proxy_tracks_ablation_magnitude": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_c_ablation_importances_nonnegative": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_blme_is_direct_ablation_delta_nll": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_reference_provenance": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_closed_form_singular_values_2_1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_near_rank1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_row_stochastic": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_identity_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_orthogonal_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_rank1_anchor_effective_rank_is_one": "passed",
+        "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher": "passed",
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms": "passed",
+        "tests/tasks/parity/test_lipschitz_parity.py::test_geometry_lipschitz_is_relative_change_proxy_not_sigma_max": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_bpc_correct_for_bos_adding_tokenizer": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_empty_text_rows_are_skipped_not_crashing": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_rare_freq_buckets_and_ppls_match_independent_reference": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_batched_causal_rows_match_scalar_spearman": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[conv1d]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[linear]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_write_weighted_mean_is_the_weighted_average": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[gpt2_layernorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[llama_rmsnorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_softcapped_gemma_matches_autograd_through_its_actual_logits": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_hill_equals_independent_hill_exact": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_vs_weightwatcher_delta_recorded": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_fixture_records_proxy_verdict": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_known_exponent_recovery": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_marchenko_pastur_anchor": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_real_task_matches_transcribed_kernel": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[gpt2]": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[llama]": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_avg_cosine_matches_the_release_estimator": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_gpt2_reproduces_the_released_anisotropy_profile": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[gpt2_conv1d]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[llama]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[neox_fused_qkv]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_ablation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_attention_knockout": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_edge_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_knowledge_neurons": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_tracing": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_logical": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_membership_inference": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_self_consistency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_gradient_flow": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_interpolation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_sharpness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_categories": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_correlation_dimension": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_mahalanobis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline_matches_textbook_ppl": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_positional_decay": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_prediction_alignment": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_representation_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_rsa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_spectral": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_svd": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_unembedding": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_head_roles_full_pipeline_matches_paper_definition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_induction_heads": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_logit_lens": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing_full_pipeline_matches_independent_alain_bengio_probe": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sae_features": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity_full_pipeline_matches_independent_l0_and_kurtosis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_concept_separability_full_pipeline_matches_sklearn_cv": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_refusal_direction": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_task_vectors": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_topology_betti_curve": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_knowledge_capacity_reports_likelihood_ratio_not_negative_logprob_ratio": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_is_deterministic_with_seed": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_uses_seeded_sampling_stability_semantics": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_accepts_structured_return_and_restores_rng_and_checkpoint": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_does_not_create_a_scored_prompt": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[literal-eos]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[plain-text]": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_collapse_task_reports_roy_vetterli_convention": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_guard_returns_nan_and_reason_on_a_tensor_error": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_linear_head_is_unchanged": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_unrunnable_guard_gives_nan_with_reason_through_evaluate": "passed",
+        "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n": "passed",
+        "tests/test_replacement_candidates.py::test_betti_1_curve_mean": "passed"
+      }
+    },
+    "5.23.0": {
+      "junit_sha256": {
+        "linked-5.23.0.xml": "574de7945deac02a56501c549f0bb114fbde04ff665d146f2cb804be01ee3e9c"
+      },
+      "cases": {
+        "tests/tasks/invariance/test_collapse.py::test_qdl_profile_is_eq1_per_sequence_uncentred": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_raw_value_is_meta_only": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge": "passed",
+        "tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_residual_gauge": "passed",
+        "tests/tasks/parity/test_attention_graph_parity.py::test_rollout_and_pagerank_are_different_quantities": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_a_no_head_helps_beyond_noise": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_b_proxy_tracks_ablation_magnitude": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_anchor_c_ablation_importances_nonnegative": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_blme_is_direct_ablation_delta_nll": "passed",
+        "tests/tasks/parity/test_attention_knockout_parity.py::test_reference_provenance": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_closed_form_singular_values_2_1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_near_rank1": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_effective_rank_parity_row_stochastic": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_identity_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_orthogonal_anchor_effective_rank_is_n": "passed",
+        "tests/tasks/parity/test_attention_rank_parity.py::test_rank1_anchor_effective_rank_is_one": "passed",
+        "tests/tasks/parity/test_b8_new_metrics_parity.py::TestOfficialAlpha::test_matches_live_weightwatcher": "passed",
+        "tests/tasks/parity/test_lipschitz_depth_additive_values.py::test_depth_additive_keys_have_their_closed_forms": "passed",
+        "tests/tasks/parity/test_lipschitz_parity.py::test_geometry_lipschitz_is_relative_change_proxy_not_sigma_max": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_bpc_correct_for_bos_adding_tokenizer": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_empty_text_rows_are_skipped_not_crashing": "passed",
+        "tests/tasks/parity/test_perplexity_parity.py::test_rare_freq_buckets_and_ppls_match_independent_reference": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_batched_causal_rows_match_scalar_spearman": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[conv1d]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_head_write_norms_are_each_heads_isolated_write[linear]": "passed",
+        "tests/tasks/parity/test_positional_decay_write_weights.py::test_write_weighted_mean_is_the_weighted_average": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[gpt2_layernorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_s_unit_matches_autograd_on_the_unit_gain_state[llama_rmsnorm]": "passed",
+        "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py::test_softcapped_gemma_matches_autograd_through_its_actual_logits": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_hill_equals_independent_hill_exact": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_blme_vs_weightwatcher_delta_recorded": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_fixture_records_proxy_verdict": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_known_exponent_recovery": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_marchenko_pastur_anchor": "passed",
+        "tests/tasks/parity/test_spectral_parity.py::test_real_task_matches_transcribed_kernel": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[gpt2]": "passed",
+        "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat_is_weightwatchers_mean_alpha_weighted[llama]": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_avg_cosine_matches_the_release_estimator": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_gpt2_reproduces_the_released_anisotropy_profile": "passed",
+        "tests/tasks/parity/test_svd_ethayarajh_release_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/parity/test_svd_isotropy_values.py::test_svd_keys_match_brute_force_definitions": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[gpt2_conv1d]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[llama]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_evaluate_equals_release_norm_metrics[neox_fused_qkv]": "passed",
+        "tests/tasks/parity/test_weight_norms_ww_parity.py::test_sources_pin_the_cloned_commit": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_ablation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_attention_knockout": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_edge_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_knowledge_neurons": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_causality_tracing": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_logical": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_membership_inference": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_consistency_self_consistency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_gradient_flow": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_interpolation": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_sharpness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_categories": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_correlation_dimension": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_lipschitz": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_mahalanobis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline_matches_textbook_ppl": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_positional_decay": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_prediction_alignment": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_representation_sensitivity": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_rsa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_spectral": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_svd": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_unembedding": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_geometry_weight_norms": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_rank": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_attribution": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_head_roles_full_pipeline_matches_paper_definition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_induction_heads": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_logit_lens": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing_full_pipeline_matches_independent_alain_bengio_probe": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sae_features": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity_full_pipeline_matches_independent_l0_and_kurtosis": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_concept_separability_full_pipeline_matches_sklearn_cv": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_refusal_direction": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_repe_task_vectors": "passed",
+        "tests/tasks/test_comprehensive_parity.py::test_topology_betti_curve": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_knowledge_capacity_reports_likelihood_ratio_not_negative_logprob_ratio": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_is_deterministic_with_seed": "passed",
+        "tests/tasks/test_consistency_diagnostic_semantics.py::test_self_consistency_uses_seeded_sampling_stability_semantics": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_accepts_structured_return_and_restores_rng_and_checkpoint": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_does_not_create_a_scored_prompt": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[literal-eos]": "passed",
+        "tests/tasks/test_metric_repairs.py::test_sampling_eos_postprocessor_preserves_prompt[plain-text]": "passed",
+        "tests/tasks/test_reference_parity_formulas.py::test_collapse_task_reports_roy_vetterli_convention": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_guard_returns_nan_and_reason_on_a_tensor_error": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_linear_head_is_unchanged": "passed",
+        "tests/tasks/test_representation_sensitivity_guard.py::test_unrunnable_guard_gives_nan_with_reason_through_evaluate": "passed",
+        "tests/test_reference_parity_guard.py::test_spectral_matches_live_weightwatcher_on_small_n": "passed",
+        "tests/test_replacement_candidates.py::test_betti_1_curve_mean": "passed"
+      }
+    }
+  },
+  "execution": {
+    "host": "dedicated-developjob-gem-foyhs-59b64b5cf6-zzlpv",
+    "source": "/public_data/dtsaras/hara/artifacts/pod1/blme/zoo-readiness-20261119-XyxCEk/qualified-library",
+    "study": "/home/dtsaras/projects/beyond_benchmarks",
+    "source_has_working_tree_changes": true,
+    "raw_artifacts": "/public_data/dtsaras/hara/artifacts/pod1/blme/zoo-readiness-20261119-XyxCEk/qualified-review",
+    "raw_junit_sha256": {
+      "5.2.0": "6097c9c01decb1037cdc763d33b5a0bfdcf73ce8a8486bc29c449b0341f5543b",
+      "5.10.2": "c60e98853794e81e570ad539a405ad7752be0f786805b9e820223d7fe0ddc4a0",
+      "5.22.2": "68386a6b022faa0adb19969fc812c22417b9d63b603944964f482893a928d406",
+      "5.23.0": "f2b7f9f4a5cb43316c1f46616c181593e8204fb985bf4e1ce1be80ae7d174682"
+    },
+    "counts": {
+      "5.2.0": {
+        "raw": 111,
+        "linked_suite": 111
+      },
+      "5.10.2": {
+        "raw": 111,
+        "linked_suite": 111
+      },
+      "5.22.2": {
+        "raw": 111,
+        "linked_suite": 111
+      },
+      "5.23.0": {
+        "raw": 111,
+        "linked_suite": 111
+      }
+    },
+    "packages": {
+      "5.2.0": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.2.0",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.10.2": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.10.2",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.22.2": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.22.2",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.23.0": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.23.0",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      }
+    },
+    "command": "CUDA_VISIBLE_DEVICES= BLME_REQUIRE_REFS=1 HF_HUB_OFFLINE=1 python -m pytest -q -p no:cacheprovider --tb=short --junitxml=STACK.xml @selected-cases.txt"
+  }
+}

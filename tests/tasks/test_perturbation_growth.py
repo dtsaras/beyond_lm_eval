@@ -61,3 +61,32 @@ def test_relative_form_removes_state_norm_growth():
     out = _growth_profile(clean, pert)
     assert out["growth_log_ratio"] == pytest.approx(L * np.log(a), rel=1e-10)
     assert out["growth_log_ratio_relative"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_per_layer_token_embeddings_preserve_ids_across_the_perturbation(monkeypatch):
+    from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel
+    from blme.tasks.dynamics.perturbation_growth import PerturbationGrowthTask
+
+    tok = AutoTokenizer.from_pretrained("hf-internal-testing/tiny-random-gpt2")
+    model = GPT2LMHeadModel(GPT2Config(vocab_size=len(tok), n_layer=2, n_head=2, n_embd=16)).eval()
+    original = model.forward
+    calls = []
+    def lookup(ids, embeddings):
+        assert ids is not None
+        clean = model.get_input_embeddings()(ids)
+        torch.testing.assert_close(embeddings, clean)
+        calls.append(("ids", ids.clone()))
+        return ids.unsqueeze(-1)
+    def forward(*args, inputs_embeds=None, per_layer_inputs=None, **kwargs):
+        assert per_layer_inputs is not None
+        calls.append(("forward", (per_layer_inputs.clone(), inputs_embeds.clone())))
+        return original(*args, inputs_embeds=inputs_embeds, **kwargs)
+    monkeypatch.setattr(model.transformer, "hidden_size_per_layer_input", 1, raising=False)
+    monkeypatch.setattr(model.transformer, "get_per_layer_inputs", lookup, raising=False)
+    monkeypatch.setattr(model, "forward", forward)
+    out = PerturbationGrowthTask({"num_samples": 1}).evaluate(model, tok, [{"text": "A small token sequence with content."}])
+    assert np.isfinite(out["growth_log_ratio_relative"])
+    assert [k for k, _ in calls] == ["ids", "forward", "forward"]
+    clean, perturbed = (calls[i][1] for i in (1, 2))
+    assert torch.equal(clean[0], perturbed[0]) and torch.equal(clean[0].squeeze(-1), calls[0][1])
+    assert not torch.equal(clean[1], perturbed[1])

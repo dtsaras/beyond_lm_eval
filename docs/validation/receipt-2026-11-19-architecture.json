@@ -1,0 +1,331 @@
+{
+  "id": "2026-11-19-architecture",
+  "base_commit": "1115c399693996f1a50c0feeb834bcfb5e9644f8",
+  "study_base": "ad43339c7a9703bc3323c75ca70179b78aefd747",
+  "study_sources_sha256": {
+    "configs/analysis_keys.yaml": "f707479ef9c04c663d73c3c9ae5a25bf5239e4c9c5605d237c06e36ce87c73e9",
+    "configs/tasks.yaml": "59b2d28a448ce4a0d864659252bf35e55f47d1652611caff4ad807f2c5270561",
+    "verification/runner_readiness_2026-11-19/gpu_smoke.py": "432be4b29f82912a8ba86e48f22b06e109d5150f1c96a09706b615bf2127843a"
+  },
+  "configuration_sources": {
+    "src/blme/tasks/configs/defaults.yaml": "fbe6e0ec454e5d1b29f28d237b028d28c01b1bad09201f34e84fe790c29fe72c",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf"
+  },
+  "hashes": {
+    "src/blme/cache.py": "980aee450ae0e7c6cfacdc207e50e844ab65b3344d938397d77b179362e50468",
+    "src/blme/core.py": "6ecc38d142b2e920e3e274e4882fbc79e2327be0ffd3ec044fdb14111a00619d",
+    "src/blme/experts.py": "2408fbffa2aa0c238a2005d1e755793c738a612d81336c75147f640d8324621f",
+    "src/blme/models/wrapper.py": "40a060c70dcbaec31904f8943fbc48c92ac9634935336063b44e066022432dcd",
+    "src/blme/normalization.py": "51644a6730a3ba080981966326cb53ebd90c10fca402ce45b6f9dafb1232c4df",
+    "src/blme/registry.py": "e7e292b09f15a41e55bfe72698d32479ed823128b849cccc89f9e2d1132a31df",
+    "src/blme/results.py": "76c4ef6fd3a0261a3c1157ab0739e476b915f5dcd3c84ce2e0becc2e3d406394",
+    "src/blme/task_metadata.py": "24fda891e93836d2b801468db90dd5720e2af17ba97c2a439434956848f5babf",
+    "src/blme/tasks/_precision.py": "4f132a41602e64ef766a3b9667a8702a13969fda9733b0e8c44b465f3874c447",
+    "src/blme/tasks/_tokens.py": "66a5604dc4ac733daf734fc88bf9542d748accda51d2b1d22f726593cf177ee0",
+    "src/blme/tasks/_windows.py": "77c200209727ba6f5bd8bc9938362e04acd0069e77509b02a90421e96dd84669",
+    "src/blme/tasks/base.py": "470287c7a90d601d665673fce253851f2ea5ee093eb807d5dcfe00e50d3bc70d",
+    "src/blme/tasks/benchmarks.py": "200336b709bdda6abf9d2a15c3ea6575f33228e7e59b9447fec32d6117097250",
+    "src/blme/tasks/common.py": "adbda9b36b7504a0523f4ad73a43ae710e57dfe5ecc7d140d1ff39bef2a5d59f",
+    "src/blme/tasks/config_loader.py": "ffedc91dda126370410939bac976f08fe55e44489d7e54b7e94e9b6b618a88d1",
+    "src/blme/tasks/dynamics/perturbation_growth.py": "11bb0ae3e173bd6219dd5eafb178cda25defdc50a8f4b68c97b226d226a68b4a",
+    "src/blme/tasks/geometry/utils.py": "ca35ae24acdbd5f7e24b0fb235ed8890635c3c28311906fc46034c2279c09f27",
+    "src/blme/tasks/repe/__init__.py": "b16d75f246c47d956d5545e79633a5f8a46e90745a743ca3b5b3366b295b99b7",
+    "src/blme/tasks/repe/_common.py": "744f3f3c7a1a4433a7a06d6916de274538203d7459fb3406c07a7f5d49d29bbd",
+    "src/blme/tasks/representation_engineering.py": "cd3b0abb0f69bdaf220377199b2325c64695eed89df6d7f43fa46a2caf012714",
+    "src/blme/utils.py": "a2eb55d73fcde5e176c315df66803c35b06525385f8b342db863920496cd971a",
+    "tests/adversarial_fixtures.py": "28ea183f4183004ba37b545fb244fe01182832605a02fad77d030b995032f7fe",
+    "tests/conftest.py": "384bdf1421cdeb9a266fd733bb5ecca67b0824bbcd499d300509bb4e0f772026",
+    "tests/fixtures/paper_core_tasks.json": "483dd81bea6b5a55f3f0566b0310bae1c5897cb60f317627be926557a9cdd0b6",
+    "tests/fixtures/reference_parity/formula_fixtures.json": "dadb0ebaa54976d967eb5249de958462383eb0c49cea48544fe3721932d06123",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json": "fc8c2a62249c300f331700668e0aa438c5e7866e7e2ba8edbff6f12c1683f999",
+    "tests/fixtures/reference_parity/parity/attention_graph.json": "498cd96a697650b832deca180cc05c42c375b787ab5ad414aa45fd6803678040",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json": "8fddd92066fbad7d09f3c06d85fd56be118e4ef74b9b4b4a1a3c0c6f6146501c",
+    "tests/fixtures/reference_parity/parity/attention_rank.json": "ce5705cc5c1f643b44f58f193d5fd44c3719915d5ef27c79d07319902019bb8f",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json": "d201d8dae718a50c348a1923ba344f7a0bee189382a0cb3a67fc951eb5ab40ce",
+    "tests/fixtures/reference_parity/parity/attribution.json": "3485a7de6e119ff63933ec790832a3180c7eb22e525d1057924c2c8a27ef7ec3",
+    "tests/fixtures/reference_parity/parity/bias_weat.json": "bc6979dec457a59205faa0c6137a921c4ec56e9c6db4a1f93c91f84d8fbdc1d3",
+    "tests/fixtures/reference_parity/parity/cknna.json": "2814ad356d117c24d7d35a7a1d1873ea792e1d001eb01cac7ffb201dd8d12c43",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json": "8af3e2415715e7a1242e2d058a64ed923078a4afe712354dc0f2d6c37ab43f93",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json": "71419ced7c9a989cbfd67a9c712053cce5fbdf18480a4e20a7fb6fc792e72832",
+    "tests/fixtures/reference_parity/parity/head_roles.json": "f251c4a1df1b86b46698a1e801f5383e3b53516ec95b3ad940fdd077b6c6ccd2",
+    "tests/fixtures/reference_parity/parity/hubness.json": "37b622af39b8fa48d87919ab3a0ff2343ffca1c4327384d034961fbac5a265a2",
+    "tests/fixtures/reference_parity/parity/induction_heads.json": "213d439b5812164eae4ec8a37e8760b7effc103aca2ba678e161b7505d94f39d",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json": "588fd25add9ce22acb71b211fd8d80b5e6d20b8db3262e3d3174bd42d17f6a9d",
+    "tests/fixtures/reference_parity/parity/lipschitz.json": "d8b15e7f57011f8aaa6c172f69474ca64c99d45e5ace629b5b07373b5e1f43b4",
+    "tests/fixtures/reference_parity/parity/logit_lens.json": "bec2df07b423da0298b37d67a1a8616ca2c59f584803a5891c8ae45002a5c0ca",
+    "tests/fixtures/reference_parity/parity/magnitude.json": "8488e0a0dc3f5c5d743b24c5259394c61f37a5cc73550c9f50d28efade6643c2",
+    "tests/fixtures/reference_parity/parity/membership_inference.json": "3da2e1d9bf9dd4055084dd9214807f634b6476ce0ad409758271198f2eb97ce6",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json": "4ccdc6daaea47b5f566dcfaaeb713641b7b24cfa4eebae256a4cc86a99215509",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json": "36f8975fb3b95a50f1cce63d0621bc481e51914b93addd07ad3dce9c7af4e6d8",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json": "a431e4f665298a43ae16cdf658ef6fd3533d0620ed38878f07f2c909c6e6cb06",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json": "04938fe1583cff35235183aaff86bd45df65483feaff0052c719aa45354fea5b",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json": "170024b79d1652788ca7ff356c0e12e57c7ec9accc8a486bc9588fe346f7603e",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json": "7a8ee223690e2d1ddc02a08fc59fec6ed980fc48e4b1bbe1f7b1c4a4158a35bd",
+    "tests/fixtures/reference_parity/parity/rsa.json": "8b91e0ed37164de9c9f55a109c5076df93046e3fd30df174746bfa8dc954eb48",
+    "tests/fixtures/reference_parity/parity/sae_features.json": "633c4650263024e7855cfd73ec0fe249e753587cbdab135283f04df87869e652",
+    "tests/fixtures/reference_parity/parity/sharpness.json": "d2cb31e6f970c38c33d2011b51e5373d4b70cf07e7c8e7417fb3c65c92a2ced8",
+    "tests/fixtures/reference_parity/parity/spectral.json": "abb31e8f6b387a2c5c790ff1bec5bde228894c740184d6fcadbb4fe21862050a",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json": "f68ef4e46536aa406b29bf345222e7af82213e615ff87c69ae8363e5484ff562",
+    "tests/fixtures/reference_parity/parity/vendi.json": "db32927d43fd08bfef7525a5e787a6b71cf02b422e8f662e36726af81bd74c9c",
+    "tests/fixtures/reference_parity/parity/zigzag.json": "c6585e25d3f13642b7129261cd245b80c7b68175a8b5da583805928a2ab1942f",
+    "tests/golden/golden_snapshot.py": "59f13f3673dbc605bb866e18b4d87d6ef5287b3fc7fb5215aaf0b79f29d013e5",
+    "tests/invariance/_threads.py": "a9a5125689d9542b1bbaae8bab6a1696460165f9055500396bd0cf3b60de25e9",
+    "tests/invariance/clouds.py": "b6fabba65c447f84720dbc57cfe8dfbb9c777bb8e74da8a437351702eb215f3f",
+    "tests/invariance/compare.py": "a62794aa53c93bd203c4b326acb335b9d24e8218a1deff03ad300634fd89a01e",
+    "tests/invariance/driver.py": "89d0e21e5ee7a53f98e10d63af7d531e57d5711536a3f85b0434dbb48ec028dc",
+    "tests/invariance/model_transforms.py": "d05c1a51c474e1f742564b60d7ee9142f64b690b3f8b061b7722c5d6de4675ff",
+    "tests/invariance/precision.py": "c6c67c4665610b8a75224fb948cc1bbfee7f5e2af9b17435a742cdf3df8284d4",
+    "tests/invariance/states.py": "4d4bae0a96ace894479bc72cb76a508123679771abfe0617c90f48abb6bfe12c",
+    "tests/precision/lift.py": "afad1fe8b471ddd0c8efb9b2640639dc7821dce7547281feca4399ad7b109ca8",
+    "tests/tasks/invariance/_end_of_stack.py": "bb1adda849b1f330664fce4d807a2bad3ec733063103b705061b72e55bd50e24",
+    "tests/tasks/invariance/_family_c.py": "31d999e81f9c783ba86a3d8385523ca4269af391dd947718ff19345a442bbff4",
+    "tests/tasks/invariance/_family_d.py": "112ea5243e0e070422fd974507b2fa26a7807ea307a72d03cf63c98c1463773d",
+    "tests/tasks/invariance/_nlpaug_side.py": "86c4b891794f9a9b2f3f93d14d18033aebdbb7207cd6b4b9c1bcc9385da551dd",
+    "tests/tasks/invariance/_reference_side.py": "053d6e73c689319d4a5f08a7b529633371d8e24b3611527f25055bfef2538fa3",
+    "tests/tasks/invariance/_sinks.py": "1d8981e4269e0cf70362f46a11a672294b52f461cefd3672d8a3deee4232331c",
+    "tests/tasks/invariance/dynamics_fixtures.py": "28c841021fd3d5523e1a09b2f4e405e149f221b84b8b869e0577534ff7a21f60",
+    "tests/tasks/invariance/repe_width_padding.py": "0d4faf2c2a240100a57ec9bc92995f1d4dc7f2982a8c4633841e0b61359b8b35",
+    "tests/tasks/test_perturbation_growth.py": "273073786dcdd4c7e0a5a8c74ba4cca19acb1eefbde8aab79d90dfcb92ab74a6"
+  },
+  "common_inputs": [
+    "src/blme/cache.py",
+    "src/blme/core.py",
+    "src/blme/experts.py",
+    "src/blme/models/wrapper.py",
+    "src/blme/normalization.py",
+    "src/blme/registry.py",
+    "src/blme/results.py",
+    "src/blme/task_metadata.py",
+    "src/blme/tasks/_precision.py",
+    "src/blme/tasks/_tokens.py",
+    "src/blme/tasks/_windows.py",
+    "src/blme/tasks/base.py",
+    "src/blme/tasks/benchmarks.py",
+    "src/blme/tasks/common.py",
+    "src/blme/tasks/config_loader.py",
+    "src/blme/tasks/dynamics/perturbation_growth.py",
+    "src/blme/tasks/geometry/utils.py",
+    "src/blme/tasks/repe/__init__.py",
+    "src/blme/tasks/repe/_common.py",
+    "src/blme/tasks/representation_engineering.py",
+    "src/blme/utils.py",
+    "tests/adversarial_fixtures.py",
+    "tests/conftest.py",
+    "tests/fixtures/paper_core_tasks.json",
+    "tests/fixtures/reference_parity/formula_fixtures.json",
+    "tests/fixtures/reference_parity/parity/activation_kurtosis.json",
+    "tests/fixtures/reference_parity/parity/attention_graph.json",
+    "tests/fixtures/reference_parity/parity/attention_knockout.json",
+    "tests/fixtures/reference_parity/parity/attention_rank.json",
+    "tests/fixtures/reference_parity/parity/attention_rollout.json",
+    "tests/fixtures/reference_parity/parity/attribution.json",
+    "tests/fixtures/reference_parity/parity/bias_weat.json",
+    "tests/fixtures/reference_parity/parity/cknna.json",
+    "tests/fixtures/reference_parity/parity/correlation_dimension.json",
+    "tests/fixtures/reference_parity/parity/edge_attribution.json",
+    "tests/fixtures/reference_parity/parity/head_roles.json",
+    "tests/fixtures/reference_parity/parity/hubness.json",
+    "tests/fixtures/reference_parity/parity/induction_heads.json",
+    "tests/fixtures/reference_parity/parity/knowledge_neurons.json",
+    "tests/fixtures/reference_parity/parity/lipschitz.json",
+    "tests/fixtures/reference_parity/parity/logit_lens.json",
+    "tests/fixtures/reference_parity/parity/magnitude.json",
+    "tests/fixtures/reference_parity/parity/membership_inference.json",
+    "tests/fixtures/reference_parity/parity/neural_collapse.json",
+    "tests/fixtures/reference_parity/parity/phd_dimension.json",
+    "tests/fixtures/reference_parity/parity/procrustes_linearity.json",
+    "tests/fixtures/reference_parity/parity/repe_concept_separability.json",
+    "tests/fixtures/reference_parity/parity/repe_refusal_direction.json",
+    "tests/fixtures/reference_parity/parity/repe_task_vectors.json",
+    "tests/fixtures/reference_parity/parity/rsa.json",
+    "tests/fixtures/reference_parity/parity/sae_features.json",
+    "tests/fixtures/reference_parity/parity/sharpness.json",
+    "tests/fixtures/reference_parity/parity/spectral.json",
+    "tests/fixtures/reference_parity/parity/tracing_rome.json",
+    "tests/fixtures/reference_parity/parity/vendi.json",
+    "tests/fixtures/reference_parity/parity/zigzag.json",
+    "tests/golden/golden_snapshot.py",
+    "tests/invariance/_threads.py",
+    "tests/invariance/clouds.py",
+    "tests/invariance/compare.py",
+    "tests/invariance/driver.py",
+    "tests/invariance/model_transforms.py",
+    "tests/invariance/precision.py",
+    "tests/invariance/states.py",
+    "tests/precision/lift.py",
+    "tests/tasks/invariance/_end_of_stack.py",
+    "tests/tasks/invariance/_family_c.py",
+    "tests/tasks/invariance/_family_d.py",
+    "tests/tasks/invariance/_nlpaug_side.py",
+    "tests/tasks/invariance/_reference_side.py",
+    "tests/tasks/invariance/_sinks.py",
+    "tests/tasks/invariance/dynamics_fixtures.py",
+    "tests/tasks/invariance/repe_width_padding.py",
+    "tests/tasks/test_perturbation_growth.py"
+  ],
+  "tasks": {
+    "dynamics_perturbation_growth": {
+      "source": "src/blme/tasks/dynamics/perturbation_growth.py",
+      "inputs": [],
+      "selectors": [
+        "tests/tasks/test_perturbation_growth.py",
+        "tests/tasks/test_perturbation_growth.py::test_per_layer_token_embeddings_preserve_ids_across_the_perturbation"
+      ],
+      "readout_selectors": {
+        "growth_log_ratio_relative": [
+          "tests/tasks/test_perturbation_growth.py::test_relative_form_removes_state_norm_growth"
+        ]
+      },
+      "headlines": [
+        "growth_log_ratio_relative"
+      ],
+      "declaration": "proxy-only",
+      "metadata_sha256": "7f2c05985e54eb2695b49611ab9792f79ce716ec47dc9a75d6bd5fcddfd79095",
+      "defaults_sha256": "3be3db6697f695c787c3afa966b1de15021c8f7695afb5356fab3a33df80f6e2"
+    }
+  },
+  "runs": {
+    "5.2.0": {
+      "junit_sha256": {
+        "linked-5.2.0.xml": "679eb2ca247017e2510c15198259efc74af5a23b5c05d930430458fcae1af660"
+      },
+      "cases": {
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[10000000000000.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e+25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-13]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-30]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[2.3058429404942162e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[9.223371761976865e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_ignores_a_common_translation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_per_layer_token_embeddings_preserve_ids_across_the_perturbation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_relative_form_removes_state_norm_growth": "passed"
+      }
+    },
+    "5.10.2": {
+      "junit_sha256": {
+        "linked-5.10.2.xml": "09fe4ca6ff9e59bd09dfd3c86cb558f306167aa66d18dc1039cd9c3b07ff036f"
+      },
+      "cases": {
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[10000000000000.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e+25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-13]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-30]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[2.3058429404942162e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[9.223371761976865e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_ignores_a_common_translation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_per_layer_token_embeddings_preserve_ids_across_the_perturbation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_relative_form_removes_state_norm_growth": "passed"
+      }
+    },
+    "5.22.2": {
+      "junit_sha256": {
+        "linked-5.22.2.xml": "3a373b4b37f6093d821fcf55266f49e76d96f93cb07f235e0dac30014f6ec3a6"
+      },
+      "cases": {
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[10000000000000.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e+25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-13]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-30]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[2.3058429404942162e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[9.223371761976865e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_ignores_a_common_translation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_per_layer_token_embeddings_preserve_ids_across_the_perturbation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_relative_form_removes_state_norm_growth": "passed"
+      }
+    },
+    "5.23.0": {
+      "junit_sha256": {
+        "linked-5.23.0.xml": "55a0da19d5b56c74d69a9746662b8fac0f29bc60219cbf7c2c61a11cfe4e5299"
+      },
+      "cases": {
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[10000000000000.0]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e+25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-13]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-25]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[1e-30]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[2.3058429404942162e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_exact_at_every_scale[9.223371761976865e+18]": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_growth_profile_ignores_a_common_translation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_per_layer_token_embeddings_preserve_ids_across_the_perturbation": "passed",
+        "tests/tasks/test_perturbation_growth.py::test_relative_form_removes_state_norm_growth": "passed"
+      }
+    }
+  },
+  "execution": {
+    "host": "dedicated-developjob-gem-foyhs-59b64b5cf6-zzlpv",
+    "source": "/public_data/dtsaras/hara/artifacts/pod1/blme/zoo-readiness-20261119-XyxCEk/architecture-lib",
+    "study": "/home/dtsaras/projects/beyond_benchmarks",
+    "source_has_working_tree_changes": true,
+    "raw_artifacts": "/public_data/dtsaras/hara/artifacts/pod1/blme/zoo-readiness-20261119-XyxCEk/architecture-review",
+    "raw_junit_sha256": {
+      "5.2.0": "add5fa36556afe3363a13eb10803f6c4917396e1e2b2beeabe4d38d0259a3cb5",
+      "5.10.2": "ccdc4f34db648ce0e400e66e0bef3929e2b944259613a2d0d3aa24e1a83c239d",
+      "5.22.2": "ba5a4a84b509e68c325f9a5917678c190019f07d9866a5617976579ef17fcfd8",
+      "5.23.0": "53d04a2f9297d6bfe25ad11440fb00d77f11224bfd57d4ac5110d9a8f3ef631e"
+    },
+    "counts": {
+      "5.2.0": {
+        "raw": 788,
+        "linked_suite": 11
+      },
+      "5.10.2": {
+        "raw": 788,
+        "linked_suite": 11
+      },
+      "5.22.2": {
+        "raw": 788,
+        "linked_suite": 11
+      },
+      "5.23.0": {
+        "raw": 788,
+        "linked_suite": 11
+      }
+    },
+    "packages": {
+      "5.2.0": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.2.0",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.10.2": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.10.2",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.22.2": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.22.2",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      },
+      "5.23.0": {
+        "python": "3.12.15",
+        "torch": "2.8.0+cu128",
+        "transformers": "5.23.0",
+        "numpy": "2.2.6",
+        "scipy": "1.13.0",
+        "datasets": "4.5.0",
+        "pytest": "9.0.2"
+      }
+    },
+    "command": "CUDA_VISIBLE_DEVICES= BLME_REQUIRE_REFS=1 HF_HUB_OFFLINE=1 python -m pytest -q -p no:cacheprovider --tb=short --junitxml=STACK.xml tests/tasks/invariance/test_dynamics_perturbation_growth.py tests/tasks/test_eos_appending_tokenizers.py tests/tasks/test_forward_hook_leaks.py tests/tasks/test_perturbation_growth.py"
+  }
+}

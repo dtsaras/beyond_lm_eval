@@ -13,6 +13,10 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
       fail-fast: false
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
 
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +28,24 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake libboost-dev
           python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[test]"
 
+      - name: Prepare offline test fixtures
+        run: |
+          export HF_HOME="$RUNNER_TEMP/blme-hub"
+          export NLTK_DATA="$RUNNER_TEMP/blme-nltk"
+          echo "HF_HOME=$HF_HOME" >> "$GITHUB_ENV"
+          echo "NLTK_DATA=$NLTK_DATA" >> "$GITHUB_ENV"
+          python .github/scripts/prepare_test_data.py
+
       - name: Run tests
+        env:
+          HF_HUB_OFFLINE: "1"
+          HF_DATASETS_OFFLINE: "1"
         run: |
           python -m pytest tests/ -v --tb=short
 

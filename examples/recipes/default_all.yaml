@@ -11,6 +11,10 @@ model:
   args: "pretrained=gpt2"
 
 tasks:
+  # A small synthetic panel exercises the structured inputs in this example.
+  # Supply a study panel for measurements intended for comparison.
+  geometry_domain_bpb: {panel_path: example_panel.json}
+  geometry_paraphrase_lidar: {panel_path: example_panel.json}
   # ---- Geometry Tasks (27) ----
   geometry_svd:
     num_samples: 100

@@ -211,6 +211,11 @@ def evaluate(
             resolved.setdefault("seed", seed)
             resolved_task_configs[task_name] = resolved
 
+        # These read structured document or paraphrase records. WikiText rows
+        # cannot serve either task when an explicit panel is missing.
+        if dataset is None and set(diagnostic_tasks) <= {"geometry_domain_bpb", "geometry_paraphrase_lidar"}:
+            dataset = []
+
         # Load a shared evaluation corpus if none was provided, sized to the
         # largest requested sample count (never below the 200-sample default).
         if dataset is None:
@@ -230,7 +235,10 @@ def evaluate(
                     f"Default corpus: {corpus_size} passages requested, "
                     f"{n_available} available; loading all {n_available}.")
                 corpus_size = n_available
-            dataset = load_default_corpus(corpus_size)
+            if "geometry_procrustes_linearity" in diagnostic_tasks:
+                dataset = load_default_corpus(corpus_size, include_document_ids=True)
+            else:
+                dataset = load_default_corpus(corpus_size)
 
         # Shared cache: only tasks known to consume cached hidden states or
         # logits are listed here so we avoid the memory cost of caching when

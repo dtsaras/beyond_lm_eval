@@ -8,7 +8,7 @@ logger = logging.getLogger("blme")
 
 # Byte-attribution modes of `strided_perplexity` that give an exact byte count;
 # any other mode only bounds it, and is emitted under a `_lower_bound` name.
-_EXACT_BYTE_MODES = ("offsets", "token_pieces")
+_EXACT_BYTE_MODES = ("offsets", "token_pieces", "scored_full_text")
 
 
 def _frequency_buckets(token_counts):

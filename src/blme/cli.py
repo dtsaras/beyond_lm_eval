@@ -174,7 +174,8 @@ def _cmd_list_tasks(args):
         if group != current_group:
             current_group = group
             print(f"  [{current_group}]")
-        print(f"    {task_name}")
+        label = TASK_CERTIFICATION[task_name].display_name
+        print(f"    {label} ({task_name})" if label else f"    {task_name}")
     print()
 
 

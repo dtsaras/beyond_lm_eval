@@ -6,9 +6,6 @@ how often the samples agree on the first generated token. This is a
 sampling-stability proxy, not reasoning-path self-consistency with
 answer majority vote.
 
-We use exact-match agreement on the first generated word and a softer
-"common-prefix overlap" measure as well.
-
 This is purely intrinsic — no labels are needed. The bundled prompts
 each end with an obvious continuation, so we can compute agreement
 without an oracle.
@@ -16,13 +13,17 @@ without an oracle.
 
 import logging
 from collections import Counter
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 import torch
 
+from transformers import GenerationConfig, PreTrainedTokenizerBase
+
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
+from .._tokens import strip_trailing_special
+from ..common import _no_model_generation_defaults, stop_ids
 
 logger = logging.getLogger("blme")
 
@@ -80,31 +81,45 @@ class SelfConsistencyTask(DiagnosticTask):
         per_prompt_token_diversity = []  # 1 / unique_first_tokens (1.0 = full agreement)
         first_token_entropies = []
 
-        with torch.no_grad():
+        eos = sorted(stop_ids(model, tokenizer))
+        pad = getattr(tokenizer, "pad_token_id", None)
+        if pad is None:
+            pad = eos[0] if eos else 0
+        policy = GenerationConfig(
+            do_sample=True, num_beams=1, num_return_sequences=1,
+            temperature=temperature, top_k=0, top_p=1.0, max_new_tokens=max_new_tokens,
+            eos_token_id=eos or None, pad_token_id=pad, return_dict_in_generate=False,
+        )
+        tokenizer_options = {"return_special_tokens_mask": True} if isinstance(tokenizer, PreTrainedTokenizerBase) else {}
+        n_stripped = 0
+        with torch.no_grad(), _no_model_generation_defaults(model):
             for prompt in prompts:
-                enc = tokenizer(prompt, return_tensors="pt").to(device)
-                input_ids = enc["input_ids"]
+                enc = tokenizer(prompt, return_tensors="pt", **tokenizer_options)
+                enc, removed = strip_trailing_special(enc, tokenizer)
+                n_stripped += removed
+                ids = enc["input_ids"]
+                special_mask = enc.get("special_tokens_mask")
+                if not prompt or ids.numel() == 0 or (special_mask is not None and bool(special_mask.all())):
+                    # A template alone cannot establish a prompt boundary.
+                    continue
+                input_ids = ids.to(device)
                 prompt_len = input_ids.shape[1]
 
                 # Sample N completions in a single batched call.
                 generate_kwargs = {
                     "input_ids": input_ids.expand(n_samples_per_prompt, -1),
-                    "max_new_tokens": max_new_tokens,
-                    "do_sample": True,
-                    "temperature": temperature,
-                    "top_p": 1.0,
-                    "pad_token_id": tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
+                    "generation_config": policy,
                 }
-                # transformers' generate() has no per-call generator kwarg;
-                # determinism comes from the torch.manual_seed(seed) above
-                # (the global RNG drives sampling).
+                if "attention_mask" in enc:
+                    generate_kwargs["attention_mask"] = enc["attention_mask"].to(device).expand(n_samples_per_prompt, -1)
                 try:
                     outputs = model.generate(**generate_kwargs)
                 except Exception as e:
                     logger.info(f"  generate() failed for prompt '{prompt[:40]}': {e}")
                     continue
 
-                gen_ids = outputs[:, prompt_len:]  # (N, max_new_tokens)
+                sequences = getattr(outputs, "sequences", outputs)
+                gen_ids = sequences[:, prompt_len:]  # (N, max_new_tokens)
                 if gen_ids.numel() == 0:
                     continue
 
@@ -118,7 +133,7 @@ class SelfConsistencyTask(DiagnosticTask):
                 per_prompt_token_diversity.append(1.0 / len(ctr))
                 # Entropy of first-token distribution
                 p = np.array(list(ctr.values()), dtype=np.float64) / sum(ctr.values())
-                first_token_entropies.append(float(-np.sum(p * np.log(p + 1e-12))))
+                first_token_entropies.append(float(-np.sum(p * np.log(p))))
 
         if not per_prompt_top1_rate:
             return {"error": "No samples successfully generated"}
@@ -147,4 +162,7 @@ class SelfConsistencyTask(DiagnosticTask):
             "n_prompts": len(per_prompt_top1_rate),
             "n_samples_per_prompt": n_samples_per_prompt,
             "temperature": temperature,
+            "_meta_n_trailing_special_stripped": n_stripped,
+            "_meta_sampling_top_k": 0,
+            "_meta_sampling_top_p": 1.0,
         }

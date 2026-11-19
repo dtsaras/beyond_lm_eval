@@ -7,7 +7,8 @@ E_tokens ||grad_h log P(y|h)||^2.
 
 The LM head is linear (logits = s (W h + b)), so the gradient has the closed
 form grad_h log P(y|h) = s (W_y - sum_k p(k) W_k) (the softmax score
-identity), which avoids per-token backward passes.
+identity), which avoids per-token backward passes. For a final tanh softcap,
+each vocabulary row also receives its own derivative before the expectation.
 
 References:
     "Natural Gradient Works Efficiently in Learning" (Amari, 1998,
@@ -120,8 +121,9 @@ class RepresentationSensitivityTask(DiagnosticTask):
         "g the gradient with respect to h, so it carries a factor of the width. "
         "The ||h||^2 ||grad_h||^2 twin was rejected because it fails the diagonal "
         "gauge, and Fisher-trace or Hessian variants need second-order work over V. "
-        "Heads with a non-linear post-transform (final-logit softcapping) are refused "
-        "by the linearity guard."
+        "For a declared final tanh softcap, the gradient includes the derivative of "
+        "each vocabulary logit. The reconstructed scores are checked against the "
+        "model's actual logits on every document."
     )
     HEADLINE_KEYS = ("S_unit",)
     SIZE_INVARIANT = {
@@ -144,11 +146,27 @@ class RepresentationSensitivityTask(DiagnosticTask):
         return f
 
     @staticmethod
+    def _softcap_for(model):
+        cfg = getattr(model, "config", None)
+        cap = getattr(cfg, "final_logit_softcapping", None)
+        if cap is None and callable(getattr(cfg, "get_text_config", None)):
+            cap = getattr(cfg.get_text_config(), "final_logit_softcapping", None)
+        if cap is None:
+            return None
+        try:
+            cap = float(cap)
+            if not np.isfinite(cap) or cap <= 0:
+                raise ValueError("final_logit_softcapping must be finite and positive")
+        except (TypeError, ValueError) as exc:
+            raise _HeadGuardUnavailable(f"linearity test could not run ({type(exc).__name__}: {exc})") from exc
+        return cap
+
+    @staticmethod
     def _head_linearity(model, head, W, h):
         """Worst superposition violation |f(2kh)-f(0) - 2(f(kh)-f(0))| / |.| over
-        k in {1, 2, 4}, through the model's own post-head transforms
-        (logit_scale, final_logit_softcapping). A linear head stays at the
-        rounding floor at every k; a saturating one grows with k.
+        k in {1, 2, 4} for the affine projection including logit_scale. The
+        separately differentiated final softcap is checked against the actual
+        model logits in the document loop.
 
         Returns ``(lin_rel, reason)``. A test that cannot run (an unparseable
         transform in the config, a tensor shape/device error or OOM) or gives a
@@ -159,15 +177,12 @@ class RepresentationSensitivityTask(DiagnosticTask):
             _f = (lambda _x: (_x @ W.T + (_bias.detach().float()
                                           if _bias is not None else 0.0)))
             _cfg = getattr(model, "config", None)
-            _cap = getattr(_cfg, "final_logit_softcapping", None)
             _lscale = getattr(_cfg, "logit_scale", None)
 
             def _real(_x):
                 _z = _f(_x)
                 if _lscale:
                     _z = _z * float(_lscale)
-                if _cap:
-                    _z = torch.tanh(_z / float(_cap)) * float(_cap)
                 return _z
             _a = _real(_h1 * 0.0)
             lin_rel = 0.0
@@ -235,8 +250,9 @@ class RepresentationSensitivityTask(DiagnosticTask):
 
         model.eval()
         try:
+            cap = self._softcap_for(model)
             self._loop(model, tokenizer, samples, device, head, W, sensitivity_values,
-                       scalefree_values, unit_values, captured, ug if unit_reason is None else None)
+                       scalefree_values, unit_values, captured, ug if unit_reason is None else None, cap)
         except _HeadNotLinear as e:
             return {"error": str(e)}
         except _HeadGuardUnavailable as e:
@@ -263,6 +279,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
             # The number of documents actually scored (a config echo otherwise).
             "_meta_num_samples_analyzed": len(sensitivity_values),
         }
+        if cap is not None:
+            out["_meta_final_logit_softcapping"] = cap
         if unit_reason is None and unit_values:
             tol = 1e-3 if all(p.dtype == torch.float32 for p in model.parameters()) else 3e-2
             if unit_err > tol:
@@ -286,7 +304,7 @@ class RepresentationSensitivityTask(DiagnosticTask):
         return out
 
     def _loop(self, model, tokenizer, samples, device, head, W, sensitivity_values,
-              scalefree_values, unit_values, captured, ug):
+              scalefree_values, unit_values, captured, ug, cap):
         with torch.no_grad():
             for s in samples:
                 text = s["text"] if isinstance(s, dict) and "text" in s else str(s)
@@ -312,9 +330,14 @@ class RepresentationSensitivityTask(DiagnosticTask):
                 _ls = self._logit_scale_for(model)
                 if _ls is not None:
                     logits = logits * _ls
+                if cap is not None:
+                    scaled = logits / cap
+                    logits = cap * torch.tanh(scaled)
+                    # sech²(z/c) without cancellation when tanh rounds to one.
+                    tail = torch.exp(-2 * scaled.abs())
+                    slope = 4 * tail / (1 + tail).square()
 
-                # The closed form needs a linear head; checked on every document
-                # (a softcap bites hardest at the largest logits).
+                # Check the complete assumed logit transform on every document.
                 real = out.logits[0, :-1, :].float()
                 # Fail closed on non-finite logits (a NaN `rel` passes `rel > tol`).
                 if not bool(torch.isfinite(out.logits).all()):
@@ -338,9 +361,8 @@ class RepresentationSensitivityTask(DiagnosticTask):
                         "for this architecture")
                 if float(rel) > _tol:
                     raise _HeadNotLinear(
-                        "LM head is not purely linear (recomputed logits "
-                        f"deviate rel={float(rel):.3g}; e.g. final logit "
-                        f"softcapping); tolerance {_tol:.3g} for "
+                        "LM head does not match the configured projection "
+                        f"(recomputed logits deviate rel={float(rel):.3g}); tolerance {_tol:.3g} for "
                         f"{_ldtype} — closed-form sensitivity invalid "
                         "for this architecture")
                 self._head_guard_max_rel = max(
@@ -348,8 +370,11 @@ class RepresentationSensitivityTask(DiagnosticTask):
                     float(rel))
 
                 probs = torch.softmax(logits, dim=-1)  # (T-1, V)
-                # grad_h log P(y|h) = W_y - sum_k p(k) W_k
+                # The softmax score is (one_hot(y) - p) times the logit Jacobian.
                 W_target = W[targets]
+                if cap is not None:
+                    W_target = W_target * slope.gather(1, targets[:, None])
+                    probs = probs * slope
                 W_expected = probs @ W
                 grad = W_target - W_expected
                 if _ls is not None:

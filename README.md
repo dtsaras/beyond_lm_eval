@@ -10,28 +10,25 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**107 diagnostic tasks** across 7 categories:
+**109 diagnostic tasks** across 7 categories:
 
 | Category | Count | Examples | What it measures |
 |----------|-------|----------|-----------------|
-| **Geometry** | 50 | SVD isotropy, LID, CKA/CKNNA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation, Vendi, magnitude, PHD, Procrustes linearity, superposition strength, effective depth | Representation space structure |
+| **Geometry** | 52 | SVD isotropy, LID, CKA/CKNNA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation, Vendi, magnitude, PHD, Procrustes linearity, superposition strength, effective depth | Representation space structure |
 | **Interpretability** | 19 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
 | **Consistency** | 13 | Calibration, paraphrase / logical / contrastive invariance, ICL slope and score, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
-| **Causality** | 7 | Causal tracing, ablation, attention knockout, edge attribution, circuit quality, knowledge neurons, layer skip | Information flow |
+| **Causality** | 7 | Causal tracing, ablation, attention knockout, layer attribution, circuit quality, neuron saliency, layer skip | Information flow |
 | **Dynamics** | 9 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth, entropy calibration | Temporal behavior |
 | **RepE** | 4 | Task vectors, concept separability, steering effectiveness, refusal direction | Concept encoding |
 | **Topology** | 5 | Persistent homology, Betti curves, persistence entropy / landscape, zigzag persistence | Manifold shape |
 
 ## Tasks by validation tier
 
-The 107 tasks fall into three tiers: 51 + 21 + 35. How far each has been checked is in [**docs/VALIDATION.md**](docs/VALIDATION.md). It states what has been checked and how; none of it is a sign-off. Every task also carries a certification label (`parity-ready`, `formula-faithful`, `refined-adaptation` or `proxy-only`), and most carry a note on what they compute and which test pins it (`blme list-tasks --json`, or `src/blme/task_metadata.py`).
+The registry includes 51 paper-core tasks, 21 additional paper methods, 35 experimental tasks and two diagnostics for structured text panels. The [validation tracker](docs/VALIDATION.md) lists the scientific scope, actual numerical checks on both supported stacks and an outstanding check for every task. The regular test suite flags registry and reviewed-input changes. Every task also carries a certification label (`parity-ready`, `formula-faithful`, `refined-adaptation` or `proxy-only`), and most carry a note on what they compute and which test pins it (`blme list-tasks --json`, or `src/blme/task_metadata.py`).
 
 ### 1. Paper-core tasks (51)
 
-These are the tasks the accompanying study uses (`tests/fixtures/paper_core_tasks.json`). Each one declares its token policy, sources, adaptation note, headline keys and size invariances on its class, and `tests/test_task_declarations.py` checks those declarations. For each task, `docs/VALIDATION.md` lists:
-- the released code it is compared with;
-- the strongest parity test that runs against that code;
-- how many of its confirmatory headline keys have a value test against released code or an analytic anchor.
+These are the tasks the accompanying study uses (`tests/fixtures/paper_core_tasks.json`). Each one declares its token policy, sources, adaptation note, headline keys and size invariances on its class, and `tests/test_task_declarations.py` checks those declarations. The [readout ledger](docs/validation/READOUTS.md) gives the comparison and linked test results for the study’s frozen confirmatory keys. The [maintenance guide](docs/validation/README.md) explains how to check or renew a review.
 
 - **Geometry (34):** categories, cka, cknna, collapse, contextualization, correlation_dimension, effective_depth, hsic, hubness, intrinsic_dim, isoscore, lid, lipschitz, magnitude, mahalanobis, matrix_entropy, mp_bulk_deviation, neural_collapse, perplexity, phd_dimension, positional_decay, prediction_alignment, procrustes_linearity, representation_sensitivity, rsa, schatten, spectral, superposition_strength, svd, tokenizer_efficiency, trajectory_curvature, unembedding, vendi_score, weight_norms
 - **Dynamics (8):** coe, fractal, generation_diversity, gradient_flow, interpolation, perturbation_growth, sharpness, stability
@@ -68,13 +65,17 @@ Each follows its paper's protocol and, where one exists, its released code. The 
 
 Parity tests load the released code from a local clone (`~/.cache/blme-refrepos`, or `$BLME_REFREPOS`) or a side install and skip without it; `BLME_REQUIRE_REFS=1` turns those skips into failures.
 
-### 3. Experimental: interpretability, causality and consistency (35)
+### 3. Experimental tasks (35)
 
 These tasks run, and they are tested for crashes and for leaks (forward hooks left on the model, global RNG state). They have **not** been validated against their papers. Several have a kernel test against a reference implementation, which their certification label reflects. A kernel test does not validate the task end to end, so treat their outputs as exploratory.
 
 - **Interpretability (17):** activation_kurtosis, activation_sinks, attention_effective_rank, attention_entropy, attention_graph, attention_rank, attention_rollout, attribution, head_roles, induction_heads, logit_lens, prediction_entropy, probing, sae_features, sparsity, superposition, waa
 - **Causality (6):** ablation, attention_knockout, circuit_quality, edge_attribution, knowledge_neurons, tracing
 - **Consistency (12):** bias_weat, calibration, contamination, contrastive, format_robustness, icl_slope, knowledge_capacity, logical, membership_inference, paraphrase, position_sensitivity, self_consistency
+
+### 4. Structured text panels (2)
+
+`geometry_domain_bpb` measures loss per UTF-8 byte on named document domains. `geometry_paraphrase_lidar` measures discriminant effective rank on human-labeled paraphrases and matched negative pairs. Both emit per-panel results for sample repeatability. Tests compare byte loss to direct token log probabilities and the LiDAR calculation to dense whitening. [Input format and outputs](docs/tasks_geometry.md#domain-loss-and-paraphrase-lidar)
 
 ## Installation
 

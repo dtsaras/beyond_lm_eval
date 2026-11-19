@@ -1,6 +1,7 @@
 import yaml
 import argparse
 import sys
+from pathlib import Path
 from typing import Optional
 from .core import evaluate
 
@@ -26,6 +27,12 @@ def run_from_yaml(config_path: str, dry_run: bool = False, strict: bool = False)
         
     # Parse Tasks
     tasks_dict = recipe.get("tasks", {})
+    for config in tasks_dict.values():
+        if config and config.get("panel_path"):
+            panel = Path(config["panel_path"]).expanduser()
+            relative = Path(config_path).resolve().parent / panel
+            # Existing recipes can also refer to paths in the launch directory.
+            config["panel_path"] = str(relative if relative.is_file() else panel)
     task_list = list(tasks_dict.keys())
     
     # Global settings

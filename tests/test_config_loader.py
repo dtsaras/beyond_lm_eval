@@ -83,6 +83,15 @@ def test_default_all_recipe_matches_registered_tasks():
     assert not extra, f"default_all recipe contains unregistered tasks: {extra}"
 
 
+def test_exhaustive_recipe_finds_the_example_panel_outside_checkout(tmp_path, monkeypatch):
+    from blme.runner import run_from_yaml
+    recipe = Path(__file__).resolve().parents[1] / "examples/recipes/default_all.yaml"
+    monkeypatch.chdir(tmp_path)
+    plan = run_from_yaml(str(recipe), dry_run=True, strict=True)
+    for task in ("geometry_domain_bpb", "geometry_paraphrase_lidar"):
+        assert Path(plan["task_configs"][task]["panel_path"]).is_file()
+
+
 def test_demo_recipe_uses_registered_tasks():
     """The public demo recipe should stay runnable with registered tasks."""
     _register_all_tasks()

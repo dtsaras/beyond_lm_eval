@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Strided bits per byte and character can recover the exact denominator when every token after an inserted BOS is scored and its decoded suffix exactly reproduces the source text.
+
+- Representation sensitivity differentiates a declared final tanh softcap and checks its reconstructed logits against the model. Gemma-4 perturbation growth uses the original token IDs for per-layer embeddings during both forwards.
+- The held-out Procrustes readout can run separately and can use a float64 Gram eigensolver on CPU or CUDA. The archive backfill records its cutoff, rank, input articles and solver. The ordinary task still returns both the in-sample and document-held-out scores.
+- Positional attention decay ranks causal rows in batches, with average ranks for ties. The exhaustive example recipe includes a labeled panel for domain bits per byte and paraphrase LiDAR.
+
+- Document-held-out Procrustes R² now selects a truncated-SVD cutoff on an inner document split, with a numerical floor of `sqrt(eps_float32)`, then refits on all outer training documents. Results include both splits and each layer pair’s selected cutoff and rank. Previously, the float64 solver could amplify directions below the resolution of the cached activations.
+- Generation-diversity sampling entropy now normalizes and reduces one step of processed logits at a time in float64. The first-quarter, last-quarter and change-in-entropy readouts use the original score positions for content tokens when a completion contains padding.
+
 ## 0.2.0
 
 ### New tasks

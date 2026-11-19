@@ -48,3 +48,4 @@ from .ffn_spectral import FFNSpectralUtilizationTask
 from .ww_randomized import WWRandomizedTask
 from .dime import DiMETask
 from .prompt_id import PromptIntrinsicDimTask
+from .corpus_metrics import DomainBitsPerByteTask, ParaphraseLiDARTask

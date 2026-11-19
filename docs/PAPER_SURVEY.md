@@ -132,10 +132,10 @@ Each entry: `task_name` — **Paper (year)** — short description.
   per-layer restoration summaries. It is not a full ROME editing run.
 - `causality_attention_knockout` — **Michel et al. 2019**, **Voita
   et al. 2019** — per-head zero-ablation NLL impact + Gini.
-- `causality_edge_attribution` — **Syed, Rager, Conmy 2024** (arXiv:
+- **Layer attribution** (`causality_edge_attribution`) — **Syed, Rager, Conmy 2024** (arXiv:
   2310.10348 EAP) — per-layer gradient × residual attribution
   under token-shuffle corruption.
-- `causality_knowledge_neurons` — **Dai et al. 2022** (ACL) —
+- **Neuron saliency** (`causality_knowledge_neurons`) — **Dai et al. 2022** (ACL) —
   gradient × activation attribution on MLP intermediate neurons.
 - `causality_circuit_quality` — custom: faithfulness (JSD between
   full and circuit-only forward) × minimality.
@@ -404,7 +404,7 @@ Grouped by category.
 | **Clark 2019, Voita 2019, Michel 2019** (attention analyses) | 2019 | Implemented across `interpretability_attention_entropy`, `head_roles`, `causality_attention_knockout`. |
 | **Elhage 2022 Toy Models of Superposition** | 2022 | Implemented as `interpretability_superposition`. |
 | **Meng 2022 ROME** | 2022 | Implemented as `causality_tracing` (round-3-audited: every-layer sweep, 10 noise draws). |
-| **Dai 2022 Knowledge Neurons** | 2022 | Implemented as `causality_knowledge_neurons`. |
+| **Dai 2022 Knowledge Neurons** | 2022 | BLME measures endpoint neuron saliency (`causality_knowledge_neurons`). |
 | **Olsson 2022 Induction Heads** | 2022 | Implemented as `interpretability_induction_heads`. |
 | **Foret 2021 SAM** + **Yao 2020 PyHessian** | 2020–2021 | Implemented as `dynamics_sharpness`. |
 | **Lee 2018 Mahalanobis** | 2018 | Implemented as `geometry_mahalanobis` (round-4-audited: held-out split). |
@@ -463,7 +463,7 @@ spectral weight analysis (heavy-tailed alpha, matrix entropy / nuclear
 norm, RankMe), activation dynamics (sinks, massive activations,
 compression valleys), attention analysis (induction heads, entropy,
 rank collapse, sinks), mechanistic interpretability (circuits,
-attribution, probing), causality (ROME, EAP, knowledge neurons),
+attribution, probing), causality (ROME, layer attribution, neuron saliency),
 calibration / uncertainty, consistency (bias, format robustness,
 paraphrase, position), topology (persistent homology, Betti
 trajectories, persistence entropy, landscapes), RepE (task vectors,

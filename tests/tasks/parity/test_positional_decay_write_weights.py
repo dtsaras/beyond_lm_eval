@@ -47,3 +47,20 @@ def test_write_weighted_mean_is_the_weighted_average():
     w[:5] = 0.0
     assert _write_weighted_mean(list(zip(w, r))) == pytest.approx(np.average(r, weights=w), rel=1e-12)
     assert np.isnan(_write_weighted_mean([(0.0, 0.3), (0.0, -0.2)]))
+
+
+def test_batched_causal_rows_match_scalar_spearman():
+    from blme.tasks.geometry.positional_decay import _causal_row_correlations, _row_distance_correlation
+
+    rng = np.random.default_rng(129)
+    for n in (4, 17, 64):
+        head = rng.integers(0, 5, (n, n)).astype(np.float32)
+        head[3, :] = 0.25
+        head[0, -1] = np.nan
+        if n > 4:
+            head[4, 1] = np.nan
+            head[5, 2] = np.inf
+        for drop in (0, 1):
+            expected = [_row_distance_correlation(head[q, drop:q]) for q in range(3, n)]
+            np.testing.assert_allclose(_causal_row_correlations(head, drop),
+                                       np.array(expected, dtype=float), atol=1e-14, rtol=0)

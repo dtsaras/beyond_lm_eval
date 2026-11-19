@@ -11,9 +11,12 @@ import json
 import csv
 import os
 import logging
+
 import subprocess
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
+
+from .task_metadata import task_display_name
 
 logger = logging.getLogger("blme")
 
@@ -103,6 +106,7 @@ def build_results_envelope(
             "model_args": model_args,
             "device": device,
             "tasks_requested": tasks_requested,
+            "task_labels": {k: task_display_name(k) for k in tasks_requested if task_display_name(k) != k},
             "seed": seed,
             "task_configs_resolved": task_configs_resolved or {},
             "cache_settings": cache_settings or {},
@@ -147,6 +151,7 @@ def print_results_table(
         print("-" * 72)
 
     for task_name, result in sorted(task_results.items()):
+        label = task_display_name(task_name)
         if "error" in result:
             status = "⚠ ERROR"
             metric = result["error"][:30]
@@ -155,16 +160,17 @@ def print_results_table(
             metric = _pick_summary_metric(result)
         time_str = f"{timings[task_name]:>6.1f}s" if task_name in timings else ""
         if has_timings:
-            print(f"  {task_name:<40} {status:<10} {time_str:>7}  {metric}")
+            print(f"  {label:<40} {status:<10} {time_str:>7}  {metric}")
         else:
-            print(f"  {task_name:<40} {status:<10} {metric}")
+            print(f"  {label:<40} {status:<10} {metric}")
 
     for task_name, err in sorted(task_errors.items()):
+        label = task_display_name(task_name)
         time_str = f"{timings[task_name]:>6.1f}s" if task_name in timings else ""
         if has_timings:
-            print(f"  {task_name:<40} {'✗ FAIL':<10} {time_str:>7}  {err[:30]}")
+            print(f"  {label:<40} {'✗ FAIL':<10} {time_str:>7}  {err[:30]}")
         else:
-            print(f"  {task_name:<40} {'✗ FAIL':<10} {err[:30]}")
+            print(f"  {label:<40} {'✗ FAIL':<10} {err[:30]}")
 
     total = len(task_results) + len(task_errors)
     passed = sum(1 for r in task_results.values() if "error" not in r)

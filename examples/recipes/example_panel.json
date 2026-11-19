@@ -1,0 +1,14 @@
+{
+  "documents": [
+    {"id": "prose", "block": 0, "domain": "prose", "text": "A red kite flew above the field."},
+    {"id": "math", "block": 0, "domain": "mathematics", "text": "The sum of two even integers is even."},
+    {"id": "code", "block": 0, "domain": "code", "text": "def square(x): return x * x"},
+    {"id": "dialogue", "block": 0, "domain": "dialogue", "text": "Where is the key? On the shelf."}
+  ],
+  "triples": [
+    {"id": "key", "block": 0, "anchor": "Mara gave Jo the key.", "positive": "Jo received the key from Mara.", "negative": "Mara received the key from Jo."},
+    {"id": "race", "block": 0, "anchor": "The runner crossed before Lee.", "positive": "Lee crossed after the runner.", "negative": "Lee crossed before the runner."},
+    {"id": "cup", "block": 0, "anchor": "Water filled the cup.", "positive": "The cup was filled with water.", "negative": "The cup was emptied of water."},
+    {"id": "bird", "block": 0, "anchor": "A robin landed on the roof.", "positive": "The roof was where a robin landed.", "negative": "A robin flew away from the roof."}
+  ]
+}

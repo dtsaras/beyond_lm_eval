@@ -102,3 +102,33 @@ def test_shared_span_with_pieces_available_is_exact(gpt2_tok):
     assert r[7] == "token_pieces"
     # 16 source bytes; the unscored first token owns 3.
     assert r[3] == 13
+
+
+def test_added_bos_covers_all_bytes_when_piece_ownership_is_unknown(gpt2_tok, monkeypatch):
+    import copy
+    import math
+    from tokenizers.processors import TemplateProcessing
+    from blme.tasks.geometry import utils
+    from blme.tasks.geometry.perplexity import RarePPLTask
+
+    tok = copy.deepcopy(gpt2_tok)
+    tok.backend_tokenizer.post_processor = TemplateProcessing(
+        single=f"{tok.bos_token} $A {tok.eos_token}",
+        special_tokens=[(tok.bos_token, tok.bos_token_id)],
+    )
+    text = "😀 hello world"
+    ids = tok(text)["input_ids"]
+    assert tok(text, return_special_tokens_mask=True)["special_tokens_mask"][0] == 1
+    assert utils._scored_suffix_is_full_text(tok, ids, text)
+    assert not utils._scored_suffix_is_full_text(tok, ids, text.upper())
+    # A literal special in the input is different from a tokenizer-added BOS.
+    assert not utils._scored_suffix_is_full_text(gpt2_tok, gpt2_tok(tok.bos_token + text)["input_ids"],
+                                                 tok.bos_token + text)
+    monkeypatch.setattr(utils, "_exact_token_bytes", lambda *args: None)
+    cfg = transformers.GPT2Config(vocab_size=len(tok), n_layer=1, n_embd=16, n_head=2)
+    model = transformers.GPT2LMHeadModel(cfg).eval()
+    result = RarePPLTask({"num_samples": 1, "use_cache": False}).evaluate(model, tok, [{"text": text}])
+    assert result["_meta_ppl_byte_attribution"] == "scored_full_text"
+    expected = result["mean_nll_nats"] * result["_meta_n_tokens_strided"] / math.log(2)
+    assert result["bits_per_byte"] == pytest.approx(expected / len(text.encode("utf-8")))
+    assert result["bits_per_char"] == pytest.approx(expected / len(text))

@@ -20,7 +20,7 @@ from __future__ import annotations  # PEP 563: keep `float | None` lazy on py3.9
 
 import torch
 import numpy as np
-from scipy.stats import spearmanr
+from scipy.stats import rankdata, spearmanr
 
 from .._tokens import strip_trailing_special
 from .._precision import effective_dtype_meta, fp32_compute
@@ -48,6 +48,31 @@ def _row_distance_correlation(attn_row: np.ndarray) -> float | None:
     if np.isnan(corr):
         return None
     return float(corr)
+
+
+def _causal_row_correlations(head, drop):
+    """Rank all query rows of a head, masking future keys and the optional sink."""
+    queries = np.arange(3, len(head))
+    keys = np.arange(drop, len(head))
+    valid = keys[None, :] < queries[:, None]
+    lengths = queries - drop
+    values = head[3:, drop:]
+    # Future keys sort after every finite causal value, so the ranks of
+    # real keys match a separate rankdata() on each unpadded row.
+    ranks = rankdata(np.where(valid, values, np.inf), axis=1)
+    centered = np.where(valid, ranks - (lengths[:, None] + 1) / 2, 0)
+    distances = np.where(valid, (lengths[:, None] - 1) / 2 - (keys - drop), 0)
+    numerator = np.einsum("ij,ij->i", centered, distances)
+    ss = np.einsum("ij,ij->i", centered, centered)
+    denominator = np.sqrt(ss * (lengths * (lengths ** 2 - 1) / 12))
+    corr = np.divide(numerator, denominator, out=np.zeros_like(numerator), where=denominator > 0)
+    # Preserve SciPy's conventions for NaNs and infinities, including ties
+    # with a real positive infinity. An exactly flat finite row scores zero.
+    unusual = np.any(valid & ~np.isfinite(values), axis=1)
+    for j in np.flatnonzero(unusual):
+        value = _row_distance_correlation(head[queries[j], drop:queries[j]])
+        corr[j] = np.nan if value is None else value
+    return np.clip(corr, -1.0, 1.0)
 
 
 _ATTN_ATTRS = ("self_attn", "attn", "attention", "self_attention")
@@ -305,49 +330,35 @@ class PositionalAttentionDecayTask(DiagnosticTask):
                     _n_layer_slots += 1
                     _n_nonfinite_rows += int(
                         (~np.isfinite(a)).any(axis=-1).sum())
-                    for head_idx in range(a.shape[0]):
-                        # POOLED variant (one Spearman over every causal
-                        # {query, key} pair, diagonal included, from q = 1), as
-                        # the manuscript writes it; reported beside the rowwise
-                        # statistic because it reads decay under a uniform null.
-                        _pool_v, _pool_d = [], []
-                        for _q in range(1, seq_len):
-                            _fr = a[head_idx, _q, :_q + 1]
-                            _pool_v.append(_fr)
-                            _pool_d.append(_q - np.arange(_fr.size))
-                        for query_idx in range(2, seq_len):
-                            _row = a[head_idx, query_idx, :query_idx]
-                            # The same row set for both twins: the sink-excluded
-                            # one needs >= 3 keys (it drops one).
-                            if _row.size <= 2:
-                                continue
-                            if float(np.ptp(_row)) == 0.0:
-                                _n_flat_rows += 1
-                            corr = _row_distance_correlation(_row)
-                            if corr is not None:
-                                layer_correlations[li].append(corr)
-                                if _wn is not None:
-                                    _w_incl.append((float(_wn[query_idx, head_idx]), corr))
-                            # Position 0 is the attention sink and also the
-                            # maximum-distance key of every causal row, so the
-                            # inclusive statistic mixes decay with sink strength.
-                            if True:
-                                _rs = float(_row.sum())
-                                if _rs > 0:
-                                    sink_mass.append(float(_row[0]) / _rs)
-                                corr_ns = _row_distance_correlation(_row[_drop:])
-                                if corr_ns is not None:
-                                    layer_correlations_nosink[li].append(corr_ns)
-                                    if _wn is not None:
-                                        _w_nosink.append(
-                                            (float(_wn[query_idx, head_idx]), corr_ns))
-                        if _pool_v:
-                            _pv = np.concatenate(_pool_v)
-                            _pd = np.concatenate(_pool_d).astype(np.float64)
-                            if np.ptp(_pv) > 0 and np.ptp(_pd) > 0:
-                                _rho = float(spearmanr(_pd, _pv).statistic)
-                                if np.isfinite(_rho):
-                                    layer_correlations_pooled[li].append(_rho)
+                    queries, keys = np.tril_indices(seq_len)
+                    queries, keys = queries[1:], keys[1:]  # exclude query zero, retain the diagonal
+                    distances = (queries - keys).astype(np.float64)
+                    for head_idx, head in enumerate(a):
+                        if seq_len > 3:
+                            values = _causal_row_correlations(head, 0)
+                            nosink = _causal_row_correlations(head, _drop) if _drop else values
+                            valid, valid_ns = np.isfinite(values), np.isfinite(nosink)
+                            if np.any(valid):
+                                layer_correlations[li].extend(values[valid].tolist())
+                            if np.any(valid_ns):
+                                layer_correlations_nosink[li].extend(nosink[valid_ns].tolist())
+                            if _wn is not None:
+                                weights = _wn[3:seq_len, head_idx]
+                                _w_incl.extend(zip(weights[valid].tolist(), values[valid].tolist()))
+                                _w_nosink.extend(zip(weights[valid_ns].tolist(), nosink[valid_ns].tolist()))
+                            mask = np.arange(seq_len)[None, :] < np.arange(3, seq_len)[:, None]
+                            causal = head[3:seq_len, :seq_len]
+                            row_min = np.min(causal, axis=1, where=mask, initial=np.inf)
+                            row_max = np.max(causal, axis=1, where=mask, initial=-np.inf)
+                            _n_flat_rows += int(np.count_nonzero(np.isfinite(row_min) & (row_min == row_max)))
+                            rs = np.sum(causal, axis=1, where=mask)
+                            positive = rs > 0
+                            sink_mass.extend((causal[positive, 0].astype(np.float64) / rs[positive]).tolist())
+                        pooled = head[queries, keys]
+                        if len(pooled) and np.ptp(pooled) > 0 and np.ptp(distances) > 0:
+                            rho = float(spearmanr(distances, pooled).statistic)
+                            if np.isfinite(rho):
+                                layer_correlations_pooled[li].append(rho)
 
         finally:
             # Restores on every exit, including the early error return above.

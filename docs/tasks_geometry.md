@@ -2,16 +2,18 @@
 
 This module contains metrics that evaluate the geometry of the model's hidden-state and weight spaces.
 
-**Registry coverage (50 tasks)**: `geometry_alpha_req`, `geometry_categories`,
+**Registry coverage (52 tasks)**
+
+`geometry_alpha_req`, `geometry_categories`,
 `geometry_cka`, `geometry_cknna`, `geometry_collapse`,
 `geometry_contextualization`, `geometry_correlation_dimension`,
-`geometry_delta_hyperbolicity`, `geometry_dime`, `geometry_effective_depth`,
+`geometry_delta_hyperbolicity`, `geometry_dime`, `geometry_domain_bpb`, `geometry_effective_depth`,
 `geometry_farms_alpha`, `geometry_ffn_spectral_utilization`, `geometry_gride`,
 `geometry_hsic`, `geometry_hubness`, `geometry_information_imbalance`,
 `geometry_intrinsic_dim`, `geometry_isoscore`, `geometry_lid`,
 `geometry_lipschitz`, `geometry_lm_head_free_energy`, `geometry_magnitude`,
 `geometry_mahalanobis`, `geometry_matrix_entropy`, `geometry_mp_bulk_deviation`,
-`geometry_neighborhood_overlap`, `geometry_neural_collapse`,
+`geometry_neighborhood_overlap`, `geometry_neural_collapse`, `geometry_paraphrase_lidar`,
 `geometry_perplexity`, `geometry_phd_dimension`, `geometry_positional_decay`,
 `geometry_prediction_alignment`, `geometry_predictive_information`,
 `geometry_procrustes_linearity`, `geometry_prompt_id`,
@@ -90,7 +92,7 @@ quality.
 * **Hypothesis**: A larger value means small changes of the final representation move the next-token log-probability more.
 * **Citation/Paper**: `Amari, S. (1998). Natural gradient works efficiently in learning.` [Neural Computation, Vol 10(2)] — foundational reference for information geometry of neural networks. Application to LLMs is an active area of research.
 * **File & Function**: `src/blme/tasks/geometry/information_geometry.py` -> `RepresentationSensitivityTask`
-* **Critical Info**: Headline key: `S_unit`. It is declared invariant to the final-norm/unembedding gauge and a function-preserving residual rescale (`tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge`). This is a BLME construct, not a Fisher-information trace. The raw value depends on how a model splits scale between the final-norm gain and the unembedding, so it is reported only as `_meta_representation_sensitivity_raw`. `S_unit` carries a factor of the width. Heads with a non-linear post-transform (final-logit softcapping) are refused. Defaults: `num_samples: 20`.
+* **Critical Info**: Headline key: `S_unit`. It is declared invariant to the final-norm/unembedding gauge and a function-preserving residual rescale (`tests/tasks/invariance/test_geometry_representation_sensitivity.py::test_s_unit_invariant_under_final_norm_unembedding_gauge`). This is a BLME construct, not a Fisher-information trace. The raw value depends on how a model splits scale between the final-norm gain and the unembedding, so it is reported only as `_meta_representation_sensitivity_raw`. `S_unit` carries a factor of the width. For a declared final tanh softcap, the derivative of each vocabulary logit enters the score. The reconstructed logits are checked against the model on every document. Defaults: `num_samples: 20`.
 
 ## 6. Matrix Entropy (Information Bottleneck)
 * **What are we measuring**: The data compression capabilities of the LLM layers over inference.
@@ -196,7 +198,7 @@ quality.
 
 ## 18. Perplexity (Baseline / Y-variable Geometry)
 * **What are we measuring**: Baseline auto-regressive predictability.
-* **How are we measuring**: The joined passages are scored as one stream with a strided window (1024 tokens, stride 512). `bits_per_byte` is the total negative log-likelihood in bits divided by the UTF-8 byte count (the Pile's definition); `ppl_overall` is reported alongside, and the rare/frequent-token split is `_meta_`.
+* **How are we measuring**: The joined passages are scored as one stream with a 1024-token window and stride 512. `bits_per_byte` divides total negative log likelihood in bits by the UTF-8 bytes attributable to the scored targets. When the sole unscored token is an inserted BOS and the scored suffix decodes exactly to the source, all source bytes count. Ambiguous attribution leaves the headline unavailable and reports a lower bound. The task also reports `ppl_overall` and rare/frequent-token diagnostics.
 * **Hypothesis**: As the foundational sanity check, it proves the model can actually model text. Used purely as a baseline correlate for other intrinsic measures.
 * **Citation/Paper**: Canonical language modeling metric. 
 * **File & Function**: `src/blme/tasks/geometry/perplexity.py` -> `RarePPLTask`
@@ -323,6 +325,16 @@ quality.
 * **Paper summary**: The paper finds a near-perfect linear relationship (Procrustes similarity ~0.99) between sequential transformer layers' embeddings, shows the linearity is connected to the residual stream's dominance, and demonstrates that pruning the most-linear layers (or regularizing linearity away) barely hurts — evidence that much of depth is close to linear.
 * **File & Function**: `src/blme/tasks/geometry/procrustes_linearity.py` -> `ProcrustesLinearityTask`
 * **Critical Info**: Headline keys: `procrustes_linearity_mean`, `procrustes_linearity_min`, `procrustes_linearity_max`, `procrustes_linearity_first`, `procrustes_linearity_last`, `procrustes_linearity_slope`, `procrustes_linearity_q25`, `procrustes_linearity_q50`, `procrustes_linearity_q75`, `procrustes_linearity_adjusted_mean`, `procrustes_linearity_adjusted_min`, `procrustes_linearity_adjusted_max`, `procrustes_linearity_adjusted_first`, `procrustes_linearity_adjusted_last`, `procrustes_linearity_adjusted_q25`, `procrustes_linearity_adjusted_q50`, `procrustes_linearity_adjusted_q75`. Declared invariant: `procrustes_linearity_min` to zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, leading, trailing) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_first` to zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, trailing) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_last` to zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, leading) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_adjusted_min` to the sample count N, zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, leading, trailing) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_adjusted_first` to the sample count N, zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, trailing) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_adjusted_last` to the sample count N, zero-padding the width, isometric re-embedding, a global rescale and identity blocks (interior, leading) (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`); `procrustes_linearity_adjusted_mean`, `procrustes_linearity_adjusted_max`, `procrustes_linearity_adjusted_q25`, `procrustes_linearity_adjusted_q50`, `procrustes_linearity_adjusted_q75` to the sample count N, zero-padding the width, isometric re-embedding and a global rescale (`tests/tasks/invariance/test_procrustes_linearity.py::test_size_invariant_entry`). The absolute value depends on the conditioning of X; read the profile across depth. Defaults: `num_samples: 100`.
+
+**Document-held-out linearity.** `procrustes_linearity_heldout_r2_mean` measures how well an adjacent-layer affine map predicts token representations in unseen documents. BLME groups the default WikiText passages by article before splitting. For a custom corpus, supply a string or integer `document_id`, `doc_id` or `article_id` on every chunk of a document. Python integers and signed or unsigned NumPy integers with the same value identify the same document. A record without a parent ID constitutes one document. When requesting WikiText passages directly, use `load_default_corpus(n, include_document_ids=True)` to retain the article identifiers.
+
+Every fifth sorted eligible document ID enters the outer test set, starting with the first. Inside the remaining documents, every fifth ID serves as validation for choosing a cutoff for each layer pair. The inner fit learns its own sink thresholds, means and float64 SVD. It tests relative cutoffs of `sqrt(eps_float32)` (0.000345267), 0.001, 0.0031623, 0.01, 0.031623 and 0.1. The smallest cutoff tied for minimum validation prediction error wins. BLME uses the numerical floor when the inner split has fewer than two fit tokens or no validation tokens.
+
+BLME then refits the thresholds, means and affine map on all outer training documents. It retains singular values strictly above the chosen cutoff times the largest training singular value. The numerical floor drops covariance eigenvalues at or below float32 epsilon relative to the largest. A rank-zero fit predicts the training target mean.
+
+The test R² for each adjacent pair is one minus its squared prediction error divided by the squared error of predicting the training target mean. The headline averages finite pair scores equally. Negative values mean the affine map did worse than the training-mean predictor. The `_meta_procrustes_heldout` entry records both document splits and token counts, the selection rule, the selected cutoff, rank and R² for each pair, and the reason for an undefined result. The in-sample and released-notebook scores have separate definitions above.
+
+For a readout-only backfill, the task config accepts `heldout_only: true`. Set `heldout_gram_device` to `cpu` or `cuda` for the float64 Gram fit. Direct SVD is the default and handles ambiguous numerical cutoffs. Both fits use the same documents, training-selected ranks and held-out targets.
 
 ## 33. Superposition Strength (geometry_superposition_strength)
 * **What are we measuring**: How tightly the unembedding packs V vocabulary directions into m ≪ V dimensions — the degree of representation superposition, normalized by the information-theoretic packing optimum.
@@ -475,3 +487,26 @@ quality.
 * **Citation/Paper**: `Jha, N. K., & Reagen, B. (2025). Spectral Scaling Laws in Language Models: How Effectively Do Feed-Forward Networks Use Their Latent Space?` [EMNLP 2025, ArXiv: 2510.00537]; no released code.
 * **File & Function**: `src/blme/tasks/geometry/ffn_spectral.py` -> `FFNSpectralUtilizationTask`
 * **Critical Info**: Headline keys: `ffn_sui_median`, `ffn_edim_median`, `ffn_soft_rank_median`, `ffn_hard_rank_median`. No key is declared size-invariant. The paper trains its own models on C4 and fits power laws across widths; it reports no single model-level score and does not state N. BLME uses N = 32768 tokens (`n_tokens`): the first passages of the library corpus with the tokenizer's defaults, at most 512 tokens each, the last one cut so N is exact. Every rank depends on N: the covariance has rank at most N - 1 (`_meta_n_nonzero_eigenvalues_profile`), so values are comparable only at the same N. Position 0 is included, as the paper uses all tokens; in pretrained models it can be a sink, so the spectrum without it is `_meta_*_without_position0`. Each layer needs a float64 D x D accumulator; layers run in consecutive groups that fit `memory_budget_gb` (default 8), with one pass over the same tokens per group.
+
+## Domain loss and paraphrase LiDAR
+
+Both tasks accept a JSON panel through the per-task `panel_path` configuration. To run one task through the Python API, you can also pass just its rows as `dataset`. The study measures four disjoint blocks. Small fixtures can use a single block.
+
+- `geometry_domain_bpb` reads a `documents` array. Each record has a unique `id`, a `domain` string, an integer `block` and raw `text`. Each block must cover the same domains. The task conditions on BOS (EOS fallback), scores every content token once, and divides summed negative log likelihood by log(2) times total UTF-8 bytes. The vocabulary normalization and log-loss sums use float64. It returns domain and block BPB, a macro-average, and per-document NLL, byte and token counts. [Thrush et al.](https://arxiv.org/abs/2409.05816)
+- `geometry_paraphrase_lidar` reads a `triples` array. Each record has a unique `id`, an integer `block`, an `anchor`, a verified `positive` paraphrase and a same-topic `negative`. Each block needs at least three triples and the same number of triples. The task mean-pools the final content-token states, computes a regularized discriminant effective rank on positive and negative pairs, and returns RankMe and pooled-panel controls. The primary value averages log(rank / (groups − 1)) over blocks. The default ridge fraction is 0.01. [LiDAR paper](https://arxiv.org/abs/2312.04000)
+
+Both tasks check that the same input text decodes exactly from the content tokens. Set `max_tokens` to include the document-start token. An unrepresentable or overlong record raises an error, so all model comparisons can use the same bytes.
+
+A single panel file can contain both arrays.
+
+```python
+import blme
+
+panel_path = "document_and_paraphrase_panel.json"
+tasks = ["geometry_domain_bpb", "geometry_paraphrase_lidar"]
+result = blme.evaluate(
+    model_args="pretrained=gpt2",
+    tasks=tasks,
+    task_configs={task: {"panel_path": panel_path} for task in tasks},
+)
+```

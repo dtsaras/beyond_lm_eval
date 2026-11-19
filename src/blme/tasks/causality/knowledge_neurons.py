@@ -214,7 +214,7 @@ class KnowledgeNeuronsTask(DiagnosticTask):
                     all_layer_entropies.append(H)
 
             except Exception as e:
-                logger.info(f"  Knowledge neuron extraction failed for '{prompt[:40]}': {e}")
+                logger.info(f"  Neuron saliency failed for '{prompt[:40]}': {e}")
                 continue
 
         # Restore original requires_grad state and training mode.

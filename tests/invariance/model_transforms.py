@@ -87,7 +87,7 @@ def _arch(model) -> _Arch:
             mlp_out=lambda b: b.mlp.dense_4h_to_h,
             input_adds=lambda m: [m.gpt_neox.embed_in],
             final_norm=lambda m: m.gpt_neox.final_layer_norm,
-            unembed=lambda m: m.embed_out,
+            unembed=lambda m: m.get_output_embeddings(),
             input_embed=lambda m: m.gpt_neox.embed_in,
             depth_keys=("num_hidden_layers",),
             is_sequential=lambda b: not bool(getattr(b, "use_parallel_residual", True)),
@@ -539,7 +539,7 @@ def _set_input_embed(model, a: _Arch, module) -> None:
 
 def _set_unembed(model, a: _Arch, module) -> None:
     if a.family == "gpt_neox":
-        model.embed_out = module
+        model.set_output_embeddings(module)
     else:
         model.lm_head = module
 

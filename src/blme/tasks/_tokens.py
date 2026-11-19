@@ -389,6 +389,8 @@ def sink_keep_masks(
     per_sample_by_depth: Sequence[Sequence[torch.Tensor]],
     factor: float = MASSIVE_FACTOR,
     positions: Optional[Sequence[torch.Tensor]] = None,
+    *,
+    reference_chunks: Optional[Sequence[bool]] = None,
 ) -> Tuple[List[torch.Tensor], Dict[str, Any]]:
     """One keep mask per document: drop position 0 and every massive row.
 
@@ -411,13 +413,17 @@ def sink_keep_masks(
         raise ValueError("sink_keep_masks needs at least one depth")
     first, pos, _ = _prepare(per_sample_by_depth[0], positions)
     masks = [p != 0 for p in pos]
+    if reference_chunks is None:
+        reference_chunks = [True] * len(first)
+    if len(reference_chunks) != len(first) or (len(first) and not any(reference_chunks)):
+        raise ValueError("sink thresholds need at least one reference document")
     for depth_docs in per_sample_by_depth:
         chunks, _, _ = _prepare(depth_docs, positions)
         if [c.shape[0] for c in chunks] != [c.shape[0] for c in first]:
             raise ValueError("every depth must hold the same documents and rows")
         norms = [torch.linalg.vector_norm(c.detach().to("cpu", torch.float64), dim=1)
                  for c in chunks]
-        rest = torch.cat([n[p != 0] for n, p in zip(norms, pos)])
+        rest = torch.cat([n[p != 0] for n, p, use in zip(norms, pos, reference_chunks) if use])
         if rest.numel() == 0:
             continue
         thr = float(factor) * float(rest.median())
@@ -456,7 +462,11 @@ def strip_trailing_special(encoding: Dict[str, torch.Tensor], tokenizer) -> Tupl
         return encoding, 0
     row = ids[0].tolist()
     end = len(row)
-    while end > 1 and row[end - 1] in special:
+    # A tokenizer-provided mask distinguishes template EOS/SEP from the same
+    # token written literally in the prompt.
+    provenance = encoding.get("special_tokens_mask")
+    added = provenance[0].tolist() if provenance is not None else None
+    while end > 1 and row[end - 1] in special and (added is None or added[end - 1]):
         end -= 1
     n = len(row) - end
     if n == 0:

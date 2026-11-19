@@ -18,6 +18,7 @@ Usage (standalone):
     X = cache.get_hidden_states(layer_idx="all")
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, Union
 
@@ -61,6 +62,7 @@ class ModelOutputCache:
         self._logits: Optional[List[torch.Tensor]] = None
         self._labels: Optional[List[torch.Tensor]] = None
         self._sample_lengths: List[int] = []
+        self._document_groups: List[str] = []
         # INITIALISED HERE, not created lazily inside populate(). All three
         # were absent on a fresh instance, so a partially populated cache
         # raised AttributeError from get_hidden_states(include_embedding=True)
@@ -364,6 +366,7 @@ class ModelOutputCache:
         self._logits = None
         self._labels = None
         self._sample_lengths = []
+        self._document_groups = []
         self._populated = False
 
     @property
@@ -375,21 +378,29 @@ class ModelOutputCache:
     # ------------------------------------------------------------------
 
     def _resolve_dataset(self) -> list:
-        """Get a list of text samples from the dataset."""
+        """Pair each input text with its parent document or input-record identifier."""
         dataset = self.dataset
         if dataset is None:
-            dataset = _load_default_corpus(self.num_samples)
+            dataset = _load_default_corpus(self.num_samples, include_document_ids=True)
 
         samples = []
         for i, sample in enumerate(dataset):
             if i >= self.num_samples:
                 break
-            if isinstance(sample, str):
-                samples.append(sample)
-            elif isinstance(sample, dict):
-                samples.append(sample.get("text", ""))
+            group = f"record:{i}"
+            if isinstance(sample, dict):
+                text = sample.get("text", "")
+                for key in ("document_id", "doc_id", "article_id"):
+                    parent = sample.get(key)
+                    # Canonicalize signed and unsigned NumPy IDs before JSON encoding.
+                    if isinstance(parent, np.generic) and parent.dtype.kind in "iu":
+                        parent = int(parent)
+                    if isinstance(parent, (str, int)) and not isinstance(parent, bool):
+                        group = "document:" + json.dumps(parent, ensure_ascii=False)
+                        break
             else:
-                samples.append(str(sample))
+                text = str(sample)
+            samples.append((text, group))
         return samples
 
     def _run_forward_pass(self) -> None:
@@ -458,8 +469,9 @@ class ModelOutputCache:
         from .tasks._tokens import strip_trailing_special
         try:
             self._sample_lengths = []
+            self._document_groups = []
             with torch.no_grad():
-                for text in tqdm(samples, desc="Caching model outputs", unit="sample"):
+                for text, group in tqdm(samples, desc="Caching model outputs", unit="sample"):
                     inputs = self.tokenizer(
                         text, return_tensors="pt", truncation=True,
                         max_length=CACHE_TOKENIZER_MAX_LENGTH,
@@ -473,6 +485,7 @@ class ModelOutputCache:
                     if "input_ids" in inputs:
                         seq_len = inputs["input_ids"].shape[1]
                         self._sample_lengths.append(int(seq_len))
+                        self._document_groups.append(group)
 
                     outputs = self.model(**inputs, **forward_kwargs)
 
@@ -580,7 +593,11 @@ class ModelOutputCache:
             end = start + int(length)
             chunks.append(tensor[start:end])
             start = end
-        return chunks
+        from .tasks._tokens import DocList
+        docs = DocList(chunks)
+        if len(self._document_groups) >= max_samples:
+            docs.document_groups = self._document_groups[:max_samples]
+        return docs
 
 
 # The default corpus: WikiText-103 validation paragraphs (one dataset row per
@@ -656,9 +673,10 @@ def default_corpus_size() -> int:
     return len(_wikitext_passages())
 
 
-def load_default_corpus(num_samples: int, diverse: bool = True) -> list:
+def load_default_corpus(num_samples: int, diverse: bool = True, *, include_document_ids: bool = False) -> list:
     """WikiText-103 validation passages as ``[{"text": ...}, ...]``.
 
+    With include_document_ids=True, each row also carries its source article_id.
     The passages are the rows of ``Salesforce/wikitext`` /
     ``wikitext-103-raw-v1`` / validation with at least ``MIN_PASSAGE_CHARS`` (64)
     characters after stripping, returned STRIPPED: every WikiText row ends in a
@@ -680,13 +698,28 @@ def load_default_corpus(num_samples: int, diverse: bool = True) -> list:
     n = int(num_samples)
     if n < 0:
         raise ValueError(f"num_samples must be >= 0, got {num_samples}")
-    passages = _wikitext_passages()
+    if include_document_ids:
+        path, name, split = WIKITEXT_DATASET
+        records = []
+        # WikiText marks articles with one '=' at either end and subsections
+        # with two or more, sometimes separated by spaces.
+        article = -1
+        for row in _load_split(path, name, split):
+            text = (row.get("text") or "").strip()
+            heading = text.strip("= ")
+            if heading and text == "= " + heading + " =":
+                article += 1
+            if len(text) >= MIN_PASSAGE_CHARS:
+                records.append({"text": text, "article_id": article})
+        passages = records
+    else:
+        passages = _wikitext_passages()
     if n > len(passages):
         raise ValueError(
             f"load_default_corpus: {n} passages requested, but WikiText-103 validation "
             f"has {len(passages)} of >= {MIN_PASSAGE_CHARS} characters.")
     idx = nested_order(len(passages))[:n] if diverse else range(n)
-    result = [{"text": passages[i]} for i in idx]
+    result = [passages[i] if include_document_ids else {"text": passages[i]} for i in idx]
     logger.info(f"Loaded {len(result)} passages from WikiText-103 validation "
                 f"({'nested evenly spread order' if diverse else 'split-order prefix'})")
     return result
