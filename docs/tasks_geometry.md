@@ -34,6 +34,8 @@ window cut from each passage at a hashed offset
 (`src/blme/tasks/_windows.py`), the same words for every model, with 1000
 sequences. Whole passages are opt-in (`points_readout: passage`).
 
+**Sink rows** (`TOKEN_POLICY = "exclude_sinks"`): token clouds and pools drop position 0 and every token whose hidden-state norm exceeds 10x its document's median token norm at any interior depth (the union over depths; `_meta_sink_factor`, `_meta_sink_n_depths`, `_meta_sink_n_massive_dropped`). On models without massive activations only position 0 is dropped.
+
 **Size-invariance declarations**: each section lists the keys its task
 declares in `SIZE_INVARIANT`, the transformations they are declared invariant
 to, and the test that backs the declaration. Identity-block invariance is
