@@ -40,6 +40,9 @@ def test_the_population():
 
 @pytest.mark.parametrize("task", TASKS)
 def test_the_task_lifts_under_certificate(task, bf16_exact_states):
+    if task.startswith("topology_"):
+        # The lift replaces ripser by its GUDHI float64 reference (test_lift.py).
+        pytest.importorskip("gudhi")
     cfg = _DRIVER_CONFIG.get(task)
     shipped, lifted, cert = L.shipped_and_lifted(
         lambda: inv.run_task_on_states(task, bf16_exact_states, cfg, store_dtype=torch.float32),

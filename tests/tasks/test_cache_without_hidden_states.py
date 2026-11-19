@@ -16,10 +16,19 @@ transformers = pytest.importorskip("transformers")
 sys.path.insert(0, str(Path(__file__).resolve().parent / "invariance"))
 import _family_d as fd  # noqa: E402
 
-# 31-39 words each, so the shipped readout (the last token of a 20-word window)
-# places one point per document; shorter documents give it none.
-DOCS = [{"text": " ".join(fd.TEXTS[(i + j) % len(fd.TEXTS)] for j in range(3))}
+# 31-38 words each, so the shipped readout (the last token of a 20-word window)
+# places one point per document; shorter documents give it none. Sentences
+# i, i+1, i+3: consecutive sentences i..i+2 made two documents share a 20-word
+# window, an exact duplicate point, so magnitude (whose magnipy convergence
+# target counts every point) never reached 0.95 n and returned NaN.
+DOCS = [{"text": " ".join(fd.TEXTS[(i + k) % len(fd.TEXTS)] for k in (0, 1, 3))}
         for i in range(12)]
+
+
+def test_fixture_documents_have_distinct_windows():
+    from blme.tasks._windows import word_window
+    windows = [word_window(d["text"]) for d in DOCS]
+    assert None not in windows and len(set(windows)) == len(DOCS)
 
 # The shipped readout reads its points from the window forwards kept on the
 # shared cache; the whole-passage readout asks the cache for hidden states,

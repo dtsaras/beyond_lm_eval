@@ -6514,7 +6514,17 @@ def test_repe_refusal_direction():
     result = Loose({"cv_splits": cv_splits, "seed": seed}).evaluate(model, tok, None)
     assert result["_meta_is_instruct"] is True
     result2 = Loose({"cv_splits": cv_splits, "seed": seed}).evaluate(model, tok, None)
-    assert result == pytest.approx(result2, nan_ok=True, rel=0, abs=0)
+    # Bit-identical reruns, NaN-aware. pytest.approx (9.2+) rejects nested
+    # values such as the list _meta_refusal_token_ids, so compare directly.
+    def _same(a, b):
+        if isinstance(a, dict):
+            return isinstance(b, dict) and a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+        if isinstance(a, (list, tuple)):
+            return isinstance(b, (list, tuple)) and len(a) == len(b) and all(map(_same, a, b))
+        if isinstance(a, float) and isinstance(b, float) and np.isnan(a) and np.isnan(b):
+            return True
+        return bool(a == b)
+    assert _same(result, result2), sorted(k for k in result if not _same(result.get(k), result2.get(k)))
 
     h_tr, n_tr, _, _, _ = R._prompt_sets(None, {})
     pos, layer = result["_meta_selected_position"], result["_meta_selected_layer"]
