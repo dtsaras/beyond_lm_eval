@@ -303,14 +303,11 @@ Each declared key or template outside the frozen study set appears here. A task-
 | `repe_refusal_direction.separability_auc` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.best_directional_effect` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.best_directional_layer_frac` | Task-level only | — | — | — | — | Key-specific comparison pending. |
-| `repe_steering_effectiveness.directional_consistency` | Task-level only | — | — | — | — | Key-specific comparison pending. |
-| `repe_steering_effectiveness.directional_success_rate` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.mean_directional_effect` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.steering_beats_random_frac` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.steering_concept_over_random` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.steering_semantic_effect` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_steering_effectiveness.steering_semantic_success_rate` | Task-level only | — | — | — | — | Key-specific comparison pending. |
-| `repe_steering_effectiveness.steering_sign_reversal` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `repe_task_vectors.consensus_energy_rel` [1](../../tests/tasks/parity/test_repe_task_vectors_parity.py) | analytic | 1/1 | 1/1 | 1/1 | 1/1 | Compares the BLME activation-direction summary with a controlled direction or closed-form computation. |
 | `repe_task_vectors.max_norm_layer_fraction` [1](../../tests/tasks/parity/test_repe_task_vectors_parity.py) | analytic | 1/1 | 1/1 | 1/1 | 1/1 | Compares the BLME activation-direction summary with a controlled direction or closed-form computation. |
 | `repe_task_vectors.pair_direction_cos_mean` [1](../../tests/tasks/parity/test_repe_task_vectors_parity.py) | analytic | 1/1 | 1/1 | 1/1 | 1/1 | Compares the BLME activation-direction summary with a controlled direction or closed-form computation. |
