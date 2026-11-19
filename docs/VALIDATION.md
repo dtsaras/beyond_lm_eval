@@ -21,10 +21,10 @@ The primary categories count each task once. Published-value tests also occur in
 
 | Dated receipt | Transformers | Passed | Failed | Errors | Skipped |
 |---|---|---:|---:|---:|---:|
-| [2026-11-19-sweep-config](validation/receipt-2026-11-19-sweep-config.json) | 5.2.0 | 967 | 0 | 0 | 0 |
-| [2026-11-19-sweep-config](validation/receipt-2026-11-19-sweep-config.json) | 5.10.2 | 967 | 0 | 0 | 0 |
-| [2026-11-19-sweep-config](validation/receipt-2026-11-19-sweep-config.json) | 5.22.2 | 967 | 0 | 0 | 0 |
-| [2026-11-19-sweep-config](validation/receipt-2026-11-19-sweep-config.json) | 5.23.0 | 967 | 0 | 0 | 0 |
+| [2026-11-19-final-config](validation/receipt-2026-11-19-final-config.json) | 5.2.0 | 967 | 0 | 0 | 0 |
+| [2026-11-19-final-config](validation/receipt-2026-11-19-final-config.json) | 5.10.2 | 967 | 0 | 0 | 0 |
+| [2026-11-19-final-config](validation/receipt-2026-11-19-final-config.json) | 5.22.2 | 967 | 0 | 0 | 0 |
+| [2026-11-19-final-config](validation/receipt-2026-11-19-final-config.json) | 5.23.0 | 967 | 0 | 0 | 0 |
 
 Counts above are unique executed cases per run. Row counts below are *passed / linked cases* per stack. Some tests serve multiple metrics. These are selected CPU numerical and reference tests. Whole-suite testing, architecture coverage, document reliability, and published-result reproduction each require their own evidence.
 
