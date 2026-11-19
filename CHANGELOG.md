@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — 2026-11-20
+
+Performance and provenance; the study sweep's GPUs sat idle while single-threaded CPU code ran.
+
+- **Large linear algebra runs on the GPU when one is available.** `safe_svdvals`, and the new `gpu_svdvals` / `gpu_svd` / `gpu_eigh`, move float64 SVDs and eigendecompositions of large CPU matrices to CUDA. This covers the SVD, collapse, effective-rank, Schatten, matrix-entropy, Procrustes, unembedding and spectral paths. CKA's layer-pair GEMMs, and the kNN loops of `dynamics_stability` and the unembedding purity diagnostic, run on the GPU too, batched through `knn_sorted_batched` (float64 direct chord distances, stable index tie-break).
+  - **Numerics:** the same quantities in the same precision, with only the reduction order different. A CUDA out-of-memory falls back to the CPU, and `BLME_CPU_LINALG=1` forces the CPU path, which is the one every test, parity fixture and blind review ran.
+  - **Stability:** the GPU path computes distances in float64 where the CPU loop used float32, so neighbour sets can differ where two candidates tie within float32 rounding at rank k. Qwen3-1.7B: 295 of 300 queries identical, `stability_mean` 8e-5 apart; gpt2 and gemma-3: identical.
+  - **Speed:** 280–360× on stability; `_meta_knn_device` and `_meta_linalg_device` record the path taken.
+- **Provenance:** `blme_version` is now the imported source tree's version (`blme/_version.py`), not installed package metadata, which was stale when the source came from an exported tree. `git_hash` is taken in the package's own directory, not the caller's, and is None for an export; the envelope also records `blme_source`.
+- **Docs:** the conventions blind review E had to infer (predictive information's split rule, RankMe's eigenvalue convention, delta-hyperbolicity's prompts and rows, BOS rows in the FFN and delta keys, and others).
+
 ## 0.2.0 — 2026-11-19
 
 The library version the study's structural sweep runs (source 998d8aa). Every task has a numerical receipt (`docs/validation/receipt-2026-11-19-sweep-config.json`); the 53 study tasks have also had a blind end-to-end review (`docs/validation/independent_reviews.yaml`); `docs/METRICS.md` documents each task.

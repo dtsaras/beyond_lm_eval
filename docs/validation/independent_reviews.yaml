@@ -81,4 +81,23 @@ batches:
       dynamics_generation_diversity: "match exactly on BLME's samples"
       consistency_calibration: "match (1e-5)"
       interpretability_prediction_entropy: "match (2e-5)"
+  batchE:
+    date: 2026-11-19
+    library: 998d8aa
+    verdict: "No mismatch; 13 of 14 reproduced to machine precision against the released kernels (Spectral_Signature, reptrix, DADApy, InfoRidge, rep_dispersion, HypLoRA, heavytail, zipfian-whitening); predictive_information matched in distribution only (seeded split)."
+    tasks:
+      geometry_spectral_signature: "match (bit-exact vs released net_esd_estimator; gpt2, pythia, Llama)"
+      geometry_alpha_req: "match (1e-14 vs reptrix); RankMe on covariance eigenvalues reads gpt2's rogue dimensions (3.46)"
+      geometry_gride: "match (bit-exact vs DADApy)"
+      geometry_information_imbalance: "match (bit-exact vs DADApy)"
+      interpretability_logit_lens_kl: "match (1e-8); decision depth near saturation"
+      geometry_rogue_dimensions: "match (2e-8)"
+      geometry_zipfian_symmetry: "match (Sym1 exact, Sym2 5e-9)"
+      geometry_representation_dispersion: "match (bit-exact)"
+      geometry_neighborhood_overlap: "match (1e-16); adjacent_min is always the last pair (block + final norm)"
+      geometry_lm_head_free_energy: "match (bit-exact vs released bfe_w)"
+      geometry_delta_hyperbolicity: "match; profile keeps massive rows past position 0; BOS is every prompt's base point on Llama"
+      geometry_prompt_id: "match (bit-exact on gpt2); dropped from the sweep by the cost rule"
+      geometry_predictive_information: "ambiguous: the seeded split was not reproduced, values inside the reviewer's draws; last layer collapses on gpt2/pythia"
+      geometry_ffn_spectral_utilization: "match (1e-8, Llama 1e-15); the BOS row dominates 3 of 16 Llama layers"
 
