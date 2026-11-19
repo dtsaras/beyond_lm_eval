@@ -74,6 +74,7 @@ def build_results_envelope(
     cache_settings: Optional[Dict[str, Any]] = None,
     unknown_tasks: Optional[List[str]] = None,
     experts_fallback: Optional[Dict[str, Any]] = None,
+    attn_implementation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Wrap raw per-task results into a structured envelope with metadata.
@@ -124,6 +125,10 @@ def build_results_envelope(
     }
     if experts_fallback:
         envelope["config"]["experts_implementation_fallback"] = dict(experts_fallback)
+    if attn_implementation is not None:
+        # The attention kernel the tasks ran with (core.evaluate switches the
+        # whole model to eager when a co-run task needs attention weights).
+        envelope["config"]["attn_implementation"] = dict(attn_implementation)
     return envelope
 
 

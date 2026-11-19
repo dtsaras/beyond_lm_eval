@@ -93,6 +93,22 @@ def _restore_param_dtypes(saved) -> int:
     return n
 
 
+def _attn_implementation_record(model):
+    """``{"model": ..., "text": ...}``: the configured attention implementation
+    of the model and, for a multimodal checkpoint, of its text config."""
+    cfg = getattr(model, "config", None)
+    if cfg is None:
+        return None
+    rec = {"model": getattr(cfg, "_attn_implementation", None)}
+    try:
+        text = cfg.get_text_config()
+    except Exception:  # noqa: BLE001 - older configs have no text config
+        text = None
+    if text is not None and text is not cfg:
+        rec["text"] = getattr(text, "_attn_implementation", None)
+    return rec
+
+
 def evaluate(
     model_args: str = "",
     tasks: List[str] = None,
@@ -175,6 +191,7 @@ def evaluate(
         logger.warning(msg + " Skipping.")
 
     # 3. Init result accumulators
+    _attn_impl = None
     task_results: Dict[str, Any] = {}
     task_errors: Dict[str, str] = {}
     task_timings: Dict[str, float] = {}
@@ -438,6 +455,11 @@ def evaluate(
         # parameters are promoted (an OOM inside fp32_compute) must not leave
         # them promoted: every later task would hit a float32/bf16 mismatch.
         _param_dtypes = [(p, p.dtype) for p in model.parameters()] if model is not None else []
+        # The attention kernel every task ran with (after any eager switch
+        # above): bf16 eager and sdpa logits differ (gemma-4-E2B: mean NLL
+        # 2.2434 vs 2.2407 on one passage), and the choice depends on the
+        # co-run tasks and the transformers version, so it is recorded.
+        _attn_impl = _attn_implementation_record(model)
         for task_name in tqdm(diagnostic_tasks, desc="BLME tasks", unit="task"):
             task_cls = get_task(task_name)
             t_config = resolved_task_configs[task_name]
@@ -556,6 +578,7 @@ def evaluate(
         cache_settings=cache_settings,
         unknown_tasks=unknown_tasks,
         experts_fallback=getattr(model, FALLBACK_ATTR, None),
+        attn_implementation=_attn_impl,
     )
 
     # 7. Print summary table
