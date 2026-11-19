@@ -188,6 +188,9 @@ topology_homology:
 
 topology_betti_curve:
   num_samples: 1000
+  # beta_1 read radius in hops: 2 = released topnn_framework read (default);
+  # 1 = the kNN graph's clique complex. The other is recorded as _meta_.
+  hop_radius: 2.0
 
 topology_persistence_entropy:
   num_samples: 1000

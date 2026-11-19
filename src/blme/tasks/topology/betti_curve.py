@@ -56,7 +56,7 @@ def _knn_k(n: int, n_neighbors="auto") -> int:
 
 def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
                  return_persistence=False, hop_metric=True,
-                 hop_radius=2.0):
+                 hop_radius=2.0, extra_radii=(), extra=None):
     """Count Betti numbers from a point cloud via graph-geodesic homology.
     Raises a clear ImportError (not a bare NameError on ``ripser``) when the
     optional ripser dependency is missing.
@@ -78,6 +78,8 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
         maxdim: max homology dimension for ripser (1 = up to loops).
         n_neighbors: kNN graph degree (capped at N-1).
         persistence_frac: normalized-persistence threshold for counting loops.
+        extra_radii, extra: with the hop metric, ``extra[r]`` receives the H1
+            classes alive at each radius ``r`` of ``extra_radii`` (same diagram).
 
     Returns:
         (betti_0, betti_1): connected components and significant loops.
@@ -161,6 +163,10 @@ def _count_betti(data, maxdim=1, n_neighbors="auto", persistence_frac=0.3,
             # minrad=1, maxrad=2, numrad=1 in topnn_framework).
             alive.extend(1 for b, d in h1_c
                          if np.isfinite(d) and b <= hop_radius < d)
+            if extra is not None:
+                for r in extra_radii:
+                    extra[r] = extra.get(r, 0) + sum(
+                        1 for b, d in h1_c if np.isfinite(d) and b <= r < d)
         # Normalised by this component's geodesic diameter.
         lifetimes.extend((d - b) / scale_c for b, d in h1_c if np.isfinite(d))
 
@@ -239,6 +245,13 @@ class BettiCurveTask(DiagnosticTask):
         if n_neighbors != "auto":
             n_neighbors = int(n_neighbors)
         persistence_frac = float(self.config.get("persistence_frac", 0.3))
+        # The radius at which beta_1 is read, in hops. 2 is the released
+        # topnn_framework read (Eirene minrad=1, maxrad=2, numrad=1); on LLM
+        # last-token clouds it is 0 or near 0 at N = 1000 on every model checked.
+        # 1 reads the clique complex of the kNN graph itself. The other radius
+        # is always recorded as _meta_betti_1_curve_mean_hop<r>.
+        hop_radius = float(self.config.get("hop_radius", 2.0))
+        alt_radius = 1.0 if hop_radius != 1.0 else 2.0
         use_cache = self.config.get("use_cache", True)
 
         if not HAS_RIPSER:
@@ -261,16 +274,20 @@ class BettiCurveTask(DiagnosticTask):
 
         betti_0_curve = []
         betti_1_curve = []
+        betti_1_alt_curve = []
         h1_maxpers_curve = []
         h1_totpers_curve = []
 
         for l_idx in range(num_layers):
             data = np.array(layer_reps[l_idx])
+            _alt = {}
             b0, b1, mp, tp = _count_betti(
                 data, maxdim=1,
                 n_neighbors=n_neighbors, persistence_frac=persistence_frac,
-                return_persistence=True,
+                return_persistence=True, hop_radius=hop_radius,
+                extra_radii=(alt_radius,), extra=_alt,
             )
+            betti_1_alt_curve.append(int(_alt.get(alt_radius, 0)))
             betti_0_curve.append(b0)
             betti_1_curve.append(b1)
             h1_maxpers_curve.append(mp)
@@ -319,6 +336,10 @@ class BettiCurveTask(DiagnosticTask):
         # headline is the curve mean (RESOLVABILITY_PREREG §6 candidate).
         results["_meta_max_betti_1"] = int(np.max(betti_1_curve))
         results["betti_1_curve_mean"] = float(np.mean(betti_1_curve))
+        results["_meta_hop_radius"] = hop_radius
+        _tag = f"{alt_radius:g}"
+        results[f"_meta_betti_1_curve_hop{_tag}"] = betti_1_alt_curve
+        results[f"_meta_betti_1_curve_mean_hop{_tag}"] = float(np.mean(betti_1_alt_curve))
         results.update(point_meta(pinfo, pts[num_layers // 2]))
         _n_mid = int(len(np.unique(np.asarray(pts[num_layers // 2]), axis=0)))
         results["_meta_knn_k"] = _knn_k(_n_mid, n_neighbors)
