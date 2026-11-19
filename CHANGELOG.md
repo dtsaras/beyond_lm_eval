@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 — 2026-11-20
+
+Failure paths only: every value a 0.2.1 run produced without an error or a fallback is unchanged. Found by the study sweep's first models split across two GPUs and by MPS-packed GPUs running out of memory.
+
+- **Multi-GPU device maps.** `geometry_hubness` compared the input and output embeddings with `torch.equal` across two cards, and `repe_steering_effectiveness` added the steering vector on the first card to a block output on another. Both failed outright on every model split over two GPUs; both now work on the block's or the table's own device.
+- **`safe_svdvals` on a matrix already on the GPU** (a weight) now recomputes on the CPU after any CUDA failure, as CPU inputs already did. Before, an out-of-memory on a shared card raised, and `geometry_spectral` left that module (the lm_head, on 4 sweep models) out of its averages, with only a `_meta_` count and a warning to show it.
+- **`eigvalsh_f64`** (new, `geometry/utils.py`): float64 eigenvalues with the same fallbacks. cuSOLVER 11 (CUDA 12.x) rejects syevd from n = 27,392 (`CUSOLVER_STATUS_INVALID_VALUE`; 25,600 works), the FFN width of six 24–34B models, so `geometry_ffn_spectral_utilization` failed on them. A CUDA failure now goes to the command in `BLME_EIGVALSH_HELPER` (a newer cuSOLVER in another environment: matrix and eigenvalues exchanged as `.npy`), and otherwise to LAPACK on the CPU. `_meta_ffn_eigensolver_counts` records which solver ran. cuSOLVER 11 and 12 agree to 1e-16 relative at n = 25,600, where both run.
+
 ## 0.2.1 — 2026-11-20
 
 Performance and provenance; the study sweep's GPUs sat idle while single-threaded CPU code ran.

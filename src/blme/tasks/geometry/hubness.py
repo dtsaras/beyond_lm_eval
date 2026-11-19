@@ -258,7 +258,9 @@ class GlobalHubnessTask(DiagnosticTask):
         results["_meta_n_emittable_rows"] = int(n_emit)
         results["_meta_n_unused_rows"] = int(W.shape[0] - n_emit)
         results["_meta_rows_subsampled"] = idx is not None
-        tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
+        # Under a multi-GPU device map the two tables can sit on different cards.
+        tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(
+            torch.equal(E_in, W) if E_in.device == W.device else torch.equal(E_in.cpu(), W.cpu()))))
         if E_in is not None and matrix == "unembedding":
             inp = results if tied else self._score(rows(E_in), k_values, batch_size, device, drop_twins, gap)
             results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()

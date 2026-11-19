@@ -293,11 +293,11 @@ def _steering_hook(vec, alpha):
     def hook(module, input, output):
         if isinstance(output, tuple):
             out_t = output[0].clone()
-            out_t[:, -1, :] += (alpha * vec).to(out_t.dtype)
+            out_t[:, -1, :] += (alpha * vec).to(out_t.device, out_t.dtype)
             return (out_t,) + output[1:]
         else:
             out_t = output.clone()
-            out_t[:, -1, :] += (alpha * vec).to(out_t.dtype)
+            out_t[:, -1, :] += (alpha * vec).to(out_t.device, out_t.dtype)
             return out_t
     return hook
 
@@ -394,7 +394,8 @@ def _measure(model, tokenizer, layers, samples, task_vectors, test_layers,
                         u_hat = logit_dir_fn(task_vectors[num_layers - 1])
 
                 for l_idx in test_layers:
-                    tv_raw = task_vectors[l_idx].to(device)
+                    # The block's own device (a multi-GPU device map spreads the layers).
+                    tv_raw = task_vectors[l_idx].to(hs[l_idx + 1].device)
                     tv_norm = torch.linalg.vector_norm(tv_raw.double())
                     res_norm = torch.linalg.vector_norm(hs[l_idx + 1][0, -1].double())
                     if not tv_norm > 0:

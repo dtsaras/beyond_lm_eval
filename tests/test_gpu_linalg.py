@@ -96,3 +96,68 @@ def test_linear_cka_gpu_path_is_float64_exact():
     assert abs(gpu - exact) / exact < 1e-12
     # The float32 CPU path is the less accurate one.
     assert abs(cpu32 - exact) >= abs(gpu - exact)
+
+
+def test_eigvalsh_external_helper_round_trip(tmp_path):
+    """The helper protocol: (n, n) float64 .npy in, n float64 eigenvalues out."""
+    helper = tmp_path / "helper.py"
+    helper.write_text("import sys, numpy as np\n"
+                      "np.save(sys.argv[2], np.linalg.eigvalsh(np.load(sys.argv[1])))\n")
+    g = np.random.default_rng(4)
+    X = g.standard_normal((300, 120))
+    M = torch.as_tensor(X.T @ X)
+    import sys
+    w = U._external_eigvalsh(M, f"{sys.executable} {helper}")
+    np.testing.assert_allclose(w.numpy(), torch.linalg.eigvalsh(M).numpy(), rtol=1e-12, atol=1e-10)
+    bad = tmp_path / "bad.py"
+    bad.write_text("import sys, numpy as np\nnp.save(sys.argv[2], np.zeros(3))\n")
+    with pytest.raises(ValueError):
+        U._external_eigvalsh(M, f"{sys.executable} {bad}")
+
+
+@cuda
+def test_eigvalsh_f64_falls_back_on_a_cuda_failure(monkeypatch, tmp_path):
+    """A cuSOLVER rejection goes to the helper, then to the CPU; never an error."""
+    import sys
+    g = np.random.default_rng(5)
+    X = g.standard_normal((400, 150))
+    M = torch.as_tensor(X.T @ X).cuda()
+    want = torch.linalg.eigvalsh(M.cpu())
+    real = torch.linalg.eigvalsh
+
+    def eig(A, *a, **k):
+        if A.is_cuda:
+            raise RuntimeError("cusolver error: CUSOLVER_STATUS_INVALID_VALUE (simulated)")
+        return real(A, *a, **k)
+    monkeypatch.setattr(torch.linalg, "eigvalsh", eig)
+    monkeypatch.delenv("BLME_EIGVALSH_HELPER", raising=False)
+    w, solver = U.eigvalsh_f64(M)
+    assert solver == "cpu" and w.is_cuda
+    np.testing.assert_allclose(w.cpu().numpy(), want.numpy(), rtol=1e-12, atol=1e-10)
+    helper = tmp_path / "helper.py"
+    helper.write_text("import sys, numpy as np\n"
+                      "np.save(sys.argv[2], np.linalg.eigvalsh(np.load(sys.argv[1])))\n")
+    monkeypatch.setenv("BLME_EIGVALSH_HELPER", f"{sys.executable} {helper}")
+    w, solver = U.eigvalsh_f64(M)
+    assert solver == "external"
+    np.testing.assert_allclose(w.cpu().numpy(), want.numpy(), rtol=1e-12, atol=1e-10)
+
+
+@cuda
+def test_safe_svdvals_cuda_input_falls_back_to_the_cpu(monkeypatch):
+    """A weight already on the GPU: an out-of-memory there recomputes on the CPU
+    (it used to raise, and geometry_spectral left the module out)."""
+    W = torch.randn(600, 200, dtype=torch.float32).cuda()
+    monkeypatch.setenv("BLME_CPU_LINALG", "1")
+    want = U.safe_svdvals(W.cpu())
+    monkeypatch.delenv("BLME_CPU_LINALG")
+    real = torch.linalg.svdvals
+
+    def sv(A, *a, **k):
+        if A.is_cuda:
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory (simulated)")
+        return real(A, *a, **k)
+    monkeypatch.setattr(torch.linalg, "svdvals", sv)
+    got = U.safe_svdvals(W)
+    assert got.is_cuda
+    np.testing.assert_allclose(got.cpu().numpy(), want.numpy(), rtol=0, atol=0)

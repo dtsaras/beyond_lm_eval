@@ -375,6 +375,55 @@ def gpu_eigh(A):
     return _linalg_on_gpu(lambda M: tuple(torch.linalg.eigh(M)), A)
 
 
+def eigvalsh_f64(M):
+    """Ascending eigenvalues of a symmetric float64 matrix, and the solver used.
+
+    ``torch.linalg.eigvalsh`` in process first. A CUDA failure there falls
+    back, in order, to the command in ``BLME_EIGVALSH_HELPER`` and to LAPACK
+    on the CPU, all float64 on the lower triangle. cuSOLVER 11 (CUDA 12.x)
+    rejects syevd from n = 27,392 up (CUSOLVER_STATUS_INVALID_VALUE; 25,600
+    works), the FFN width of several 24-34B models; cuSOLVER 12 (CUDA 13)
+    computes n = 36,864 in 26 s, while LAPACK needs minutes per matrix. The
+    helper is called as ``<command> in.npy out.npy``: it reads the (n, n)
+    float64 matrix and writes its n eigenvalues as float64.
+
+    Returns ``(eigenvalues on M's device, "torch" | "external" | "cpu")``.
+    """
+    try:
+        return torch.linalg.eigvalsh(M), "torch"
+    except _GPU_FALLBACK as e:
+        if M.device.type != "cuda":
+            raise
+        _empty_cache()
+        cmd = os.environ.get("BLME_EIGVALSH_HELPER")
+        if cmd:
+            try:
+                return _external_eigvalsh(M, cmd).to(M.device), "external"
+            except Exception as e2:
+                logger.warning(f"eigvalsh_f64: helper failed ({e2!r}); using the CPU")
+        logger.warning(f"eigvalsh_f64: n={M.shape[0]} on the CPU after {type(e).__name__}")
+        return torch.linalg.eigvalsh(M.cpu()).to(M.device), "cpu"
+
+
+def _external_eigvalsh(M, cmd: str):
+    """Eigenvalues of ``M`` from the helper command (see eigvalsh_f64)."""
+    import shlex
+    import shutil
+    import subprocess
+    tmp = tempfile.mkdtemp(prefix="blme-eigvalsh-", dir="/dev/shm" if os.path.isdir("/dev/shm") else None)
+    try:
+        src, dst = os.path.join(tmp, "matrix.npy"), os.path.join(tmp, "eigenvalues.npy")
+        np.save(src, M.detach().to("cpu", torch.float64).numpy())
+        subprocess.run(shlex.split(cmd) + [src, dst], check=True, timeout=7200,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        w = np.load(dst)
+        if w.dtype != np.float64 or w.shape != (M.shape[0],) or not np.isfinite(w).all():
+            raise ValueError(f"helper returned {w.dtype} {w.shape}")
+        return torch.from_numpy(np.sort(w))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def knn_sorted_batched(U, queries, k: int, batch: int = 64):
     """The ``k`` nearest other rows of ``U`` for each query row, nearest first.
 
@@ -435,33 +484,37 @@ def safe_svdvals(M):
     # rescale a pure multiply-back. On a 20x20 seed-140 matrix translated by
     # +1e6 the old order gave official alpha 1.249006646 against a 100-digit
     # SVD reference's 1.163063736 (+7.39%) (gpt-5.6-sol round 9, 2026-09-07).
-    Ad = A.double()
-    (Ad,), on_gpu = to_gpu_linalg(Ad)
+    # A CUDA input (a weight already on the GPU) or a CPU input moved there:
+    # any CUDA failure (out of memory on a shared card, a cuSOLVER limit)
+    # recomputes on the CPU, so a crowded GPU never changes the result.
+    moved, on_gpu = False, A.device.type == "cuda"
     try:
-        gd = Ad.abs().amax()
-        gf = float(gd)
-        if not _np.isfinite(gf) or gf == 0.0:
-            S = torch.linalg.svdvals(Ad)
-        else:
-            S = torch.linalg.svdvals(Ad / gd) * gd
-    except _GPU_FALLBACK:
-        if not on_gpu:
+        Ad = A.double()
+        (Ad,), moved = to_gpu_linalg(Ad)
+        S = _scaled_svdvals(Ad)
+    except _GPU_FALLBACK as e:
+        if not (on_gpu or moved):
             raise
         _empty_cache()
-        return _svdvals_cpu(A, _is_torch)
-    if on_gpu:
+        logger.warning(
+            f"safe_svdvals: {tuple(A.shape)} recomputed on the CPU after {type(e).__name__}")
+        S = _scaled_svdvals(A.cpu().double())
+        if _is_torch:
+            return S.to(A.device)
+        return S.numpy()
+    if moved:
         S = S.cpu()
     return S if _is_torch else S.cpu().numpy()
 
 
-def _svdvals_cpu(A, is_torch):
-    """safe_svdvals on the CPU (the OOM fallback of the GPU path)."""
+def _scaled_svdvals(Ad):
+    """svdvals of a float64 matrix with its largest magnitude factored out."""
     import numpy as _np
-    Ad = A.double().cpu()
     gd = Ad.abs().amax()
     gf = float(gd)
-    S = torch.linalg.svdvals(Ad) if (not _np.isfinite(gf) or gf == 0.0) else torch.linalg.svdvals(Ad / gd) * gd
-    return S if is_torch else S.numpy()
+    if not _np.isfinite(gf) or gf == 0.0:
+        return torch.linalg.svdvals(Ad)
+    return torch.linalg.svdvals(Ad / gd) * gd
 
 
 def collect_hidden_states(model, tokenizer, dataset, num_samples=100, layer_idx=-1,

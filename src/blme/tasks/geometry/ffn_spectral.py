@@ -37,6 +37,7 @@ from ...tasks.base import DiagnosticTask
 from .._tokens import strip_trailing_special
 from ..common import get_layers, get_max_positions
 from .schatten import _mlp_down_projections
+from .utils import eigvalsh_f64
 
 logger = logging.getLogger("blme")
 
@@ -124,7 +125,9 @@ class CovarianceAccumulator:
         m = self.s1 / n
         M.addr_(m, m, alpha=-float(n))
         tss = float(torch.diagonal(M).sum())
-        out["all"] = torch.linalg.eigvalsh(M).div_(n - 1).cpu().numpy()
+        w, solver = eigvalsh_f64(M)
+        out["solvers"] = [solver]
+        out["all"] = w.div_(n - 1).cpu().numpy()
         P = torch.stack(self.first)
         if tss > 0:
             out["position0_share"] = float(((P - m) ** 2).sum()) / tss
@@ -134,7 +137,9 @@ class CovarianceAccumulator:
             M.addr_(m, m, alpha=float(n))
             M.addmm_(P.T, P, alpha=-1.0)
             M.addr_(m2, m2, alpha=-float(n2))
-            out["without_position0"] = torch.linalg.eigvalsh(M).div_(n2 - 1).cpu().numpy()
+            w, solver = eigvalsh_f64(M)
+            out["solvers"].append(solver)
+            out["without_position0"] = w.div_(n2 - 1).cpu().numpy()
         self.s2 = self.s1 = None
         self.first = []
         return out
@@ -355,6 +360,9 @@ class FFNSpectralUtilizationTask(DiagnosticTask):
         out["_meta_accumulator_device"] = str(acc_dev)
         out["_meta_n_layers_token_mismatch"] = n_mismatch
         out["_meta_n_layers_not_dense"] = n_not_dense
+        # Which float64 eigensolver produced the spectra (geometry.utils.eigvalsh_f64).
+        solvers = [s for sp in spectra.values() if sp for s in sp.get("solvers", ())]
+        out["_meta_ffn_eigensolver_counts"] = {s: solvers.count(s) for s in sorted(set(solvers))}
         # Derived from the spectra, not the hook count: a site whose hook never
         # fired has no spectrum.
         out["_meta_n_layers_measured"] = sum(
