@@ -1,9 +1,6 @@
-from importlib.metadata import version, PackageNotFoundError
-
-try:
-    __version__ = version("blme")
-except PackageNotFoundError:
-    __version__ = "0.2.0"
+# The version of the source tree actually imported (installed package metadata
+# can be stale when the source is on PYTHONPATH, e.g. an exported tree).
+from ._version import __version__
 
 from .core import evaluate
 from .runner import run_from_yaml

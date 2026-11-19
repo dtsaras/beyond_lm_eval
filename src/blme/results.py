@@ -25,20 +25,28 @@ logger = logging.getLogger("blme")
 # ---------------------------------------------------------------------------
 
 def _get_blme_version() -> str:
+    """The imported source tree's version (``blme._version``), not installed metadata."""
     try:
-        from importlib.metadata import version
-        return version("blme")
+        from ._version import __version__
+        return __version__
     except Exception:
         return "dev"
 
 
 def _get_git_hash() -> Optional[str]:
+    """The commit of the git checkout the imported ``blme`` package lives in.
+
+    Run in the package's own directory, not the caller's: a run launched from
+    another repository recorded that repository's commit. None for a source
+    tree outside git (an export).
+    """
     try:
+        pkg = os.path.dirname(os.path.abspath(__file__))
         return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "-C", pkg, "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL,
             text=True,
-        ).strip()
+        ).strip() or None
     except Exception:
         return None
 
@@ -98,6 +106,7 @@ def build_results_envelope(
 
     envelope = {
         "blme_version": _get_blme_version(),
+        "blme_source": os.path.dirname(os.path.abspath(__file__)),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_hash": _get_git_hash(),
         "environment": {
