@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-19
+
+The library version the study's structural sweep runs (source 998d8aa). Every task has a numerical receipt (`docs/validation/receipt-2026-11-19-sweep-config.json`); the 53 study tasks have also had a blind end-to-end review (`docs/validation/independent_reviews.yaml`); `docs/METRICS.md` documents each task.
+
+### Verification campaign and protocol decisions (2026-11-19)
 
 - **Fix:** `safe_norm` sums squares in float64. A float32 `norm()` of a parameter-sized vector is 4e-4 off at 7M coordinates and 3e-3 at 50M, so `sam_sharpness` and `asam_sharpness` were 0.1–0.15% off on gpt2's last block and the error grew with model size (blind review D). **Values change** for `dynamics_sharpness` (SAM, ASAM, the power iteration's normalisation, the critical step's start) and slightly for `dynamics_gradient_flow`.
 - `dynamics_sharpness`: `asam_variant` chooses the ASAM normaliser, `invariant` (default, unchanged) or `release` (the released asam.py rule); the other is recorded as `_meta_asam_sharpness_<other>`.
@@ -38,7 +42,7 @@
 - Document-held-out Procrustes R² now selects a truncated-SVD cutoff on an inner document split, with a numerical floor of `sqrt(eps_float32)`, then refits on all outer training documents. Results include both splits and each layer pair’s selected cutoff and rank. Previously, the float64 solver could amplify directions below the resolution of the cached activations.
 - Generation-diversity sampling entropy now normalizes and reduces one step of processed logits at a time in float64. The first-quarter, last-quarter and change-in-entropy readouts use the original score positions for content tokens when a completion contains padding.
 
-## 0.2.0
+### Earlier 0.2.0 work
 
 ### New tasks
 - `dynamics_entropy_calibration`: entropy calibration error EntCE (Cao et al. 2025).
