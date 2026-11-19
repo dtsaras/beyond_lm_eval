@@ -1046,7 +1046,7 @@ Effect of adding the contrastive task vector to the residual stream.
 
 **Protocol.** Steering effectiveness is a BLME construct. The last-token mean difference of eight truthful/untruthful sentence pairs is rescaled to 0.1 times the norm of the residual it is added to (the relative norm of ActAdd App. F; ActAdd and CAA sweep a raw multiplier instead) and added at the last position of a neutral prompt. The effect is the signed change of next-token logits along the vector's own logit-space direction (W_U times the final-norm Jacobian), with a sign-reversal (-v) check and a data-defined token-anchor effect. Generation-based scoring (ActAdd topic rates, CAA answer probabilities) was not used: it needs behaviour-specific classifiers or A/B formats that base models do not follow. The control is norm-matched differences of the last-token states of unrelated sentences (ActAdd App. G's random-text vector), scored along its own logit direction; an isotropic Gaussian control was rejected because unused width dilutes it. All arithmetic is fp32 at every model size.
 
-**Headline keys.** `steering_concept_over_random`, `steering_beats_random_frac`, `directional_consistency`, `directional_success_rate`, `steering_sign_reversal`, `steering_semantic_effect`, `steering_semantic_success_rate`, `best_directional_effect`, `mean_directional_effect`, `best_directional_layer_frac`.
+**Headline keys.** `steering_concept_over_random`, `steering_beats_random_frac`, `steering_semantic_effect`, `steering_semantic_success_rate`, `best_directional_effect`, `mean_directional_effect`, `best_directional_layer_frac`.
 
 **References.** paper: Zou et al. 2023; Turner et al. 2023 (ActAdd, arXiv:2308.10248); Panickssery et al. 2024 (CAA, arXiv:2312.06681); code: `andyzoujm/representation-engineering@5455d8a375d5fb1cb191f9ebcd089b7c21e9a31e`; LLM precedent: Turner et al. 2023 ActAdd arXiv:2308.10248 (App. F relative norm, App. G random-text control); Panickssery et al. 2024 CAA arXiv:2312.06681; Zou et al. 2023 RepE control arXiv:2310.01405.
 
@@ -1061,7 +1061,7 @@ Effect of adding the contrastive task vector to the residual stream.
 **Parameters (shipped defaults).** `num_samples: 8`, `steering_alpha: 1`, `steering_threshold: 0.01`.
 
 **Decision: Directional summary keys (steering_sign_reversal, directional_consistency, directional_success_rate).** Default: Computed from projections onto the steering direction, which are positive by construction.
-Why: They sit near 1 by construction (1.0 on pythia-160m although the per-layer directional effect is negative at two layers): they check that the estimand is directional, not that steering works. Excluded from the companion study; read steering_concept_over_random and steering_semantic_effect instead.
+Why: They sit near 1 by construction (1.0 on pythia-160m although the per-layer directional effect is negative at two layers): they check that the estimand is directional, not that steering works. Demoted to _meta_ (_meta_directional_consistency, _meta_directional_success_rate, _meta_steering_sign_reversal); read steering_concept_over_random and steering_semantic_effect instead.
 
 ### `repe_task_vectors`
 

@@ -64,8 +64,8 @@ def test_width_padding_preserves_the_function(llama, tok):
 
 
 INVARIANT_KEYS = ["steering_concept_over_random", "steering_beats_random_frac",
-                  "directional_consistency", "directional_success_rate",
-                  "steering_sign_reversal"]
+                  "_meta_directional_consistency", "_meta_directional_success_rate",
+                  "_meta_steering_sign_reversal"]
 
 
 def test_steering_keys_invariant_under_width_padding_and_residual_gauge(llama, tok):

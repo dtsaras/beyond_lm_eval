@@ -145,7 +145,7 @@ tasks:
       default: "Computed from projections onto the steering direction, which are positive by construction"
       alternatives: []
       recorded: []
-      why: "They sit near 1 by construction (1.0 on pythia-160m although the per-layer directional effect is negative at two layers): they check that the estimand is directional, not that steering works. Excluded from the companion study; read steering_concept_over_random and steering_semantic_effect instead."
+      why: "They sit near 1 by construction (1.0 on pythia-160m although the per-layer directional effect is negative at two layers): they check that the estimand is directional, not that steering works. Demoted to _meta_ (_meta_directional_consistency, _meta_directional_success_rate, _meta_steering_sign_reversal); read steering_concept_over_random and steering_semantic_effect instead."
   geometry_categories:
     - choice: Random-token baseline for inter-category similarity
       parameter: null

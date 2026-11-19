@@ -54,7 +54,7 @@ def _report_three_billion_parameters(model):
 
 CFG = {"num_samples": 2, "n_random_draws": 4}
 DIRECTIONAL = ("best_directional_effect", "mean_directional_effect",
-               "directional_consistency", "steering_sign_reversal")
+               "_meta_directional_consistency", "_meta_steering_sign_reversal")
 
 
 def test_fp32_compute_at_every_size():

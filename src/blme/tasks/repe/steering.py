@@ -512,12 +512,15 @@ def _summarise(rec, threshold, num_layers):
             [sn[l] for l in sorted(sn)])) if sn else float("nan")
 
     # mean|asym| ~ 1 is the control that the estimand is directional (KL's ~ 0);
-    # the signed mean says whether +v points the right way.
-    out["steering_sign_reversal"] = float(np.mean(np.abs(da))) if da else float("nan")
+    # the signed mean says whether +v points the right way. All three are _meta_:
+    # they summarise projections onto the steering direction and sit near 1 by
+    # construction (1.0 on pythia-160m with the per-layer directional effect
+    # negative at two layers), so they check the estimand, not the steering.
+    out["_meta_steering_sign_reversal"] = float(np.mean(np.abs(da))) if da else float("nan")
     out["_meta_kl_sign_reversal"] = float(np.mean(np.abs(ka))) if ka else float("nan")
-    out["directional_consistency"] = float(np.mean(da)) if da else float("nan")
+    out["_meta_directional_consistency"] = float(np.mean(da)) if da else float("nan")
     out["_meta_kl_sign_asymmetry"] = float(np.mean(ka)) if ka else float("nan")
-    out["directional_success_rate"] = float(np.mean(
+    out["_meta_directional_success_rate"] = float(np.mean(
         [1.0 if (fx_pos[l] > 0 and fx_neg.get(l, 0.0) < 0) else 0.0
          for l in sorted(fx_pos) if l in fx_neg])) if fx_neg else float("nan")
     return out
@@ -562,13 +565,11 @@ class SteeringEffectivenessTask(DiagnosticTask):
     )
     HEADLINE_KEYS = (
         "steering_concept_over_random", "steering_beats_random_frac",
-        "directional_consistency", "directional_success_rate", "steering_sign_reversal",
         "steering_semantic_effect", "steering_semantic_success_rate",
         "best_directional_effect", "mean_directional_effect", "best_directional_layer_frac",
     )
     SIZE_INVARIANT = dict.fromkeys(
-        ("steering_concept_over_random", "steering_beats_random_frac",
-         "directional_consistency", "directional_success_rate", "steering_sign_reversal"),
+        ("steering_concept_over_random", "steering_beats_random_frac"),
         (("zero_pad_width", "residual_scale_gauge"),
          "tests/tasks/invariance/test_repe_steering_effectiveness.py::"
          "test_steering_keys_invariant_under_width_padding_and_residual_gauge"))
