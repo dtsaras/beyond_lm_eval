@@ -23,6 +23,12 @@ geometry_isoscore:
 geometry_hubness:
   k_values: [10, 50, 100]
   batch_size: 2000
+  # Rows of the draw whose nearest other row has 1 - cos < near_duplicate_gap
+  # (untrained in-vocabulary rows, e.g. Llama-3 reserved tokens). false: rank
+  # them (default, unchanged); true: drop them. The other choice is recorded
+  # as _meta_{without,with}_near_duplicates_<key> whenever any exist.
+  drop_near_duplicates: false
+  near_duplicate_gap: 1.0e-4
 
 geometry_collapse:
   # qdl_entropy_min over every block ("all") or blocks 1..L-2 ("interior");
@@ -533,6 +539,10 @@ interpretability_attention_rollout:
 geometry_superposition_strength:
   max_pairs: 200000
   seed: 42
+  # true: drop rows within near_duplicate_gap (1 - cos) of another row before
+  # scoring (untrained in-vocabulary rows); an O(V^2 d) search, so opt-in.
+  drop_near_duplicates: false
+  near_duplicate_gap: 1.0e-4
 
 geometry_effective_depth:
   num_samples: 20

@@ -94,8 +94,11 @@ def _unit_rows(E, device):
     return U, n_zero, n_nonfinite, has_direction
 
 
-def _k_occurrences(U, k_values, batch_size):
+def _k_occurrences(U, k_values, batch_size, return_nn=False):
     """k-occurrence counts N_k of every row of ``U`` (self excluded).
+
+    With ``return_nn`` it also returns each row's chord distance to its
+    nearest other row (float64 numpy), which the ranking already computes.
 
     Neighbours are ranked by DIRECT chord distance on unit rows (the
     dot-product ranking cancels two ~1 sums on anisotropic vocabularies), in
@@ -110,6 +113,7 @@ def _k_occurrences(U, k_values, batch_size):
     _bytes = U.element_size() * max(1, n_vocab)
     batch_size = max(1, min(int(batch_size), (512 << 20) // _bytes))
     n_occ = {k: torch.zeros(n_vocab, dtype=torch.int64, device=device) for k in k_values}
+    nn_dist = torch.empty(n_vocab, dtype=torch.float64, device=device) if return_nn else None
     with torch.no_grad():
         for i in tqdm(range(0, n_vocab, batch_size), desc="Hubness"):
             end = min(i + batch_size, n_vocab)
@@ -118,10 +122,41 @@ def _k_occurrences(U, k_values, batch_size):
             cols = torch.arange(i, end, device=device)
             sims[rows, cols] = float("inf")          # self is never a neighbour
             top_idx_sorted = torch.argsort(sims, dim=1, descending=False, stable=True)[:, :max_k]
+            if return_nn:
+                nn_dist[i:end] = sims.gather(1, top_idx_sorted[:, :1]).squeeze(1).double()
             for k in k_values:
                 flat = top_idx_sorted[:, :k].reshape(-1)
                 n_occ[k].scatter_add_(0, flat, torch.ones_like(flat))
-    return {k: v.cpu().numpy().astype(np.int64) for k, v in n_occ.items()}
+    occ = {k: v.cpu().numpy().astype(np.int64) for k, v in n_occ.items()}
+    if return_nn:
+        return occ, nn_dist.cpu().numpy()
+    return occ
+
+
+def nearest_other_gap(E, batch_size: int = 512) -> np.ndarray:
+    """``1 - cos`` from every row of ``E`` to its nearest other row (float64).
+
+    Direct chord distances on unit rows, as :func:`_k_occurrences` ranks them,
+    on the GPU when one is available. Rows without a direction get ``inf``
+    (they are never near-duplicates). O(V^2 d): opt-in callers only.
+    """
+    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    U, _, _, has_dir = _unit_rows(E, device)
+    out = np.full(U.shape[0], np.inf)
+    idx = has_dir.to(device).nonzero().flatten()
+    Ud = U[idx]
+    n = Ud.shape[0]
+    if n < 2:
+        return out
+    best = torch.empty(n, dtype=torch.float64, device=device)
+    with torch.no_grad():
+        for i in range(0, n, batch_size):
+            d = torch.cdist(Ud[i:i + batch_size], Ud, compute_mode="donot_use_mm_for_euclid_dist")
+            r = torch.arange(d.shape[0], device=device)
+            d[r, r + i] = float("inf")
+            best[i:i + d.shape[0]] = d.min(dim=1).values
+    out[idx.cpu().numpy()] = (best * best / 2.0).cpu().numpy()
+    return out
 
 
 @register_task("geometry_hubness")
@@ -217,13 +252,15 @@ class GlobalHubnessTask(DiagnosticTask):
             T = T[:n_emit]
             return T if idx is None else T[idx.to(T.device)]
 
-        results = self._score(rows(W), k_values, batch_size, device)
+        drop_twins = bool(self.config.get("drop_near_duplicates", False))
+        gap = float(self.config.get("near_duplicate_gap", 1e-4))
+        results = self._score(rows(W), k_values, batch_size, device, drop_twins, gap)
         results["_meta_n_emittable_rows"] = int(n_emit)
         results["_meta_n_unused_rows"] = int(W.shape[0] - n_emit)
         results["_meta_rows_subsampled"] = idx is not None
         tied = E_in is not None and (E_in is W or (E_in.shape == W.shape and bool(torch.equal(E_in, W))))
         if E_in is not None and matrix == "unembedding":
-            inp = results if tied else self._score(rows(E_in), k_values, batch_size, device)
+            inp = results if tied else self._score(rows(E_in), k_values, batch_size, device, drop_twins, gap)
             results.update({f"_meta_input_embedding_{k}": v for k, v in inp.items()
                             if k.startswith("hubness_")})
         results["_meta_hubness_matrix"] = matrix
@@ -232,19 +269,42 @@ class GlobalHubnessTask(DiagnosticTask):
         return results
 
     @staticmethod
-    def _score(E, k_values, batch_size, device):
+    def _score(E, k_values, batch_size, device, drop_near_duplicates=False, gap=1e-4):
         E_norm, _n_zero, _n_nonfinite, _dir = _unit_rows(E, device)
         # Rows without a direction are not ranked: a zero vector sits at chord
         # distance exactly 1 from every unit row (cosine 0.5), nearer than most
         # true neighbours in a near-isotropic table, so it became a
         # near-universal hub (test_hubness_protocol.py::test_zero_rows_are_not_ranked).
         E_norm = E_norm[_dir.to(E_norm.device)]
-        occ = _k_occurrences(E_norm, k_values, batch_size)
+        occ, nn = _k_occurrences(E_norm, k_values, batch_size, return_nn=True)
+        # Near-twins: rows whose nearest other ranked row has 1 - cos < gap
+        # (chord^2 / 2). Untrained in-vocabulary rows come in such groups
+        # (Llama-3's reserved tokens, Qwen3's never-emitted byte tokens), but
+        # the gap is a continuum on other models (gemma-3: 3498 rows under 1e-4,
+        # 5144 under 1e-3), so dropping them is a parameter, not the protocol.
+        # Whichever choice is not the headline is recorded when it differs.
+        twin = (nn * nn / 2.0) < float(gap)
+        n_twin = int(twin.sum())
         results = {
             "_meta_n_zero_rows": _n_zero,
             "_meta_n_nonfinite_rows": _n_nonfinite,
-            "_meta_n_rows_ranked": int(E_norm.shape[0]),
+            "_meta_n_near_duplicate_rows": n_twin,
+            "_meta_near_duplicate_gap": float(gap),
+            "_meta_near_duplicates_dropped": bool(drop_near_duplicates and n_twin),
         }
+        keep = None
+        if n_twin and E_norm.shape[0] - n_twin > max(k_values):
+            keep = torch.from_numpy(~twin).to(E_norm.device)
+            occ_other = _k_occurrences(E_norm[keep], k_values, batch_size)
+        if drop_near_duplicates and keep is not None:
+            occ, occ_other = occ_other, occ
+            other_tag = "with_near_duplicates"
+        else:
+            other_tag = "without_near_duplicates"
+        results["_meta_n_rows_ranked"] = int(E_norm.shape[0] - (n_twin if results["_meta_near_duplicates_dropped"] else 0))
         for k in k_values:
             results.update(_hubness_stats_from_occurrences(occ[k], k))
+            if keep is not None:
+                results.update({f"_meta_{other_tag}_{key}": v for key, v in
+                                _hubness_stats_from_occurrences(occ_other[k], k).items()})
         return results

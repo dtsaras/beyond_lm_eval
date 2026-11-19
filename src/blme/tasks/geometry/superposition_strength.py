@@ -143,7 +143,17 @@ class SuperpositionStrengthTask(DiagnosticTask):
         mso_all_rows = (_mean_squared_overlap(W, max_pairs=max_pairs, seed=seed)
                         if n_emit < V_all else None)
         W = W[:n_emit]
-        V = n_emit
+        # Near-duplicate rows (1 - cos to the nearest other row below
+        # near_duplicate_gap; untrained in-vocabulary rows such as Llama-3's
+        # reserved tokens): kept by default, as the released code keeps every
+        # row; drop_near_duplicates removes them (an O(V^2 d) search, so opt-in).
+        n_twin = None
+        if bool(self.config.get("drop_near_duplicates", False)):
+            from .hubness import nearest_other_gap
+            twin = torch.from_numpy(nearest_other_gap(W) < float(self.config.get("near_duplicate_gap", 1e-4)))
+            n_twin = int(twin.sum())
+            W = W[~twin]
+        V = int(W.shape[0])
         # The kernel's zero-row predicate (max-abs, exact at every scale).
         V_eff = int((W.abs().amax(dim=1) > 0).sum().item())
 
@@ -184,6 +194,8 @@ class SuperpositionStrengthTask(DiagnosticTask):
             "_meta_vocab_size": int(V_all),
             "_meta_n_emittable_rows": int(n_emit),
             "_meta_n_unused_rows": int(V_all - n_emit),
+            "_meta_near_duplicates_dropped": n_twin is not None,
+            "_meta_n_near_duplicate_rows": n_twin,
             "_meta_mean_squared_overlap_all_rows": (
                 mso if mso_all_rows is None else mso_all_rows),
             "_meta_hidden_dim": int(m),
