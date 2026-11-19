@@ -1,0 +1,61 @@
+# Independent end-to-end reviews (read by scripts/metrics_doc.py).
+#
+# Each reviewer re-implemented the task's full path, from the model's forward
+# pass to the reported number, without reading src/blme/tasks or tests/, using
+# the papers, docs/tasks_*.md, the authors' released code and BLME's outputs
+# (including _meta_ keys) only, and compared numbers on identical inputs
+# (gpt2 and pythia-160m-deduped, fp32, CPU). Reports and scripts are under
+# /public_data/dtsaras/hara/artifacts/pod1/blme/blind_review/<batch>/ on pod1.
+
+batches:
+  batchA:
+    date: 2026-11-19
+    library: fbce8b8
+    verdict: "No formula mismatch; 11 of 11 reproduced (<= 1e-5 relative, counts exact)."
+    tasks:
+      geometry_collapse: match
+      geometry_correlation_dimension: match
+      geometry_mp_bulk_deviation: match
+      geometry_neural_collapse: match
+      geometry_schatten: match
+      geometry_unembedding: match
+      geometry_tokenizer_efficiency: match
+      geometry_prediction_alignment: "match (raw cosine); control is a design choice"
+      geometry_positional_decay: match
+      geometry_perplexity: match
+      topology_betti_curve: "match (construction); headline nearly constant at study N"
+  batchB:
+    date: 2026-11-19
+    library: fbce8b8
+    verdict: "No formula mismatch; 8 of 8 reproduced where the docs define the quantity."
+    tasks:
+      dynamics_gradient_flow: match
+      dynamics_interpolation: "match (all 1225 pairs)"
+      geometry_representation_sensitivity: match
+      dynamics_perturbation_growth: "match (same seed-42 draw)"
+      dynamics_stability: "match (within the seed spread)"
+      geometry_lipschitz: match
+      repe_steering_effectiveness: "7 of 10 keys match; 3 directional summaries near 1 by construction"
+      geometry_categories: "match except inter (fixed baseline draw)"
+  batchC:
+    date: 2026-11-19
+    library: 1ae4105
+    verdict: "No formula mismatch; 16 of 16 reproduced from a real forward pass with the released kernels or a standard library."
+    tasks:
+      geometry_intrinsic_dim: "match (<= 3e-8 vs DADApy compute_id_2NN); its _meta_ token cloud exceeded task_timeout on CPU (fixed: token_cloud auto)"
+      geometry_lid: "match (exact vs released mle_batch); lid_mean changed meaning with layerwise (fixed: layerwise default)"
+      geometry_cka: "match (debiased 1e-6, biased 1.5e-5)"
+      geometry_svd: match
+      geometry_matrix_entropy: "match (1e-7 vs Diff-eRank)"
+      geometry_hubness: "match (<= 7e-5); Llama-3 reserved rows are ranked (now a parameter)"
+      geometry_superposition_strength: "match (4e-7 vs the released all-pairs code); reserved rows kept (now a parameter)"
+      geometry_spectral: "match (1e-9 vs WeightWatcher 0.7.7 on BLME's module set)"
+      geometry_weight_norms: match
+      geometry_isoscore: "match (<= 1e-5 vs IsoScore 2.0.1)"
+      geometry_vendi_score: "match (exact vs vendi_score.score_X)"
+      geometry_magnitude: "match (exact vs magnipy); docs named the wrong scale grid (fixed)"
+      geometry_phd_dimension: "match (within 0.3-1.3 sd of GPTID across seeds)"
+      geometry_cknna: "match (exact vs platonic-rep)"
+      geometry_hsic: "match (6e-16; subsample reproduced)"
+      geometry_rsa: "match (exact); noisy at 200 tokens"
+

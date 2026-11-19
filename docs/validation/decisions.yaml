@@ -1,0 +1,155 @@
+# Design decisions for the evaluation tasks (read by scripts/metrics_doc.py into docs/METRICS.md).
+#
+# Rule used throughout (method-fidelity): the paper's or released code's protocol
+# is the default; an LLM adaptation is used only where the reference cannot apply,
+# and a documented rationale only where neither decides. Where several settings
+# are defensible and the evidence does not pick one, the choice is a parameter
+# with the reference as its default, and, when the alternative is cheap, every
+# run also records it as a _meta_ key so both can be compared without a rerun.
+#
+# Per entry: choice, parameter (config key or null), default, alternatives,
+# recorded (keys that carry the alternative in every run), why, evidence.
+
+conventions:
+  - choice: Sink rows in token clouds and pools
+    default: "Drop position 0 and every token whose hidden-state norm exceeds 10x its document's median token norm at any interior depth (TOKEN_POLICY exclude_sinks)."
+    why: "Massive-activation tokens carry most of the centred variance (gpt2 L6: 1% of rows hold 96% of it) and are a positional artefact, not content; non-LLM-origin metrics would otherwise measure them."
+  - choice: One point per sequence
+    default: "The last token of a 20-word window cut from each passage at a hashed offset; the same words for every model (points_readout: window). Whole passages are opt-in (points_readout: passage)."
+    why: "Identical text across tokenizers; the last-token state is the one whose next-token distribution is defined."
+  - choice: Massive activations at the last token of a window
+    default: "Kept (massive_points: keep), as the references keep every point; every one-point-per-sequence cloud records _meta_n_massive_points and _meta_massive_points_max_ratio. massive_points: drop removes those windows at every depth, using the token-cloud sink rule (norm > 10x the median last-token norm at a middle depth)."
+    why: "Rare but not absent: 1 of 979 windows on OLMo-1B (a window ending in '.', 54x the median) and on pythia-160m, 28 on SmolLM2-1.7B, 0 on gpt2, Llama-3.2, gemma-2/3/4, phi-2, Qwen2.5/3. One such point sets a cloud's extremal statistics: OLMo's mid_layer_max_persistence_h0_norm is 22.7 against ~1 on the other models."
+  - choice: Which state 'the last layer' is
+    default: "Tasks differ, and each records _meta_last_entry_is_block_output. HF's post-final-norm hidden_states[-1]: geometry_svd, the matrix_entropy headline, isoscore, magnitude, phd_dimension and cknna's last entry. The raw deepest block output: lid and intrinsic_dim (layerwise), vendi, cka, hsic, rsa and the per-layer matrix-entropy profile."
+    why: "The final norm changes values a lot (gpt2 effective rank 237 post-norm vs 596 pre-norm; Llama IsoScore 0.053 vs 0.0006), so the same key name on two tasks is not the same representation. Each task follows its reference's readout where one exists."
+  - choice: Attention kernel
+    default: "Eager whenever a co-run task needs attention weights (the study's full runs always are); recorded in the envelope as config.attn_implementation."
+    why: "bf16 eager and sdpa give different logits (gemma-4-E2B mean NLL 2.2434 vs 2.2407); fp32 is identical across kernels and transformers versions."
+
+tasks:
+  dynamics_interpolation:
+    - choice: Which context pairs are scored
+      parameter: num_pairs
+      default: "null: every distinct pair of the num_samples pool, canonical order"
+      alternatives: ["an integer: that many distinct pairs from the seeded sampler"]
+      recorded: [_meta_pair_selection, _meta_num_pairs_used, _meta_num_pairs_requested]
+      why: "The pair sample was the estimator's only noise: 200 of 1225 pairs had a seed-to-seed sd of ~0.09 (~7% of the gap) on gpt2, and the fixed seed-42 subset gave 1.150 against 1.315 for all pairs. All pairs cost < 5 min per model at 50 passages."
+  topology_betti_curve:
+    - choice: Radius at which beta_1 is read (hops on the kNN graph)
+      parameter: hop_radius
+      default: "2.0, the released topnn_framework read (Eirene minrad=1, maxrad=2, numrad=1)"
+      alternatives: ["1.0: H1 of the kNN graph's clique complex"]
+      recorded: [_meta_betti_1_curve_mean_hop1, _meta_betti_1_curve_hop1, _meta_hop_radius]
+      why: "Fidelity keeps the released read as the default, but on LLM last-token clouds at N = 1000 it is 0 or near 0 on every checkpoint checked (OLMo-1B 0 on all 16 layers, SmolLM2-1.7B 0.042, gpt2 0.083, pythia-160m 0), so the headline is nearly constant across models. At 1 hop beta_1 is 10-25 per layer. Naitzat et al.'s text calibrates eps* = 2.5 (5 hops), which differs from both."
+  geometry_collapse:
+    - choice: Blocks over which the Queipo-de-Llano valley is read
+      parameter: qdl_layers
+      default: "all: the minimum of the per-layer profile over every block"
+      alternatives: ["interior: blocks 1..L-2"]
+      recorded: [_meta_qdl_entropy_min_interior, _meta_qdl_entropy_min_interior_layer_frac, _meta_qdl_layers]
+      why: "The paper's compression valley is mid-depth; pythia-160m's all-block minimum is the final pre-norm block (0.266) while its mid-depth valley is 0.80, whereas gpt2's minimum is mid-depth."
+  dynamics_coe:
+    - choice: The state that ends each layer chain
+      parameter: chain_end
+      default: "final_norm: ln_f(h_L), as the release's inference.py reads HF hidden_states"
+      alternatives: ["block_output: the raw deepest block output"]
+      recorded: [_meta_coe_r_blockout, _meta_coe_c_blockout, _meta_chain_end]
+      why: "The release normalises by the first-to-last displacement, so a model whose last block leaves a large residual has coe_c dominated by the final norm's compression: smollm2-1.7b 1.64 at ln_f vs 0.074 at the block output (other models 0.08-0.36)."
+  dynamics_sharpness:
+    - choice: When the Hutchinson trace estimator stops
+      parameter: hutchinson_stop
+      default: "pyhessian: stop once the running mean changes by < hutchinson_tol (PyHessian trace(maxIter, tol))"
+      alternatives: ["rse: stop at a relative standard error <= hutchinson_rse_target (0.05) after hutchinson_min_probes (10); n_hutchinson stays the cap"]
+      recorded: [_meta_hutchinson_trace_rel_se, _meta_hutchinson_n_used, _meta_hutchinson_stop, _meta_hutchinson_pyhessian_n, _meta_hutchinson_trace_pyhessian_stop]
+      why: "PyHessian's rule does not control precision: phi-2 stopped at 29 probes with a 27% relative SE and pythia-160m hit the 100-probe cap at 38%, against 0.9-7% elsewhere. An RSE run reports PyHessian's stopping point on the same probe sequence."
+  geometry_intrinsic_dim:
+    - choice: Static (vocabulary embedding) or layerwise (per-layer point clouds) mode
+      parameter: layerwise
+      default: "true: TwoNN per layer on one point per sequence (lid_first/mid/last_layer)"
+      alternatives: ["false: the static vocabulary-embedding estimate (intrinsic_dimension)"]
+      recorded: []
+      why: "The headline keys exist only in layerwise mode, which is what the study runs; the static mode has no headline key and takes ~40 min on gpt2 on two CPU threads."
+    - choice: Whether the _meta_ token cloud runs
+      parameter: token_cloud
+      default: "auto: only when CUDA is available"
+      alternatives: ["true", "false"]
+      recorded: [_meta_token_cloud]
+      why: "The token cloud is a _meta_ diagnostic (TwoNN on 20000 token rows per layer): 66 s for the whole task on a GPU, but the CPU ball tree took over 42 min on gpt2 and the 600 s task_timeout discarded the headlines with it."
+  geometry_lid:
+    - choice: Layerwise or single-layer mode
+      parameter: layerwise
+      default: "true: every block output, the deepest the raw block output; lid_mean/std/max/median are the deepest layer's"
+      alternatives: ["false: HF's post-norm output only (lid_first_layer and lid_mid_layer absent)"]
+      recorded: [_meta_lid_mode]
+      why: "Ma et al. compute LID at every layer, and the study runs layerwise. In single-layer mode lid_mean reads the post-norm output instead, so the same key changed meaning with the flag (gpt2: 7.62 single-layer vs 21.75 layerwise)."
+  geometry_hubness:
+    - choice: Near-duplicate rows of the 32000-row draw
+      parameter: drop_near_duplicates
+      default: "false: ranked like every other emittable row"
+      alternatives: ["true: rows within near_duplicate_gap (1 - cos, default 1e-4) of another drawn row are dropped"]
+      recorded: [_meta_n_near_duplicate_rows, "_meta_without_near_duplicates_<key> (or _meta_with_near_duplicates_<key>)"]
+      why: "The emittable-row rule (id < len(tokenizer)) keeps untrained in-vocabulary rows: Llama-3's reserved tokens (290 rows within 1e-6 of another) and Qwen3's 1961 bitwise-identical never-emitted byte tokens. Dropping Llama's from the draw moves hubness_k50_skew 19.10 -> 26.19. But the nearest-neighbour gap is a continuum on other models (gemma-3: 3498 rows under 1e-4, 5144 under 1e-3) with no natural cut, so it is a parameter; the alternative costs a second ranking pass only on models that have near-duplicates."
+  geometry_superposition_strength:
+    - choice: Near-duplicate rows of the unembedding
+      parameter: drop_near_duplicates
+      default: "false: every emittable row, as the released overlap code"
+      alternatives: ["true: rows within near_duplicate_gap (1 - cos) of another row are dropped first"]
+      recorded: [_meta_near_duplicates_dropped, _meta_n_near_duplicate_rows]
+      why: "On Llama-3.2-1B the reserved rows move superposition_ratio_centered by -4.5% when removed. The search is O(V^2 d) over the whole vocabulary, so it is opt-in and not recorded by default."
+  geometry_magnitude:
+    - choice: Scales of the magnitude function
+      parameter: null
+      default: "magnipy's defaults: 30 evenly spaced scales on [0, t_conv], cosine distance; n_scales sets only the geometric ladder of the Euclidean _meta_ summary"
+      alternatives: []
+      recorded: []
+      why: "The reference library's protocol. The docs had said the headline used n_scales: 10 (blind review C, F2); a 10-point grid gives 175.0006 / 1.1005 instead of 175.3122 / 1.1087 on gpt2."
+  geometry_rsa:
+    - choice: Number of tokens in the RDMs
+      parameter: null
+      default: "200 tokens at np.linspace positions"
+      alternatives: []
+      recorded: []
+      why: "Open precision question for the resolvability study: over random 200-token subsets early_late is 0.213 +- 0.042 on gpt2 (BLME's fixed subset 0.154) and 0.254 +- 0.053 on pythia."
+  geometry_mahalanobis:
+    - choice: Unit of the fit / held-out split
+      parameter: null
+      default: "Whole source documents (article_id / document_id / doc_id) when the rows name them; single passages otherwise"
+      alternatives: ["passage-level seeded permutation (the earlier behaviour, still used when rows carry no source)"]
+      recorded: [_meta_split_unit, _meta_n_split_groups, _meta_split_groups_shared_max]
+      why: "A passage-level split held out WikiText passages whose ~14 sibling passages were in the Gaussian fit. On 8 models, keeping articles whole raised the ID distance per dimension 40-93% and lowered AUROC 3-19% (phi-2 0.924 -> 0.746, below gpt2), so the leak changed rankings. Not a free choice, hence no parameter."
+  geometry_prediction_alignment:
+    - choice: The control subtracted from the target-row cosine
+      parameter: null
+      default: "A deterministic frequency-matched within-document derangement"
+      alternatives: ["a uniform within-document derangement (seeded)"]
+      recorded: []
+      why: "BLME construct; the blind review reproduced the raw cosine exactly and found plausible alternative controls move the gpt2 headline across 0.0089-0.0118 (0.0107 as shipped). Kept; flagged as a protocol choice."
+  geometry_positional_decay:
+    - choice: Attention rows that are constant over the kept keys
+      parameter: null
+      default: "Scored rho = 0 and kept in the write-weighted mean"
+      alternatives: ["excluded"]
+      recorded: [_meta_n_flat_attn_rows]
+      why: "On pythia-160m sink heads drive many key probabilities to exactly 0 even in float64; excluding those rows moves the value by 1.1%; gpt2 has none."
+  geometry_correlation_dimension:
+    - choice: Where the correlation integral is evaluated
+      parameter: null
+      default: "At the sorted pair distances with C(d_(k)) = k/M, OLS of log C on log r in Du & Tanaka-Ishii's window 20/(N(N-1)) <= C <= 1/N"
+      alternatives: ["a radius grid or midpoints (+1-2.5%)", "strict < (+2.5%)"]
+      recorded: [_meta_correlation_dimension_under_resolved]
+      why: "The papers do not fix it; estimates exceed the Eckmann-Ruelle bound 2 log10 N at N <= 1000 and are flagged under-resolved."
+  repe_steering_effectiveness:
+    - choice: Directional summary keys (steering_sign_reversal, directional_consistency, directional_success_rate)
+      parameter: null
+      default: "Computed from projections onto the steering direction, which are positive by construction"
+      alternatives: []
+      recorded: []
+      why: "They sit near 1 by construction (1.0 on pythia-160m although the per-layer directional effect is negative at two layers): they check that the estimand is directional, not that steering works. Excluded from the companion study; read steering_concept_over_random and steering_semantic_effect instead."
+  geometry_categories:
+    - choice: Random-token baseline for inter-category similarity
+      parameter: null
+      default: "A fixed draw of 100 tokens, independent of the run seed"
+      alternatives: []
+      recorded: []
+      why: "Exploratory task; the draw sits in the upper tail of re-draws (gpt2 one-sided p = 0.018), shifting inter by +0.002-0.012."
