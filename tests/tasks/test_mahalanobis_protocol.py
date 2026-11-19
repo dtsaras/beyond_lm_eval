@@ -108,5 +108,45 @@ def test_extended_corpus_nests_and_starts_with_the_default_corpus():
         ext = _wikitext_passages_extended(n_val + 5)
     except (RuntimeError, ValueError) as e:  # pragma: no cover - environment dependent
         pytest.skip(f"WikiText unavailable: {e}")
-    assert ext[:n_val] == load_default_corpus(n_val)
+    assert [r["text"] for r in ext[:n_val]] == [r["text"] for r in load_default_corpus(n_val)]
+    # Each row names its article, numbered as the default corpus numbers them.
+    assert [r["article_id"] for r in ext[:n_val]] == [
+        f"validation:{r['article_id']}" for r in load_default_corpus(n_val, include_document_ids=True)]
+    assert all(r["article_id"].startswith("test:") for r in ext[n_val:])
     assert _wikitext_passages_extended(n_val + 2) == ext[:n_val + 2]
+
+
+def test_fit_and_score_never_share_an_article():
+    """A held-out ID text must not have sibling passages (same article) in the
+    fit set. The passage-level split held out WikiText passages whose ~14
+    siblings were in the fit: on 8 real models the ID distance per dimension
+    rose 40-93% and AUROC fell by up to 0.18 once articles were kept whole
+    (2026-11-19). The split is reported as derived _meta_ keys."""
+    cfg = {"num_samples": N_DOCS, "ood_strategy": "shuffle", "n_splits": 3,
+           "id_corpus": "dataset"}
+    data = [{"text": f"sample {i}", "article_id": i // 4} for i in range(N_DOCS)]
+    out = MahalanobisOODTask(cfg).evaluate(_Model(), _Tok(), data, cache=None)
+    assert out["_meta_split_unit"] == "article"
+    assert out["_meta_n_split_groups"] == N_DOCS // 4
+    assert out["_meta_split_groups_shared_max"] == 0
+    # Without source ids the split stays per passage, and says so.
+    plain = MahalanobisOODTask(cfg).evaluate(
+        _Model(), _Tok(), [{"text": f"sample {i}"} for i in range(N_DOCS)], cache=None)
+    assert plain["_meta_split_unit"] == "passage" and plain["_meta_split_groups_shared_max"] is None
+
+
+def test_split_rows_keeps_documents_whole_and_matches_the_old_permutation_without_ids():
+    from blme.tasks.geometry.mahalanobis import _row_groups, _split_rows
+    sizes = [5, 7, 3, 9, 6]
+    rows = [{"text": "x", "article_id": a} for a, k in enumerate(sizes) for _ in range(k)]
+    groups = _row_groups(rows, len(rows))
+    for seed in range(20):
+        fi, si = _split_rows(groups, len(rows), 15, np.random.default_rng(seed))
+        assert len(fi) >= 15 and len(si) >= 2
+        assert not set(groups[fi]) & set(groups[si])
+        assert sorted(np.concatenate([fi, si]).tolist()) == list(range(len(rows)))
+    assert _row_groups([{"text": "x"}] * 30, 30) is None
+    assert _row_groups([{"text": "x", "article_id": 1}] * 30, 30) is None   # one document
+    fi, si = _split_rows(None, 30, 15, np.random.default_rng(7))
+    perm = np.random.default_rng(7).permutation(30)
+    assert fi.tolist() == sorted(perm[:15].tolist()) and si.tolist() == sorted(perm[15:].tolist())

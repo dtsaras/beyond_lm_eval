@@ -91,19 +91,71 @@ def _wikitext_passages_extended(n: int) -> list:
     then test, then train, each in its own ``nested_order`` with the same
     filter and stripping, so draws nest and the first passages ARE the default
     corpus. Raises ``ValueError`` if the three splits hold fewer than ``n``.
+
+    Each row carries ``article_id`` (``"<split>:<article>"``), so the fit and
+    held-out halves can be split by article.
     """
-    from ...cache import (MIN_PASSAGE_CHARS, WIKITEXT_DATASET, _load_split,  # noqa: F401
-                          _stripped_texts, nested_order)
+    from ...cache import WIKITEXT_DATASET, _load_split, article_records, nested_order
     path, name, _ = WIKITEXT_DATASET
     out = []
     for split in _SPLITS:
         if len(out) >= n:
             break
-        passages = _stripped_texts(_load_split(path, name, split), "text")
-        out.extend({"text": passages[i]} for i in nested_order(len(passages))[:n - len(out)])
+        records = article_records(_load_split(path, name, split))
+        out.extend({"text": records[i]["text"], "article_id": f"{split}:{records[i]['article_id']}"}
+                   for i in nested_order(len(records))[:n - len(out)])
     if len(out) < n:
         raise ValueError(f"{n} passages requested, WikiText-103 holds {len(out)}")
     return out
+
+
+_GROUP_KEYS = ("article_id", "document_id", "doc_id")
+
+
+def _row_groups(rows, n: int):
+    """The source document of each ID row, or None when the rows do not name one.
+
+    Rows are ``dataset_id`` in the order their pooled vectors were stacked;
+    each must carry one of ``_GROUP_KEYS`` and at least two documents must
+    occur, otherwise the split falls back to single passages.
+    """
+    if len(rows) != n:
+        return None
+    ids = []
+    for r in rows:
+        g = None
+        if isinstance(r, dict):
+            for key in _GROUP_KEYS:
+                if r.get(key) is not None:
+                    g = str(r[key])
+                    break
+        if g is None:
+            return None
+        ids.append(g)
+    return np.asarray(ids) if len(set(ids)) >= 2 else None
+
+
+def _split_rows(groups, n: int, fit_n: int, rng):
+    """Fit and held-out row indices for one split.
+
+    Without ``groups``: a seeded permutation, the first ``fit_n`` rows fit.
+    With ``groups``: documents are drawn in a seeded order and whole documents
+    join the fit set until it holds at least ``fit_n`` rows, leaving at least
+    two rows held out, so no document is on both sides.
+    """
+    if groups is None:
+        perm = rng.permutation(n)
+        return np.sort(perm[:fit_n]), np.sort(perm[fit_n:])
+    fit = []
+    for g in rng.permutation(np.unique(groups)):
+        if len(fit) >= fit_n:
+            break
+        members = np.flatnonzero(groups == g).tolist()
+        if n - len(fit) - len(members) < 2:
+            continue
+        fit.extend(members)
+    fit = np.sort(np.asarray(fit, dtype=np.int64))
+    return fit, np.setdiff1d(np.arange(n), fit)
 
 
 def _default_id_dataset(num_samples: int):
@@ -304,8 +356,9 @@ class MahalanobisOODTask(DiagnosticTask):
         "labels. The out-of-distribution set is BLME's own: each held-out text with its tokens "
         "shuffled in place, so the task measures how far the model moves a text's "
         "representation when word order is destroyed, at matched vocabulary. The covariance is "
-        "Ledoit-Wolf, fitted on 1000 texts (2000 drawn from WikiText-103 in a nested order, "
-        "half held out), averaged over 5 random splits. Position 0 and massive rows are left "
+        "Ledoit-Wolf, fitted on about 1000 texts (2000 drawn from WikiText-103 in a nested "
+        "order; whole articles go to the fit or the held-out half, so no held-out text has a "
+        "sibling passage in the fit), averaged over 5 random splits. Position 0 and massive rows are left "
         "out of every mean (sink policy). Raw distances grow with sqrt(d) when n_fit < d, so "
         "AUROC, the distance ratio and the dist^2/d forms are the cross-model comparable "
         "outputs."
@@ -437,9 +490,12 @@ class MahalanobisOODTask(DiagnosticTask):
         n_id = X_id.shape[0]
         fit_n = max(2, min(n_id - 2, max(5, n_id // 2)))
         _perm_rng = np.random.default_rng(int(self.config.get("seed", 42)))
-        _perm = _perm_rng.permutation(n_id)
-        _fit_idx = np.sort(_perm[:fit_n])
-        _score_idx = np.sort(_perm[fit_n:])
+        # Passages of one article share topic and wording, so a held-out text
+        # whose siblings are in the fit set scores as in-distribution. Whole
+        # articles therefore go to one side when the rows name their source
+        # (tests/tasks/test_mahalanobis_protocol.py::test_fit_and_score_never_share_an_article).
+        _groups = _row_groups(dataset_id, n_id)
+        _fit_idx, _score_idx = _split_rows(_groups, n_id, fit_n, _perm_rng)
         X_id_fit = X_id[_fit_idx]
         X_id_score = X_id[_score_idx]
         # Pairing: row i of X_ood is the shuffle of row i of X_id.
@@ -460,12 +516,17 @@ class MahalanobisOODTask(DiagnosticTask):
         _diag = {}
         _acc_id, _acc_ood = [], []
         _per_split_auroc = []
+        _shared_groups = []
+        _fit_sizes = []
         for _k in range(_n_splits):
             if _k == 0:
                 _fi, _si = _fit_idx, _score_idx
             else:
-                _pk = _rng_split.permutation(n_id)
-                _fi, _si = np.sort(_pk[:fit_n]), np.sort(_pk[fit_n:])
+                _fi, _si = _split_rows(_groups, n_id, fit_n, _rng_split)
+            _fit_sizes.append(int(len(_fi)))
+            if _groups is not None:
+                # Derived, not declared: articles on both sides of this split.
+                _shared_groups.append(len(set(_groups[_fi]) & set(_groups[_si])))
             # ONE Ledoit-Wolf fit per split scores both arms (the fit is
             # deterministic, so this is what two separate fits returned).
             _ood_k = X_ood_full[_si] if _paired_ood else X_ood
@@ -523,6 +584,10 @@ class MahalanobisOODTask(DiagnosticTask):
             "_meta_n_id_score": int(X_id_score.shape[0]),
             "_meta_n_splits": int(_n_splits),
             "_meta_n_ood_score": int(X_ood.shape[0]),
+            "_meta_split_unit": "article" if _groups is not None else "passage",
+            "_meta_n_split_groups": (int(len(np.unique(_groups))) if _groups is not None else None),
+            "_meta_split_groups_shared_max": (max(_shared_groups) if _shared_groups else None),
+            "_meta_n_id_fit_mean": float(np.mean(_fit_sizes)),
         }
 
         # dist^2/d: dist^2 ~ chi2(d) under a correctly specified Gaussian, so

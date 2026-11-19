@@ -80,7 +80,7 @@ quality.
 
 ## 4. Latent Mahalanobis OOD Distance
 * **What are we measuring**: How far Out-Of-Distribution (OOD) a sample is, accounting for the natural covariance of the in-distribution manifold.
-* **How are we measuring**: Each text's mean-pooled final-layer state (position 0 and massive-activation rows left out of the mean) is scored by its Mahalanobis distance to a single Gaussian fitted on other texts, with a Ledoit-Wolf covariance. The out-of-distribution set is each held-out text with its tokens shuffled in place (`ood_strategy: shuffle`). `num_samples: 2000` WikiText-103 texts are drawn, half held out, and results are averaged over 5 random splits.
+* **How are we measuring**: Each text's mean-pooled final-layer state (position 0 and massive-activation rows left out of the mean) is scored by its Mahalanobis distance to a single Gaussian fitted on other texts, with a Ledoit-Wolf covariance. The out-of-distribution set is each held-out text with its tokens shuffled in place (`ood_strategy: shuffle`). `num_samples: 2000` WikiText-103 texts are drawn and about half are held out, with whole articles assigned to one side so that no held-out text shares an article with the fit set; results are averaged over 5 random splits.
 * **Hypothesis**: Simple Euclidean distance is flawed in highly anisotropic spaces. Mahalanobis distance correctly scales by the principal axes of variance, providing a true measure of semantic anomaly.
 * **Citation/Paper**: `Lee, K., Lee, K., Lee, H., & Shin, J. (2018). A simple unified framework for detecting out-of-distribution samples and adversarial attacks.` [ArXiv: 1807.03888]
 * **File & Function**: `src/blme/tasks/geometry/mahalanobis.py` -> `MahalanobisOODTask`

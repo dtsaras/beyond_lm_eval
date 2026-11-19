@@ -662,6 +662,25 @@ def _stripped_texts(rows, field: str) -> List[str]:
     return out
 
 
+def article_records(rows, field: str = "text") -> List[dict]:
+    """``[{"text", "article_id"}]`` for the rows :func:`_stripped_texts` keeps.
+
+    WikiText marks articles with one '=' at either end and subsections with
+    two or more, sometimes separated by spaces; ``article_id`` counts article
+    headings from 0 (-1 before the first heading).
+    """
+    records = []
+    article = -1
+    for row in rows:
+        text = (row.get(field) or "").strip() if isinstance(row, dict) else ""
+        heading = text.strip("= ")
+        if heading and text == "= " + heading + " =":
+            article += 1
+        if len(text) >= MIN_PASSAGE_CHARS:
+            records.append({"text": text, "article_id": article})
+    return records
+
+
 def _wikitext_passages() -> List[str]:
     """Stripped WikiText-103 validation passages of >= MIN_PASSAGE_CHARS characters."""
     path, name, split = WIKITEXT_DATASET
@@ -700,18 +719,7 @@ def load_default_corpus(num_samples: int, diverse: bool = True, *, include_docum
         raise ValueError(f"num_samples must be >= 0, got {num_samples}")
     if include_document_ids:
         path, name, split = WIKITEXT_DATASET
-        records = []
-        # WikiText marks articles with one '=' at either end and subsections
-        # with two or more, sometimes separated by spaces.
-        article = -1
-        for row in _load_split(path, name, split):
-            text = (row.get("text") or "").strip()
-            heading = text.strip("= ")
-            if heading and text == "= " + heading + " =":
-                article += 1
-            if len(text) >= MIN_PASSAGE_CHARS:
-                records.append({"text": text, "article_id": article})
-        passages = records
+        passages = article_records(_load_split(path, name, split))
     else:
         passages = _wikitext_passages()
     if n > len(passages):
