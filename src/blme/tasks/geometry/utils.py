@@ -190,8 +190,11 @@ def safe_norm(x) -> float:
     nonzero gradients of -5.000000097707407e-25 reported norm 0.0 and turned
     SAM sharpness into NaN (adversarial review round 3, 2026-09-04).
 
-    Factoring out the largest magnitude first only shifts exponents, so it is
-    exact, and it brings every coordinate into [-1, 1] before the squaring.
+    Factoring out the largest magnitude first brings every coordinate into
+    [-1, 1] before the squaring. The squares are summed in float64: a float32
+    ``norm()`` accumulates in float32, which is 4e-4 off at 7M coordinates and
+    3e-3 at 50M (one transformer block's gradient), and that error grows with
+    model size (tests/test_safe_norm_accumulation.py).
     """
     import torch as _t
     if not isinstance(x, _t.Tensor):
@@ -199,7 +202,8 @@ def safe_norm(x) -> float:
     m = x.detach().abs().max()
     if not bool(_t.isfinite(m)) or float(m) == 0.0:
         return 0.0 if float(m) == 0.0 else float("nan")
-    return float(m) * float((x.detach() / m).norm())
+    u = x.detach() / m
+    return float(m) * float(_t.sqrt((u * u).sum(dtype=_t.float64)))
 
 
 def safe_unit_rows(X, eps_zero: bool = True):
