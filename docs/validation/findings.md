@@ -1,3 +1,14 @@
+### 19 November 2026: correctness review
+
+**Mahalanobis OOD leaked articles across its fit/held-out split.** On eight checkpoints, keeping articles whole raised the in-distribution distance per dimension by 40–93% and lowered AUROC by 3–19%. The stock/grouped rank correlations of the confirmatory keys were 0.88–1.00, so the leak changed model rankings. A failing MRRR eigensolver also dropped one of five splits on SmolLM3-3B. Both are fixed. [Findings, measurements and raw paths](https://github.com/dtsaras/beyond_benchmarks/blob/main/verification/population_screen_2026-11-19/FINDINGS.md)
+
+**A blind re-implementation found no formula mismatch in 11 paper-core tasks.** The reviewer did not read BLME's task code or tests. The tasks are collapse, correlation dimension, MP bulk, neural collapse, Schatten, unembedding, tokenizer efficiency, prediction alignment, positional decay, perplexity and Betti curve. Each was rerun from its paper or released code on GPT-2 and Pythia-160M. The review raised validity questions, which were left for decision:
+- `betti_1_curve_mean` is nearly constant at the study's N;
+- prediction alignment's control is a design choice;
+- `qdl_entropy_min` mixes a mid-depth valley with a final-layer effect.
+
+**Transformers versions agree exactly on GPT-2** for every covered task, on CPU and GPU. 5.2.0 differs only on the random-weight test model, through GPT-2's attention scaling. Gemma-4-E2B's one-task runs differ between 5.10.2 and 5.22+ because the default attention kernel changes; float32 logits are identical. A full study run uses eager attention on every stack. [Cross-stack report](https://github.com/dtsaras/beyond_benchmarks/blob/main/verification/xstack_golden_2026-11-19/README.md)
+
 ### 19 November 2026
 
 **All 109 registered tasks have current numerical receipts.** The same 801 reference and regression cases passed on Transformers 5.2.0, 5.10.2, 5.22.2 and 5.23.0. The complete CPU collection on both project stacks had 4,444 passes, 148 skips, two expected failures and zero unexpected failures. BERT’s nonlinear output-head rejection and Pythia’s active unembedding were checked explicitly. The readout ledger distinguishes released estimators, equation checks and operational proxies. [Four-version receipt](https://github.com/dtsaras/beyond_lm_eval/blob/main/docs/validation/receipt-2026-11-19-verification.json) · [Full-suite accounting](https://github.com/dtsaras/beyond_benchmarks/blob/main/verification/runner_readiness_2026-11-19/test_summary.json)

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Mahalanobis OOD keeps whole articles on one side of each fit/held-out split. The passage-level split held out WikiText passages whose sibling passages from the same article were in the Gaussian fit. On eight checkpoints, keeping articles whole raised the in-distribution distance per dimension by 40–93% and lowered AUROC by 3–19%. Phi-2 fell from 0.924 to 0.746, below GPT-2, so the leak changed model rankings. The extended corpus rows carry `article_id`. `_meta_split_unit`, `_meta_n_split_groups` and `_meta_split_groups_shared_max` record the split. Rows without source IDs keep the earlier seeded permutation exactly.
+- Mahalanobis OOD no longer drops a split when LAPACK's MRRR eigensolver fails on the shrunk covariance. At n_fit < d that covariance has d − n_fit equal eigenvalues, and SmolLM3-3B raised `LinAlgError("Internal Error.")`. The same covariance is inverted with the divide-and-conquer solver. `_meta_n_precision_fallbacks` and `_meta_n_failed_splits` are derived. Fits that succeed are unchanged.
+- Weight spectral analysis counts modules whose analysis raised in `_meta_n_modules_failed`. Before, they were left out of the averages with only an INFO log.
+- The results envelope records the attention kernel the tasks ran with in `config.attn_implementation`. On Gemma-4-E2B, bf16 eager and sdpa differ, with mean NLL 2.2434 against 2.2407. Transformers 5.10.2 and 5.22+ choose different defaults, and `evaluate()` switches the model to eager when a co-run task needs attention weights.
+- Test fixes for a fresh install with the newest packages allowed by the pins:
+  - pytest 9.2 rejects `approx` on nested values;
+  - the GUDHI-dependent topology lifts are skipped without GUDHI;
+  - the magnitude cache test's documents no longer share a 20-word window. The duplicate point made magnipy's convergence target unreachable on every stack.
+
 - Strided bits per byte and character can recover the exact denominator when every token after an inserted BOS is scored and its decoded suffix exactly reproduces the source text.
 
 - Representation sensitivity differentiates a declared final tanh softcap and checks its reconstructed logits against the model. Gemma-4 perturbation growth uses the original token IDs for per-layer embeddings during both forwards.
