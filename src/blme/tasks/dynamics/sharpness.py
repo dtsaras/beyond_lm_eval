@@ -251,7 +251,8 @@ def _sam_sharpness(compute_loss, params, sam_rho: float,
 
 
 def _asam_sharpness(compute_loss, params, rho: float,
-                    baseline_loss: float) -> Tuple[float, float, float]:
+                    baseline_loss: float, eta: float = 0.0,
+                    normalize=None) -> Tuple[float, float, float]:
     """Adaptive sharpness (Kwon et al. 2021, ASAM, arXiv:2102.11600) with the
     element-wise operator T_w = |w|: ``L(w + eps*) - L(w)`` with
     ``eps* = rho * T_w^2 g / ||T_w g||_2``, i.e. a rho-ball in the coordinates
@@ -259,14 +260,19 @@ def _asam_sharpness(compute_loss, params, rho: float,
     unchanged and scales eps* with w, so the perturbed function, and the value,
     are unchanged (plain SAM's fixed-radius ball is not; Dinh et al. 2017).
 
-    T_w = |w| on every parameter, biases included, and no +eta: the released
-    ASAM code adds eta = 0.01 to |w| of weights only, which breaks the exact
-    invariance this twin exists for. Parameters are restored exactly.
-    Returns ``(sharpness, perturbed_loss, ||T_w g||)``; NaNs when T_w g = 0.
+    Defaults: T_w = |w| on every parameter, biases included, and no +eta,
+    which is exactly invariant. ``eta`` and ``normalize`` give the released
+    asam.py rule instead (``eta=0.01``; ``normalize[i]`` False leaves that
+    tensor unnormalised, T_w = 1, as asam.py does for tensors not named
+    "weight"); that rule is not scale-invariant. Parameters are restored
+    exactly. Returns ``(sharpness, perturbed_loss, ||T_w g||)``; NaNs when
+    T_w g = 0.
     """
     loss = compute_loss()
     grads = torch.autograd.grad(loss, params, create_graph=False)
-    tw = [p.detach().abs() for p in params]
+    tw = [((p.detach().abs() + eta) if eta else p.detach().abs())
+          if (normalize is None or normalize[i]) else torch.ones_like(p.detach())
+          for i, p in enumerate(params)]
     twg = [t * g.detach() for t, g in zip(tw, grads)]
     norm = _safe_norm(_flatten_grads(twg))
     if not norm > 0:
@@ -456,6 +462,14 @@ class LossSharpnessTask(DiagnosticTask):
         # The adaptive twin uses the same radius by default, so it differs from
         # sam_sharpness only by the T_w = |w| normaliser.
         asam_rho = float(self.config.get("asam_rho", sam_rho))
+        # "invariant" (default): T_w = |w| on every parameter, exactly invariant
+        # to function-preserving rescales. "release": the released asam.py rule,
+        # T_w = |w| + asam_eta on tensors named "weight" and T_w = 1 elsewhere.
+        # The other is recorded as _meta_asam_sharpness_<other>.
+        asam_variant = str(self.config.get("asam_variant", "invariant"))
+        if asam_variant not in ("invariant", "release"):
+            return {"error": f"dynamics_sharpness: asam_variant must be 'invariant' or 'release', got {asam_variant!r}"}
+        asam_eta = float(self.config.get("asam_eta", 0.01))
         num_samples = self.config.get("num_samples", 4)
         seed = int(self.config.get("seed", 42))
 
@@ -578,8 +592,13 @@ class LossSharpnessTask(DiagnosticTask):
             # 3b. Adaptive (scale-invariant) SAM on the same scope: the
             # normalised version of sam_sharpness
             # (tests/tasks/invariance/test_dynamics_sharpness.py).
-            asam_sharpness, asam_perturbed, _ = _asam_sharpness(
-                compute_loss, params, asam_rho, baseline_loss)
+            _ids = {id(q) for q in params}
+            _weight = {id(q): ("weight" in n) for n, q in model.named_parameters() if id(q) in _ids}
+            _release = dict(eta=asam_eta, normalize=[_weight.get(id(q), True) for q in params])
+            _inv = _asam_sharpness(compute_loss, params, asam_rho, baseline_loss)
+            _rel = _asam_sharpness(compute_loss, params, asam_rho, baseline_loss, **_release)
+            (asam_sharpness, asam_perturbed, _), (_asam_other, _, _) = (
+                (_inv, _rel) if asam_variant == "invariant" else (_rel, _inv))
 
             # 4. Critical sharpness: largest stable descent step along the
             # gradient; lambda_c = 2/eta* (edge of stability).
@@ -633,6 +652,8 @@ class LossSharpnessTask(DiagnosticTask):
             "asam_sharpness": asam_sharpness,
             "_meta_asam_perturbed_loss": asam_perturbed,
             "_meta_asam_rho": asam_rho,
+            "_meta_asam_variant": asam_variant,
+            f"_meta_asam_sharpness_{'release' if asam_variant == 'invariant' else 'invariant'}": _asam_other,
             "critical_step_size": critical_step,
             "critical_sharpness": critical_sharpness,
             "sam_rho": sam_rho,

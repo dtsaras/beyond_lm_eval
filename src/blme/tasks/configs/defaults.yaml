@@ -330,6 +330,11 @@ dynamics_sharpness:
   n_power_iter: 100
   power_iter_tol: 0.001
   sam_rho: 0.05
+  # ASAM normaliser: invariant (T_w = |w| on every parameter, exactly
+  # scale-invariant) or release (asam.py: |w| + asam_eta on tensors named
+  # "weight", 1 elsewhere). The other is recorded as _meta_asam_sharpness_<other>.
+  asam_variant: invariant
+  asam_eta: 0.01
   num_samples: 4
 
 dynamics_gradient_flow:
