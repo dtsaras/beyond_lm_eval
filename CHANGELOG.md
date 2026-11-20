@@ -13,6 +13,7 @@ One precision defect in `geometry_cka`, found by the study sweep: `_meta_max_adj
   - **Affected keys:** `early_late_cka`, `min_adjacent_cka`, `min_offdiag_cka` and their `_meta_` summaries. The debiased twins were float64 throughout and are unchanged; the CPU path is unchanged.
   - **New `_meta_max_abs_self_cka_minus_one`:** the matrix diagonal, which passes through the cached norms; about 1e-16 on the GPU and 0 on the CPU.
   - **Why the tests missed it:** `tests/test_gpu_linalg.py` called `_linear_cka` without cached norms, and the receipts hid CUDA. The new GPU tests drive `evaluate()`.
+- **Receipts:** `2026-11-20-v023` covers all 109 tasks, CPU only, on four Transformers stacks. It ran 979 cases per stack: 0 failures, and 8 skips, the GPU tests. `2026-11-20-cka-gpu` covers `geometry_cka` with a GPU visible, so its `evaluate()` parity cases take the study's path: 20 cases per stack, all passed.
 
 ## 0.2.2 — 2026-11-20
 

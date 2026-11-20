@@ -21,10 +21,78 @@ The primary categories count each task once. Published-value tests also occur in
 
 | Dated receipt | Transformers | Passed | Failed | Errors | Skipped |
 |---|---|---:|---:|---:|---:|
-| [2026-11-20-gpu-linalg](validation/receipt-2026-11-20-gpu-linalg.json) | 5.2.0 | 967 | 0 | 0 | 0 |
-| [2026-11-20-gpu-linalg](validation/receipt-2026-11-20-gpu-linalg.json) | 5.10.2 | 967 | 0 | 0 | 0 |
-| [2026-11-20-gpu-linalg](validation/receipt-2026-11-20-gpu-linalg.json) | 5.22.2 | 967 | 0 | 0 | 0 |
-| [2026-11-20-gpu-linalg](validation/receipt-2026-11-20-gpu-linalg.json) | 5.23.0 | 967 | 0 | 0 | 0 |
+| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.2.0 | 20 | 0 | 0 | 0 |
+| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.10.2 | 20 | 0 | 0 | 0 |
+| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.22.2 | 20 | 0 | 0 | 0 |
+| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.23.0 | 20 | 0 | 0 | 0 |
+| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.2.0 | 971 | 0 | 0 | 8 |
+| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.10.2 | 971 | 0 | 0 | 8 |
+| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.22.2 | 971 | 0 | 0 | 8 |
+| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.23.0 | 971 | 0 | 0 | 8 |
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
 
 Counts above are unique executed cases per run. Row counts below are *passed / linked cases* per stack. Some tests serve multiple metrics. These are selected CPU numerical and reference tests. Whole-suite testing, architecture coverage, document reliability, and published-result reproduction each require their own evidence.
 
@@ -141,7 +209,7 @@ Task links open the implementation. Numbered links open the test files. The mach
 |---|---|---:|---:|---:|---:|---|
 | [geometry_alpha_req](../src/blme/tasks/geometry/alpha_req.py) [1](../tests/tasks/parity/test_alpha_req_parity.py)<br>parity-ready | Released estimator or component executed | 13/13 | 13/13 | 13/13 | 13/13 | reptrix@dbf53c5: spectrum, fit, RankMe ≤1e-9, via evaluate(). Fixed spectral fit window and last-token cloud define this use of alpha-ReQ. **Next.** Vary the spectral fit window and document budget on the same checkpoints. |
 | [geometry_categories](../src/blme/tasks/geometry/categories.py) [1](../tests/tasks/test_comprehensive_parity.py)<br>proxy-only | Operational proxy or study-defined diagnostic | 1/1 | 1/1 | 1/1 | 1/1 | Within-category distances and retrieval statistics use curated single-token lists. Tokenization and the choice of categories govern what generalizes. **Next.** Repeat with held-out categories and multi-token forms across tokenizers. |
-| [geometry_cka](../src/blme/tasks/geometry/cka.py) [1](../tests/tasks/parity/test_cka_hsic_demo_parity.py)<br>parity-ready | Released estimator or component executed | 4/4 | 4/4 | 4/4 | 4/4 | Biased and debiased CKA are checked against the original Demo.ipynb on the same observations. Token sample, centering, layer convention and finite-sample baseline govern comparisons. A displacement ratio derived from CKA missed its held-out-lab improvement rule on archived measurements. **Next.** Check out-of-lab incremental value with finite-sample controls and independent text draws. |
+| [geometry_cka](../src/blme/tasks/geometry/cka.py) [1](../tests/tasks/parity/test_cka_hsic_demo_parity.py) [2](../tests/test_gpu_linalg.py)<br>parity-ready | Released estimator or component executed | 8/8 | 8/8 | 8/8 | 8/8 | Biased and debiased CKA are checked against the original Demo.ipynb on the same observations. Token sample, centering, layer convention and finite-sample baseline govern comparisons. The receipt runs with one GPU visible, so evaluate() takes the GPU path the study runs; the CPU path is checked by forcing BLME_CPU_LINALG. A displacement ratio derived from CKA missed its held-out-lab improvement rule on archived measurements. **Next.** Check out-of-lab incremental value with finite-sample controls and independent text draws. |
 | [geometry_cknna](../src/blme/tasks/geometry/cknna.py) [1](../tests/tasks/parity/test_cknna_parity.py)<br>parity-ready | Release transcription, recorded output or reimplementation | 12/12 | 12/12 | 12/12 | 12/12 | Mutual neighbourhood kernel is transcribed from platonic-rep with official fixture values. Within-model across-depth usage and the selected neighbourhood size are additional protocol decisions. **Next.** Vary neighbourhood size and compare the across-depth use with the released cross-model use. |
 | [geometry_collapse](../src/blme/tasks/geometry/collapse.py) [1](../tests/tasks/test_comprehensive_parity.py) [2](../tests/tasks/test_reference_parity_formulas.py) [3](../tests/tasks/test_collapse_qdl_layers.py)<br>refined-adaptation | Equation, analytic anchor or controlled recomputation | 3/3 | 3/3 | 3/3 | 3/3 | Roy–Vetterli effective rank uses normalized singular values. Loss of numerical rank does not identify its semantic cause. **Next.** Test whether induced rank loss changes a separately measured behavioural outcome. |
 | [geometry_contextualization](../src/blme/tasks/geometry/contextualization.py) [1](../tests/tasks/parity/test_contextualization_mev_baselines.py) [2](../tests/tasks/test_reference_parity_formulas.py)<br>refined-adaptation | Independent implementation or scientific library | 8/8 | 8/8 | 8/8 | 8/8 | Shared pools pin the MEV and anisotropy conventions using sklearn PCA and TruncatedSVD. A full run of the original contextual extraction pipeline on identical sentences is outstanding. **Next.** Run the original contextual extraction pipeline on exactly the same sentences and token pools. |
