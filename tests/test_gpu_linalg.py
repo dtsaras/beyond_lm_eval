@@ -98,6 +98,69 @@ def test_linear_cka_gpu_path_is_float64_exact():
     assert abs(cpu32 - exact) >= abs(gpu - exact)
 
 
+
+def _massive_cloud(n=1500, d=1024, seed=5):
+    """Centred token cloud with two massive coordinates (Sun et al. 2024 scale)."""
+    g = torch.Generator().manual_seed(seed)
+    X = torch.randn(n, d, generator=g)
+    X[:, :2] *= 120.0
+    return X - X.mean(0)
+
+
+@cuda
+def test_cached_norms_share_the_gpu_numerator_arithmetic():
+    """evaluate() caches ||X^T X||_F per layer and passes it to _linear_cka; on the
+    GPU the numerator is float64, so the cached norm must be too. A float32 norm
+    there put CKA(X, X) up to 1e-2 above 1 on 12-34B models (BLME 0.2.1-0.2.2)."""
+    from blme.tasks.geometry.cka import _linear_cka, _max_relative_gram_norm
+    X = _massive_cloud().cuda()
+    nx = _max_relative_gram_norm(X)
+    assert abs(_linear_cka(X, X, norm_x=nx, norm_y=nx, centered=True) - 1.0) < 1e-12
+    Y = X + 0.5 * torch.randn_like(X)
+    exact = _linear_cka(X.double().cpu(), Y.double().cpu(), centered=True)
+    got = _linear_cka(X, Y, norm_x=nx, norm_y=_max_relative_gram_norm(Y), centered=True)
+    assert abs(got - exact) / exact < 1e-12
+
+
+def _massive_states(n_docs=24, T=40, d=384, n_layers=4, seed=6):
+    g = torch.Generator().manual_seed(seed)
+    base = [torch.randn(T, d, generator=g) for _ in range(n_docs)]
+    states = {}
+    for layer in range(n_layers):
+        docs = []
+        for x in base:
+            y = x + 0.3 * layer * torch.randn(T, d, generator=g)
+            y[:, :2] *= 120.0
+            docs.append(y)
+        states[layer] = docs
+    return states
+
+
+@cuda
+def test_cka_evaluate_self_similarity_is_one_on_the_gpu():
+    """The real evaluate(): the derived flag reads the matrix diagonal, which goes
+    through the cached norms, so it is ~1e-16 only if they match the numerator."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from invariance.driver import run_task_on_states
+    r = run_task_on_states("geometry_cka", _massive_states())
+    assert r["_meta_linalg_device"] == "cuda"
+    assert r["_meta_max_abs_self_cka_minus_one"] < 1e-12
+    assert r["min_adjacent_cka"] <= 1.0 and r["_meta_max_adjacent_cka"] <= 1.0 + 1e-12
+
+
+def test_cka_evaluate_self_similarity_is_one_on_the_cpu(monkeypatch):
+    """The CPU path is float32 throughout, numerator and norms alike: exactly 1."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from invariance.driver import run_task_on_states
+    monkeypatch.setenv("BLME_CPU_LINALG", "1")
+    r = run_task_on_states("geometry_cka", _massive_states())
+    assert r["_meta_linalg_device"] == "cpu"
+    assert r["_meta_max_abs_self_cka_minus_one"] == 0.0
+
 def test_eigvalsh_external_helper_round_trip(tmp_path):
     """The helper protocol: (n, n) float64 .npy in, n float64 eigenvalues out."""
     helper = tmp_path / "helper.py"

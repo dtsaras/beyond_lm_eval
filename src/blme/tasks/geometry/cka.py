@@ -162,7 +162,14 @@ def _center_layer(X: torch.Tensor):
 
 
 def _max_relative_gram_norm(X: torch.Tensor) -> float:
-    """||X^T X||_F in units of X's largest entry (what ``_linear_cka`` expects)."""
+    """||X^T X||_F in units of X's largest entry (what ``_linear_cka`` expects).
+
+    Same arithmetic as ``_linear_cka``'s numerator: float64 on the GPU, float32
+    on the CPU. A float32 norm under a float64 numerator put CKA(X, X) up to
+    1e-2 above 1 on 12-34B models (test_gpu_linalg.py::test_cached_norms_*).
+    """
+    if X.is_cuda:
+        X = X.double()
     _Xn = X / X.abs().amax().clamp_min(torch.finfo(X.dtype).tiny)
     return torch.norm(_Xn.t() @ _Xn, p="fro").item()
 
@@ -237,7 +244,6 @@ class CKATask(DiagnosticTask):
 
         logger.info("  Centering activations...")
         centered_acts = {}
-        norms = {}  # ||X^T X||_F, max-relative
         _n_f64_centered = 0
         _rows_meta = None
         for idx in tqdm(layers, desc="Centering"):
@@ -245,7 +251,6 @@ class CKATask(DiagnosticTask):
             X, _f64 = _center_layer(X)
             _n_f64_centered += int(_f64)
             centered_acts[idx] = X
-            norms[idx] = _max_relative_gram_norm(X)
 
         # The pair loop is one D x D GEMM per layer pair: on the GPU when the
         # centred layers fit (same float32 arithmetic; only reduction order
@@ -262,6 +267,9 @@ class CKATask(DiagnosticTask):
                     torch.cuda.empty_cache()
                 except Exception:
                     pass
+        # ||X^T X||_F per layer, on the device the pair loop uses, so numerator
+        # and denominators share one arithmetic.
+        norms = {k_: _max_relative_gram_norm(v_) for k_, v_ in centered_acts.items()}
 
         logger.info("  Computing CKA Matrix...")
         cka_matrix = np.zeros((n_layers, n_layers))
@@ -334,6 +342,10 @@ class CKATask(DiagnosticTask):
         # are _meta_ profile summaries (test_cka.py identity-insertion test).
         results = {
             "_meta_linalg_device": _linalg_device,
+            # CKA(X, X) is 1 by definition; its largest departure measures the
+            # arithmetic mismatch between numerator and cached norms.
+            "_meta_max_abs_self_cka_minus_one": (
+                float(np.nanmax(np.abs(np.diag(cka_matrix) - 1.0))) if n_layers else float("nan")),
             "min_adjacent_cka": _stat(diagonal_off1, np.nanmin),
             "min_offdiag_cka": _stat(off_diag, np.nanmin),
             # max_offdiag_cka is not emitted: the most similar pair is an

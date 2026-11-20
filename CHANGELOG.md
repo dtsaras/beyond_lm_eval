@@ -4,6 +4,16 @@
 
 - **Docs:** receipt `2026-11-20-gpu-linalg` (source e5dc33e, 967 linked cases on transformers 5.2.0, 5.10.2, 5.22.2 and 5.23.0, 0 failures) now backs every row of `docs/validation/metrics.json`. New decision entry: `dynamics_sharpness.top_eigenvalue_estimate` is PyHessian's signed eigenvalue of largest magnitude, which is negative on gpt2-355m, phi-2 and phi-4 (an isolated negative eigenvalue of the last-block Hessian outweighs lambda_max); a cross-model ranking of sharpness should read its magnitude.
 
+## 0.2.3 — 2026-11-20
+
+One precision defect in `geometry_cka`, found by the study sweep: `_meta_max_adjacent_cka` exceeded 1 (up to 1.0095) on 9 of 61 models, all 12–34B.
+
+- **Biased linear CKA on the GPU** (0.2.1–0.2.2). `evaluate()` caches each layer's ||X^T X||_F and passes it to `_linear_cka`. Since 0.2.1 the GPU path computes the numerator ||Y^T X||_F^2 in float64, but the cached norms were still computed in float32 on the CPU. Their error is almost all in the float32 Frobenius reduction, about 3e-5 relative on a 7168 × 7168 Gram of random data and up to about 5e-3 on real activations. Every biased CKA value carried the product of its two layers' norm errors, so CKA(X, X) came out up to 1e-2 above 1, growing with width.
+  - **Fix:** the norms are computed on the linear-algebra device with the numerator's arithmetic.
+  - **Affected keys:** `early_late_cka`, `min_adjacent_cka`, `min_offdiag_cka` and their `_meta_` summaries. The debiased twins were float64 throughout and are unchanged; the CPU path is unchanged.
+  - **New `_meta_max_abs_self_cka_minus_one`:** the matrix diagonal, which passes through the cached norms; about 1e-16 on the GPU and 0 on the CPU.
+  - **Why the tests missed it:** `tests/test_gpu_linalg.py` called `_linear_cka` without cached norms, and the receipts hid CUDA. The new GPU tests drive `evaluate()`.
+
 ## 0.2.2 — 2026-11-20
 
 Failure paths only: every value a 0.2.1 run produced without an error or a fallback is unchanged. Found by the study sweep's first models split across two GPUs and by MPS-packed GPUs running out of memory.
