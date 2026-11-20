@@ -20,6 +20,7 @@ Usage (standalone):
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -606,6 +607,32 @@ WIKITEXT_DATASET = ("Salesforce/wikitext", "wikitext-103-raw-v1", "validation")
 WIKITEXT_DOCUMENTS = ("EleutherAI/wikitext_document_level", "wikitext-103-raw-v1")
 MIN_PASSAGE_CHARS = 64
 
+# Parallel item sets, for measuring how much a result depends on the texts it
+# reads. Item set 0 is the default corpus. Item set 1 draws every corpus by the
+# same process from a disjoint pool: WikiText-103 test passages where set 0
+# reads validation passages (same filter, stripping and nested order, and the
+# same count), the next articles in nested order for long documents, and test
+# rows for the release-protocol row loader. Chosen per process with
+# BLME_ITEM_SET (unset or "0": set 0); results record it as
+# environment.item_set (tests/test_item_sets.py).
+ITEM_SET_ENV = "BLME_ITEM_SET"
+PASSAGE_SPLITS = ("validation", "test")
+
+
+def item_set() -> int:
+    """The item set this process draws (``BLME_ITEM_SET``: 0 or 1)."""
+    raw = os.environ.get(ITEM_SET_ENV, "").strip()
+    if raw in ("", "0"):
+        return 0
+    if raw == "1":
+        return 1
+    raise ValueError(f"{ITEM_SET_ENV} must be 0 or 1, got {raw!r}")
+
+
+def passage_split(items: Optional[int] = None) -> str:
+    """The WikiText-103 split that item set ``items`` (default: this process's) reads passages from."""
+    return PASSAGE_SPLITS[item_set() if items is None else int(items)]
+
 
 def nested_order(n: int) -> List[int]:
     """A fixed order of ``range(n)`` whose every prefix is evenly spread.
@@ -681,15 +708,19 @@ def article_records(rows, field: str = "text") -> List[dict]:
     return records
 
 
-def _wikitext_passages() -> List[str]:
-    """Stripped WikiText-103 validation passages of >= MIN_PASSAGE_CHARS characters."""
-    path, name, split = WIKITEXT_DATASET
-    return _stripped_texts(_load_split(path, name, split), "text")
+def _wikitext_passages(items: Optional[int] = None) -> List[str]:
+    """Stripped WikiText-103 passages of >= MIN_PASSAGE_CHARS characters, from item set ``items``'s split."""
+    path, name, _ = WIKITEXT_DATASET
+    return _stripped_texts(_load_split(path, name, passage_split(items)), "text")
 
 
 def default_corpus_size() -> int:
-    """How many passages :func:`load_default_corpus` can return."""
-    return len(_wikitext_passages())
+    """How many passages :func:`load_default_corpus` can return.
+
+    Item set 0's size (the validation split) for every item set, so a task that
+    reads the whole default corpus reads the same number of passages in each.
+    """
+    return len(_wikitext_passages(0))
 
 
 def load_default_corpus(num_samples: int, diverse: bool = True, *, include_document_ids: bool = False) -> list:
@@ -717,18 +748,19 @@ def load_default_corpus(num_samples: int, diverse: bool = True, *, include_docum
     n = int(num_samples)
     if n < 0:
         raise ValueError(f"num_samples must be >= 0, got {num_samples}")
+    split = passage_split()
     if include_document_ids:
-        path, name, split = WIKITEXT_DATASET
+        path, name, _ = WIKITEXT_DATASET
         passages = article_records(_load_split(path, name, split))
     else:
         passages = _wikitext_passages()
     if n > len(passages):
         raise ValueError(
-            f"load_default_corpus: {n} passages requested, but WikiText-103 validation "
+            f"load_default_corpus: {n} passages requested, but WikiText-103 {split} "
             f"has {len(passages)} of >= {MIN_PASSAGE_CHARS} characters.")
     idx = nested_order(len(passages))[:n] if diverse else range(n)
     result = [passages[i] if include_document_ids else {"text": passages[i]} for i in idx]
-    logger.info(f"Loaded {len(result)} passages from WikiText-103 validation "
+    logger.info(f"Loaded {len(result)} passages from WikiText-103 {split} "
                 f"({'nested evenly spread order' if diverse else 'split-order prefix'})")
     return result
 
@@ -754,6 +786,8 @@ def load_long_documents(
     comes from ``split`` alone and is never topped up from another split or
     truncated. Validation holds 60 articles and test 62; train holds 29,145,
     so a task that may be asked for more than 60 reads ``split="train"``.
+    Item set 1 (``BLME_ITEM_SET``) returns the next ``n`` qualifying articles
+    of the same order, disjoint from item set 0's.
     """
     n = int(n)
     if n < 0:
@@ -762,9 +796,11 @@ def load_long_documents(
         raise ValueError("load_long_documents: min_tokens needs a tokenizer")
     path, name = WIKITEXT_DOCUMENTS
     docs = _stripped_texts(_load_split(path, name, split), "page")
+    # Item set s takes the qualifying articles s*n .. (s+1)*n - 1 of the order.
+    skip = n * item_set()
     out = []
     for i in nested_order(len(docs)):
-        if len(out) >= n:
+        if len(out) >= n + skip:
             break
         text = docs[i]
         if min_words is not None and len(text.split()) < int(min_words):
@@ -774,15 +810,16 @@ def load_long_documents(
             if n_tok < int(min_tokens):
                 continue
         out.append({"text": text})
-    if len(out) < n:
+    if len(out) < n + skip:
         need = "".join(
             f" of >= {v} {unit}" for v, unit in ((min_words, "words"), (min_tokens, "tokens"))
             if v is not None)
         hint = "" if split == "train" else " The train split holds about 29,000 articles."
+        sets = f" (item set {item_set()} needs {n + skip})" if skip else ""
         raise ValueError(
-            f"load_long_documents: {n} articles requested, but {path} {split} has "
+            f"load_long_documents: {n} articles requested{sets}, but {path} {split} has "
             f"{len(out)}{need}.{hint}")
-    return out
+    return out[skip:]
 
 
 # Keep backward-compatible private alias

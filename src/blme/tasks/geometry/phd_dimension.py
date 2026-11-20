@@ -69,7 +69,7 @@ from scipy.spatial.distance import cdist
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ...cache import load_long_documents
+from ...cache import item_set, load_long_documents
 from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
@@ -401,6 +401,8 @@ class PHDimensionTask(DiagnosticTask):
             except (ValueError, RuntimeError) as e:
                 return {"error": f"geometry_phd_dimension: long documents unavailable: {e}"}
             source_name = f"wikitext_document_level:{doc_split}"
+            if item_set():      # BLME_ITEM_SET: the next articles of the same order
+                source_name += f":item{item_set()}"
             cache = None    # the shared cache holds the corpus passages, not these
         dataset = [{"text": _preprocess_text(t["text"] if isinstance(t, dict) else str(t))}
                    for t in texts]

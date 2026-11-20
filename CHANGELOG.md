@@ -4,6 +4,18 @@
 
 - **Docs:** receipt `2026-11-20-gpu-linalg` (source e5dc33e, 967 linked cases on transformers 5.2.0, 5.10.2, 5.22.2 and 5.23.0, 0 failures) now backs every row of `docs/validation/metrics.json`. New decision entry: `dynamics_sharpness.top_eigenvalue_estimate` is PyHessian's signed eigenvalue of largest magnitude, which is negative on gpt2-355m, phi-2 and phi-4 (an isolated negative eigenvalue of the last-block Hessian outweighs lambda_max); a cross-model ranking of sharpness should read its magnitude.
 
+## 0.2.4 — 2026-11-21
+
+Parallel item sets, for measuring how much a result depends on the texts it reads. Item set 0 (the default) is unchanged: every value of a 0.2.3 run is reproduced.
+
+- **`BLME_ITEM_SET`** (`blme.cache.item_set`, 0 or 1; anything else raises). Item set 1 draws every corpus by the same process from a disjoint pool of the same size:
+  - the default corpus (`load_default_corpus`) reads WikiText-103 test passages where set 0 reads validation passages: same filter, stripping and nested order. `default_corpus_size()` is set 0's size (1,691) in either set, so tasks that read the whole corpus read the same count;
+  - `load_long_documents` (fractal, PHD) returns the next `n` qualifying articles of the same order;
+  - `geometry_mahalanobis`' extended corpus walks test, then train, skipping every passage of set 0's draw;
+  - `geometry_representation_dispersion`'s release-protocol rows come from the test split.
+- **Provenance:** results record `environment.item_set`; fractal's `_meta_document_source` and PHD's `_meta_phd_documents` end in `:item1` in set 1. Tasks with bundled items (categories, RepE prompts, CounterFact) read the same items in both sets.
+- **Tests:** `tests/test_item_sets.py`, on synthetic splits.
+
 ## 0.2.3 — 2026-11-20
 
 One precision defect in `geometry_cka`, found by the study sweep: `_meta_max_adjacent_cka` exceeded 1 (up to 1.0095) on 9 of 61 models, all 12–34B.

@@ -94,19 +94,34 @@ def _wikitext_passages_extended(n: int) -> list:
 
     Each row carries ``article_id`` (``"<split>:<article>"``), so the fit and
     held-out halves can be split by article.
+
+    Item set 1 (``BLME_ITEM_SET``) walks test, then train, in the same orders,
+    skipping every passage item set 0's draw of ``n`` holds, so the two sets
+    are disjoint and the same size.
     """
-    from ...cache import WIKITEXT_DATASET, _load_split, article_records, nested_order
+    from ...cache import WIKITEXT_DATASET, _load_split, article_records, item_set, nested_order
     path, name, _ = WIKITEXT_DATASET
-    out = []
-    for split in _SPLITS:
-        if len(out) >= n:
-            break
-        records = article_records(_load_split(path, name, split))
-        out.extend({"text": records[i]["text"], "article_id": f"{split}:{records[i]['article_id']}"}
-                   for i in nested_order(len(records))[:n - len(out)])
-    if len(out) < n:
-        raise ValueError(f"{n} passages requested, WikiText-103 holds {len(out)}")
-    return out
+
+    def walk(splits, taken=frozenset()):
+        out = []
+        for split in splits:
+            if len(out) >= n:
+                break
+            records = article_records(_load_split(path, name, split))
+            for i in nested_order(len(records)):
+                if len(out) >= n:
+                    break
+                if records[i]["text"] in taken:
+                    continue
+                out.append({"text": records[i]["text"],
+                            "article_id": f"{split}:{records[i]['article_id']}"})
+        if len(out) < n:
+            raise ValueError(f"{n} passages requested, WikiText-103 holds {len(out)}")
+        return out
+
+    if item_set() == 0:
+        return walk(_SPLITS)
+    return walk(_SPLITS[1:], taken=frozenset(r["text"] for r in walk(_SPLITS)))
 
 
 _GROUP_KEYS = ("article_id", "document_id", "doc_id")

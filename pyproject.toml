@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blme"
-version = "0.2.3"
+version = "0.2.4"
 description = "Beyond LM Eval — Intrinsic diagnostics for language models"
 readme = "README.md"
 authors = [

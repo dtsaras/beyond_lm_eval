@@ -27,10 +27,11 @@ logger = logging.getLogger("blme")
 
 def wikitext_validation_rows():
     """The release's ``load_texts("wikitext", split="validation")`` rows: every
-    non-blank row, unstripped (on the raw WikiText-103 the library caches)."""
-    from ...cache import WIKITEXT_DATASET, _load_split
-    path, name, split = WIKITEXT_DATASET
-    rows = [str(r["text"]) for r in _load_split(path, name, split)]
+    non-blank row, unstripped (on the raw WikiText-103 the library caches).
+    Item set 1 (``BLME_ITEM_SET``) reads the test split's rows instead."""
+    from ...cache import WIKITEXT_DATASET, _load_split, passage_split
+    path, name, _ = WIKITEXT_DATASET
+    rows = [str(r["text"]) for r in _load_split(path, name, passage_split())]
     return [t for t in rows if t and not t.isspace()]
 
 

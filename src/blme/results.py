@@ -24,6 +24,11 @@ logger = logging.getLogger("blme")
 # Version
 # ---------------------------------------------------------------------------
 
+def _item_set() -> int:
+    from .cache import item_set
+    return item_set()
+
+
 def _get_blme_version() -> str:
     """The imported source tree's version (``blme._version``), not installed metadata."""
     try:
@@ -111,6 +116,7 @@ def build_results_envelope(
         "git_hash": _get_git_hash(),
         "environment": {
             "dependencies": _dependency_versions(),
+            "item_set": _item_set(),
         },
         "config": {
             "model_args": model_args,

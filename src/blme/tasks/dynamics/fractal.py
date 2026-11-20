@@ -47,7 +47,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ...cache import load_long_documents
+from ...cache import item_set, load_long_documents
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
 
@@ -240,6 +240,8 @@ class FractalLikelihoodTask(DiagnosticTask):
                 return {"error": f"dynamics_fractal: long documents unavailable: {e}"}
             texts = [d["text"] for d in docs]
             source_name = f"wikitext_document_level:{doc_split}"
+            if item_set():      # BLME_ITEM_SET: the next articles of the same order
+                source_name += f":item{item_set()}"
 
         device = next(model.parameters()).device
         ctx = (getattr(model.config, "max_position_embeddings", None)
