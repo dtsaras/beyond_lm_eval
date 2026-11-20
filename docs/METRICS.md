@@ -57,7 +57,7 @@ Linear CKA (Kornblith et al. 2019, arXiv:1905.00414) between all layers.
 
 **Verification.**
 
-- Kernel: Released code executed on the same inputs. Biased and debiased CKA are checked against the original Demo.ipynb on the same observations. Token sample, centering, layer convention and finite-sample baseline govern comparisons.
+- Kernel: Released code executed on the same inputs. Biased and debiased CKA are checked against the original Demo.ipynb on the same observations. Token sample, centering, layer convention and finite-sample baseline govern comparisons. The receipt runs with one GPU visible, so evaluate() takes the GPU path the study runs; the CPU path is checked by forcing BLME_CPU_LINALG.
 - Pipeline: match (debiased 1e-6, biased 1.5e-5) (batchC, 2026-11-19, library 1ae4105).
 - Next scientific check: Check out-of-lab incremental value with finite-sample controls and independent text draws.
 
