@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Docs:** receipt `2026-11-20-gpu-linalg` (source e5dc33e, 967 linked cases on transformers 5.2.0, 5.10.2, 5.22.2 and 5.23.0, 0 failures) now backs every row of `docs/validation/metrics.json`. New decision entry: `dynamics_sharpness.top_eigenvalue_estimate` is PyHessian's signed eigenvalue of largest magnitude, which is negative on gpt2-355m, phi-2 and phi-4 (an isolated negative eigenvalue of the last-block Hessian outweighs lambda_max); a cross-model ranking of sharpness should read its magnitude.
+
 ## 0.2.2 — 2026-11-20
 
 Failure paths only: every value a 0.2.1 run produced without an error or a fallback is unchanged. Found by the study sweep's first models split across two GPUs and by MPS-packed GPUs running out of memory.

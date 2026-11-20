@@ -997,6 +997,10 @@ Why: asam_sharpness is the scale-invariant twin of sam_sharpness; the release's 
 **Decision: Resolution of critical_step_size.** Default: Doubling from eta0, then 6 bisection steps on 'loss strictly increases' (Kalra et al. Def. 2.1); the bracket midpoint is returned.
 Why: Six halvings of the factor-2 bracket resolve eta* to +-0.8%, so moving eta0 (it depends on the gradient norm) moves the result by up to that much (gpt2: 1.414 vs 1.426 after the float64-norm fix). Negligible against the cross-model spread (0.006-0.87 on the panel).
 
+**Decision: Sign of top_eigenvalue_estimate.** Default: PyHessian's power iteration: the signed Rayleigh quotient of the eigenvalue of largest magnitude.
+Alternatives: its absolute value, the spectral norm ||H||_2 of the last-block loss Hessian (computed by the consumer; no rerun needed).
+Why: Away from a minimum the dominant eigenvalue can be negative. ARPACK Lanczos on the same HVP operator: gpt2-355m lambda_min -24.55 against lambda_max +4.29, phi-4 -13.09 against +10.78 (phi-2 likewise). The signed value is PyHessian's output and its sign is informative (dominant negative curvature), so it is kept; a rank-based comparison of sharpness across models should read its magnitude, as the beyond_benchmarks study does (keys.transforms).
+
 ### `dynamics_stability`
 
 Measures Jaccard stability of k-NN neighborhoods. If 'reference_model_path' is provided in config, compares current model to reference. Otherwise, compares the embedding neighborhood graph against a seeded small Gaussian perturbation of the embeddings.
