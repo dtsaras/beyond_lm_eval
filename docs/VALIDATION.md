@@ -21,78 +21,78 @@ The primary categories count each task once. Published-value tests also occur in
 
 | Dated receipt | Transformers | Passed | Failed | Errors | Skipped |
 |---|---|---:|---:|---:|---:|
-| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.2.0 | 20 | 0 | 0 | 0 |
-| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.10.2 | 20 | 0 | 0 | 0 |
-| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.22.2 | 20 | 0 | 0 | 0 |
-| [2026-11-20-cka-gpu](validation/receipt-2026-11-20-cka-gpu.json) | 5.23.0 | 20 | 0 | 0 | 0 |
-| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.2.0 | 971 | 0 | 0 | 8 |
-| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.10.2 | 971 | 0 | 0 | 8 |
-| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.22.2 | 971 | 0 | 0 | 8 |
-| [2026-11-20-v023](validation/receipt-2026-11-20-v023.json) | 5.23.0 | 971 | 0 | 0 | 8 |
+| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.2.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.10.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.22.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.23.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.2.0 | 971 | 0 | 0 | 8 |
+| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.10.2 | 971 | 0 | 0 | 8 |
+| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.22.2 | 971 | 0 | 0 | 8 |
+| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.23.0 | 971 | 0 | 0 | 8 |
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-20-v023 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
 
 Counts above are unique executed cases per run. Row counts below are *passed / linked cases* per stack. Some tests serve multiple metrics. These are selected CPU numerical and reference tests. Whole-suite testing, architecture coverage, document reliability, and published-result reproduction each require their own evidence.
 

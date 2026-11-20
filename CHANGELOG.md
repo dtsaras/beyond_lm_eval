@@ -15,6 +15,7 @@ Parallel item sets, for measuring how much a result depends on the texts it read
   - `geometry_representation_dispersion`'s release-protocol rows come from the test split.
 - **Provenance:** results record `environment.item_set`; fractal's `_meta_document_source` and PHD's `_meta_phd_documents` end in `:item1` in set 1. Tasks with bundled items (categories, RepE prompts, CounterFact) read the same items in both sets.
 - **Tests:** `tests/test_item_sets.py`, on synthetic splits.
+- **Receipts:** `2026-11-21-v024` covers all 109 tasks, CPU only, on four Transformers stacks: 979 cases per stack, 0 failures, 8 skips (the GPU tests). Eleven files hit FUSE I/O errors at start-up in the parallel run and passed on a serial rerun. `2026-11-21-cka-gpu` repeats `geometry_cka`'s GPU-path cases on 0.2.4, because `cache.py`, `results.py` and `_version.py` are in its import closure: 20 cases per stack, all passed.
 
 ## 0.2.3 — 2026-11-20
 
