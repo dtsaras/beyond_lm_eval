@@ -118,6 +118,12 @@ tasks:
       alternatives: ["true: rows within near_duplicate_gap (1 - cos) of another row are dropped first"]
       recorded: [_meta_near_duplicates_dropped, _meta_n_near_duplicate_rows]
       why: "On Llama-3.2-1B the reserved rows move superposition_ratio_centered by -4.5% when removed. The search is O(V^2 d) over the whole vocabulary, so it is opt-in and not recorded by default."
+    - choice: Multimodal placeholder rows in row_norm_cv
+      parameter: null
+      default: "kept: they are emittable ids (id < len(tokenizer)), like every other in-vocabulary row"
+      alternatives: []
+      recorded: []
+      why: "Gemma-3 and Gemma-4 tables are row-normalised (CV about 1e-4), so their few image and audio placeholder rows set the CV: gemma3-4b 2.64e-3 with <image_soft_token> (norm 0.005) and <end_of_image> (0.084), 1.41e-4 without; gemma4-12b likewise. These models stay two to three orders of magnitude below every other family (sweep median 0.123), so their rank against other families does not move; only the order within the Gemma rows does. A placeholder-aware filter would change every vocabulary task on these checkpoints and is not adopted (outlier review, 2026-11-20)."
   geometry_magnitude:
     - choice: Scales of the magnitude function
       parameter: null
