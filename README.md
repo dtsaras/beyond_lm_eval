@@ -10,21 +10,21 @@
 
 Standard evaluation harnesses (lm-eval, HELM) measure **task performance**. BLME measures **intrinsic properties**: How isotropic are your representations? Which layers are redundant? Where does causal information flow? These diagnostics help you understand *why* a model performs the way it does.
 
-**109 diagnostic tasks** across 7 categories:
+**111 diagnostic tasks** across 7 categories:
 
 | Category | Count | Examples | What it measures |
 |----------|-------|----------|-----------------|
-| **Geometry** | 52 | SVD isotropy, LID, CKA/CKNNA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation, Vendi, magnitude, PHD, Procrustes linearity, superposition strength, effective depth | Representation space structure |
+| **Geometry** | 53 | SVD isotropy, LID, CKA/CKNNA, Schatten-p + MNN, Lipschitz, hubness, tokenizer efficiency, collapse, spectral, matrix entropy, trajectory curvature, MP bulk deviation, Vendi, magnitude, PHD, Procrustes linearity, superposition strength, effective depth, readout dual spectrum | Representation space structure |
 | **Interpretability** | 19 | Logit lens, attention entropy / rank, probing, sparsity, superposition, head roles, induction heads, activation sinks, WAA | Internal mechanisms |
 | **Consistency** | 13 | Calibration, paraphrase / logical / contrastive invariance, ICL slope and score, format robustness, position sensitivity, contamination, knowledge capacity, bias | Output reliability |
 | **Causality** | 7 | Causal tracing, ablation, attention knockout, layer attribution, circuit quality, neuron saliency, layer skip | Information flow |
-| **Dynamics** | 9 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth, entropy calibration | Temporal behavior |
+| **Dynamics** | 10 | Sharpness, gradient flow, stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood, perturbation growth, entropy calibration, context influence | Temporal behavior |
 | **RepE** | 4 | Task vectors, concept separability, steering effectiveness, refusal direction | Concept encoding |
 | **Topology** | 5 | Persistent homology, Betti curves, persistence entropy / landscape, zigzag persistence | Manifold shape |
 
 ## Tasks by validation tier
 
-The registry includes 51 paper-core tasks, 21 additional paper methods, 35 experimental tasks and two diagnostics for structured text panels. The [validation tracker](docs/VALIDATION.md) lists the scientific scope, actual numerical checks on both supported stacks and an outstanding check for every task. The regular test suite flags registry and reviewed-input changes. Every task also carries a certification label (`parity-ready`, `formula-faithful`, `refined-adaptation` or `proxy-only`), and most carry a note on what they compute and which test pins it (`blme list-tasks --json`, or `src/blme/task_metadata.py`).
+The registry includes 51 paper-core tasks, 21 additional paper methods, 35 experimental tasks, two diagnostics for structured text panels and two exploratory BLME constructs. The [validation tracker](docs/VALIDATION.md) lists the scientific scope, actual numerical checks on both supported stacks and an outstanding check for every task. The regular test suite flags registry and reviewed-input changes. Every task also carries a certification label (`parity-ready`, `formula-faithful`, `refined-adaptation` or `proxy-only`), and most carry a note on what they compute and which test pins it (`blme list-tasks --json`, or `src/blme/task_metadata.py`).
 
 ### 1. Paper-core tasks (51)
 
@@ -76,6 +76,10 @@ These tasks run, and they are tested for crashes and for leaks (forward hooks le
 ### 4. Structured text panels (2)
 
 `geometry_domain_bpb` measures loss per UTF-8 byte on named document domains. `geometry_paraphrase_lidar` measures discriminant effective rank on human-labeled paraphrases and matched negative pairs. Both emit per-panel results for sample repeatability. Tests compare byte loss to direct token log probabilities and the LiDAR calculation to dense whitening. [Input format and outputs](docs/tasks_geometry.md#domain-loss-and-paraphrase-lidar)
+
+### 5. Exploratory constructs (2)
+
+BLME's own definitions, with no paper protocol to follow; their tests check analytic identities, invariances and controls, not agreement with a release. `geometry_readout_dual_spectrum` reports the Jeffreys dispersion of the next-token distributions and the spectrum of the readout's dual coordinates, which is exactly invariant to any invertible affine re-basing of the state the head reads. `dynamics_context_influence` measures how much the next-token distribution moves when one earlier token is resampled, as a function of distance. [Readout dual spectrum](docs/tasks_geometry.md#51-readout-dual-spectrum-geometry_readout_dual_spectrum) · [Context influence](docs/tasks_dynamics.md#10-context-influence-dynamics_context_influence)
 
 ## Installation
 

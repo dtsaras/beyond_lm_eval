@@ -213,3 +213,84 @@ tasks:
       recorded: []
       why: "Seed-to-seed SD of the headline ~4.5% on gpt2 (seed 42 is a low draw on the first layer): compare models at a common seed."
 
+  # ---- Exploratory additions (2026-11-21 research memo, section 4) ----
+  geometry_readout_dual_spectrum:
+    - choice: Which positions enter the headline
+      parameter: null
+      default: "Word-final positions: token t owns a non-empty character span [s, e) with text[e-1] not whitespace and text[e] whitespace, and token t+1 starts at or after e (from the tokenizer's offsets; the next prediction begins a new word). Position 0 and massive-activation rows are excluded (TOKEN_POLICY exclude_sinks)."
+      alternatives: ["every position >= 1, sinks excluded (_meta_*_all_positions)"]
+      recorded: [_meta_jeffreys_dispersion_all_positions, _meta_dual_coupling_all_positions, _meta_dual_coherence_all_positions, _meta_dual_effective_rank_all_positions, _meta_dual_effective_rank_frac_all_positions, _meta_dual_tail_exponent_all_positions, _meta_word_final_share, _meta_word_final_rule]
+      why: "The research memo found 0.1% of Pythia-70m/160m positions carrying 9-15% of D_J: mid-character UTF-8 byte positions (CJK, primes) with near-deterministic continuations worth 900-1,360 nats each; BLME's norm-based sink rule does not flag them. A character split across tokens gives every piece the character's span, so the next-token-start rule removes those positions by construction, for any tokenizer with offsets; the definition uses only the text, so every model is scored at the ends of the same words. On the default corpus at N = 32 d, all positions against word-final: pythia-160m-deduped D_J 8.47 vs 6.44 (-24%), gpt2 8.00 vs 7.06 (-12%). A tokenizer without offsets (slow tokenizers) gets NaN headlines and _meta_word_final_reason."
+    - choice: Number of rows
+      parameter: points_per_dim
+      default: "32: N = 32 d headline rows, passages read in corpus order until N is reached (n_rows overrides)"
+      alternatives: ["any other N/d; n_rows for a fixed N (used by the invariance tests)"]
+      recorded: [_meta_n_rows, _meta_n_rows_target, _meta_points_per_dim, _meta_n_target_met, _meta_n_docs_read]
+      why: "The effective rank of a sample spectrum is biased low at finite N: on gpt2 the prototype gave 286, 296 and 304 at N/d = 16, 33 and 66. Pinning N/d compares every width at the same bias. 32 is the largest power of two the default corpus (1,691 passages, about 208k words, about 0.87-0.89 word-final rows per token) covers at every width of the companion study (d <= 5120 needs 164k rows); wider models are capped by the corpus and flagged."
+    - choice: Sink rows in a streamed moment estimate
+      parameter: null
+      default: "Exact removal: rows whose middle-depth norm exceeds 2.5x the running median keep their read state; after the last passage the corpus-wide sink masks (10x the median, the library rule) are built and every accumulated sink row is recomputed from its read state and subtracted. A sink row not kept as a candidate is re-read by a second forward of its passage."
+      alternatives: []
+      recorded: [_meta_sink_rows_removed, _meta_sink_rows_refetched, _meta_jeffreys_dispersion_incl_sinks, _meta_jeffreys_dispersion_all_positions_incl_sinks]
+      why: "The library's rule needs the corpus-wide median, which a single streaming pass does not know until the end, and the moments are too large to keep per row (N x d at d = 5120). Subtraction is exact to rounding (tests/tasks/test_readout_dual_spectrum.py against a brute-force computation, buffered and refetched paths agree to 1e-10). pythia-160m-deduped: 58 sink rows, all candidates; gpt2: none."
+    - choice: The level, the coupling and the coherence of a soft-capped head
+      parameter: null
+      default: "D_J is computed in its logit form tr Cov(z, p) (z the softmax input), exact for any head; mu is the gradient of the log-partition, s W^T (p * sech^2(u / c)) under a final softcap; coherence is tr Cov(h, mu) / sum kappa, so it stays in (0, 1] by the Bures bound"
+      alternatives: ["coherence as D_J (logit form) / sum kappa (_meta_dual_coherence_logit_level)"]
+      recorded: [_meta_jeffreys_dispersion_dspace, _meta_identity_rel_gap, _meta_d_space_exact, _meta_dual_coherence_logit_level, _meta_head_form]
+      why: "For an affine head (bias and logit_scale included) the two forms of D_J are the same number (gpt2 and pythia: relative gap 7e-8 and 2e-7, fp32 head) and so are the two coherences. Under a softcap (Gemma-2) only the logit form is exact and the d-dimensional spectrum is a first-order approximation; _meta_d_space_exact is false."
+    - choice: Decay exponent window
+      parameter: null
+      default: "Ranks 11-100 of kappa (alpha-ReQ's window, the prototype's), weighted least squares with weights 1/r, truncated to the numerically nonzero kappa (above kappa_max * d * eps) when d < 101"
+      alternatives: []
+      recorded: [_meta_dual_tail_fit_ranks]
+      why: "A fixed rank window is unchanged by zero-padding the width; the numerical-rank cut keeps exactly singular directions (a LayerNorm state lies on a hyperplane) out of the fit."
+    - choice: Precision and the read state
+      parameter: compute_dtype
+      default: "model: the forwards in the model's dtype; the read state captured at the head's input (a forward pre-hook); the head recomputed in float32 (float64 on a float64 model), the softmax and every moment in float64; recomputed logits checked against the model's own on every passage (fail closed)"
+      alternatives: ["float32: fp32 arithmetic for the forwards (fp32_compute), the refetch included"]
+      recorded: [_meta_compute_dtype, _meta_original_dtype, _meta_promoted_to_fp32, _meta_head_compute_dtype, _meta_moment_dtype, _meta_head_guard_max_rel, _meta_read_state]
+      why: "Measured on gpt2 at the shipped defaults: with bf16 weights, bf16 against fp32 arithmetic moved D_J 7.1428 vs 7.1456, the coupling 12.972 vs 12.979 and the effective rank 246.83 vs 246.90 (all under 0.05%), so the forwards keep the model's dtype. Rounding gpt2's fp32 checkpoint to bf16 moves D_J by +1.2% (7.061 to 7.143): that is a different function, not arithmetic noise. The identity needs the logits the head computes from the state it reads; capturing the head's input avoids assuming that HF's last hidden state is that input. The gauge invariance holds to 1e-10 through evaluate() on a float64 model."
+  dynamics_context_influence:
+    - choice: Window length
+      parameter: window
+      default: "1024 tokens for every model"
+      alternatives: ["a longer window for models that support one (the memo suggests 2,048-4,096)"]
+      recorded: [_meta_window_tokens, _meta_window_is_configured, _meta_max_lag]
+      why: "1024 is the largest context every model of the companion study supports (GPT-2's limit), so every model is measured over the same lags. The memo's 256-token prototype saw the far mass saturate by about 400M parameters within its lags; 1024 extends the lags fourfold without excluding a model. A model with a shorter context is capped and flagged."
+    - choice: Which predictions are scored
+      parameter: n_scored
+      default: "The last 64 positions of the window (960-1023): every term reads 960+ tokens of context and only the lag varies"
+      alternatives: ["every position after the replaced one (the memo's prototype and BLME before this revision)"]
+      recorded: [_meta_scored_positions, _meta_n_terms_per_bin, _meta_n_terms_per_lag]
+      why: "Scoring every position after s measures short lags at early positions, with little context, and long lags at late ones, so the decay mixes lag with position. On a synthetic model whose response depends on the position only (logits read the running mean of the embeddings), that design reports beta = 1.14, while scoring the end of the window gives 0.039 +- 0.034 (tests/tasks/test_context_influence.py). On gpt2 the earlier design's far mass was 0.538 against 0.276 here: a single token moves a prediction less when the prediction reads the whole window."
+    - choice: Replaced positions, lags and bins
+      parameter: n_replacements
+      default: "16 per window. The base lag k0 = t_first - s + 1 at the first scored position (lag k = t - s + 1, k = 1 the token just read) is log-uniform on [1, 945]: one draw per equal-width stratum of log(k0) on [0, log 946), k0 = floor(exp(u)); s is never below 16. Each replacement gives the lags k0..k0 + 63; lags run to K = window - 16 = 1008; log2 bins [1], [2], [3-4], ..., [513-1008]; I per bin is the mean of the per-lag means over the bin's lags that have a term (every lag weighs the same); beta by least squares in log-log over the bins from lag 3 (bin centres the geometric mean of the bin's lags); far mass = sum over bins from lag 9 of bin mean x lags in the bin, i.e. the sum of the per-lag means with an empty lag filled by its bin's mean; horizon = exp(sum_b I_b w_b log c_b / sum_b I_b w_b) x the windows' mean bytes per token"
+      alternatives: ["8 or 32 replacements per window (measured below)", "more windows (num_samples)"]
+      recorded: [_meta_base_lag_range, _meta_base_lag_draw, _meta_n_replacements_per_window, _meta_n_forwards, _meta_lag_bins, _meta_influence_bin_means, _meta_influence_bin_means_pooled_terms, _meta_far_mass_pooled_terms, _meta_lag_empty_share, _meta_n_terms_per_bin, _meta_influence_per_lag, _meta_lag_bin_centers_tokens, _meta_lag_bin_centers_bytes, _meta_bytes_per_token, _meta_influence_horizon_tokens, _meta_influence_far_share, _meta_decay_fit_r2, _meta_influence_far_mass_se, _meta_influence_decay_exponent_se, _meta_influence_horizon_bytes_se]
+      why: "Log-uniform base lags give every lag octave about the same number of replacements; stratifying within a window reaches every octave in every window (no bin is empty at the shipped settings: 151 terms in [1], 9,712 in [513-1008]). Within a bin the terms concentrate towards its lower lags (density about 1/k), so pooling a bin's terms weights its lower lags more: for a k^-1.2 profile that raises the far mass by about 5% (tests/tasks/test_context_influence.py), and on the two models the pooled far mass is 1.5% (gpt2, 0.276 vs 0.272) and 1.0% (pythia, 0.356 vs 0.353) higher; it is recorded as _meta_far_mass_pooled_terms. 0.8% of the lags have no term at the shipped settings (_meta_lag_empty_share). At 96 windows, R = 16 (1,632 forwards per model) gives far-mass bootstrap SEs of 0.018 (gpt2) and 0.020 (pythia-160m-deduped) and beta SEs of 0.031 and 0.029, the relative precision of the earlier shipped design (SE 0.031 on a far mass of 0.538). With pooled terms, R = 8 gave far-mass SEs of 0.062 and 0.059 and R = 32 gave 0.021 and 0.026: between-window variance dominates beyond 16, so more windows, not more replacements, is the lever. On the same windows, R = 16 and R = 32 differed by 0.012 and 0.048 in far mass and 0.07 and 0.02 in beta, so the bootstrap SE (heavy-tailed terms) is if anything optimistic. Lag 1 here is the token just read; the base lag counted from the token before it is k0 - 1."
+    - choice: Arithmetic precision of the forwards
+      parameter: compute_dtype
+      default: "float32: fp16/bf16 parameters and buffers are promoted for the task and restored after (fp32_compute)"
+      alternatives: ["model: the model's own dtype"]
+      recorded: [_meta_compute_dtype, _meta_original_dtype, _meta_promoted_to_fp32]
+      why: "On the shipped design, gpt2 at R = 16, bf16 against fp32 forwards: far mass 5.56 vs 0.276 (20x), beta 0.44 vs 1.30, horizon 702 vs 17.2 bytes; from lag 33 on the bf16 bins sit at a rounding floor of about 0.005-0.006 nats against 1e-4 to 1e-3 in fp32. On the earlier all-positions design the same comparison gave gpt2 far mass 5.56 vs 0.538 and pythia-160m-deduped 140 vs 0.613, and bf16-stored weights with fp32 arithmetic (the study's path) stayed within sampling error of the fp32 checkpoints (gpt2 0.550 vs 0.538, pythia 0.612 vs 0.613). The values in bf16 are rounding noise, so fp32 arithmetic is used at every size."
+    - choice: The causality check
+      parameter: null
+      default: "_meta_pre_replacement_max_js is the largest JS over the 8 positions before each replaced position, recorded and never an error; _meta_causality_ok is true when it is at most 1e-6 (CAUSALITY_TOL)"
+      alternatives: []
+      recorded: [_meta_pre_replacement_max_js, _meta_causality_ok, _meta_causality_tol]
+      why: "A prediction cannot depend on a later token, so the value is exactly 0 on a bitwise-deterministic stack: every CPU run here gave 0.0. Non-bitwise kernels (GPU, or a CPU math library under concurrent load: one CPU replacement in 3,072 gave 1.8e-7 and 0.0 on replay) can leave rounding-level divergences, 9e-13 in the test for logits perturbed at 1e-6, far below the 1e-6 tolerance; a model that reads later tokens gives 1.8e-3 there. The flag never drops or changes a result."
+    - choice: Replacement tokens and sinks
+      parameter: null
+      default: "u from the unigram distribution of the windows' content tokens (special tokens excluded), redrawn while equal to the original; position 0 and massive-activation tokens (the corpus-wide rule over the clean forwards) are never replaced and their predictions are not scored"
+      alternatives: []
+      recorded: [_meta_n_replacements, _meta_n_replacements_on_sinks, _meta_unigram_support, _meta_sink_n_massive_dropped]
+      why: "Replacing a sink token removes an attention sink and moves every later prediction, an artefact of the sink, not dependence on content. The base lags are drawn before the masks are known, so the draws do not depend on the corpus-wide threshold; a draw that lands on a sink is dropped, not redrawn."
+    - choice: Random streams
+      parameter: seed
+      default: "42; window i draws its word offset, its base lags and its replacement tokens from numpy.random.default_rng([seed, 0, i]); the bootstrap from default_rng([seed, 1])"
+      alternatives: []
+      recorded: [_meta_seed, _meta_draw_digest]
+      why: "Window i's draws do not depend on how many windows are read, and the global RNGs are untouched. The study's seed facet adds k to every seed key (offset_seeds), which moves every stream."

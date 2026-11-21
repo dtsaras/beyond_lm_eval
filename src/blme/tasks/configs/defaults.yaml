@@ -731,3 +731,49 @@ geometry_paraphrase_lidar:
   batch_size: 8
   max_tokens: 256
   ridge_fraction: 0.01
+
+# ---- Exploratory additions (2026-11-21 research memo, section 4) ----
+
+geometry_readout_dual_spectrum:
+  # Headline rows (word-final positions, sinks excluded) per dimension of the
+  # read state. The dual effective rank is biased low at finite N, so N is
+  # pinned at points_per_dim * d; 32 is the largest power of two the default
+  # corpus (1,691 passages, about 208k words) covers at every width of the
+  # companion study (d <= 5120). Passages are read in corpus order until the
+  # target is met (_meta_n_target_met). n_rows (null) overrides the target.
+  points_per_dim: 32
+  n_rows: null
+  # Passages read at most (the whole default corpus).
+  num_samples: 4000
+  max_length: 512
+  # Positions x vocabulary elements decoded at once (memory only).
+  chunk_elements: 4194304
+  # model: the forwards in the model's dtype (bf16 against fp32 arithmetic
+  # moved gpt2's headlines by under 0.05%); float32: fp32 arithmetic.
+  compute_dtype: model
+
+dynamics_context_influence:
+  # One window per document: num_samples WikiText-103 train articles of at
+  # least min_doc_words words, each read from a seeded word offset for
+  # `window` tokens. 1024 tokens for every model: the largest context every
+  # model of the companion study supports (GPT-2's).
+  num_samples: 96
+  window: 1024
+  min_doc_words: 2048
+  doc_split: train
+  documents: long_documents
+  # Only the last n_scored positions are scored (960+ tokens of context each).
+  # n_replacements base lags k0 = t_first - s + 1 per window, log-uniform on
+  # [1, t_first - replace_lo + 1] (one per stratum of log k0); lags run to
+  # window - replace_lo (1008). 16 puts the far-mass bootstrap SE at about
+  # 0.02 on gpt2 and pythia-160m (1 + 16 forwards per window).
+  n_scored: 64
+  n_replacements: 16
+  replace_lo: 16
+  # float32: the forwards run in fp32 arithmetic at every size (bf16 forwards
+  # raised gpt2's far mass 20x); model: the model's dtype.
+  compute_dtype: float32
+  n_bootstrap: 200
+  # Every random stream (window offsets, base lags, replacement tokens,
+  # bootstrap) derives from this seed.
+  seed: 42

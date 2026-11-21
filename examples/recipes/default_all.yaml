@@ -408,6 +408,14 @@ tasks:
     num_samples: 500
     max_new_tokens: 1024
 
+  # ---- Exploratory additions (2026-11-21) ----
+  geometry_readout_dual_spectrum:
+    points_per_dim: 32
+
+  dynamics_context_influence:
+    num_samples: 96
+    window: 1024
+
   # ---- Representation Engineering Tasks (4) ----
   repe_task_vectors:
     num_samples: 5

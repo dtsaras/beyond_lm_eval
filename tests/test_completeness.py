@@ -131,6 +131,9 @@ EXPECTED_TASKS = [
     "dynamics_perturbation_growth",
     "geometry_effective_depth",
     "geometry_superposition_strength",
+    # --- Exploratory additions (2026-11-21 research memo, section 4) ---
+    "geometry_readout_dual_spectrum",
+    "dynamics_context_influence",
 ]
 
 
@@ -163,10 +166,10 @@ def test_task_instantiable(task_name):
 
 
 def test_task_count():
-    """Registry must expose the current 109-task catalog."""
+    """Registry must expose the current 111-task catalog."""
     registered = list_tasks()
-    assert len(registered) == 109, (
-        f"Expected exactly 109 registered tasks, got {len(registered)}"
+    assert len(registered) == 111, (
+        f"Expected exactly 111 registered tasks, got {len(registered)}"
     )
     assert len(registered) >= len(EXPECTED_TASKS), (
         f"Expected at least {len(EXPECTED_TASKS)} tasks, "
@@ -178,4 +181,4 @@ def test_getting_started_docs_task_count():
     """Docs drift guard: getting_started must mention the current task total."""
     from pathlib import Path
     text = Path("docs/getting_started.md").read_text(encoding="utf-8")
-    assert "109 diagnostic tasks" in text
+    assert "111 diagnostic tasks" in text

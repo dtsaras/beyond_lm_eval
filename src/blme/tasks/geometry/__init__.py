@@ -49,3 +49,5 @@ from .ww_randomized import WWRandomizedTask
 from .dime import DiMETask
 from .prompt_id import PromptIntrinsicDimTask
 from .corpus_metrics import DomainBitsPerByteTask, ParaphraseLiDARTask
+# Exploratory additions (2026-11-21 research memo, section 4: M1)
+from .readout_dual_spectrum import ReadoutDualSpectrumTask
