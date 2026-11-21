@@ -5,7 +5,8 @@ name: Release check
 # pinned input until a new validation receipt is recorded:
 #   - scripts/metric_status.py --check: the receipts cover the current tree and
 #     docs/VALIDATION.md and docs/validation/READOUTS.md are up to date;
-#   - pytest -m release: the same freshness check as a test.
+#   - pytest -m release: the same freshness check as a test, plus the
+#     version-hygiene test (src/ changed since the newest v* tag => bump).
 # Run it by hand before tagging; it runs again on the tag push. It never
 # publishes: publish.yml runs only on a published GitHub release.
 
@@ -29,6 +30,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the version-hygiene test compares src/ with
+          # the newest v* tag reachable from HEAD (it skips in a shallow clone).
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
