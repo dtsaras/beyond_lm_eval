@@ -101,3 +101,10 @@ batches:
       geometry_predictive_information: "ambiguous: the seeded split was not reproduced, values inside the reviewer's draws; last layer collapses on gpt2/pythia"
       geometry_ffn_spectral_utilization: "match (1e-8, Llama 1e-15); the BOS row dominates 3 of 16 Llama layers"
 
+  m1m2:
+    date: 2026-11-21
+    library: b702649
+    verdict: "No arithmetic defect; both reproduced on gpt2 and pythia-160m-deduped (M1 <= 3e-7 relative, M2 <= 1e-14 / 9e-6) once the row rule and draws are aligned. Findings F1-F10 are documented in docs/tasks_geometry.md §51 and docs/tasks_dynamics.md §10."
+    tasks:
+      geometry_readout_dual_spectrum: "match; kappa keys first-order on soft-capped heads (F2); numerical gauge invariance to cond(A) ~1e3 (F3)"
+      dynamics_context_influence: "match; decay exponent near -0.2 at random initialisation, so not a signed training-progress key (F1)"
