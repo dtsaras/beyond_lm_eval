@@ -11,6 +11,7 @@ Usage from Python:
     model, tokenizer = load_model_and_tokenizer("pretrained=gpt2,dtype=float16")
 """
 
+import gc
 import logging
 from typing import Tuple, Optional, Dict, Any
 
@@ -18,6 +19,7 @@ import torch
 from transformers import AutoTokenizer
 
 from ..experts import ensure_runnable_experts
+from . import dtype_contract as _dc
 
 logger = logging.getLogger("blme")
 
@@ -209,7 +211,8 @@ def load_model_and_tokenizer(
     # --- Load model ----------------------------------------------------------
     logger.info(f"Loading model: {model_name} (kwargs: {model_kwargs})")
 
-    model = _load_model(model_name, model_kwargs)
+    model, record = _load_with_dtype_contract(model_name, model_kwargs, dtype, dtype_str,
+                                              quantized=bool(quant_8bit or quant_4bit))
 
     # Move to device if device_map was not used
     if not use_device_map:
@@ -230,7 +233,98 @@ def load_model_and_tokenizer(
     except StopIteration:
         logger.info(f"Model loaded: {model.__class__.__name__}")
 
+    record["loaded_param_dtypes"] = _dc.floating_dtypes(model, "parameter")
+    record["loaded_buffer_dtypes"] = _dc.floating_dtypes(model, "buffer")
+    loaded = _dc.dtype_name(_dc.dominant_param_dtype(model))
+    for w in _dc.native_dtype_hints(loaded, record.get("native_dtype")):
+        logger.warning(f"{model.__class__.__name__}: {w}")
+        record["warnings"].append(w)
+    try:
+        setattr(model, _dc.PRECISION_ATTR, record)
+    except Exception:  # noqa: BLE001 - a model that refuses attributes keeps no record
+        pass
     return model, tokenizer
+
+
+def _load_with_dtype_contract(model_name: str, model_kwargs: Dict[str, Any], dtype, dtype_str: str,
+                              quantized: bool):
+    """Load the model under the dtype contract (``models/dtype_contract.py``):
+    ``(model, record)``.
+
+    With an explicit ``dtype``, a model whose floating parameters or buffers
+    are narrower than requested (or in the other 16-bit format), or mostly
+    wider for a 16-bit request, is loaded again from a config with the dtype
+    pinned on it and every sub-config; what is then still narrower is cast.
+    A model whose loader honoured the request is returned as loaded.
+    """
+    model = _load_model(model_name, model_kwargs)
+    native, native_src = _dc.native_dtype(model_name, model_kwargs)
+    record: Dict[str, Any] = {
+        "requested_dtype": _dc.dtype_name(dtype_str),
+        "native_dtype": native,
+        "native_dtype_source": native_src,
+        "dtype_contract": None,
+        "load_violation": None,
+        "reloaded": False,
+        "cast_applied": False,
+        "casts": [],
+        "warnings": [],
+    }
+    if not isinstance(dtype, torch.dtype):
+        record["dtype_contract"] = "not checked: no explicit dtype requested"
+        return model, record
+    found = _dc.find_violations(model, dtype)
+    if quantized or _dc.is_quantized(model):
+        record["dtype_contract"] = "not checked: quantized model"
+        record["load_violation"] = found
+        return model, record
+    if found is None:
+        record["dtype_contract"] = "honoured"
+        return model, record
+
+    cls = model.__class__.__name__
+    want = _dc.dtype_name(dtype)
+    what = (f"{found['tensors']} tensor(s) in {', '.join(found['dtypes'])}" if found["tensors"]
+            else "most parameters in a wider dtype")
+    example = f" (e.g. {'; '.join(found['examples'])})" if found["examples"] else ""
+    logger.warning(f"{cls}: dtype={want} was requested but the loader returned {what}{example}. "
+                   f"Loading again with dtype={want} pinned on the config and every sub-config.")
+    record["load_violation"] = found
+    try:
+        config = _dc.config_with_dtype(model_name, model_kwargs, dtype)
+    except Exception as e:  # noqa: BLE001 - no readable config: cast what was loaded
+        logger.warning(f"{cls}: could not read the config to load again ({e}); casting instead.")
+        config = None
+    if config is not None:
+        model = None        # the only reference: free it before the second load
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        model = _load_model(model_name, {**model_kwargs, "config": config})
+        record["reloaded"] = True
+        cls = model.__class__.__name__
+        found = _dc.find_violations(model, dtype)
+        if found is None:
+            record["dtype_contract"] = "honoured after reload"
+            logger.warning(f"{cls}: dtype={want} honoured after the reload.")
+            return model, record
+    steps = []
+    if found["tensors"]:
+        n = _dc.cast_violations(model, dtype)
+        msg = (f"dtype contract: {n['parameters']} parameter(s) and {n['buffers']} buffer(s) in "
+               f"{', '.join(found['dtypes'])} cast to {want}")
+        logger.warning(f"{cls}: {msg}; wider tensors kept.")
+        record["casts"].append(msg)
+        record["cast_applied"] = True
+        steps.append("cast")
+    if found["wider_bulk"]:
+        w = (f"dtype={want} was requested but most parameters are in a wider dtype as loaded; "
+             f"kept (BLME never narrows a tensor the loader widened).")
+        logger.warning(f"{cls}: {w}")
+        record["warnings"].append(w)
+        steps.append("wider parameters kept")
+    record["dtype_contract"] = ("reloaded, then " if record["reloaded"] else "") + ", ".join(steps)
+    return model, record
 
 
 def _load_image_text_to_text(model_name: str, model_kwargs: Dict[str, Any]):
