@@ -20,6 +20,7 @@ Two defects found by an independent review of the study sweep: Gemma windows wit
   - **Scope:** of the 66 study checkpoints only gemma-4-12B sets either field, so every other model is unchanged.
 - **Stale guard:** `test_round5_determinism.py::test_repe_steering_hook_casts_vector_to_hidden_dtype` looked for the literal `(alpha * vec).to(out_t.dtype)`. Since 0.2.2 the cast is `.to(out_t.device, out_t.dtype)`, so the test had failed outside every receipt's linked selectors. The code was correct; the guard now matches any `.to(...)` that casts to `out_t.dtype`.
 - **Tests:** `tests/tasks/test_perplexity_window_bos.py`. Every window starts with BOS; values match an independent window loop on raw logits; no token is skipped when the stride equals the window; tokenizers without a BOS are unchanged. All 8 fail on 0.2.4. `tests/tasks/test_generation_diversity_stop_ids.py::test_model_suppress_tokens_still_apply`: suppressed tokens are never sampled, and other defaults are still ignored. It fails on 0.2.4.
+- **Receipts:** `2026-11-21-v025` covers all 109 tasks, CPU only, on four Transformers stacks: 1001 cases per stack, 0 failures, 8 skips (the GPU tests). Ten files did not pass in the parallel run and passed on a serial rerun. `2026-11-21-cka-gpu-v025` repeats `geometry_cka`'s GPU-path cases (20 per stack, all passed). Both pin the study at 1d94455, with fractal at 1000 documents.
 
 ## 0.2.4 — 2026-11-21
 

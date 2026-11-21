@@ -21,78 +21,78 @@ The primary categories count each task once. Published-value tests also occur in
 
 | Dated receipt | Transformers | Passed | Failed | Errors | Skipped |
 |---|---|---:|---:|---:|---:|
-| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.2.0 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.10.2 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.22.2 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu](validation/receipt-2026-11-21-cka-gpu.json) | 5.23.0 | 20 | 0 | 0 | 0 |
-| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.2.0 | 971 | 0 | 0 | 8 |
-| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.10.2 | 971 | 0 | 0 | 8 |
-| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.22.2 | 971 | 0 | 0 | 8 |
-| [2026-11-21-v024](validation/receipt-2026-11-21-v024.json) | 5.23.0 | 971 | 0 | 0 | 8 |
+| [2026-11-21-cka-gpu-v025](validation/receipt-2026-11-21-cka-gpu-v025.json) | 5.2.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v025](validation/receipt-2026-11-21-cka-gpu-v025.json) | 5.10.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v025](validation/receipt-2026-11-21-cka-gpu-v025.json) | 5.22.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v025](validation/receipt-2026-11-21-cka-gpu-v025.json) | 5.23.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-v025](validation/receipt-2026-11-21-v025.json) | 5.2.0 | 993 | 0 | 0 | 8 |
+| [2026-11-21-v025](validation/receipt-2026-11-21-v025.json) | 5.10.2 | 993 | 0 | 0 | 8 |
+| [2026-11-21-v025](validation/receipt-2026-11-21-v025.json) | 5.22.2 | 993 | 0 | 0 | 8 |
+| [2026-11-21-v025](validation/receipt-2026-11-21-v025.json) | 5.23.0 | 993 | 0 | 0 | 8 |
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v025 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v025 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v025 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v025 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v024 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v025 run.
 
 Counts above are unique executed cases per run. Row counts below are *passed / linked cases* per stack. Some tests serve multiple metrics. These are selected CPU numerical and reference tests. Whole-suite testing, architecture coverage, document reliability, and published-result reproduction each require their own evidence.
 
@@ -193,10 +193,10 @@ Task links open the implementation. Numbered links open the test files. The mach
 
 | Task, tests and library declaration | Primary evidence | 5.2.0 | 5.10.2 | 5.22.2 | 5.23.0 | Verified scope and next check |
 |---|---|---:|---:|---:|---:|---|
-| [dynamics_coe](../src/blme/tasks/dynamics/coe.py) [1](../tests/tasks/parity/test_coe_release_values.py) [2](../tests/tasks/test_coe_chain_end.py)<br>formula-faithful | Released estimator or component executed | 3/3 | 3/3 | 3/3 | 3/3 | The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ. **Next.** Match both collectors on multi-token prompts and quantify the first-state contribution. |
+| [dynamics_coe](../src/blme/tasks/dynamics/coe.py) [1](../tests/tasks/parity/test_coe_release_values.py) [2](../tests/tasks/test_coe_chain_end.py) [3](../tests/tasks/invariance/test_dynamics_coe.py)<br>formula-faithful | Released estimator or component executed | 4/4 | 4/4 | 4/4 | 4/4 | The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ. **Next.** Match both collectors on multi-token prompts and quantify the first-state contribution. |
 | [dynamics_entropy_calibration](../src/blme/tasks/dynamics/entropy_calibration.py) [1](../tests/tasks/parity/test_entropy_calibration_parity.py)<br>formula-faithful | Released estimator or component executed | 7/7 | 7/7 | 7/7 | 7/7 | entropy-calibration@d3f62e4 compute_logprobs: entropies 1e-4; log losses equal after fixing the release's one-position slice. BLME deliberately corrects a one-position offset in the released loss slice. Preserve the release value and aligned value when comparing protocols. **Next.** Compare both next-token indexing conventions against hand-aligned outcomes. |
 | [dynamics_fractal](../src/blme/tasks/dynamics/fractal.py) [1](../tests/tasks/parity/test_fractal_pooled_parity.py)<br>refined-adaptation | Released estimator or component executed | 4/4 | 4/4 | 4/4 | 4/4 | The original notebook estimators are checked at matched scales and offsets. BLME pools long articles and corrects the Joseph accumulator across scales. Corpus and sequence-length sensitivity remain. **Next.** Repeat across corpora, aggregation units and fitting scales. |
-| [dynamics_generation_diversity](../src/blme/tasks/dynamics/generation_diversity.py) [1](../tests/tasks/parity/test_generation_diversity_values.py) [2](../tests/tasks/test_reference_parity_formulas.py) [3](../tests/tasks/test_round6_fixes.py)<br>parity-ready | Independent implementation or scientific library | 8/8 | 8/8 | 8/8 | 8/8 | Scripted completions anchor diversity and repetition. Self-BLEU uses the Texygen NLTK smoothing convention. Sampling entropy uses the processed logits and each completion’s own content-token quarters. The November 19 fix reduces masked, processed scores in float64 at the retained token positions. Scripted quarter means meet 1e-12 nats, and the largest difference from SciPy on the three sampled GPT-2 summaries was 2.22e-16 nats on four Transformers versions. The six entropy cases passed at one, four and eight CPU threads per version. **Next.** Quantify sampling variability across prompts and random seeds for the intended generation budget. |
+| [dynamics_generation_diversity](../src/blme/tasks/dynamics/generation_diversity.py) [1](../tests/tasks/parity/test_generation_diversity_values.py) [2](../tests/tasks/test_reference_parity_formulas.py) [3](../tests/tasks/test_round6_fixes.py) [4](../tests/tasks/test_generation_diversity_stop_ids.py)<br>parity-ready | Independent implementation or scientific library | 9/9 | 9/9 | 9/9 | 9/9 | Scripted completions anchor diversity and repetition. Self-BLEU uses the Texygen NLTK smoothing convention. Sampling entropy uses the processed logits and each completion’s own content-token quarters. The November 19 fix reduces masked, processed scores in float64 at the retained token positions. Scripted quarter means meet 1e-12 nats, and the largest difference from SciPy on the three sampled GPT-2 summaries was 2.22e-16 nats on four Transformers versions. The six entropy cases passed at one, four and eight CPU threads per version. **Next.** Quantify sampling variability across prompts and random seeds for the intended generation budget. |
 | [dynamics_gradient_flow](../src/blme/tasks/dynamics/gradient_flow.py) [1](../tests/tasks/parity/test_gradient_flow_log_ratio_values.py) [2](../tests/test_safe_norm_accumulation.py)<br>refined-adaptation | Equation, analytic anchor or controlled recomputation | 5/5 | 5/5 | 5/5 | 5/5 | Autograd on known endpoints checks the gradient norm log ratio. Depth replaces time in the cited recurrent-network motivation. **Next.** Vary endpoint depth and verify gradient ratios across independent passage draws. |
 | [dynamics_interpolation](../src/blme/tasks/dynamics/trajectories.py) [1](../tests/tasks/parity/test_interpolation_values.py) [2](../tests/tasks/test_interpolation_distinct_pairs.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 4/4 | 4/4 | 4/4 | 4/4 | Known midpoint entropies check the convexity gap. The reference for SLERP covers an interpolation primitive. The sampled layer readout and performance interpretation are study choices. **Next.** Vary layer pairs and sequence samples and quantify resulting changes in convexity gap. |
 | [dynamics_perturbation_growth](../src/blme/tasks/dynamics/perturbation_growth.py) [1](../tests/tasks/test_perturbation_growth.py)<br>proxy-only | Operational proxy or study-defined diagnostic | 11/11 | 11/11 | 11/11 | 11/11 | Known contracting and expanding systems check finite-depth divergence under seeded embedding perturbations. The headline is a BLME diagnostic. It does not implement the quoted Lyapunov experiment. For models with per-layer token embeddings, both forwards use the same token-identity lookup while the main embedding receives the specified perturbation. On pretrained Gemma-4-E2B, all 64 samples produced a relative log-growth of −2.437157 on both Transformers 5.10.2 and 5.23.0. **Next.** Repeat seeded perturbations over step sizes and known contracting and expanding dynamics. |
@@ -236,7 +236,7 @@ Task links open the implementation. Numbered links open the test files. The mach
 | [geometry_neighborhood_overlap](../src/blme/tasks/geometry/gride.py) [1](../tests/tasks/parity/test_gride_parity.py)<br>parity-ready | Released estimator or component executed | 3/3 | 3/3 | 3/3 | 3/3 | DADApy exact, via evaluate(). Matched DADApy neighbourhoods on common points. k, ties and the token population affect interpretation. **Next.** Vary neighbourhood size, ties and the token population. |
 | [geometry_neural_collapse](../src/blme/tasks/geometry/neural_collapse.py) [1](../tests/tasks/invariance/test_neural_collapse.py) [2](../tests/tasks/parity/test_neural_collapse_parity.py)<br>refined-adaptation | Equation, analytic anchor or controlled recomputation | 7/7 | 7/7 | 7/7 | 7/7 | Next-token class and Galanti CDNV checks target the headline. NC1 trace comparison covers a separate quantity. Full classical neural collapse has several distinct conditions. **Next.** Compare CDNV with other collapse criteria on matched features and class definitions. |
 | [geometry_paraphrase_lidar](../src/blme/tasks/geometry/corpus_metrics.py) [1](../tests/tasks/test_domain_lidar.py)<br>refined-adaptation | Independent implementation or scientific library | 5/5 | 5/5 | 5/5 | 5/5 | Discriminant effective rank on paired mean-pooled final-layer content-token states with trace-relative ridge. Independent dense whitening agrees to 2.6e-12 on matched inputs. The text pairing and ridge adapt the original estimator. Matched meaning-changing pairs yield almost the same model rankings. Median panel rank correlation was 0.942. Adding LiDAR to size and BPB increased equal-lab MAE from 0.0921 to 0.0999 in the primary study. **Next.** Require gains over size, BPB, ordinary rank and matched negative pairs on untouched labs. |
-| [geometry_perplexity](../src/blme/tasks/geometry/perplexity.py) [1](../tests/tasks/parity/test_perplexity_parity.py) [2](../tests/tasks/test_comprehensive_parity.py) [3](../tests/tasks/test_perplexity_byte_ownership.py) [4](../tests/tasks/test_bits_per_byte_bos.py)<br>formula-faithful | Equation, analytic anchor or controlled recomputation | 14/14 | 14/14 | 14/14 | 14/14 | Teacher-forced loss, frequency buckets and scored UTF-8 bytes are independently checked. When an inserted BOS alone is unscored, exact suffix decoding can establish the whole-text denominator even for shared character offsets. **Next.** Recheck byte coverage and ranking on identical raw text across tokenizer families. |
+| [geometry_perplexity](../src/blme/tasks/geometry/perplexity.py) [1](../tests/tasks/parity/test_perplexity_parity.py) [2](../tests/tasks/test_comprehensive_parity.py) [3](../tests/tasks/test_perplexity_byte_ownership.py) [4](../tests/tasks/test_bits_per_byte_bos.py) [5](../tests/tasks/test_perplexity_window_bos.py)<br>formula-faithful | Equation, analytic anchor or controlled recomputation | 22/22 | 22/22 | 22/22 | 22/22 | Teacher-forced loss, frequency buckets and scored UTF-8 bytes are independently checked. When an inserted BOS alone is unscored, exact suffix decoding can establish the whole-text denominator even for shared character offsets. **Next.** Recheck byte coverage and ranking on identical raw text across tokenizer families. |
 | [geometry_phd_dimension](../src/blme/tasks/geometry/phd_dimension.py) [1](../tests/tasks/parity/test_phd_dimension_parity.py)<br>parity-ready | Released estimator or component executed | 7/7 | 7/7 | 7/7 | 7/7 | GPTID’s PHD and Prim kernels run on the same subsamples and RNG stream. The dimension estimate remains dependent on text length and point count. **Next.** Estimate convergence over text length, point budget and repeated subsampling. |
 | [geometry_positional_decay](../src/blme/tasks/geometry/positional_decay.py) [1](../tests/tasks/parity/test_positional_decay_write_weights.py) [2](../tests/tasks/test_comprehensive_parity.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 5/5 | 5/5 | 5/5 | 5/5 | The per-head write norm and write weighting are checked explicitly. This summarizes attention vs position on a prescribed text sample. On 2,024 causal rows with ties, the batched Spearman correlations agreed with the scalar SciPy calculation to 2.22e−16. Two CPU timings showed 90× and 91× speedups for this rank calculation. **Next.** Repeat the write-weighted attention profile across corpora and context lengths. |
 | [geometry_prediction_alignment](../src/blme/tasks/geometry/consistency.py) [1](../tests/tasks/parity/test_prediction_alignment_values.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 1/1 | 1/1 | 1/1 | 1/1 | Supplied logits anchor the margin mean and spread. A model’s own next-token ranking is used. Treat shared readout signal with likelihood baselines explicitly. **Next.** Test incremental prediction beyond next-token likelihood on held-out labs. |
