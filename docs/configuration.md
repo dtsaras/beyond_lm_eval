@@ -110,6 +110,47 @@ The `--model-args` flag (or `model.args` in YAML) uses comma-separated `key=valu
 | `load_in_4bit` | `true` | 4-bit quantization (requires bitsandbytes) |
 | `max_memory` | `0:20GiB,cpu:40GiB` | Per-device memory limits |
 
+## Numerical precision
+
+**The rule.** Run a checkpoint in a 16-bit dtype only if its mean next-token NLL in that dtype is at most 0.02 nats above its float32 NLL; otherwise run float32. The checkpoint's native dtype is a hint, not a test: a float16-native checkpoint can degrade badly in bfloat16, and a bfloat16-native one can still degrade.
+
+**The check** is opt-in and measures the rule's quantity:
+
+```bash
+blme precision-check --model-args pretrained=<id-or-path>[,device_map=auto,...] \
+    [--dtype bfloat16|float16] [--threshold 0.02] [--device cuda] [--output check.json]
+```
+
+```python
+from blme.precision import check
+rec = check("pretrained=<id-or-path>", dtype="bfloat16", threshold=0.02)
+```
+
+Method:
+
+- Text: WikiText-103 validation (`Salesforce/wikitext`, `wikitext-103-raw-v1`), the non-empty lines of the first 4,000 rows joined with newlines.
+- Rows: the first 2,044 tokens of that text, tokenized without special tokens, as 4 rows of 511. When the tokenizer prepends a BOS (`tokenizer("a")` starts with `bos_token_id`), each row is that BOS followed by its 511 tokens; otherwise the row is the 511 tokens.
+- Model: loaded once per dtype with `attn_implementation=eager`, through BLME's loader, so under the dtype contract below. `dtype` and `attn_implementation` in `--model-args` are replaced; other keys, such as `device_map` and `revision`, are kept.
+- Loss: one forward per dtype; logits cast to float32; per-token cross-entropy of every next token; the mean over finite values, with the non-finite count reported beside it.
+
+The record gives `nll_float32`, `nll_<dtype>`, `delta` (16-bit minus float32), the non-finite counts, each load's parameter dtypes and dtype contract, the checkpoint's native dtype, and `recommendation` with its `reason`. float32 is recommended when `delta` exceeds the threshold, or when the 16-bit run has more non-finite values than float32. Numbers measured on CPU and on GPU differ slightly, mostly in the 16-bit run.
+
+**The dtype contract.** When `dtype` is given explicitly, the loader checks every floating parameter and buffer after the load. A tensor honours the request when it is in the requested dtype or a wider one: transformers itself keeps some tensors in float32, such as `_keep_in_fp32_modules` and RoPE `inv_freq` buffers, and those are left as they are. The contract is broken by a tensor in a narrower dtype or in the other 16-bit format. For a 16-bit request, it is also broken when float32 parameters hold most of the parameter elements. When the contract is broken, BLME logs a warning naming the model class. It then loads the checkpoint again from a config with the dtype pinned on the config and every sub-config, and casts whatever is still narrower. It never narrows a tensor that the loader returned wider. A loader that honours the request is not touched. Quantized models are recorded but neither reloaded nor cast. With `dtype=auto` (the default), nothing is checked.
+
+Why: on transformers 5.10, `from_pretrained(path, dtype=torch.float32)` returns bfloat16 parameters for Qwen3.5. The config loader consumes the `dtype` keyword into the top-level config. The auto class then swaps in the text sub-config, whose own `dtype` in `config.json` is bfloat16, and the model loads with `dtype="auto"`. The same path exists for emu3, llama4, mllama and qwen3_5_moe. transformers 5.2 honours the request.
+
+**Provenance.** Every results envelope records `config.precision`. Task results never contain these fields.
+
+| Field | Meaning |
+|---|---|
+| `requested_dtype` | The `dtype` model argument (`auto` when absent) |
+| `native_dtype`, `native_dtype_source` | The checkpoint's dtype, from its config (`dtype`/`torch_dtype`, or the text sub-config's). If the config has none, the dtype holding most elements in its safetensors header. |
+| `loaded_param_dtypes`, `loaded_buffer_dtypes` | Floating dtypes after the load and the contract |
+| `dtype_contract`, `load_violation`, `reloaded` | `honoured`, `honoured after reload`, `reloaded, then cast`, or `not checked: ...`; what the first load got wrong; whether the checkpoint was loaded again |
+| `cast_applied`, `casts` | Whether BLME changed any dtype after the load, and each cast. This includes the float16 to bfloat16 parameter cast that runs need when they force eager attention. |
+| `effective_param_dtypes`, `effective_dtype` | What the tasks ran with |
+| `warnings` | Native-dtype hints: bfloat16 on a float16-native checkpoint, or 16-bit on a float32-native one |
+
 ## Output Formats
 
 ### JSON (default)
@@ -124,7 +165,7 @@ Produces `results/results.json`:
 {
   "blme_version": "0.1.0",
   "timestamp": "2026-02-28T14:30:00",
-  "config": {"model_args": "pretrained=gpt2", ...},
+  "config": {"model_args": "pretrained=gpt2", "precision": {"requested_dtype": "auto", ...}, ...},
   "results": {
     "geometry_svd": {
       "effective_rank": 127.4,
