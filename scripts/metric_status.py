@@ -180,7 +180,7 @@ def render(rows, receipts):
     out = [
         "# Metric validation status", "",
         f"**{len(present)} registered tasks.** Each row describes the quantity checked, the strongest numerical evidence selected for it, and the next scientific check. A public task can expose multiple readouts with different evidence. A passing comparison applies to the stated inputs and conventions.", "",
-        f"**{sum(bool(r.get('runs')) for r in present)} tasks have linked numerical receipts. {len(outstanding)} rows flagged by the freshness check.** Changes to reviewed inputs or the registry are flagged by the regular test suite. [Maintenance and evidence format](validation/README.md) · [Machine-readable assessments](validation/metrics.json)", "",
+        f"**{sum(bool(r.get('runs')) for r in present)} tasks have linked numerical receipts. {len(outstanding)} rows flagged by the freshness check.** Changes to reviewed inputs or the registry are flagged by the release check. [Maintenance and evidence format](validation/README.md) · [Machine-readable assessments](validation/metrics.json)", "",
         "## Evidence across the library", "", "| Primary evidence | Tasks |", "|---|---:|",
     ]
     out.extend(f"| {label} | {counts[code]} |" for code, label in EVIDENCE.items())

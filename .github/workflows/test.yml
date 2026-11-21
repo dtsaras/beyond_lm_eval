@@ -50,8 +50,11 @@ jobs:
         env:
           HF_HUB_OFFLINE: "1"
           HF_DATASETS_OFFLINE: "1"
+        # `release` tests run in release-check.yml instead: the validation-
+        # receipt freshness check fails on every commit that changes a pinned
+        # input until a new receipt is recorded.
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short -m "not release"
 
       - name: Check imports
         run: |

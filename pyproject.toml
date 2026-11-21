@@ -108,3 +108,19 @@ blme = [
 [project.scripts]
 blme = "blme.cli:main"
 beyond-eval = "blme.cli:main"
+
+[tool.pytest.ini_options]
+# Test-group markers are assigned by path in tests/_plugins/blme_test_groups.py,
+# because the validation receipts pin the test files themselves.
+pythonpath = ["tests/_plugins"]
+addopts = ["-p", "blme_test_groups"]
+markers = [
+    "release: release check; fails between a pinned-input change and its new receipt (CI: release workflow)",
+    "slow: long-running; deselect with -m 'not slow'",
+    "gpu: needs a CUDA device; skips without one",
+    "golden: golden-snapshot tooling (tests/golden/)",
+    "population_guard: one assertion swept over every task or call site",
+    "parity: parity with a released implementation or published values",
+    "invariance: invariance harness (transforms that must not move a readout)",
+    "precision: precision lifting and dtype restore",
+]

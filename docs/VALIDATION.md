@@ -2,7 +2,7 @@
 
 **111 registered tasks.** Each row describes the quantity checked, the strongest numerical evidence selected for it, and the next scientific check. A public task can expose multiple readouts with different evidence. A passing comparison applies to the stated inputs and conventions.
 
-**111 tasks have linked numerical receipts. 0 rows flagged by the freshness check.** Changes to reviewed inputs or the registry are flagged by the regular test suite. [Maintenance and evidence format](validation/README.md) · [Machine-readable assessments](validation/metrics.json)
+**111 tasks have linked numerical receipts. 0 rows flagged by the freshness check.** Changes to reviewed inputs or the registry are flagged by the release check. [Maintenance and evidence format](validation/README.md) · [Machine-readable assessments](validation/metrics.json)
 
 ## Evidence across the library
 
