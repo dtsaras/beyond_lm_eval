@@ -2,7 +2,7 @@
 
 This module contains metrics that evaluate the geometry of the model's hidden-state and weight spaces.
 
-**Registry coverage (52 tasks)**
+**Registry coverage (53 tasks)**
 
 `geometry_alpha_req`, `geometry_categories`,
 `geometry_cka`, `geometry_cknna`, `geometry_collapse`,
@@ -16,7 +16,7 @@ This module contains metrics that evaluate the geometry of the model's hidden-st
 `geometry_neighborhood_overlap`, `geometry_neural_collapse`, `geometry_paraphrase_lidar`,
 `geometry_perplexity`, `geometry_phd_dimension`, `geometry_positional_decay`,
 `geometry_prediction_alignment`, `geometry_predictive_information`,
-`geometry_procrustes_linearity`, `geometry_prompt_id`,
+`geometry_procrustes_linearity`, `geometry_prompt_id`, `geometry_readout_dual_spectrum`,
 `geometry_representation_dispersion`, `geometry_representation_sensitivity`,
 `geometry_rogue_dimensions`, `geometry_rsa`, `geometry_schatten`,
 `geometry_spectral`, `geometry_spectral_signature`,
@@ -489,6 +489,14 @@ For a readout-only backfill, the task config accepts `heldout_only: true`. Set `
 * **Citation/Paper**: `Jha, N. K., & Reagen, B. (2025). Spectral Scaling Laws in Language Models: How Effectively Do Feed-Forward Networks Use Their Latent Space?` [EMNLP 2025, ArXiv: 2510.00537]; no released code.
 * **File & Function**: `src/blme/tasks/geometry/ffn_spectral.py` -> `FFNSpectralUtilizationTask`
 * **Critical Info**: Headline keys: `ffn_sui_median`, `ffn_edim_median`, `ffn_soft_rank_median`, `ffn_hard_rank_median`. No key is declared size-invariant. The paper trains its own models on C4 and fits power laws across widths; it reports no single model-level score and does not state N. BLME uses N = 32768 tokens (`n_tokens`): the first passages of the library corpus with the tokenizer's defaults, at most 512 tokens each, the last one cut so N is exact. Every rank depends on N: the covariance has rank at most N - 1 (`_meta_n_nonzero_eigenvalues_profile`), so values are comparable only at the same N. Position 0 is included, as the paper uses all tokens; in pretrained models it can be a sink, so the spectrum without it is `_meta_*_without_position0`. Each layer needs a float64 D x D accumulator; layers run in consecutive groups that fit `memory_budget_gb` (default 8), with one pass over the same tokens per group. On BOS models the BOS row, identical in every passage, can dominate a layer (Llama: 72/99/44% of the variance at layers 0, 1, 15); without it the SUI median is +10% and the hard-rank median +11%.
+
+## 51. Readout dual spectrum (geometry_readout_dual_spectrum)
+* **What are we measuring**: How much the model's next-token distributions differ from one position to another, and how that difference is spread over the directions of the state the head reads, in a form that does not depend on how that state is parametrised.
+* **How are we measuring**: For a softmax head z = s (W h + b), h is the natural parameter of an exponential family and mu = s W^T p its expectation parameter, and KL(p_x || p_x') + KL(p_x' || p_x) = (h_x - h_x') . (mu_x - mu_x') = (z_x - z_x') . (p_x - p_x') exactly. The Jeffreys dispersion `jeffreys_dispersion` = 1/2 E J over distinct pairs of positions = tr Cov(z, p) (nats; the logit form, exact for any head). The dual spectrum kappa_i = sqrt(eig_i(Cov(h) Cov(mu))) is unchanged by any invertible affine re-basing of h with the compensating head change; `dual_coupling` = sum kappa (>= the trace, the Bures bound), `dual_coherence` = tr Cov(h, mu) / sum kappa in (0, 1], `dual_effective_rank` its Roy-Vetterli effective rank (and `dual_effective_rank_frac` that over d), `dual_tail_exponent` the decay of kappa over ranks 11-100. Rows are the word-final positions of the default corpus: the text read so far ends exactly at the end of a whitespace-delimited word (from the tokenizer's character offsets; a character split across tokens never qualifies), with position 0 and massive-activation rows excluded, N = 32 d rows. h is captured at the head's input; the head is recomputed in float32 and checked against the model's logits; the softmax and every moment are float64 and streamed.
+* **Hypothesis**: The research memo of 2026-11-21 (section 4.2) predicts that, once the gauge of the read state is removed, final-layer geometry carries little beyond width and loss: D_J and coherence track bits per byte, and the dual effective rank is about 0.4 d. Random initialisation gives coherence near 1 and a dispersion near 0.
+* **Citation/Paper**: BLME construct. Exponential-family duality: Amari & Nagaoka (2000), Methods of Information Geometry; the Bures coupling: Bhatia, Jain & Lim (2019) [ArXiv: 1712.01504]; dual coordinates of the softmax head: Park et al. (2026) [ArXiv: 2602.15293].
+* **File & Function**: `src/blme/tasks/geometry/readout_dual_spectrum.py` -> `ReadoutDualSpectrumTask`
+* **Critical Info**: Exploratory, not part of the paper core. Declared invariant at a fixed N to the readout gauge, zero-padding and isometric embedding of the read state (`tests/tasks/test_readout_dual_spectrum.py::test_size_invariant_entry`, 1e-10 on float64 models): every headline but the /d twin. The default pins N to 32 d rows, so a wider model reads more rows (`_meta_n_rows`, `_meta_points_per_dim`); the default corpus covers 32 d at every d <= 5120 (`_meta_n_target_met`). Every position >= 1 is `_meta_*_all_positions` (on pythia-160m-deduped D_J 8.47 against 6.44 word-final, the mid-character byte positions the word-final rule removes). Sink rows are removed exactly from the streamed moments (`_meta_sink_rows_removed`). Under a final logit softcap (Gemma-2) the level is exact and the d-dimensional spectrum is a first-order approximation (`_meta_d_space_exact` false). A tokenizer without character offsets gives NaN headlines (`_meta_word_final_reason`).
 
 ## Domain loss and paraphrase LiDAR
 
