@@ -27,6 +27,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        # cmake + Boost build dionysus (the `topology` extra, included in
+        # `test`) where no wheel matches, so the zigzag tests run in CI.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake libboost-dev

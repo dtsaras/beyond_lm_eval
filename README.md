@@ -92,8 +92,12 @@ pip install -e .
 # With all optional dependencies
 pip install -e ".[all]"
 
+# Everything the paper-core tasks need (topology + diversity)
+pip install -e ".[paper]"
+
 # Specific extras
-pip install -e ".[topology]"   # ripser for persistent homology
+pip install -e ".[topology]"   # ripser for persistent homology; dionysus for zigzag persistence
+pip install -e ".[diversity]"  # nltk for Texygen-parity Self-BLEU
 pip install -e ".[benchmarks]" # lm-eval integration
 pip install -e ".[probing]"    # scikit-learn for probing tasks
 pip install -e ".[data]"       # datasets for HF-backed task data
