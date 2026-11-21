@@ -323,9 +323,9 @@
   },
   "dynamics_context_influence": {
     "evidence": "equation",
-    "next_check": "Seed and item reliability on the zoo, and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2).",
+    "next_check": "Seed and item reliability on the zoo (the blind review of 2026-11-21 measured 3-4 seeds on two models: single-run far mass 0.27-0.31 on gpt2, 0.34-0.38 on pythia-160m-deduped), and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2).",
     "receipt": "2026-11-21-v026",
-    "scope": "BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the seed moves every draw, sinks are never replaced and the global RNGs are untouched.",
+    "scope": "BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the task config's seed moves every draw (blme.evaluate(seed=...) does not, since the shipped seed 42 takes precedence), item sets share the base lags, sinks are never replaced and the global RNGs are untouched. The decay exponent is near -0.2 at random initialisation, 1.2-1.3 trained and dependent on the fit's lower lag (blind review, 2026-11-21), so the far mass or the far share, not beta, is the comparison along training.",
     "selectors": [
       "tests/tasks/test_context_influence.py",
       "tests/tasks/test_exploratory_task_guards.py"
@@ -2097,9 +2097,9 @@
   },
   "geometry_readout_dual_spectrum": {
     "evidence": "equation",
-    "next_check": "Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4).",
+    "next_check": "Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4). Record the conditioning of the two covariances (eigenvalue range, zeroed eigenvalues) in _meta_, as the blind review of 2026-11-21 suggests.",
     "receipt": "2026-11-21-v026",
-    "scope": "BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1.",
+    "scope": "BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. The invariance is exact in exact arithmetic; a blind review (2026-11-21) found dense re-basings held to about 1e-12 up to cond(A) of about 1e3 and drifting beyond about 1e4 (4% at 2e7), diagonal gains removed exactly at any scale, and the models' own bases far from that limit. Under a final softcap only D_J is exact and the kappa keys are first-order (gemma-2-2b coherence 0.274 against 0.661 at the logit level), so soft-capped models are excluded from comparisons of the kappa keys. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1; untrained or random vocabulary rows collapse the kappa keys.",
     "selectors": [
       "tests/tasks/test_readout_dual_spectrum.py",
       "tests/tasks/test_exploratory_task_guards.py"
