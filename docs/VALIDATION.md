@@ -21,78 +21,78 @@ The primary categories count each task once. Published-value tests also occur in
 
 | Dated receipt | Transformers | Passed | Failed | Errors | Skipped |
 |---|---|---:|---:|---:|---:|
-| [2026-11-21-cka-gpu-v026](validation/receipt-2026-11-21-cka-gpu-v026.json) | 5.2.0 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu-v026](validation/receipt-2026-11-21-cka-gpu-v026.json) | 5.10.2 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu-v026](validation/receipt-2026-11-21-cka-gpu-v026.json) | 5.22.2 | 20 | 0 | 0 | 0 |
-| [2026-11-21-cka-gpu-v026](validation/receipt-2026-11-21-cka-gpu-v026.json) | 5.23.0 | 20 | 0 | 0 | 0 |
-| [2026-11-21-v026](validation/receipt-2026-11-21-v026.json) | 5.2.0 | 1052 | 0 | 0 | 8 |
-| [2026-11-21-v026](validation/receipt-2026-11-21-v026.json) | 5.10.2 | 1052 | 0 | 0 | 8 |
-| [2026-11-21-v026](validation/receipt-2026-11-21-v026.json) | 5.22.2 | 1052 | 0 | 0 | 8 |
-| [2026-11-21-v026](validation/receipt-2026-11-21-v026.json) | 5.23.0 | 1052 | 0 | 0 | 8 |
+| [2026-11-21-cka-gpu-v027](validation/receipt-2026-11-21-cka-gpu-v027.json) | 5.2.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v027](validation/receipt-2026-11-21-cka-gpu-v027.json) | 5.10.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v027](validation/receipt-2026-11-21-cka-gpu-v027.json) | 5.22.2 | 20 | 0 | 0 | 0 |
+| [2026-11-21-cka-gpu-v027](validation/receipt-2026-11-21-cka-gpu-v027.json) | 5.23.0 | 20 | 0 | 0 | 0 |
+| [2026-11-21-v027](validation/receipt-2026-11-21-v027.json) | 5.2.0 | 1057 | 0 | 0 | 8 |
+| [2026-11-21-v027](validation/receipt-2026-11-21-v027.json) | 5.10.2 | 1057 | 0 | 0 | 8 |
+| [2026-11-21-v027](validation/receipt-2026-11-21-v027.json) | 5.22.2 | 1057 | 0 | 0 | 8 |
+| [2026-11-21-v027](validation/receipt-2026-11-21-v027.json) | 5.23.0 | 1057 | 0 | 0 | 8 |
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v027 run.
 
-**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v026 run.
+**5.2.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v027 run.
 
-**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v026 run.
+**5.10.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v027 run.
 
-**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v026 run.
+**5.22.2 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cached_norms_share_the_gpu_numerator_arithmetic` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_cka_evaluate_self_similarity_is_one_on_the_gpu` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_eigvalsh_f64_falls_back_on_a_cuda_failure` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_knn_matches_lexsort_on_gpu` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_linear_cka_gpu_path_is_float64_exact` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_cuda_input_falls_back_to_the_cpu` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_safe_svdvals_gpu_matches_cpu` in the 2026-11-21-v027 run.
 
-**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v026 run.
+**5.23.0 · skipped** `tests/test_gpu_linalg.py::test_svd_and_eigh_wrappers_match_cpu` in the 2026-11-21-v027 run.
 
 Counts above are unique executed cases per run. Row counts below are *passed / linked cases* per stack. Some tests serve multiple metrics. These are selected CPU numerical and reference tests. Whole-suite testing, architecture coverage, document reliability, and published-result reproduction each require their own evidence.
 
@@ -194,7 +194,7 @@ Task links open the implementation. Numbered links open the test files. The mach
 | Task, tests and library declaration | Primary evidence | 5.2.0 | 5.10.2 | 5.22.2 | 5.23.0 | Verified scope and next check |
 |---|---|---:|---:|---:|---:|---|
 | [dynamics_coe](../src/blme/tasks/dynamics/coe.py) [1](../tests/tasks/parity/test_coe_release_values.py) [2](../tests/tasks/test_coe_chain_end.py) [3](../tests/tasks/invariance/test_dynamics_coe.py)<br>formula-faithful | Released estimator or component executed | 4/4 | 4/4 | 4/4 | 4/4 | The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ. **Next.** Match both collectors on multi-token prompts and quantify the first-state contribution. |
-| [dynamics_context_influence](../src/blme/tasks/dynamics/context_influence.py) [1](../tests/tasks/test_context_influence.py) [2](../tests/tasks/test_exploratory_task_guards.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 37/37 | 37/37 | 37/37 | 37/37 | BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the task config's seed moves every draw (blme.evaluate(seed=...) does not, since the shipped seed 42 takes precedence), item sets share the base lags, sinks are never replaced and the global RNGs are untouched. The decay exponent is near -0.2 at random initialisation, 1.2-1.3 trained and dependent on the fit's lower lag (blind review, 2026-11-21), so the far mass or the far share, not beta, is the comparison along training. **Next.** Seed and item reliability on the zoo (the blind review of 2026-11-21 measured 3-4 seeds on two models: single-run far mass 0.27-0.31 on gpt2, 0.34-0.38 on pythia-160m-deduped), and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2). |
+| [dynamics_context_influence](../src/blme/tasks/dynamics/context_influence.py) [1](../tests/tasks/test_context_influence.py) [2](../tests/tasks/test_exploratory_task_guards.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 38/38 | 38/38 | 38/38 | 38/38 | BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the task config's seed moves every draw (blme.evaluate(seed=...) does not, since the shipped seed 42 takes precedence), item sets share the base lags, sinks are never replaced and the global RNGs are untouched. The decay exponent is near -0.2 at random initialisation, 1.2-1.3 trained and dependent on the fit's lower lag (blind review, 2026-11-21), so the far mass or the far share, not beta, is the comparison along training. **Next.** Seed and item reliability on the zoo (the blind review of 2026-11-21 measured 3-4 seeds on two models: single-run far mass 0.27-0.31 on gpt2, 0.34-0.38 on pythia-160m-deduped), and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2). |
 | [dynamics_entropy_calibration](../src/blme/tasks/dynamics/entropy_calibration.py) [1](../tests/tasks/parity/test_entropy_calibration_parity.py)<br>formula-faithful | Released estimator or component executed | 7/7 | 7/7 | 7/7 | 7/7 | entropy-calibration@d3f62e4 compute_logprobs: entropies 1e-4; log losses equal after fixing the release's one-position slice. BLME deliberately corrects a one-position offset in the released loss slice. Preserve the release value and aligned value when comparing protocols. **Next.** Compare both next-token indexing conventions against hand-aligned outcomes. |
 | [dynamics_fractal](../src/blme/tasks/dynamics/fractal.py) [1](../tests/tasks/parity/test_fractal_pooled_parity.py)<br>refined-adaptation | Released estimator or component executed | 4/4 | 4/4 | 4/4 | 4/4 | The original notebook estimators are checked at matched scales and offsets. BLME pools long articles and corrects the Joseph accumulator across scales. Corpus and sequence-length sensitivity remain. **Next.** Repeat across corpora, aggregation units and fitting scales. |
 | [dynamics_generation_diversity](../src/blme/tasks/dynamics/generation_diversity.py) [1](../tests/tasks/parity/test_generation_diversity_values.py) [2](../tests/tasks/test_reference_parity_formulas.py) [3](../tests/tasks/test_round6_fixes.py) [4](../tests/tasks/test_generation_diversity_stop_ids.py)<br>parity-ready | Independent implementation or scientific library | 9/9 | 9/9 | 9/9 | 9/9 | Scripted completions anchor diversity and repetition. Self-BLEU uses the Texygen NLTK smoothing convention. Sampling entropy uses the processed logits and each completion’s own content-token quarters. The November 19 fix reduces masked, processed scores in float64 at the retained token positions. Scripted quarter means meet 1e-12 nats, and the largest difference from SciPy on the three sampled GPT-2 summaries was 2.22e-16 nats on four Transformers versions. The six entropy cases passed at one, four and eight CPU threads per version. **Next.** Quantify sampling variability across prompts and random seeds for the intended generation budget. |
@@ -244,7 +244,7 @@ Task links open the implementation. Numbered links open the test files. The mach
 | [geometry_predictive_information](../src/blme/tasks/geometry/predictive_information.py) [1](../tests/tasks/parity/test_predictive_information_parity.py)<br>parity-ready | Released estimator or component executed | 6/6 | 6/6 | 6/6 | 6/6 | InfoRidge@2cde643 utils / analyze_batch, via evaluate() 1e-3. Ridge-based information estimates use the configured batches and readout. Label-free predictive information about activations is distinct from benchmark prediction. **Next.** Vary ridge strength and batches and test held-out information estimates. |
 | [geometry_procrustes_linearity](../src/blme/tasks/geometry/procrustes_linearity.py) [1](../tests/tasks/parity/test_procrustes_linearity_values.py) [2](../tests/tasks/parity/test_procrustes_linearity_parity.py) [3](../tests/tasks/test_metric_repairs.py) [4](../tests/tasks/invariance/test_procrustes_linearity.py) [5](../tests/tasks/parity/test_procrustes_heldout_rank.py)<br>parity-ready | Released estimator or component executed | 37/37 | 37/37 | 37/37 | 37/37 | The 17 in-sample summaries have notebook and rank-aware comparisons. The held-out fit chooses truncation with an inner document split and refits the affine map on all outer training documents. Both stages learn sink thresholds and means from their own fit documents. On four independent test panels per checkpoint, the largest change after refining the rank grid was 0.01299. The canonical 100-passage study sample has 51 articles and zero overlap at both splits. Across 65 checkpoints and 11 held-out labs, adding R² to log size and four BPBs increased equal-lab MAE from 0.09205 to 0.09594. Four labs improved. The alternate-stack Qwen3-8B score agreed exactly. **Next.** An independent lab cohort and a prospectively chosen target are needed for a new predictive claim. Retain the training-selected cutoff and report both document splits. |
 | [geometry_prompt_id](../src/blme/tasks/geometry/prompt_id.py) [1](../tests/tasks/parity/test_prompt_id_parity.py)<br>parity-ready | Released estimator or component executed | 11/11 | 11/11 | 11/11 | 11/11 | token_geometry@0214897 extract_id.py pipeline + DADApy GRIDE: profile and Pearson 1e-9 (fp64), 1e-4 (fp32), via evaluate(). The release’s single-prompt GRIDE and surprisal association are checked. Token count and tokenizer determine each cloud. **Next.** Check the ID–surprisal association over independent prompts and several neighbour scales. |
-| [geometry_readout_dual_spectrum](../src/blme/tasks/geometry/readout_dual_spectrum.py) [1](../tests/tasks/test_readout_dual_spectrum.py) [2](../tests/tasks/test_exploratory_task_guards.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 41/41 | 41/41 | 41/41 | 41/41 | BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. The invariance is exact in exact arithmetic; a blind review (2026-11-21) found dense re-basings held to about 1e-12 up to cond(A) of about 1e3 and drifting beyond about 1e4 (4% at 2e7), diagonal gains removed exactly at any scale, and the models' own bases far from that limit. Under a final softcap only D_J is exact and the kappa keys are first-order (gemma-2-2b coherence 0.274 against 0.661 at the logit level), so soft-capped models are excluded from comparisons of the kappa keys. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1; untrained or random vocabulary rows collapse the kappa keys. **Next.** Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4). Record the conditioning of the two covariances (eigenvalue range, zeroed eigenvalues) in _meta_, as the blind review of 2026-11-21 suggests. |
+| [geometry_readout_dual_spectrum](../src/blme/tasks/geometry/readout_dual_spectrum.py) [1](../tests/tasks/test_readout_dual_spectrum.py) [2](../tests/tasks/test_exploratory_task_guards.py) [3](../tests/tasks/test_readout_dual_spectrum_conditioning.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 45/45 | 45/45 | 45/45 | 45/45 | BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. The invariance is exact in exact arithmetic; a blind review (2026-11-21) found dense re-basings held to about 1e-12 up to cond(A) of about 1e3 and drifting beyond about 1e4 (4% at 2e7), diagonal gains removed exactly at any scale, and the models' own bases far from that limit. Under a final softcap only D_J is exact and the kappa keys are first-order (gemma-2-2b coherence 0.274 against 0.661 at the logit level), so soft-capped models are excluded from comparisons of the kappa keys. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1; untrained or random vocabulary rows collapse the kappa keys. **Next.** Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4). The conditioning of the two covariances is recorded in _meta_cov_* since 0.2.7 (blind review of 2026-11-21, F3). |
 | [geometry_representation_dispersion](../src/blme/tasks/geometry/dispersion.py) [1](../tests/tasks/parity/test_dispersion_parity.py)<br>parity-ready | Released estimator or component executed | 7/7 | 7/7 | 7/7 | 7/7 | rep_dispersion@dae432d (side-installed) run end to end: exact equality. Released readout is exercised end to end on tested inputs. Fixed token chunks need not contain equal amounts of text across tokenizers. **Next.** Compare fixed token chunks with sentence-aligned samples across document draws. |
 | [geometry_representation_sensitivity](../src/blme/tasks/geometry/information_geometry.py) [1](../tests/tasks/parity/test_representation_sensitivity_s_unit_values.py) [2](../tests/tasks/test_comprehensive_parity.py) [3](../tests/tasks/test_representation_sensitivity_guard.py)<br>proxy-only | Equation, analytic anchor or controlled recomputation | 7/7 | 7/7 | 7/7 | 7/7 | The normalized true-next-token log-probability gradient agrees with autograd for affine and tanh-softcapped heads. The head reconstruction and final-norm gain checks determine whether a checkpoint can be scored. **Next.** Check the local linear approximation against actual perturbations over several radii. |
 | [geometry_rogue_dimensions](../src/blme/tasks/geometry/rogue_dimensions.py) [1](../tests/tasks/parity/test_rogue_dimensions_parity.py)<br>parity-ready | Released estimator or component executed | 6/6 | 6/6 | 6/6 | 6/6 | rogue-dimensions@84f4009 notebook cos_contrib over every pair 1e-12; exact all-pairs CC replaces the 500k-pair Monte Carlo. Exact all-pair coordinate contributions replace sampled pairs. A GPT-2 Table 4 check exists. Coordinate changes can change this statistic. **Next.** Repeat the GPT-2 profile with independent samples and report sampling variation. |
