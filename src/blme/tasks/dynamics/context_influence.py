@@ -77,6 +77,8 @@ DEFAULT_REPLACEMENTS = 16
 DEFAULT_REPLACE_LO = 16
 DEFAULT_MIN_DOC_WORDS = 2048
 DEFAULT_BOOTSTRAP = 200
+# Extra tokens requested at truncation, for special tokens a tokenizer appends.
+_APPEND_ROOM = 8
 FAR_LAG = 9
 FIT_FROM_LAG = 3
 # Largest divergence before the replaced position still read as causal: kernel
@@ -288,9 +290,13 @@ class ContextInfluenceTask(DiagnosticTask):
             end = j + 4 * W
             sub = (text[starts[j]:starts[end]] if end < len(starts) else text[starts[j]:]) \
                 if starts else text
-            enc = tokenizer(sub, return_tensors="pt", truncation=True, max_length=W)
+            # Truncate with room for tokens the tokenizer appends (OLMo-1B's
+            # EOS, also under truncation), strip them, then keep W: W content
+            # tokens for every tokenizer, the same W ids as a plain
+            # truncation for one that appends nothing.
+            enc = tokenizer(sub, return_tensors="pt", truncation=True, max_length=W + _APPEND_ROOM)
             enc, _ = strip_trailing_special(dict(enc), tokenizer)
-            ids = enc["input_ids"][0]
+            ids = enc["input_ids"][0][:W]
             if int(ids.numel()) < W:
                 n_short += 1
                 continue

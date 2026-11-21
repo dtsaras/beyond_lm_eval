@@ -361,3 +361,23 @@ def test_fp32_compute_on_a_bf16_model_restores_it(gpt2_tok):
     assert all(p.dtype == torch.bfloat16 for p in model.parameters())
     native = _run(model, gpt2_tok, _docs(2), n_replacements=1, compute_dtype="model")
     assert native["_meta_compute_dtype"] == "bfloat16"
+
+
+def test_a_tokenizer_that_appends_eos_gets_full_windows_and_the_same_result(gpt2_tok):
+    """OLMo-1B's tokenizer appends EOS, also under truncation. Truncating at the
+    window and then stripping it left W - 1 tokens, so every window was rejected
+    ("no document yields a 1024-token window") on that model. With room at
+    truncation the windows hold the same W ids as for a tokenizer that appends
+    nothing, so the result is bit-identical."""
+    import copy
+    from tokenizers.processors import TemplateProcessing
+    eos_tok = copy.deepcopy(gpt2_tok)
+    eos, eid = eos_tok.eos_token, eos_tok.eos_token_id
+    eos_tok._tokenizer.post_processor = TemplateProcessing(
+        single=f"$A {eos}", pair=f"$A {eos} $B {eos}", special_tokens=[(eos, eid)])
+    assert eos_tok("a b c", truncation=True, max_length=3)["input_ids"][-1] == eid
+    docs = _docs(3)
+    plain = _run(_tiny_gpt2(), gpt2_tok, docs, n_replacements=2)
+    appended = _run(_tiny_gpt2(), eos_tok, docs, n_replacements=2)
+    assert appended["_meta_n_windows"] == 3 and appended["_meta_window_tokens"] == 128
+    assert _canon(appended) == _canon(plain)
