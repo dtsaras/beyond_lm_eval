@@ -79,7 +79,7 @@ These tasks run, and they are tested for crashes and for leaks (forward hooks le
 
 ### 5. Exploratory constructs (2)
 
-BLME's own definitions, with no paper protocol to follow; their tests check analytic identities, invariances and controls, not agreement with a release. `geometry_readout_dual_spectrum` reports the Jeffreys dispersion of the next-token distributions and the spectrum of the readout's dual coordinates, which is exactly invariant to any invertible affine re-basing of the state the head reads. `dynamics_context_influence` measures how much the next-token distribution moves when one earlier token is resampled, as a function of distance. [Readout dual spectrum](docs/tasks_geometry.md#51-readout-dual-spectrum-geometry_readout_dual_spectrum) · [Context influence](docs/tasks_dynamics.md#10-context-influence-dynamics_context_influence)
+BLME's own definitions, with no paper protocol to follow; their tests check analytic identities, invariances and controls, not agreement with a release. `geometry_readout_dual_spectrum` reports the Jeffreys dispersion of the next-token distributions and the spectrum of the readout's dual coordinates, which is invariant to any invertible affine re-basing of the state the head reads: exactly in exact arithmetic, and to about 1e-12 numerically for well-conditioned re-basings (condition number up to about 1e3-1e4). The conditioning of the covariances it reads is reported as `_meta_cov_*`. `dynamics_context_influence` measures how much the next-token distribution moves when one earlier token is resampled, as a function of distance. [Readout dual spectrum](docs/tasks_geometry.md#51-readout-dual-spectrum-geometry_readout_dual_spectrum) · [Context influence](docs/tasks_dynamics.md#10-context-influence-dynamics_context_influence)
 
 ## Installation
 
@@ -173,6 +173,25 @@ tasks:
 - **Task certification metadata** — every task is labeled as `parity-ready`, `formula-faithful`, `refined-adaptation`, or `proxy-only`
 - **Default configs** — every task has sensible defaults in `defaults.yaml`, override per-task in your recipe
 - **HuggingFace-native** — supports `dtype`, `device_map`, quantization, `trust_remote_code`, `attn_implementation`
+
+## Numerical precision
+
+16-bit arithmetic can cost a checkpoint loss, and the checkpoint's native dtype does not predict it reliably: a float16-trained checkpoint can lose a lot in bfloat16, and a bfloat16-native checkpoint can still lose some. BLME's rule: **if the bfloat16 (or float16) mean next-token NLL exceeds the float32 one by more than 0.02 nats, run float32.**
+
+`blme precision-check` measures it. It loads the checkpoint in float32 and in the 16-bit dtype, with eager attention, and compares the mean next-token NLL on fixed text: the first 4 x 511 tokens of WikiText-103 validation (the non-empty lines of its first 4,000 rows), each row led by the tokenizer's BOS when it prepends one.
+
+```bash
+blme precision-check --model-args pretrained=EleutherAI/pythia-160m [--dtype bfloat16] [--threshold 0.02]
+```
+
+```python
+from blme.precision import check
+rec = check("pretrained=EleutherAI/pythia-160m")   # rec["delta"], rec["recommendation"], rec["reason"]
+```
+
+An explicitly requested `dtype` is enforced at load. If transformers returns floating parameters or buffers in a narrower dtype (for example Qwen3.5 under transformers 5.10, which ignores `dtype=float32`), BLME loads the checkpoint again with the dtype set on every sub-config, casts anything still narrower, and logs a warning naming the model class. Rotary buffers such as RoPE `inv_freq`, which transformers keeps in float32 on purpose, are never cast. Every results envelope records `config.precision`: the requested dtype, the checkpoint's native dtype, the loaded and effective parameter dtypes, and any cast. BLME also warns when it runs bfloat16 on a float16-native checkpoint, or 16-bit arithmetic on a float32-native one. That warning is only a hint; the check is the measurement.
+
+**bfloat16 runs that need eager attention:** add `attn_score_dtype=float32` to `--model-args`. transformers' eager attention computes the scores q k^T in the model's dtype and only then applies a float32 softmax, so in bfloat16 large scores are rounded before the softmax. BLME switches a run to eager whenever an attention-weight or double-backward task is in it. With the option, eager attention computes q k^T in float32 and changes nothing else: same mask, the same float32 softmax, probabilities cast back and multiplied with v as transformers does, and attention weights still returned. It is off by default, so existing numbers do not change. `blme precision-check --model-args pretrained=...,attn_score_dtype=float32` measures a checkpoint with it. [Details](docs/configuration.md#numerical-precision)
 
 ## Interpreting Results
 

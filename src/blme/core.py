@@ -15,6 +15,8 @@ from tqdm import tqdm
 
 from .registry import get_task, list_tasks
 from .experts import FALLBACK_ATTR
+from .models.attention import eager_implementation
+from .models.dtype_contract import precision_provenance
 from .models.wrapper import load_model_and_tokenizer
 from .results import build_results_envelope, print_results_table, save_results
 
@@ -192,6 +194,7 @@ def evaluate(
 
     # 3. Init result accumulators
     _attn_impl = None
+    _precision = None
     task_results: Dict[str, Any] = {}
     task_errors: Dict[str, str] = {}
     task_timings: Dict[str, float] = {}
@@ -331,6 +334,7 @@ def evaluate(
         force_eager = any(
             t in force_eager_tasks for t in diagnostic_tasks
         )
+        eager_cast = False
         if force_eager:
             # float16 + eager attention OVERFLOWS. SDPA/FlashAttention keep the
             # softmax numerically stable internally; the eager path computes
@@ -373,19 +377,31 @@ def evaluate(
                 for _p in model.parameters():
                     _p.data = _p.data.to(torch.bfloat16)
                 effective_dtype = "bfloat16 (cast from float16 for eager)"
+                eager_cast = True
             else:
                 effective_dtype = str(param_dtype).replace("torch.", "")
 
             try:
+                # "eager", or its float32-score variant when the model was
+                # loaded with attn_score_dtype=float32 (models/attention.py).
+                eager_name = eager_implementation(model)
                 if hasattr(model, "config"):
-                    model.config._attn_implementation = "eager"
+                    model.config._attn_implementation = eager_name
                 if hasattr(model, "set_attn_implementation"):
-                    model.set_attn_implementation("eager")
+                    model.set_attn_implementation(eager_name)
             except Exception as e:
                 logger.info(
                     f"Could not switch to eager attention: {e}. "
                     "Attention-consuming tasks may fail."
                 )
+
+        # Precision provenance (envelope config.precision, never a task result):
+        # the requested, native and loaded dtypes, any cast, and the dtype the
+        # tasks run with. Warns on half precision against a wider native dtype.
+        try:
+            _precision = precision_provenance(model, model_args, eager_cast=eager_cast)
+        except Exception as e:  # noqa: BLE001 - provenance never breaks a run
+            logger.info(f"precision provenance skipped: {e}")
 
         if cache_tasks:
             if cache_num_samples is None:
@@ -579,6 +595,7 @@ def evaluate(
         unknown_tasks=unknown_tasks,
         experts_fallback=getattr(model, FALLBACK_ATTR, None),
         attn_implementation=_attn_impl,
+        precision=_precision,
     )
 
     # 7. Print summary table

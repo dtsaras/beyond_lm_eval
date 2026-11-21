@@ -6,6 +6,7 @@ Usage:
     blme evaluate --recipe examples/recipes/default_all.yaml
     blme list-tasks
     blme list-tasks --group geometry
+    blme precision-check --model-args pretrained=EleutherAI/pythia-160m [--threshold 0.02]
 """
 
 import argparse
@@ -118,6 +119,41 @@ Examples:
         help="Emit machine-readable task metadata.",
     )
 
+    # ----- precision-check subcommand -----
+    prec_parser = subparsers.add_parser(
+        "precision-check",
+        help="Measure next-token NLL in float32 and in a 16-bit dtype and recommend one",
+        description=(
+            "Loads the checkpoint in float32 and in --dtype (eager attention), measures the mean "
+            "next-token NLL of each on 4 x 511 tokens of WikiText-103 validation (with the "
+            "tokenizer's BOS first when it prepends one), and recommends float32 when the "
+            "16-bit NLL exceeds float32's by more than --threshold nats."),
+    )
+    prec_parser.add_argument(
+        "--model-args", type=str, required=True,
+        help="Model loading arguments, as for evaluate; dtype and attn_implementation are set by the check",
+    )
+    prec_parser.add_argument(
+        "--dtype", type=str, default="bfloat16", choices=["bfloat16", "float16"],
+        help="The 16-bit dtype to test against float32 (default: bfloat16)",
+    )
+    prec_parser.add_argument(
+        "--threshold", type=float, default=0.02,
+        help="Largest acceptable NLL increase over float32, in nats (default: 0.02)",
+    )
+    prec_parser.add_argument(
+        "--device", type=str, default=None,
+        help="Device to run on (e.g., cuda, cpu). Ignored if device_map is set in --model-args.",
+    )
+    prec_parser.add_argument(
+        "--output", type=str, default=None,
+        help="Also write the JSON record to this file",
+    )
+    prec_parser.add_argument(
+        "--verbosity", type=str, choices=["DEBUG", "INFO", "WARNING"], default="WARNING",
+        help="Logging verbosity (default: WARNING)",
+    )
+
     # ----- Parse -----
     args = parser.parse_args()
 
@@ -129,6 +165,8 @@ Examples:
         _cmd_list_tasks(args)
     elif args.command == "evaluate":
         _cmd_evaluate(args)
+    elif args.command == "precision-check":
+        _cmd_precision_check(args)
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +215,28 @@ def _cmd_list_tasks(args):
         label = TASK_CERTIFICATION[task_name].display_name
         print(f"    {label} ({task_name})" if label else f"    {task_name}")
     print()
+
+
+# ---------------------------------------------------------------------------
+# precision-check
+# ---------------------------------------------------------------------------
+
+def _cmd_precision_check(args):
+    """Run blme.precision.check and print its record and recommendation."""
+    import logging
+    logging.basicConfig(
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+        level=getattr(logging, args.verbosity),
+    )
+    from blme.precision import check
+    rec = check(args.model_args, dtype=args.dtype, threshold=args.threshold, device=args.device)
+    text = json.dumps(rec, indent=2, sort_keys=True, default=str)
+    print(text)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text + "\n")
+    print(f"Recommendation: run {rec['recommendation']} ({rec['reason']})")
 
 
 # ---------------------------------------------------------------------------

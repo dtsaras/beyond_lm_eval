@@ -24,9 +24,12 @@ PATH_GROUPS = {
     "parity": ("tests/tasks/parity/",),
     # Invariance harness: model transforms that must leave a readout unchanged.
     "invariance": ("tests/tasks/invariance/", "tests/test_invariance_harness.py"),
-    # Precision lifting and dtype restore.
+    # Precision lifting and dtype restore; the loader's dtype contract and the
+    # precision check (0.2.7).
     "precision": ("tests/precision/", "tests/test_precision.py",
-                  "tests/test_precision_restore_after_failure.py"),
+                  "tests/test_precision_restore_after_failure.py",
+                  "tests/test_dtype_contract.py", "tests/test_precision_check.py",
+                  "tests/test_attention_fp32_scores.py"),
     # The golden-snapshot tool (tests/golden/golden_snapshot.py).
     "golden": ("tests/test_golden_configs.py",),
     # Whole-population guards: one assertion swept over every task or site.

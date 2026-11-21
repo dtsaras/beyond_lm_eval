@@ -88,13 +88,15 @@ def build_results_envelope(
     unknown_tasks: Optional[List[str]] = None,
     experts_fallback: Optional[Dict[str, Any]] = None,
     attn_implementation: Optional[Dict[str, Any]] = None,
+    precision: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Wrap raw per-task results into a structured envelope with metadata.
 
     ``experts_fallback`` is the record ``ensure_runnable_experts`` left on the
     model; ``config.experts_implementation_fallback`` appears only when the MoE
-    experts were switched.
+    experts were switched. ``precision`` is ``config.precision``: the requested,
+    native, loaded and effective dtypes and any cast (``blme.models.dtype_contract``).
     """
     timings = task_timings or {}
     total_elapsed = round(sum(timings.values()), 2) if timings else None
@@ -144,6 +146,8 @@ def build_results_envelope(
         # The attention kernel the tasks ran with (core.evaluate switches the
         # whole model to eager when a co-run task needs attention weights).
         envelope["config"]["attn_implementation"] = dict(attn_implementation)
+    if precision is not None:
+        envelope["config"]["precision"] = dict(precision)
     return envelope
 
 

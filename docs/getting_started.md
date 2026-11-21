@@ -52,6 +52,9 @@ The `--model-args` flag uses a comma-separated `key=value` format:
 > [!NOTE]
 > Attention-based tasks require attention weights. If your model uses SDPA/flash attention, set `attn_implementation=eager` to expose weights.
 
+> [!TIP]
+> Before running a checkpoint in `bfloat16` or `float16`, run `blme precision-check --model-args pretrained=...`. It measures how much higher the 16-bit next-token NLL is than the float32 one, and recommends float32 above 0.02 nats. An explicit `dtype` is enforced at load, and the envelope records it under `config.precision` ([Numerical precision](configuration.md#numerical-precision)).
+
 ### Output
 
 Results are saved as structured JSON with metadata:
