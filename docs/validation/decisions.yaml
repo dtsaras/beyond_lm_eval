@@ -26,6 +26,9 @@ conventions:
   - choice: Where large linear algebra runs (BLME >= 0.2.1)
     default: "On the GPU when one is available: float64 SVD/eigh of large matrices, CKA's layer-pair GEMMs (float64), and the stability and unembedding kNN loops (batched, float64 chord distances, stable index tie-break). A CUDA failure recomputes on the CPU; BLME_CPU_LINALG=1 forces the CPU."
     why: "The sweep was CPU-bound with idle GPUs (stability alone was 29% of the panel's task time). A/B on the same model and run: every changed task within 3e-13 of the CPU path except stability (float32 near-ties at rank k: pythia identical, Qwen2.5-0.5B 1.4e-4) and biased CKA (the CPU path's float32 GEMMs are 1e-5..6e-5 off the exact value; the GPU path is float64-exact). Stability 280-360x and unembedding 25-50x faster. Since 0.2.2 a matrix already on the GPU falls back too (safe_svdvals), and eigvalsh_f64 sends an eigenproblem cuSOLVER 11 rejects (n >= 27,392) to BLME_EIGVALSH_HELPER before LAPACK: a crowded or older GPU stack changes only the solver, recorded in _meta_, never the quantity."
+  - choice: A model's own generation_config in generation tasks (BLME >= 0.2.5)
+    default: "Unset every decoding default (temperature, top_k, top_p, repetition_penalty, no_repeat_ngram_size, ...): each task samples under its own settings, recorded in _meta_ignored_generation_config. Validity fields (suppress_tokens, begin_suppress_tokens) stay applied in generation_diversity and coe (_meta_generation_validity_config); entropy_calibration and self_consistency unset them too, since they measure the full sampling distribution."
+    why: "Decoding defaults differ across checkpoints and would confound comparisons (repetition_penalty 1.3 moved distinct_2 from 0.845 to 0.912). Validity fields are not a decoding preference: gemma-4-12B suppresses its <image|>/<audio|> placeholders, and without that it sampled them in 27% of positions, which the text filter then removed."
   - choice: Attention kernel
     default: "Eager whenever a co-run task needs attention weights (the study's full runs always are); recorded in the envelope as config.attn_implementation."
     why: "bf16 eager and sdpa give different logits (gemma-4-E2B mean NLL 2.2434 vs 2.2407); fp32 is identical across kernels and transformers versions."
@@ -145,6 +148,13 @@ tasks:
       alternatives: ["passage-level seeded permutation (the earlier behaviour, still used when rows carry no source)"]
       recorded: [_meta_split_unit, _meta_n_split_groups, _meta_split_groups_shared_max]
       why: "A passage-level split held out WikiText passages whose ~14 sibling passages were in the Gaussian fit. On 8 models, keeping articles whole raised the ID distance per dimension 40-93% and lowered AUROC 3-19% (phi-2 0.924 -> 0.746, below gpt2), so the leak changed rankings. Not a free choice, hence no parameter."
+  geometry_perplexity:
+    - choice: BOS in strided windows after the first
+      parameter: ppl_window_bos
+      default: "auto: when the tokenizer prepends a BOS, every window is BOS + max_length - 1 content tokens (BOS unscored context), sliding by min(stride, max_length - 1); tokenizers without a BOS are unchanged"
+      alternatives: ["never: the HuggingFace GPT-2 recipe, BOS in the first window only"]
+      recorded: [_meta_ppl_window_bos]
+      why: "The HF strided recipe was written for GPT-2, which has no BOS. A model trained to always see its BOS first is off distribution in every later window. On the 0.2.1-0.2.4 sweep, corpus perplexity exceeded per-document perplexity by 2.7-37x on seven Gemma models (gemma-2-9b 493 vs 13.2), against 0.67-1.03x on the other 59. Restoring BOS on gemma-2-9b's later windows took them from 6.33 to 2.26 nats per token (Fable review, 2026-11-21). Every content token is still scored exactly once, with the same byte attribution."
   geometry_prediction_alignment:
     - choice: The control subtracted from the target-row cosine
       parameter: null

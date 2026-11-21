@@ -79,8 +79,10 @@ def test_repe_steering_hook_casts_vector_to_hidden_dtype():
     from blme.tasks.repe import steering
     src = inspect.getsource(steering)
     # Raw ``out_t[:, -1, :] += alpha * vec`` without a dtype cast is the bug.
-    # Fix line must have ``.to(out_t.dtype)``.
-    assert "(alpha * vec).to(out_t.dtype)" in src, (
+    # The fix casts to the hidden state's dtype; since 0.2.2 the same call also
+    # moves the vector to the hidden state's device (multi-GPU device maps).
+    import re
+    assert re.search(r"\(alpha \* vec\)\.to\([^)]*out_t\.dtype\)", src), (
         "repe_steering_effectiveness still adds fp32 task-vector to "
         "bf16/fp16 hidden state without dtype cast"
     )

@@ -4,6 +4,23 @@
 
 - **Docs:** receipt `2026-11-20-gpu-linalg` (source e5dc33e, 967 linked cases on transformers 5.2.0, 5.10.2, 5.22.2 and 5.23.0, 0 failures) now backs every row of `docs/validation/metrics.json`. New decision entry: `dynamics_sharpness.top_eigenvalue_estimate` is PyHessian's signed eigenvalue of largest magnitude, which is negative on gpt2-355m, phi-2 and phi-4 (an isolated negative eigenvalue of the last-block Hessian outweighs lambda_max); a cross-model ranking of sharpness should read its magnitude.
 
+## 0.2.5 — 2026-11-21
+
+Two defects found by an independent review of the study sweep: Gemma windows without BOS in strided perplexity, and Gemma-4-12B sampling its banned modality tokens in the generation tasks.
+
+- **Strided windows without BOS.** `strided_perplexity` (the HuggingFace recipe: one joined stream, 1024-token windows, stride 512) gave the tokenizer's BOS only to the stream's first window.
+  - **Why it matters:** a model that always sees its BOS first is off distribution in every later window.
+  - **Measured on the sweep:** corpus perplexity exceeded per-document perplexity by 2.7-37x on gemma2-2b/9b/27b, gemma3-12b/27b and gemma4-e2b/e4b. On gemma-2-9b, `ppl_overall` was 493 against 13.2 per document, and `bits_per_byte` 1.93. On the other 59 models the ratio was 0.67-1.03.
+  - **Fix:** with `ppl_window_bos: auto` (the new default), when the tokenizer prepends a BOS, every window is that BOS followed by `max_length - 1` content tokens, sliding over the content by `min(stride, max_length - 1)`. The BOS is context only. The first window is unchanged, every content token is scored exactly once, and byte attribution is unchanged. `never` restores the old behaviour.
+  - **Affected:** `ppl_overall`, `mean_nll_nats`, `bits_per_byte` and `bits_per_char` on every model whose tokenizer prepends a BOS (Gemma, Llama, Mistral, Yi, TinyLlama, ...). Tokenizers without a BOS (GPT-2, Pythia, Qwen, ...) give bit-identical results. The per-document keys are unchanged.
+  - **Recorded:** `_meta_ppl_window_bos`.
+- **Generation ignored the model's `suppress_tokens`.** `_no_model_generation_defaults` unsets every decoding default a model ships (temperature, top_k, repetition_penalty, ...), so all models sample under the task's own settings. It also unset `suppress_tokens` and `begin_suppress_tokens`, which say which tokens are valid output at all.
+  - **Effect:** Gemma-4-12B ships `suppress_tokens` for `<image|>` and `<audio|>`. At the study's settings (temperature 0.8, top_k 0, 32 tokens) it sampled `<image|>` in 39 of 64 completions, 27% of all sampled tokens. The completion filter strips them, leaving fragmented, repetitive text: `mean_phrase_repetition_rate` 0.158 against a population median of 0.0055. With the suppression kept, it sampled none.
+  - **Fix:** `generation_diversity` and `coe` pass `keep_validity=True`, so the validity fields stay applied, and each run records `_meta_generation_validity_config`. `entropy_calibration` and `self_consistency` measure the model's full sampling distribution, so they keep the default (`keep_validity=False`, everything unset) and record the fields as ignored, as before.
+  - **Scope:** of the 66 study checkpoints only gemma-4-12B sets either field, so every other model is unchanged.
+- **Stale guard:** `test_round5_determinism.py::test_repe_steering_hook_casts_vector_to_hidden_dtype` looked for the literal `(alpha * vec).to(out_t.dtype)`. Since 0.2.2 the cast is `.to(out_t.device, out_t.dtype)`, so the test had failed outside every receipt's linked selectors. The code was correct; the guard now matches any `.to(...)` that casts to `out_t.dtype`.
+- **Tests:** `tests/tasks/test_perplexity_window_bos.py`. Every window starts with BOS; values match an independent window loop on raw logits; no token is skipped when the stride equals the window; tokenizers without a BOS are unchanged. All 8 fail on 0.2.4. `tests/tasks/test_generation_diversity_stop_ids.py::test_model_suppress_tokens_still_apply`: suppressed tokens are never sampled, and other defaults are still ignored. It fails on 0.2.4.
+
 ## 0.2.4 — 2026-11-21
 
 Parallel item sets, for measuring how much a result depends on the texts it reads. Item set 0 (the default) is unchanged: every value of a 0.2.3 run is reproduced.

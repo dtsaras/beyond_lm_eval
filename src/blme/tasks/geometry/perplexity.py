@@ -1,6 +1,6 @@
 from ...tasks.base import DiagnosticTask
 from ...registry import register_task
-from .utils import collect_prediction_stats, strided_perplexity
+from .utils import collect_prediction_stats, strided_perplexity, tokenizer_prepends_bos
 import torch.nn.functional as F
 import numpy as np
 import logging
@@ -109,6 +109,10 @@ class RarePPLTask(DiagnosticTask):
         _extra_bounds = {}
         nll_strided = float("nan")
         n_strided = 0
+        # Every strided window starts with the tokenizer's BOS when the tokenizer
+        # prepends one ("auto"); "never" is the GPT-2 recipe (BOS in the first
+        # window only). See strided_perplexity.
+        _window_bos = str(self.config.get("ppl_window_bos", "auto"))
         try:
             (ppl_strided, nll_strided, n_strided,
              n_bytes, n_chars, _ppl_window, _ppl_stride,
@@ -116,6 +120,7 @@ class RarePPLTask(DiagnosticTask):
                 model, tokenizer, dataset, num_samples=num_samples,
                 max_length=self.config.get("ppl_max_length"),
                 stride=self.config.get("ppl_stride"),
+                window_bos=_window_bos,
             )
             if n_strided > 0 and np.isfinite(nll_strided):
                 bits_total = nll_strided * n_strided / float(np.log(2))
@@ -147,6 +152,7 @@ class RarePPLTask(DiagnosticTask):
 
         _extra = {
             "_meta_ppl_protocol": "strided" if _strided_ok else "per_document",
+            "_meta_ppl_window_bos": bool(_window_bos == "auto" and tokenizer_prepends_bos(tokenizer)),
             "_meta_ppl_byte_attribution": _byte_attr,
             **_extra_bounds,
         }

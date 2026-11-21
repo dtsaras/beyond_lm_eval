@@ -101,6 +101,9 @@ geometry_lipschitz:
 
 geometry_perplexity:
   num_samples: 100
+  # auto: every strided window starts with the tokenizer's BOS when the tokenizer
+  # prepends one (Gemma, Llama, Mistral, ...); never: BOS in the first window only.
+  ppl_window_bos: auto
 
 geometry_spectral:
   tail_fraction: 0.2  # Fraction of top singular values for Hill estimator

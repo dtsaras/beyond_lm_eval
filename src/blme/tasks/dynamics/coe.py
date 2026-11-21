@@ -48,7 +48,7 @@ import torch.nn.functional as F
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import _no_model_generation_defaults
+from ..common import _generation_validity_settings, _no_model_generation_defaults
 from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
@@ -294,7 +294,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
                 # max_new_tokens kwarg next to generation_config is deprecated.
                 call_cfg = copy.deepcopy(gen_cfg)
                 call_cfg.max_new_tokens = min(max_new_tokens, ctx - P)
-                with _no_model_generation_defaults(model):
+                with _no_model_generation_defaults(model, keep_validity=True):
                     seq = model.generate(input_ids=input_ids,
                                          attention_mask=torch.ones_like(input_ids),
                                          generation_config=call_cfg)
@@ -375,6 +375,7 @@ class ChainOfEmbeddingTask(DiagnosticTask):
             # Paper Eq. 3. The normalised magnitude is _meta_: coe_r is exactly
             # magnitude - angle, so the three would carry two degrees of freedom.
             "_meta_mean_normalized_magnitude": _mean("mag_norm_mean"),
+            "_meta_generation_validity_config": _generation_validity_settings(model),
             "mean_normalized_angle": _mean("ang_norm_mean"),
 
             # Paper Eq. 5 + Eq. 7 — the headline output-free scores.

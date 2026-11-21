@@ -375,12 +375,36 @@ _GENERATION_INFRA_FIELDS = frozenset((
     "transformers_version", "_from_model_config"))
 
 
+# generation_config fields that say which tokens are valid output at all, not how to sample:
+# Gemma-4-12B's suppress_tokens bans its modality placeholders <image|> and <audio|>. They
+# stay, like the infra fields. Without them the model samples placeholders that the
+# completion filters strip: 27% of gemma-4-12B's sampled tokens at the study's settings
+# (39 of 64 completions), leaving fragmented, repetitive text (review 2026-11-21).
+_GENERATION_VALIDITY_FIELDS = frozenset(("suppress_tokens", "begin_suppress_tokens"))
+
+
+def _generation_validity_settings(model) -> dict:
+    """The model's validity fields that generate() keeps applying (recorded per run)."""
+    cfg = getattr(model, "generation_config", None)
+    out = {}
+    for k in sorted(_GENERATION_VALIDITY_FIELDS):
+        v = getattr(cfg, k, None) if cfg is not None else None
+        if v:
+            out[k] = [int(t) for t in v] if isinstance(v, (list, tuple)) else repr(v)
+    return out
+
+
 @contextlib.contextmanager
-def _no_model_generation_defaults(model):
+def _no_model_generation_defaults(model, keep_validity=False):
     """generate() fills every unset field of a passed GenerationConfig from
     model.generation_config (repetition_penalty, no_repeat_ngram_size,
-    suppress_tokens, ...), so those fields are unset on the model for the call.
-    The cache and token-id fields stay: some architectures need them."""
+    ...), so those fields are unset on the model for the call. The cache and
+    token-id fields stay (some architectures need them). ``keep_validity=True``
+    also keeps the validity fields (suppress_tokens, begin_suppress_tokens), which
+    define the model's output vocabulary rather than a decoding preference: the
+    text-generation tasks (generation_diversity, coe) pass it. Tasks that measure
+    the model's full sampling distribution (entropy_calibration, self_consistency)
+    unset them as well."""
     saved = getattr(model, "generation_config", None)
     if saved is None:
         yield
@@ -389,7 +413,8 @@ def _no_model_generation_defaults(model):
     from transformers import GenerationConfig
     neutral = copy.deepcopy(saved)
     for field in GenerationConfig().to_dict():
-        if field not in _GENERATION_INFRA_FIELDS:
+        if field not in _GENERATION_INFRA_FIELDS and not (
+                keep_validity and field in _GENERATION_VALIDITY_FIELDS):
             setattr(neutral, field, None)
     model.generation_config = neutral
     try:
@@ -398,7 +423,7 @@ def _no_model_generation_defaults(model):
         model.generation_config = saved
 
 
-def _ignored_generation_settings(model) -> dict:
+def _ignored_generation_settings(model, keep_validity=False) -> dict:
     """The model's non-default decoding fields: what a bare generate() would
     have applied and _no_model_generation_defaults keeps out."""
     cfg = getattr(model, "generation_config", None)
@@ -407,7 +432,9 @@ def _ignored_generation_settings(model) -> dict:
     except Exception:
         return {}
     return {k: (v if isinstance(v, (bool, int, float, str, type(None))) else repr(v))
-            for k, v in sorted(diff.items()) if k not in _GENERATION_INFRA_FIELDS}
+            for k, v in sorted(diff.items())
+            if k not in _GENERATION_INFRA_FIELDS
+            and not (keep_validity and k in _GENERATION_VALIDITY_FIELDS)}
 
 
 def relative_depth(hidden_state_index: int, n_layers: int) -> float:

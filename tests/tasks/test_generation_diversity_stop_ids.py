@@ -81,3 +81,36 @@ def test_generate_gets_no_generation_kwargs_next_to_the_config():
     for kwargs in calls:
         assert set(kwargs) == {"input_ids", "generation_config"}
         assert kwargs["generation_config"].max_new_tokens == 12
+
+
+def _sampled_ids(model, tok, cfg):
+    """Run the task and return every sampled token id (a spy on generate)."""
+    seen, generate = [], model.generate
+
+    def spy(**kwargs):
+        out = generate(**kwargs)
+        seen.extend(out.sequences[:, kwargs["input_ids"].shape[1]:].flatten().tolist())
+        return out
+
+    model.generate = spy
+    r = GenerationDiversityTask(config=dict(cfg)).evaluate(model, tok, None)
+    return r, seen
+
+
+def test_model_suppress_tokens_still_apply():
+    """Validity fields stay: Gemma-4-12B ships suppress_tokens for <image|>/<audio|>,
+    and with every model default unset it sampled them in 27% of positions."""
+    from collections import Counter
+    tok = fd.tokenizer()
+    cfg = {"seed": 0, "num_prompts": 2, "n_samples_per_prompt": 8, "max_new_tokens": 16}
+    plain, ids = _sampled_ids(fd.tiny_gpt2(), tok, cfg)
+    banned = [t for t, _ in Counter(ids).most_common(2)]
+    model = fd.tiny_gpt2()
+    model.generation_config.suppress_tokens = banned
+    model.generation_config.repetition_penalty = 1.3      # still ignored
+    shipped, ids2 = _sampled_ids(model, tok, cfg)
+    assert ids2 and not set(banned) & set(ids2)
+    assert shipped["_meta_generation_validity_config"] == {"suppress_tokens": banned}
+    assert shipped["_meta_ignored_generation_config"] == {"repetition_penalty": 1.3}
+    assert plain["_meta_generation_validity_config"] == {}
+    assert model.generation_config.suppress_tokens == banned            # restored after the call

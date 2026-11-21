@@ -1106,8 +1106,25 @@ def _exact_token_bytes(tokenizer, ids, corpus):
     return [len(p) for p in pieces]
 
 
+def tokenizer_prepends_bos(tokenizer):
+    """True when the tokenizer itself starts every encoding with its BOS token
+    (Llama, Gemma, Mistral, Yi, ...); False for GPT-2, Pythia, Qwen and other
+    tokenizers that add none."""
+    bos = getattr(tokenizer, "bos_token_id", None)
+    if bos is None:
+        return False
+    try:
+        ids = tokenizer("a")["input_ids"]
+        plain = tokenizer("a", add_special_tokens=False)["input_ids"]
+    except Exception:
+        return False
+    if ids and isinstance(ids[0], (list, tuple)):
+        ids, plain = ids[0], plain[0]
+    return len(ids) > len(plain) and len(ids) > 0 and int(ids[0]) == int(bos)
+
+
 def strided_perplexity(model, tokenizer, dataset, num_samples=100,
-                       max_length=None, stride=None, doc_sep="\n\n"):
+                       max_length=None, stride=None, doc_sep="\n\n", window_bos="auto"):
     """Corpus perplexity by the standard strided sliding-window protocol.
 
     This is the HuggingFace reference procedure
@@ -1145,6 +1162,19 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
     for WikiText-2 under its own (inverted-preprocessing, zero-shot) protocol.
     No published GPT-2-small figure is 21.8. The claim is retracted
     (adversarial review, 2026-09-03).
+
+    ``window_bos`` ("auto" or "never"). The HuggingFace recipe was written for
+    GPT-2, which has no BOS: only the stream's first window starts with one. A
+    model trained to always see its BOS first (Gemma most of all) is then off
+    distribution in every later window: gemma-2-9b scored 6.33 nats per token in
+    BOS-less windows against 2.26 with BOS restored, and its corpus perplexity read
+    493 against 13.2 per document (2026-11-21 review). With "auto", when the
+    tokenizer itself prepends BOS, every window is the stream's BOS followed by
+    ``max_length - 1`` content tokens, sliding over the content (the stream after
+    its BOS) by ``min(stride, max_length - 1)``. The BOS is context only. The first
+    window is the stream's own first window, every content token is scored exactly
+    once, and nothing changes for tokenizers that add no BOS. "never" keeps the
+    GPT-2 recipe for every tokenizer.
 
     Returns ``(ppl, mean_nll_nats, n_tokens_scored, n_bytes, n_chars)``,
     where the byte/char counts describe the SAME scored text span so a
@@ -1223,11 +1253,47 @@ def strided_perplexity(model, tokenizer, dataset, num_samples=100,
 
     device = getattr(model, "device", None) or next(model.parameters()).device
 
+    if window_bos not in ("auto", "never"):
+        raise ValueError(f"window_bos must be 'auto' or 'never', got {window_bos!r}")
+    _bos = getattr(tokenizer, "bos_token_id", None)
+    prefix_bos = (window_bos == "auto" and _bos is not None and n_total > 2
+                  and int(input_ids_all[0, 0]) == int(_bos) and max_length >= 2
+                  and tokenizer_prepends_bos(tokenizer))
+
     nll_sum = 0.0
     n_scored = 0
     prev_end = 0
     _scored_pos = set()
-    for begin in range(0, n_total, stride):
+    if prefix_bos:
+        # Content coordinates: content[k] is stream position k + 1. Window =
+        # [BOS] + content[begin:end]; its label j (after HF's shift) predicts
+        # window position j + 1 = content begin + j = stream position begin + j + 1.
+        bos_col = input_ids_all[:, :1]
+        content = input_ids_all[:, 1:]
+        n_content = content.shape[1]
+        width = max_length - 1
+        stride = int(max(1, min(stride, width)))
+        for begin in range(0, n_content, stride):
+            end = min(begin + width, n_content)
+            trg_len = end - prev_end
+            if trg_len <= 0:
+                continue
+            ids = torch.cat([bos_col, content[:, begin:end]], dim=1).to(device)
+            target = ids.clone()
+            target[:, :-trg_len] = -100
+            with torch.no_grad():
+                out = model(ids, labels=target)
+            shift_labels = target[:, 1:]
+            n_valid = int((shift_labels != -100).sum().item())
+            for _j in (shift_labels[0] != -100).nonzero(as_tuple=True)[0].tolist():
+                _scored_pos.add(begin + _j + 1)
+            if n_valid > 0:
+                nll_sum += float(out.loss.detach().float().item()) * n_valid
+                n_scored += n_valid
+            prev_end = end
+            if end == n_content:
+                break
+    for begin in (range(0, n_total, stride) if not prefix_bos else ()):
         end = min(begin + max_length, n_total)
         trg_len = end - prev_end          # tokens newly revealed by this window
         if trg_len <= 0:

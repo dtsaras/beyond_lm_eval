@@ -33,8 +33,8 @@ import torch
 
 from ...registry import register_task
 from ...tasks.base import DiagnosticTask
-from ..common import (_ignored_generation_settings, _no_model_generation_defaults,
-                      stop_ids)
+from ..common import (_generation_validity_settings, _ignored_generation_settings,
+                      _no_model_generation_defaults, stop_ids)
 from .._tokens import strip_trailing_special
 
 logger = logging.getLogger("blme")
@@ -298,7 +298,7 @@ class GenerationDiversityTask(DiagnosticTask):
         device = next(model.parameters()).device
         stops = stop_ids(model, tokenizer)
         from transformers import GenerationConfig
-        ignored = _ignored_generation_settings(model)
+        ignored = _ignored_generation_settings(model, keep_validity=True)
 
         all_distinct1 = []
         all_distinct2 = []
@@ -343,7 +343,7 @@ class GenerationDiversityTask(DiagnosticTask):
                         eos_token_id=sorted(stops) or None,
                         pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id or 0,
                         output_scores=True, return_dict_in_generate=True)
-                    with _no_model_generation_defaults(model):
+                    with _no_model_generation_defaults(model, keep_validity=True):
                         outputs = model.generate(
                             input_ids=enc["input_ids"].expand(n_samples, -1),
                             generation_config=gen_cfg)
@@ -501,6 +501,7 @@ class GenerationDiversityTask(DiagnosticTask):
             # The model's own non-default generation settings, none of which
             # entered the sampling.
             "_meta_ignored_generation_config": ignored,
+            "_meta_generation_validity_config": _generation_validity_settings(model),
             "temperature": temperature,
             "seed": int(seed) if seed is not None else None,
             "completion_filter": "trim_at_eos_drop_special",
