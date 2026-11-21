@@ -1,5 +1,9 @@
 name: Publish to PyPI
 
+# Only a published GitHub release publishes. A tag push never does: tags run
+# release-check.yml. The `pypi` environment must have required reviewers set in
+# the repository settings (Settings > Environments > pypi), so every upload
+# waits for an approval; PyPI's trusted publisher should name this environment.
 on:
   release:
     types: [published]
@@ -10,6 +14,9 @@ permissions:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/blme
 
     steps:
       - uses: actions/checkout@v4
