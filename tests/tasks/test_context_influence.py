@@ -1,9 +1,12 @@
-"""dynamics_context_influence: the Jensen-Shannon kernel, exact zero
-influence beyond the receptive field of an n-gram-like model, causality,
-sinks, determinism and seeding, through the real ``evaluate()``.
+"""dynamics_context_influence: the Jensen-Shannon kernel, the base-lag draw,
+exact zero influence beyond the receptive field of an n-gram-like model, a
+position-dependent but lag-independent model (where scoring every position
+after the replacement would report a spurious decay), causality, sinks,
+determinism and seeding, through the real ``evaluate()``.
 """
 import math
 import random
+import types
 
 import numpy as np
 import pytest
@@ -13,15 +16,15 @@ transformers = pytest.importorskip("transformers")
 
 from blme.tasks.config_loader import resolve_task_config  # noqa: E402
 from blme.tasks.dynamics.context_influence import (  # noqa: E402
-    ContextInfluenceTask, influence_summary, js_rows, lag_bins)
+    ContextInfluenceTask, base_lags, influence_summary, js_rows, lag_bins)
 
 _WORDS = ("the river bank market story light water stone city night road garden "
           "window music paper , . of and to a in that it was").split()
 
 
-def _docs(n, words=400, seed=0):
+def _docs(n, words=400, seed=0, vocab=_WORDS):
     rng = np.random.default_rng(seed)
-    return [{"text": " ".join(rng.choice(_WORDS, size=words))} for _ in range(n)]
+    return [{"text": " ".join(rng.choice(vocab, size=words))} for _ in range(n)]
 
 
 @pytest.fixture(scope="module")
@@ -31,7 +34,7 @@ def gpt2_tok():
 
 def _run(model, tok, docs, **cfg):
     base = {"documents": "dataset", "num_samples": len(docs), "window": 128,
-            "replace_lo": 16, "replace_hi": 32, "n_replacements": 2, "n_bootstrap": 20}
+            "n_scored": 64, "replace_lo": 16, "n_replacements": 8, "n_bootstrap": 20}
     conf = resolve_task_config("dynamics_context_influence", {**base, **cfg})
     with torch.no_grad():
         res = ContextInfluenceTask(config=conf).evaluate(model, tok, docs)
@@ -49,7 +52,7 @@ def _canon(x):
     return x
 
 
-# ── the kernel ───────────────────────────────────────────────────────────
+# ── the kernel, the draw and the summary ─────────────────────────────────
 
 def test_js_is_exactly_zero_for_identical_rows_and_log2_for_disjoint_ones():
     g = torch.Generator().manual_seed(0)
@@ -83,20 +86,40 @@ def test_js_is_bounded_by_log2_and_symmetric():
 
 
 def test_lag_bins_cover_every_lag_once():
-    for K in (11, 16, 17, 961):
+    for K in (11, 16, 17, 1008):
         bins = lag_bins(K)
         lags = [k for lo, hi in bins for k in range(lo, hi + 1)]
         assert lags == list(range(1, K + 1))
-    assert lag_bins(961)[:5] == [(1, 1), (2, 2), (3, 4), (5, 8), (9, 16)]
-    assert lag_bins(961)[-1] == (513, 961)
+    assert lag_bins(1008)[:5] == [(1, 1), (2, 2), (3, 4), (5, 8), (9, 16)]
+    assert lag_bins(1008)[-1] == (513, 1008)
+
+
+def test_base_lags_are_log_uniform_and_stratified():
+    k0_max, R = 945, 32
+    rng = np.random.default_rng(0)
+    draws = np.stack([base_lags(rng, R, k0_max) for _ in range(4000)])
+    assert draws.min() >= 1 and draws.max() <= k0_max
+    # One draw per stratum: column r always lies in stratum r of log(k0).
+    L = math.log(k0_max + 1)
+    lo = np.floor(np.exp(np.arange(R) * L / R))
+    hi = np.floor(np.exp((np.arange(R) + 1) * L / R))
+    assert np.all(draws >= lo) and np.all(draws <= np.minimum(hi, k0_max))
+    # Marginally P(k0 = m) = log((m + 1) / m) / log(k0_max + 1).
+    for m in (1, 2, 10, 300):
+        want = math.log((m + 1) / m) / L
+        assert abs(np.mean(draws == m) - want) < 0.1 * want + 2e-4, m
 
 
 def test_summary_recovers_a_power_law():
-    K = 961
+    K = 1008
+    bins = lag_bins(K)
     k = np.arange(1, K + 1, dtype=np.float64)
-    s = influence_summary(0.5 * k ** -1.25, bytes_per_token=4.0)
+    I = 0.5 * k ** -1.25
+    sums = [I[a - 1:b].sum() for a, b in bins]
+    cnts = [b - a + 1 for a, b in bins]
+    s = influence_summary(sums, cnts, bins, bytes_per_token=4.0)
     assert abs(s["influence_decay_exponent"] - 1.25) < 0.01
-    assert math.isclose(s["influence_far_mass"], float(np.sum(0.5 * k[8:] ** -1.25)), rel_tol=1e-12)
+    assert math.isclose(s["influence_far_mass"], float(I[8:].sum()), rel_tol=1e-12)
     assert math.isclose(s["influence_horizon_bytes"], 4.0 * s["horizon_tokens"], rel_tol=1e-12)
 
 
@@ -121,10 +144,68 @@ def test_zero_influence_beyond_the_receptive_field(gpt2_tok, sliding_window, n_l
     n = n_layers * (sliding_window - 1) + 1
     res = _run(_local_model(sliding_window, n_layers), gpt2_tok, _docs(4))
     I = np.array(res["_meta_influence_per_lag"])
+    seen = np.array(res["_meta_n_terms_per_lag"]) > 0
+    assert seen[:n].all() and seen[n:].sum() > 50
     assert np.all(I[:n] > 0), I[:n]
-    assert np.all(I[n:] == 0.0), I[n:n + 5]
-    assert res["influence_far_mass"] == 0.0 if n < 9 else res["influence_far_mass"] > 0
+    assert np.all(I[n:][seen[n:]] == 0.0)
+    assert res["influence_far_mass"] == 0.0
     assert res["_meta_pre_replacement_max_js"] == 0.0
+
+
+class _MeanPoolLM(torch.nn.Module):
+    """Logits at t read the mean of the embeddings of tokens 0..t. Replacing
+    one token moves the state at t by (e_u - e_x) / (t + 1) for every t after
+    it: the response depends on the position t and not on the lag."""
+
+    def __init__(self, vocab=50257, d=16, ctx=1024, seed=0):
+        super().__init__()
+        g = torch.Generator().manual_seed(seed)
+        self.emb = torch.nn.Embedding(vocab, d)
+        self.head = torch.nn.Linear(d, vocab, bias=False)
+        with torch.no_grad():
+            self.emb.weight.copy_(torch.randn(vocab, d, generator=g))
+            self.head.weight.copy_(torch.randn(vocab, d, generator=g) * 3.0)
+        self.config = types.SimpleNamespace(max_position_embeddings=ctx)
+
+    def forward(self, input_ids=None, output_hidden_states=False, **kw):
+        e = self.emb(input_ids)
+        h = e.cumsum(1) / torch.arange(1, e.shape[1] + 1, dtype=e.dtype)[None, :, None]
+        return types.SimpleNamespace(logits=self.head(h),
+                                     hidden_states=(e, e, e) if output_hidden_states else None)
+
+
+def _all_positions_beta(model, tok, docs, W=1024, lo=16, hi=64, R=3, seed=0):
+    """The replaced design: s in [lo, hi), every position after s scored."""
+    rng = np.random.default_rng(seed)
+    K = W - hi + 1
+    bins = lag_bins(K)
+    sums, cnts = np.zeros(len(bins)), np.zeros(len(bins))
+    with torch.no_grad():
+        for doc in docs:
+            ids = tok(doc["text"], return_tensors="pt")["input_ids"][:, :W]
+            lp = torch.log_softmax(model(input_ids=ids).logits[0].double(), -1)
+            for s in rng.choice(np.arange(lo, hi), size=R, replace=False):
+                x = ids.clone()
+                x[0, s] = (int(x[0, s]) + 7919) % 50257
+                lq = torch.log_softmax(model(input_ids=x).logits[0].double(), -1)
+                d = js_rows(lp[s:s + K], lq[s:s + K]).numpy()
+                for b, (a, z) in enumerate(bins):
+                    sums[b] += d[a - 1:z].sum()
+                    cnts[b] += z - a + 1
+    return influence_summary(sums, cnts, bins, 1.0)["influence_decay_exponent"]
+
+
+def test_a_position_dependent_lag_independent_response_has_no_decay(gpt2_tok):
+    """Scoring only the end of the window holds the position fixed, so a
+    response that depends on the position alone gives beta ~ 0; scoring every
+    position after the replacement reads it as a decay with the lag."""
+    model = _MeanPoolLM().eval()
+    docs = _docs(6, words=1500, seed=4)
+    res = _run(model, gpt2_tok, docs, window=1024, n_replacements=24)
+    assert res["_meta_n_bins_empty"] == 0 and res["_meta_pre_replacement_max_js"] == 0.0
+    assert abs(res["influence_decay_exponent"]) < 0.1, res["influence_decay_exponent"]
+    old = _all_positions_beta(model, gpt2_tok, docs[:3])
+    assert old > 0.7, old
 
 
 def _tiny_gpt2(seed=0):
@@ -182,17 +263,21 @@ def _with_sinks(model, token_id):
 
 def test_sinks_are_never_replaced_and_never_scored(gpt2_tok):
     the = gpt2_tok(" the")["input_ids"][0]
-    docs = _docs(6, seed=3)
+    docs = _docs(6, seed=3, vocab=["the", "river", "the", "bank", "the", "city"])
     res = _run(_with_sinks(_tiny_gpt2(), the), gpt2_tok, docs, n_replacements=6)
     assert res["_meta_sink_n_massive_dropped"] > 0
     assert res["_meta_n_replacements_on_sinks"] > 0
     assert res["_meta_n_replacements"] + res["_meta_n_replacements_on_sinks"] == 6 * 6
+    # Sink predictions are not scored: fewer terms than replacements x positions.
+    assert sum(res["_meta_n_terms_per_lag"]) < res["_meta_n_replacements"] * 64
 
 
 def test_window_and_lags(gpt2_tok):
-    res = _run(_tiny_gpt2(), gpt2_tok, _docs(3), window=128, replace_hi=32)
-    assert res["_meta_window_tokens"] == 128 and res["_meta_max_lag"] == 128 - 32 + 1
+    res = _run(_tiny_gpt2(), gpt2_tok, _docs(3), window=128)
+    assert res["_meta_window_tokens"] == 128 and res["_meta_max_lag"] == 128 - 16
+    assert res["_meta_scored_positions"] == [64, 127] and res["_meta_base_lag_range"] == [1, 49]
     assert len(res["_meta_influence_per_lag"]) == res["_meta_max_lag"]
+    assert res["_meta_n_forwards"] == 3 * (1 + 8)
     bpt = res["_meta_bytes_per_token"]
     assert res["_meta_lag_bin_centers_bytes"] == [c * bpt for c in res["_meta_lag_bin_centers_tokens"]]
     # The configured window is capped at the model's context and says so.

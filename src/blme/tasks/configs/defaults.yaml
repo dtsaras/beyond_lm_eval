@@ -762,16 +762,18 @@ dynamics_context_influence:
   min_doc_words: 2048
   doc_split: train
   documents: long_documents
-  # n_replacements positions per window, drawn without replacement from
-  # [replace_lo, replace_hi); lags run to window - replace_hi + 1 (961).
-  n_replacements: 3
+  # Only the last n_scored positions are scored (960+ tokens of context each).
+  # n_replacements base lags k0 = t_first - s + 1 per window, log-uniform on
+  # [1, t_first - replace_lo + 1] (one per stratum of log k0); lags run to
+  # window - replace_lo (1008). 16 puts the far-mass bootstrap SE at about
+  # 0.02 on gpt2 and pythia-160m (1 + 16 forwards per window).
+  n_scored: 64
+  n_replacements: 16
   replace_lo: 16
-  replace_hi: 64
-  # float32: the forwards run in fp32 arithmetic at every size (bf16 moved the
-  # headline by more than 1% on gpt2 and pythia-160m); model: the model's dtype.
+  # float32: the forwards run in fp32 arithmetic at every size (bf16 forwards
+  # raised gpt2's far mass 20x); model: the model's dtype.
   compute_dtype: float32
   n_bootstrap: 200
-  chunk_elements: 4194304
-  # Every random stream (window offsets, replaced positions, replacement
-  # tokens, bootstrap) derives from this seed.
+  # Every random stream (window offsets, base lags, replacement tokens,
+  # bootstrap) derives from this seed.
   seed: 42

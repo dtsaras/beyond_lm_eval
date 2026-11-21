@@ -29,7 +29,7 @@ TASKS = ("geometry_readout_dual_spectrum", "dynamics_context_influence")
 SMALL = {
     "geometry_readout_dual_spectrum": {"n_rows": 200},
     "dynamics_context_influence": {"documents": "dataset", "num_samples": 3, "window": 128,
-                                   "replace_lo": 16, "replace_hi": 32, "n_replacements": 2,
+                                   "n_scored": 64, "replace_lo": 16, "n_replacements": 4,
                                    "n_bootstrap": 10},
 }
 _register_all_tasks()
@@ -72,14 +72,21 @@ def _run(task, model, tok, docs, cache=None):
         return get_task(task)(config=cfg).evaluate(model, tok, dataset=docs, cache=cache)
 
 
+def _canon(x):
+    """Bit-exact comparable form: floats by their hex (NaN equals NaN)."""
+    if isinstance(x, dict):
+        return {k: _canon(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_canon(v) for v in x]
+    if isinstance(x, float):
+        return x.hex()
+    return x
+
+
 def _same(a, b):
     assert "error" not in a and "error" not in b, (a.get("error"), b.get("error"))
     for k in sorted(a.keys() | b.keys()):
-        x, y = a.get(k), b.get(k)
-        if isinstance(x, float) and math.isnan(x):
-            assert isinstance(y, float) and math.isnan(y), k
-        else:
-            assert x == y, (k, x, y)
+        assert _canon(a.get(k)) == _canon(b.get(k)), (k, a.get(k), b.get(k))
 
 
 @pytest.mark.parametrize("task", TASKS)

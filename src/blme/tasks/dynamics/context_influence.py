@@ -1,22 +1,34 @@
 """``dynamics_context_influence``: how far back in its context a model's
 prediction depends on a single token.
 
-For a window x, a replaced position s and a lag k >= 1, the prediction made at
-position t = s + k - 1 (the next-token distribution after reading x_<=t) is
-compared with the same prediction when x_s alone is replaced by a token u drawn
-from the corpus unigram distribution:
+For a window x, a replaced position s and a scored position t >= s, the lag is
+k = t - s + 1 (k = 1: the replaced token is the one just read). The prediction
+made at t (the next-token distribution after reading x_<=t) is compared with
+the same prediction when x_s alone is replaced by a token u drawn from the
+corpus unigram distribution:
 
     I(k) = E_x E_s E_u JS( p(. | x_<=t), p(. | x_<=t with x_s := u) ),
 
-in nats, bounded by log 2 per term. Every lag after s comes from the same
-perturbed forward, so a window with R replacements costs 1 + R forwards. The
-lags run up to K = window - replace_hi + 1, the largest lag observed for every
-replacement, so each lag averages the same number of terms.
+in nats, bounded by log 2 per term.
 
-Reported: the decay exponent beta of I(k) ~ k^-beta (least squares in log-log
-over log-spaced lag bins from lag 3 to K), the far mass sum_{k=9..K} I(k)
-(nats), and the effective horizon exp(sum_k I(k) log k / sum_k I(k)) converted
-to bytes with the windows' mean bytes per token. The binned profile, the
+Only the last ``n_scored`` (64) positions of every window are scored, so every
+term reads nearly the whole window (960+ tokens of context) and only the lag
+varies: a design that scored every position after s would measure short lags
+at early positions with little context and long lags at late ones, so its
+decay would mix lag with position. The base lag k0 = t_first - s + 1 at the
+first scored position is drawn log-uniformly over [1, t_first - replace_lo + 1]
+(stratified within each window, one draw per equal-width stratum of log k0,
+so every lag octave is reached in every window); one perturbed forward then
+gives the lags k0 .. k0 + 63. A window with R replacements costs 1 + R
+forwards. Lags run to K = window - replace_lo (1008).
+
+Reported, on log2 lag bins [1], [2], [3-4], ..., cut at K, with I estimated per
+bin as the mean over its terms: the decay exponent beta of I(k) ~ k^-beta
+(least squares in log-log over the bins from lag 3; bin centres the geometric
+mean lag of the bin), the far mass sum over bins from lag 9 of (bin mean x lags
+in the bin) (nats), and the effective horizon exp(sum_b I_b w_b log c_b /
+sum_b I_b w_b) (w_b the lags in bin b, c_b its centre) converted to bytes with
+the windows' mean bytes per token. The binned profile, its term counts, the
 per-lag means, the lag bins in tokens and in bytes and window-bootstrap
 standard errors are ``_meta_``.
 
@@ -24,7 +36,7 @@ The window is 1024 tokens for every model: the largest context every model of
 the companion study supports (GPT-2's). Position 0 and massive-activation rows
 are never replaced and their predictions are not scored (TOKEN_POLICY
 ``exclude_sinks``, the corpus-wide rule). Every random stream (each window's
-start in its document, the replaced positions, the replacement tokens and the
+start in its document, the base lags, the replacement tokens and the
 bootstrap) comes from the ``seed`` config key.
 
 Grounding: Khandelwal et al. 2018 (arXiv:1805.04623) perturb context at a
@@ -54,11 +66,10 @@ logger = logging.getLogger("blme")
 
 DEFAULT_WINDOW = 1024
 DEFAULT_NUM_SAMPLES = 96
-DEFAULT_REPLACEMENTS = 3
+DEFAULT_SCORED = 64
+DEFAULT_REPLACEMENTS = 16
 DEFAULT_REPLACE_LO = 16
-DEFAULT_REPLACE_HI = 64
 DEFAULT_MIN_DOC_WORDS = 2048
-DEFAULT_CHUNK_ELEMENTS = 2 ** 22
 DEFAULT_BOOTSTRAP = 200
 FAR_LAG = 9
 FIT_FROM_LAG = 3
@@ -73,6 +84,14 @@ def lag_bins(k_max: int) -> List[Tuple[int, int]]:
         bins.append((lo, hi))
         lo = hi + 1
     return bins
+
+
+def _bin_of_lag(bins: List[Tuple[int, int]]) -> np.ndarray:
+    """``b[k]`` = the bin index of lag k (index 0 unused)."""
+    out = np.full(bins[-1][1] + 1, -1, dtype=np.int64)
+    for i, (lo, hi) in enumerate(bins):
+        out[lo:hi + 1] = i
+    return out
 
 
 def js_rows(lp: torch.Tensor, lq: torch.Tensor) -> torch.Tensor:
@@ -93,21 +112,26 @@ def js_rows(lp: torch.Tensor, lq: torch.Tensor) -> torch.Tensor:
     return 0.5 * (a + b)
 
 
-def influence_summary(per_lag: np.ndarray, bytes_per_token: float) -> Dict[str, Any]:
-    """The reported statistics of a per-lag influence profile I(1..K)."""
-    I = np.asarray(per_lag, dtype=np.float64)
-    K = int(I.size)
-    lags = np.arange(1, K + 1, dtype=np.float64)
-    ok = np.isfinite(I)
-    bins = lag_bins(K)
-    means, centers = [], []
-    for lo, hi in bins:
-        seg = I[lo - 1:hi]
-        seg = seg[np.isfinite(seg)]
-        means.append(float(seg.mean()) if seg.size else float("nan"))
-        centers.append(float(np.exp(np.mean(np.log(np.arange(lo, hi + 1, dtype=np.float64))))))
-    means, centers = np.array(means), np.array(centers)
-    fit = np.array([lo >= FIT_FROM_LAG for lo, _ in bins]) & np.isfinite(means) & (means > 0)
+def base_lags(rng: np.random.Generator, R: int, k0_max: int) -> np.ndarray:
+    """R base lags, log-uniform on [1, k0_max]: one draw per equal-width stratum
+    of [0, log(k0_max + 1)), k0 = floor(exp(u)), so P(k0 = m) is
+    log((m + 1) / m) / log(k0_max + 1)."""
+    L = math.log(k0_max + 1)
+    u = (np.arange(R) + rng.random(R)) * (L / R)
+    return np.clip(np.floor(np.exp(u)).astype(np.int64), 1, k0_max)
+
+
+def influence_summary(bin_sums, bin_counts, bins, bytes_per_token: float) -> Dict[str, Any]:
+    """The reported statistics from per-bin term sums and counts."""
+    sums = np.asarray(bin_sums, dtype=np.float64)
+    cnts = np.asarray(bin_counts, dtype=np.float64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        means = np.where(cnts > 0, sums / cnts, np.nan)
+    lo = np.array([b[0] for b in bins], dtype=np.float64)
+    widths = np.array([b[1] - b[0] + 1 for b in bins], dtype=np.float64)
+    centers = np.array([float(np.exp(np.mean(np.log(np.arange(a, b + 1, dtype=np.float64)))))
+                        for a, b in bins])
+    fit = (lo >= FIT_FROM_LAG) & np.isfinite(means) & (means > 0)
     beta = r2 = float("nan")
     if fit.sum() >= 3:
         x, y = np.log(centers[fit]), np.log(means[fit])
@@ -116,10 +140,12 @@ def influence_summary(per_lag: np.ndarray, bytes_per_token: float) -> Dict[str, 
         resid = y - (slope * x + icpt)
         ss = float(((y - y.mean()) ** 2).sum())
         r2 = float(1.0 - (resid ** 2).sum() / ss) if ss > 0 else float("nan")
-    total = float(np.sum(I[ok]))
-    far = float(np.sum(I[ok & (lags >= FAR_LAG)]))
-    pos = ok & (I > 0)
-    horizon = (float(np.exp(np.sum(I[pos] * np.log(lags[pos])) / np.sum(I[pos])))
+    ok = np.isfinite(means)
+    mass = np.where(ok, means * widths, 0.0)
+    total = float(mass.sum())
+    far = float(mass[lo >= FAR_LAG].sum())
+    pos = ok & (means > 0)
+    horizon = (float(np.exp(np.sum(mass[pos] * np.log(centers[pos])) / np.sum(mass[pos])))
                if pos.any() else float("nan"))
     return {
         "influence_decay_exponent": beta,
@@ -147,7 +173,8 @@ def _bootstrap_rng(seed: int) -> np.random.Generator:
 @register_task("dynamics_context_influence")
 class ContextInfluenceTask(DiagnosticTask):
     """Interventional context-influence spectrum: JS change of the next-token
-    distribution when one earlier token is resampled, by lag."""
+    distribution at the end of a window when one earlier token is resampled,
+    by lag."""
 
     # Position 0 and massive-activation tokens are never replaced and their
     # predictions are not scored (one mask per token, the corpus-wide rule).
@@ -164,15 +191,17 @@ class ContextInfluenceTask(DiagnosticTask):
         "BLME construct after Khandelwal et al. (2018), who perturb an LSTM's context beyond a "
         "distance and measure the change in loss: here one token at a time is resampled from the "
         "corpus unigram distribution and the change of the full next-token distribution is "
-        "measured as a Jensen-Shannon divergence at every later position, which needs no labels "
-        "and is bounded by log 2. Windows are 1024 tokens for every model (GPT-2's context, the "
-        "largest every study model supports), cut from WikiText-103 train articles of at least "
-        "2048 words at a seeded word offset, so every model reads the same text. Three positions "
-        "in [16, 64) per window are replaced, sinks excepted, and lags run to 961, the largest "
-        "lag every replacement observes. beta is fitted over log-spaced bins from lag 3, the far "
-        "mass sums lags 9 and beyond, and the horizon is the influence-weighted geometric mean "
-        "lag in bytes. The forwards run in fp32 arithmetic at every size because the long-lag "
-        "values sit near bf16 rounding, and the divergences are taken in float64."
+        "measured as a Jensen-Shannon divergence, which needs no labels and is bounded by log 2. "
+        "Windows are 1024 tokens for every model (GPT-2's context, the largest every study model "
+        "supports), cut from WikiText-103 train articles of at least 2048 words at a seeded word "
+        "offset, so every model reads the same text. Only the last 64 positions are scored, so "
+        "every term has 960+ tokens of context and only the lag varies; the replaced positions "
+        "give base lags log-uniform over [1, 945] (stratified per window, sinks and the first 16 "
+        "positions never replaced), and lags run to 1008. I is the mean of its terms per log2 lag "
+        "bin; beta is fitted over the bins from lag 3, the far mass sums bin mean times bin width "
+        "from lag 9, and the horizon is the influence-weighted geometric mean lag in bytes. The "
+        "forwards run in fp32 arithmetic at every size because the long-lag values sit near bf16 "
+        "rounding, and the divergences are taken in float64."
     )
     HEADLINE_KEYS = ("influence_decay_exponent", "influence_far_mass", "influence_horizon_bytes")
     # A function-space quantity, but every key depends on the tokenizer (lags
@@ -184,14 +213,13 @@ class ContextInfluenceTask(DiagnosticTask):
         cfg = self.config
         num_samples = int(cfg.get("num_samples", DEFAULT_NUM_SAMPLES))
         window = int(cfg.get("window", DEFAULT_WINDOW))
+        P = int(cfg.get("n_scored", DEFAULT_SCORED))
         R = int(cfg.get("n_replacements", DEFAULT_REPLACEMENTS))
-        lo = int(cfg.get("replace_lo", DEFAULT_REPLACE_LO))
-        hi = int(cfg.get("replace_hi", DEFAULT_REPLACE_HI))
+        lo = max(int(cfg.get("replace_lo", DEFAULT_REPLACE_LO)), 1)
         min_doc_words = int(cfg.get("min_doc_words", DEFAULT_MIN_DOC_WORDS))
         doc_split = str(cfg.get("doc_split", "train"))
         source = str(cfg.get("documents", "long_documents"))
         compute = str(cfg.get("compute_dtype", "float32"))
-        chunk_elements = int(cfg.get("chunk_elements", DEFAULT_CHUNK_ELEMENTS))
         n_boot = int(cfg.get("n_bootstrap", DEFAULT_BOOTSTRAP))
         seed = int(cfg.get("seed", 42))
         policy = self.TOKEN_POLICY
@@ -200,12 +228,15 @@ class ContextInfluenceTask(DiagnosticTask):
 
         ctx = get_max_positions(model, window)
         W = int(min(window, ctx))
-        lo = max(lo, 1)
-        if not (1 <= lo < hi <= W) or R < 1 or hi - lo < R:
-            return {"error": f"bad replacement range [{lo}, {hi}) for {R} replacements in {W} tokens"}
-        K = W - hi + 1
-        if K < FAR_LAG + 2:
-            return {"error": f"window {W} leaves lags up to {K} only"}
+        t_first = W - P
+        K = W - lo                       # largest lag: s = lo, t = W - 1
+        k0_max = t_first - lo + 1        # largest base lag: s = lo at t_first
+        if R < 1 or P < 1 or k0_max < 1 or K < FAR_LAG + 2:
+            return {"error": f"window {W} with {P} scored positions and replace_lo {lo} "
+                             f"leaves no usable lags"}
+        bins = lag_bins(K)
+        bin_of = _bin_of_lag(bins)
+        nb = len(bins)
 
         # ── documents and windows ──
         if source == "dataset":
@@ -269,21 +300,25 @@ class ContextInfluenceTask(DiagnosticTask):
 
         device = next(model.parameters()).device
         model.eval()
-        js = np.full((len(wins), R, K), np.nan)
-        s_drawn = np.zeros((len(wins), R), dtype=np.int64)
+        n_win = len(wins)
+        js = np.full((n_win, R, P), np.nan)        # scored positions t_first..W-1
+        s_drawn = np.zeros((n_win, R), dtype=np.int64)
         pre_max = 0.0
         norms: Optional[Dict[int, List[torch.Tensor]]] = None
         mid: Optional[List[int]] = None
         digest = hashlib.sha256()
+        n_forwards = 0
         with torch.no_grad(), fp32_compute(model, enabled=(compute == "float32")) as prec:
             for wi, w in enumerate(wins):
                 rng, ids = w["rng"], w["ids"]
-                pos = rng.choice(np.arange(lo, hi), size=R, replace=False)
-                us = [_draw(rng, int(ids[s])) for s in pos]
+                k0 = base_lags(rng, R, k0_max)
+                pos = t_first - k0 + 1
+                us = [_draw(rng, int(ids[int(s)])) for s in pos]
                 s_drawn[wi] = pos
                 digest.update(np.array([w["i"], w["offset"], *pos, *us], dtype=np.int64).tobytes())
                 x = ids[None].to(device)
                 out = model(input_ids=x, output_hidden_states=True)
+                n_forwards += 1
                 # post-final-norm: not read. Only middle depths (relative 0.1-0.9)
                 # of the block outputs feed the sink norms.
                 blocks = out.hidden_states[1:]
@@ -295,25 +330,21 @@ class ContextInfluenceTask(DiagnosticTask):
                         blocks[k][0].to("cpu", torch.float64), dim=1).unsqueeze(1))
                 clean = out.logits[0].detach()
                 del out, blocks
-                V = int(clean.shape[-1])
-                step = max(1, chunk_elements // V)
+                lp_clean = torch.log_softmax(clean[t_first:W].double(), -1)
                 for r, (s, u) in enumerate(zip(pos, us)):
                     s = int(s)
                     xp = x.clone()
                     xp[0, s] = u
                     pert = model(input_ids=xp).logits[0].detach()
+                    n_forwards += 1
                     # Causality check: positions before s cannot move.
                     a = max(0, s - 8)
                     d0 = js_rows(torch.log_softmax(clean[a:s].double(), -1),
                                  torch.log_softmax(pert[a:s].double(), -1))
                     if d0.numel():
                         pre_max = max(pre_max, float(d0.abs().max()))
-                    vals = []
-                    for t0 in range(s, s + K, step):
-                        t1 = min(t0 + step, s + K)
-                        vals.append(js_rows(torch.log_softmax(clean[t0:t1].double(), -1),
-                                            torch.log_softmax(pert[t0:t1].double(), -1)))
-                    js[wi, r] = torch.cat(vals).cpu().numpy()
+                    js[wi, r] = js_rows(lp_clean, torch.log_softmax(pert[t_first:W].double(), -1)
+                                        ).cpu().numpy()
                     del pert
 
         # ── sinks: drop replacements at sink positions and sink predictions ──
@@ -324,33 +355,41 @@ class ContextInfluenceTask(DiagnosticTask):
                 masks, sink_info = sink_keep_masks([norms[k] for k in mid])
             else:
                 masks = [torch.arange(W) != 0 for _ in wins]
-            for wi in range(len(wins)):
+            for wi in range(n_win):
                 keep = masks[wi].numpy().astype(bool)
+                js[wi][:, ~keep[t_first:W]] = np.nan
                 for r in range(R):
-                    s = int(s_drawn[wi, r])
-                    if not keep[s]:
+                    if not keep[int(s_drawn[wi, r])]:
                         js[wi, r] = np.nan
                         n_rep_sink += 1
-                        continue
-                    t_keep = keep[s:s + K]
-                    js[wi, r, ~t_keep] = np.nan
 
-        sums = np.nansum(js, axis=1)                    # (n_win, K)
-        cnts = np.sum(np.isfinite(js), axis=1)
+        # ── terms -> per-window bin sums and counts, per-lag sums and counts ──
+        t_idx = np.arange(t_first, W)
+        lags = t_idx[None, None, :] - s_drawn[:, :, None] + 1          # (n_win, R, P)
+        valid = np.isfinite(js)
+        bsum = np.zeros((n_win, nb))
+        bcnt = np.zeros((n_win, nb))
+        lag_sum = np.zeros(K + 1)
+        lag_cnt = np.zeros(K + 1)
+        for wi in range(n_win):
+            v = valid[wi]
+            kk = lags[wi][v]
+            vv = js[wi][v]
+            np.add.at(bsum[wi], bin_of[kk], vv)
+            np.add.at(bcnt[wi], bin_of[kk], 1.0)
+            np.add.at(lag_sum, kk, vv)
+            np.add.at(lag_cnt, kk, 1.0)
         bpt = float(np.mean([w["bytes_per_token"] for w in wins]))
+        summ = influence_summary(bsum.sum(0), bcnt.sum(0), bins, bpt)
         with np.errstate(invalid="ignore", divide="ignore"):
-            per_lag = sums.sum(0) / cnts.sum(0)
-        summ = influence_summary(per_lag, bpt)
+            per_lag = np.where(lag_cnt[1:] > 0, lag_sum[1:] / lag_cnt[1:], np.nan)
 
         # Window bootstrap.
         brng = _bootstrap_rng(seed)
         boots = {k: [] for k in self.HEADLINE_KEYS}
-        nw = len(wins)
-        for _ in range(n_boot if nw > 1 else 0):
-            pick = brng.integers(0, nw, size=nw)
-            c = cnts[pick].sum(0)
-            with np.errstate(invalid="ignore", divide="ignore"):
-                b = influence_summary(sums[pick].sum(0) / c, bpt)
+        for _ in range(n_boot if n_win > 1 else 0):
+            pick = brng.integers(0, n_win, size=n_win)
+            b = influence_summary(bsum[pick].sum(0), bcnt[pick].sum(0), bins, bpt)
             for k in boots:
                 boots[k].append(b[k])
 
@@ -359,6 +398,7 @@ class ContextInfluenceTask(DiagnosticTask):
             v = v[np.isfinite(v)]
             return float(v.std(ddof=1)) if v.size > 1 else float("nan")
 
+        n_terms_bin = bcnt.sum(0)
         out = {k: summ[k] for k in self.HEADLINE_KEYS}
         out.update({
             "_meta_influence_decay_exponent_se": _sd(boots["influence_decay_exponent"]),
@@ -367,28 +407,34 @@ class ContextInfluenceTask(DiagnosticTask):
             "_meta_influence_horizon_tokens": summ["horizon_tokens"],
             "_meta_influence_total_mass": summ["total_mass"],
             "_meta_influence_far_share": summ["far_share"],
-            "_meta_influence_lag1": float(per_lag[0]),
+            "_meta_influence_lag1": float(summ["bin_means"][0]),
             "_meta_decay_fit_r2": summ["fit_r2"],
             "_meta_decay_fit_bins": summ["n_fit_bins"],
             "_meta_decay_fit_lags": [FIT_FROM_LAG, K],
             "_meta_far_lag": FAR_LAG,
-            "_meta_lag_bins": [list(b) for b in summ["bins"]],
+            "_meta_lag_bins": [list(b) for b in bins],
             "_meta_influence_bin_means": [float(v) for v in summ["bin_means"]],
+            "_meta_n_terms_per_bin": [int(v) for v in n_terms_bin],
+            "_meta_n_bins_empty": int(np.sum(n_terms_bin == 0)),
             "_meta_lag_bin_centers_tokens": [float(v) for v in summ["bin_centers"]],
             "_meta_lag_bin_centers_bytes": [float(v) * bpt for v in summ["bin_centers"]],
             "_meta_influence_per_lag": [float(v) for v in per_lag],
+            "_meta_n_terms_per_lag": [int(v) for v in lag_cnt[1:]],
             "_meta_bytes_per_token": bpt,
             "_meta_max_lag": K,
+            "_meta_scored_positions": [t_first, W - 1],
+            "_meta_base_lag_range": [1, k0_max],
+            "_meta_base_lag_draw": "log-uniform, one draw per equal stratum of log k0 per window",
             "_meta_window_tokens": W,
             "_meta_window_tokens_configured": window,
             "_meta_window_is_configured": bool(W == window),
-            "_meta_replace_range": [lo, hi],
+            "_meta_replace_lo": lo,
             "_meta_n_replacements_per_window": R,
-            "_meta_n_windows": len(wins),
+            "_meta_n_windows": n_win,
+            "_meta_n_forwards": n_forwards,
             "_meta_n_documents_too_short": n_short,
-            "_meta_n_replacements": int(len(wins) * R - n_rep_sink),
+            "_meta_n_replacements": int(n_win * R - n_rep_sink),
             "_meta_n_replacements_on_sinks": n_rep_sink,
-            "_meta_n_lags_empty": int(np.sum(cnts.sum(0) == 0)),
             "_meta_pre_replacement_max_js": pre_max,
             "_meta_seed": seed,
             "_meta_draw_digest": digest.hexdigest()[:16],
