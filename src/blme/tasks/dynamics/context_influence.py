@@ -23,14 +23,20 @@ gives the lags k0 .. k0 + 63. A window with R replacements costs 1 + R
 forwards. Lags run to K = window - replace_lo (1008).
 
 Reported, on log2 lag bins [1], [2], [3-4], ..., cut at K, with I estimated per
-bin as the mean over its terms: the decay exponent beta of I(k) ~ k^-beta
+bin as the mean of the per-lag means over the lags of the bin that have a term
+(each lag weighted equally: log-uniform base lags put more terms on a bin's
+lower lags): the decay exponent beta of I(k) ~ k^-beta
 (least squares in log-log over the bins from lag 3; bin centres the geometric
 mean lag of the bin), the far mass sum over bins from lag 9 of (bin mean x lags
 in the bin) (nats), and the effective horizon exp(sum_b I_b w_b log c_b /
 sum_b I_b w_b) (w_b the lags in bin b, c_b its centre) converted to bytes with
 the windows' mean bytes per token. The binned profile, its term counts, the
-per-lag means, the lag bins in tokens and in bytes and window-bootstrap
-standard errors are ``_meta_``.
+per-lag means, the share of lags without a term, the far mass of the pooled
+terms, the lag bins in tokens and in bytes and window-bootstrap standard errors
+are ``_meta_``. ``_meta_pre_replacement_max_js`` is the largest divergence
+before a replaced position: exactly 0 on a bitwise-deterministic stack (CPU),
+recorded and never an error; ``_meta_causality_ok`` holds when it is at most
+CAUSALITY_TOL (1e-6), which non-bitwise GPU kernels can reach without a leak.
 
 The window is 1024 tokens for every model: the largest context every model of
 the companion study supports (GPT-2's). Position 0 and massive-activation rows
@@ -73,6 +79,9 @@ DEFAULT_MIN_DOC_WORDS = 2048
 DEFAULT_BOOTSTRAP = 200
 FAR_LAG = 9
 FIT_FROM_LAG = 3
+# Largest divergence before the replaced position still read as causal: kernel
+# nondeterminism on a GPU, not a leak (a leak moves predictions by far more).
+CAUSALITY_TOL = 1e-6
 LOG2 = math.log(2.0)
 
 
@@ -84,14 +93,6 @@ def lag_bins(k_max: int) -> List[Tuple[int, int]]:
         bins.append((lo, hi))
         lo = hi + 1
     return bins
-
-
-def _bin_of_lag(bins: List[Tuple[int, int]]) -> np.ndarray:
-    """``b[k]`` = the bin index of lag k (index 0 unused)."""
-    out = np.full(bins[-1][1] + 1, -1, dtype=np.int64)
-    for i, (lo, hi) in enumerate(bins):
-        out[lo:hi + 1] = i
-    return out
 
 
 def js_rows(lp: torch.Tensor, lq: torch.Tensor) -> torch.Tensor:
@@ -121,16 +122,32 @@ def base_lags(rng: np.random.Generator, R: int, k0_max: int) -> np.ndarray:
     return np.clip(np.floor(np.exp(u)).astype(np.int64), 1, k0_max)
 
 
-def influence_summary(bin_sums, bin_counts, bins, bytes_per_token: float) -> Dict[str, Any]:
-    """The reported statistics from per-bin term sums and counts."""
-    sums = np.asarray(bin_sums, dtype=np.float64)
-    cnts = np.asarray(bin_counts, dtype=np.float64)
+def influence_summary(lag_sums, lag_counts, bins, bytes_per_token: float) -> Dict[str, Any]:
+    """The reported statistics from per-lag term sums and counts (lags 1..K).
+
+    A bin's I is the mean of the per-lag means over its lags that have at least
+    one term, so every lag weighs the same whatever its term count; the far mass
+    is that mean times the bin's width, i.e. the sum of the per-lag means with
+    an empty lag filled by its bin's mean. ``pooled_*`` pool the bin's terms
+    instead (lags weighted by their term counts).
+    """
+    sums = np.asarray(lag_sums, dtype=np.float64)
+    cnts = np.asarray(lag_counts, dtype=np.float64)
     with np.errstate(invalid="ignore", divide="ignore"):
-        means = np.where(cnts > 0, sums / cnts, np.nan)
+        per_lag = np.where(cnts > 0, sums / cnts, np.nan)
     lo = np.array([b[0] for b in bins], dtype=np.float64)
     widths = np.array([b[1] - b[0] + 1 for b in bins], dtype=np.float64)
     centers = np.array([float(np.exp(np.mean(np.log(np.arange(a, b + 1, dtype=np.float64)))))
                         for a, b in bins])
+    means, pooled = np.full(len(bins), np.nan), np.full(len(bins), np.nan)
+    for i, (a, b) in enumerate(bins):
+        seg = per_lag[a - 1:b]
+        seg = seg[np.isfinite(seg)]
+        if seg.size:
+            means[i] = float(seg.mean())
+        c = float(cnts[a - 1:b].sum())
+        if c > 0:
+            pooled[i] = float(sums[a - 1:b].sum()) / c
     fit = (lo >= FIT_FROM_LAG) & np.isfinite(means) & (means > 0)
     beta = r2 = float("nan")
     if fit.sum() >= 3:
@@ -147,6 +164,7 @@ def influence_summary(bin_sums, bin_counts, bins, bytes_per_token: float) -> Dic
     pos = ok & (means > 0)
     horizon = (float(np.exp(np.sum(mass[pos] * np.log(centers[pos])) / np.sum(mass[pos])))
                if pos.any() else float("nan"))
+    far_pooled = float(np.where(np.isfinite(pooled), pooled * widths, 0.0)[lo >= FAR_LAG].sum())
     return {
         "influence_decay_exponent": beta,
         "influence_far_mass": far,
@@ -157,6 +175,10 @@ def influence_summary(bin_sums, bin_counts, bins, bytes_per_token: float) -> Dic
         "fit_r2": r2,
         "n_fit_bins": int(fit.sum()),
         "bin_means": means,
+        "bin_means_pooled_terms": pooled,
+        "far_mass_pooled_terms": far_pooled,
+        "lag_empty_share": float(np.mean(cnts == 0)) if cnts.size else float("nan"),
+        "per_lag": per_lag,
         "bin_centers": centers,
         "bins": bins,
     }
@@ -197,9 +219,10 @@ class ContextInfluenceTask(DiagnosticTask):
         "offset, so every model reads the same text. Only the last 64 positions are scored, so "
         "every term has 960+ tokens of context and only the lag varies; the replaced positions "
         "give base lags log-uniform over [1, 945] (stratified per window, sinks and the first 16 "
-        "positions never replaced), and lags run to 1008. I is the mean of its terms per log2 lag "
-        "bin; beta is fitted over the bins from lag 3, the far mass sums bin mean times bin width "
-        "from lag 9, and the horizon is the influence-weighted geometric mean lag in bytes. The "
+        "positions never replaced), and lags run to 1008. I per log2 lag bin is the mean of its "
+        "per-lag means, so every lag weighs the same; beta is fitted over the bins from lag 3, the "
+        "far mass sums bin mean times bin width from lag 9, and the horizon is the "
+        "influence-weighted geometric mean lag in bytes. The "
         "forwards run in fp32 arithmetic at every size because the long-lag values sit near bf16 "
         "rounding, and the divergences are taken in float64."
     )
@@ -235,8 +258,6 @@ class ContextInfluenceTask(DiagnosticTask):
             return {"error": f"window {W} with {P} scored positions and replace_lo {lo} "
                              f"leaves no usable lags"}
         bins = lag_bins(K)
-        bin_of = _bin_of_lag(bins)
-        nb = len(bins)
 
         # ── documents and windows ──
         if source == "dataset":
@@ -363,33 +384,29 @@ class ContextInfluenceTask(DiagnosticTask):
                         js[wi, r] = np.nan
                         n_rep_sink += 1
 
-        # ── terms -> per-window bin sums and counts, per-lag sums and counts ──
+        # ── terms -> per-window per-lag sums and counts ──
         t_idx = np.arange(t_first, W)
         lags = t_idx[None, None, :] - s_drawn[:, :, None] + 1          # (n_win, R, P)
         valid = np.isfinite(js)
-        bsum = np.zeros((n_win, nb))
-        bcnt = np.zeros((n_win, nb))
-        lag_sum = np.zeros(K + 1)
-        lag_cnt = np.zeros(K + 1)
+        lsum = np.zeros((n_win, K + 1))
+        lcnt = np.zeros((n_win, K + 1))
         for wi in range(n_win):
             v = valid[wi]
-            kk = lags[wi][v]
-            vv = js[wi][v]
-            np.add.at(bsum[wi], bin_of[kk], vv)
-            np.add.at(bcnt[wi], bin_of[kk], 1.0)
-            np.add.at(lag_sum, kk, vv)
-            np.add.at(lag_cnt, kk, 1.0)
+            np.add.at(lsum[wi], lags[wi][v], js[wi][v])
+            np.add.at(lcnt[wi], lags[wi][v], 1.0)
+        lsum, lcnt = lsum[:, 1:], lcnt[:, 1:]                           # lags 1..K
         bpt = float(np.mean([w["bytes_per_token"] for w in wins]))
-        summ = influence_summary(bsum.sum(0), bcnt.sum(0), bins, bpt)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            per_lag = np.where(lag_cnt[1:] > 0, lag_sum[1:] / lag_cnt[1:], np.nan)
+        summ = influence_summary(lsum.sum(0), lcnt.sum(0), bins, bpt)
+        per_lag = summ["per_lag"]
+        lag_cnt = lcnt.sum(0)
+        n_terms_bin = np.array([lag_cnt[a - 1:b].sum() for a, b in bins])
 
         # Window bootstrap.
         brng = _bootstrap_rng(seed)
         boots = {k: [] for k in self.HEADLINE_KEYS}
         for _ in range(n_boot if n_win > 1 else 0):
             pick = brng.integers(0, n_win, size=n_win)
-            b = influence_summary(bsum[pick].sum(0), bcnt[pick].sum(0), bins, bpt)
+            b = influence_summary(lsum[pick].sum(0), lcnt[pick].sum(0), bins, bpt)
             for k in boots:
                 boots[k].append(b[k])
 
@@ -398,7 +415,6 @@ class ContextInfluenceTask(DiagnosticTask):
             v = v[np.isfinite(v)]
             return float(v.std(ddof=1)) if v.size > 1 else float("nan")
 
-        n_terms_bin = bcnt.sum(0)
         out = {k: summ[k] for k in self.HEADLINE_KEYS}
         out.update({
             "_meta_influence_decay_exponent_se": _sd(boots["influence_decay_exponent"]),
@@ -414,12 +430,15 @@ class ContextInfluenceTask(DiagnosticTask):
             "_meta_far_lag": FAR_LAG,
             "_meta_lag_bins": [list(b) for b in bins],
             "_meta_influence_bin_means": [float(v) for v in summ["bin_means"]],
+            "_meta_influence_bin_means_pooled_terms": [float(v) for v in summ["bin_means_pooled_terms"]],
+            "_meta_far_mass_pooled_terms": summ["far_mass_pooled_terms"],
+            "_meta_lag_empty_share": summ["lag_empty_share"],
             "_meta_n_terms_per_bin": [int(v) for v in n_terms_bin],
             "_meta_n_bins_empty": int(np.sum(n_terms_bin == 0)),
             "_meta_lag_bin_centers_tokens": [float(v) for v in summ["bin_centers"]],
             "_meta_lag_bin_centers_bytes": [float(v) * bpt for v in summ["bin_centers"]],
             "_meta_influence_per_lag": [float(v) for v in per_lag],
-            "_meta_n_terms_per_lag": [int(v) for v in lag_cnt[1:]],
+            "_meta_n_terms_per_lag": [int(v) for v in lag_cnt],
             "_meta_bytes_per_token": bpt,
             "_meta_max_lag": K,
             "_meta_scored_positions": [t_first, W - 1],
@@ -436,6 +455,8 @@ class ContextInfluenceTask(DiagnosticTask):
             "_meta_n_replacements": int(n_win * R - n_rep_sink),
             "_meta_n_replacements_on_sinks": n_rep_sink,
             "_meta_pre_replacement_max_js": pre_max,
+            "_meta_causality_ok": bool(pre_max <= CAUSALITY_TOL),
+            "_meta_causality_tol": CAUSALITY_TOL,
             "_meta_seed": seed,
             "_meta_draw_digest": digest.hexdigest()[:16],
             "_meta_n_bootstrap": n_boot,

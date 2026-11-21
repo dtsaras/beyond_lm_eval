@@ -325,7 +325,7 @@
     "evidence": "equation",
     "next_check": "Seed and item reliability on the zoo, and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2).",
     "receipt": "",
-    "scope": "BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. The base lags are log-uniform and stratified. Predictions before the replaced position never move. Runs are bit-identical, the seed moves every draw, sinks are never replaced and the global RNGs are untouched.",
+    "scope": "BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the seed moves every draw, sinks are never replaced and the global RNGs are untouched.",
     "selectors": [
       "tests/tasks/test_context_influence.py",
       "tests/tasks/test_exploratory_task_guards.py"

@@ -115,12 +115,45 @@ def test_summary_recovers_a_power_law():
     bins = lag_bins(K)
     k = np.arange(1, K + 1, dtype=np.float64)
     I = 0.5 * k ** -1.25
-    sums = [I[a - 1:b].sum() for a, b in bins]
-    cnts = [b - a + 1 for a, b in bins]
-    s = influence_summary(sums, cnts, bins, bytes_per_token=4.0)
+    s = influence_summary(I, np.ones(K), bins, bytes_per_token=4.0)
     assert abs(s["influence_decay_exponent"] - 1.25) < 0.01
     assert math.isclose(s["influence_far_mass"], float(I[8:].sum()), rel_tol=1e-12)
     assert math.isclose(s["influence_horizon_bytes"], 4.0 * s["horizon_tokens"], rel_tol=1e-12)
+    assert s["lag_empty_share"] == 0.0
+
+
+def test_every_lag_weighs_the_same_inside_a_bin():
+    """Log-uniform base lags put about 1/k of the terms on lag k: pooling a
+    bin's terms leans to its lower lags; averaging per-lag means does not."""
+    K = 1008
+    bins = lag_bins(K)
+    k = np.arange(1, K + 1, dtype=np.float64)
+    I = 0.5 * k ** -1.2
+    cnt = np.ceil(5000.0 / k)
+    s = influence_summary(I * cnt, cnt, bins, bytes_per_token=1.0)
+    assert math.isclose(s["influence_far_mass"], float(I[8:].sum()), rel_tol=1e-12)
+    for (a, b), m in zip(bins, s["bin_means"]):
+        assert math.isclose(m, float(I[a - 1:b].mean()), rel_tol=1e-12)
+    bias = s["far_mass_pooled_terms"] / s["influence_far_mass"] - 1
+    assert 0.02 < bias < 0.08, bias
+
+
+def test_an_empty_lag_is_filled_from_its_bin():
+    K = 100
+    bins = lag_bins(K)
+    k = np.arange(1, K + 1, dtype=np.float64)
+    I = k ** -1.0
+    cnt = np.ones(K)
+    cnt[[19, 40, 41, 70]] = 0                 # lags 20, 41, 42, 71 have no term
+    s = influence_summary(I * cnt, cnt, bins, bytes_per_token=1.0)
+    want = 0.0
+    for a, b in bins:
+        if a >= 9:
+            seen = [I[j - 1] for j in range(a, b + 1) if cnt[j - 1] > 0]
+            want += np.mean(seen) * (b - a + 1)
+    assert math.isclose(s["influence_far_mass"], want, rel_tol=1e-12)
+    assert math.isclose(s["lag_empty_share"], 4 / K, rel_tol=1e-12)
+    assert np.isnan(s["per_lag"][19]) and s["per_lag"][18] == I[18]
 
 
 # ── through evaluate() ───────────────────────────────────────────────────
@@ -149,7 +182,7 @@ def test_zero_influence_beyond_the_receptive_field(gpt2_tok, sliding_window, n_l
     assert np.all(I[:n] > 0), I[:n]
     assert np.all(I[n:][seen[n:]] == 0.0)
     assert res["influence_far_mass"] == 0.0
-    assert res["_meta_pre_replacement_max_js"] == 0.0
+    assert res["_meta_pre_replacement_max_js"] == 0.0 and res["_meta_causality_ok"] is True
 
 
 class _MeanPoolLM(torch.nn.Module):
@@ -178,8 +211,7 @@ def _all_positions_beta(model, tok, docs, W=1024, lo=16, hi=64, R=3, seed=0):
     """The replaced design: s in [lo, hi), every position after s scored."""
     rng = np.random.default_rng(seed)
     K = W - hi + 1
-    bins = lag_bins(K)
-    sums, cnts = np.zeros(len(bins)), np.zeros(len(bins))
+    sums, cnts = np.zeros(K), np.zeros(K)          # lags 1..K
     with torch.no_grad():
         for doc in docs:
             ids = tok(doc["text"], return_tensors="pt")["input_ids"][:, :W]
@@ -188,11 +220,9 @@ def _all_positions_beta(model, tok, docs, W=1024, lo=16, hi=64, R=3, seed=0):
                 x = ids.clone()
                 x[0, s] = (int(x[0, s]) + 7919) % 50257
                 lq = torch.log_softmax(model(input_ids=x).logits[0].double(), -1)
-                d = js_rows(lp[s:s + K], lq[s:s + K]).numpy()
-                for b, (a, z) in enumerate(bins):
-                    sums[b] += d[a - 1:z].sum()
-                    cnts[b] += z - a + 1
-    return influence_summary(sums, cnts, bins, 1.0)["influence_decay_exponent"]
+                sums += js_rows(lp[s:s + K], lq[s:s + K]).numpy()
+                cnts += 1.0
+    return influence_summary(sums, cnts, lag_bins(K), 1.0)["influence_decay_exponent"]
 
 
 def test_a_position_dependent_lag_independent_response_has_no_decay(gpt2_tok):
@@ -203,9 +233,48 @@ def test_a_position_dependent_lag_independent_response_has_no_decay(gpt2_tok):
     docs = _docs(6, words=1500, seed=4)
     res = _run(model, gpt2_tok, docs, window=1024, n_replacements=24)
     assert res["_meta_n_bins_empty"] == 0 and res["_meta_pre_replacement_max_js"] == 0.0
+    assert res["_meta_causality_ok"] is True
     assert abs(res["influence_decay_exponent"]) < 0.1, res["influence_decay_exponent"]
     old = _all_positions_beta(model, gpt2_tok, docs[:3])
     assert old > 0.7, old
+
+
+class _GlobalMeanLM(_MeanPoolLM):
+    """Not causal: every position reads the mean of the whole window."""
+
+    def forward(self, input_ids=None, output_hidden_states=False, **kw):
+        e = self.emb(input_ids)
+        h = e.mean(1, keepdim=True).expand_as(e)
+        return types.SimpleNamespace(logits=self.head(h),
+                                     hidden_states=(e, e, e) if output_hidden_states else None)
+
+
+class _JitterLM(_MeanPoolLM):
+    """Causal, with a different 1e-6 perturbation of the logits on every call
+    (non-bitwise kernels), from a local generator."""
+
+    def __init__(self):
+        super().__init__()
+        self._calls = 0
+
+    def forward(self, input_ids=None, output_hidden_states=False, **kw):
+        out = super().forward(input_ids=input_ids, output_hidden_states=output_hidden_states)
+        self._calls += 1
+        g = torch.Generator().manual_seed(self._calls)
+        out.logits = out.logits + 1e-6 * torch.randn(out.logits.shape, generator=g)
+        return out
+
+
+def test_a_nonzero_pre_replacement_divergence_is_recorded_not_raised(gpt2_tok):
+    """A leak (or GPU nondeterminism) never drops the result: it is recorded,
+    and _meta_causality_ok says whether it stays within the tolerance."""
+    docs = _docs(3, words=1500, seed=6)
+    leak = _run(_GlobalMeanLM().eval(), gpt2_tok, docs, window=256)
+    assert leak["_meta_pre_replacement_max_js"] > 1e-6 and leak["_meta_causality_ok"] is False
+    assert all(math.isfinite(leak[k]) for k in ContextInfluenceTask.HEADLINE_KEYS)
+    jitter = _run(_JitterLM().eval(), gpt2_tok, docs, window=256)
+    assert 0 < jitter["_meta_pre_replacement_max_js"] <= 1e-6
+    assert jitter["_meta_causality_ok"] is True and jitter["_meta_causality_tol"] == 1e-6
 
 
 def _tiny_gpt2(seed=0):
