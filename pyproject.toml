@@ -137,3 +137,25 @@ markers = [
     "invariance: invariance harness (transforms that must not move a readout)",
     "precision: precision lifting and dtype restore",
 ]
+
+[tool.ruff]
+# LINT ONLY. Do not run `ruff format` or `ruff check --fix`: the tasks are
+# bit-pinned against reference implementations, and every edit to a pinned
+# file invalidates its validation receipt (docs/validation/README.md).
+target-version = "py310"
+line-length = 120
+fix = false
+extend-exclude = ["results"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "E741",  # I, l, O: the papers' notation in numerical code
+    "B905",  # zip() without strict=: no defect signal here, and a code edit to satisfy
+]
+# `# noqa: WPS433` (wemake-python-styleguide) in tests/tasks/parity.
+external = ["WPS"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # re-exports
+"tests/**" = ["E402"]     # sys.path set-up before the imports it enables

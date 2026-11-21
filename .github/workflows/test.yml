@@ -63,3 +63,24 @@ jobs:
           python -c "from blme.core import evaluate; print('Core OK')"
           python -c "from blme.cli import main; print('CLI OK')"
           python -c "from blme.cache import ModelOutputCache; print('Cache OK')"
+
+  lint:
+    # Non-blocking: reports ruff findings as annotations and never fails the
+    # run. Lint only, never `ruff format` or `--fix` (see [tool.ruff]).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install "ruff==0.14.4"
+
+      - name: Ruff (report only)
+        run: |
+          ruff check --no-fix --exit-zero --output-format=github .
+          ruff check --no-fix --exit-zero --statistics .
