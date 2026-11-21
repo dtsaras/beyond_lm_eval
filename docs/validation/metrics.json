@@ -258,7 +258,8 @@
     "scope": "The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ.",
     "selectors": [
       "tests/tasks/parity/test_coe_release_values.py",
-      "tests/tasks/test_coe_chain_end.py"
+      "tests/tasks/test_coe_chain_end.py",
+      "tests/tasks/invariance/test_dynamics_coe.py::test_model_suppress_tokens_still_apply"
     ],
     "study_readouts": {
       "coe_c": {
@@ -422,7 +423,8 @@
     "selectors": [
       "tests/tasks/parity/test_generation_diversity_values.py",
       "tests/tasks/test_reference_parity_formulas.py::test_self_bleu_matches_texygen_nltk_smoothing*",
-      "tests/tasks/test_round6_fixes.py::test_generation_diversity_preserves_low_probability_entropy"
+      "tests/tasks/test_round6_fixes.py::test_generation_diversity_preserves_low_probability_entropy",
+      "tests/tasks/test_generation_diversity_stop_ids.py::test_model_suppress_tokens_still_apply"
     ],
     "study_readouts": {
       "distinct_1": {
@@ -1804,7 +1806,8 @@
       "tests/tasks/parity/test_perplexity_parity.py",
       "tests/tasks/test_comprehensive_parity.py::test_geometry_perplexity_full_pipeline*",
       "tests/tasks/test_perplexity_byte_ownership.py",
-      "tests/tasks/test_bits_per_byte_bos.py"
+      "tests/tasks/test_bits_per_byte_bos.py",
+      "tests/tasks/test_perplexity_window_bos.py"
     ],
     "tier": "paper core"
   },

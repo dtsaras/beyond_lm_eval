@@ -186,3 +186,36 @@ def test_generate_gets_no_generation_kwargs_next_to_the_config():
         assert kwargs["generation_config"].max_new_tokens == ctx - P
     assert out["_meta_max_new_tokens"] == ctx + 100
     assert len({id(k["generation_config"]) for k in calls}) == 3
+
+
+def test_model_suppress_tokens_still_apply():
+    """Validity fields stay (0.2.5): greedy decoding never emits a token the model's
+    generation_config suppresses (Gemma-4-12B's <image|>/<audio|>), while its
+    decoding preferences are still ignored."""
+    model, tok = tiny_gpt2(), tokenizer()
+    seen, generate = [], model.generate
+
+    def spy(**kwargs):
+        out = generate(**kwargs)
+        seen.extend(out[0, kwargs["input_ids"].shape[1]:].tolist())
+        return out
+
+    model.generate = spy
+    plain = _run(model, tok)
+    banned = sorted(set(seen))[:3]
+    model2 = tiny_gpt2()
+    model2.generation_config.suppress_tokens = banned
+    model2.generation_config.repetition_penalty = 1.3
+    seen2, generate2 = [], model2.generate
+
+    def spy2(**kwargs):
+        out = generate2(**kwargs)
+        seen2.extend(out[0, kwargs["input_ids"].shape[1]:].tolist())
+        return out
+
+    model2.generate = spy2
+    shipped = _run(model2, tok)
+    assert seen2 and not set(banned) & set(seen2)
+    assert shipped["_meta_generation_validity_config"] == {"suppress_tokens": banned}
+    assert plain["_meta_generation_validity_config"] == {}
+    assert model2.generation_config.suppress_tokens == banned
