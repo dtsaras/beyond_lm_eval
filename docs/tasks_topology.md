@@ -14,7 +14,7 @@ offset (`src/blme/tasks/_windows.py`), the same words for every model, with
 (`points_readout: passage`). `topology_zigzag_persistence` follows the
 Gardinazzi et al. protocol instead (last token of each prompt, tokenised
 without special tokens). All tasks require `ripser`; zigzag also requires
-`dionysus`.
+`dionysus`. Both come with `pip install "blme[topology]"` (or `blme[paper]`).
 
 **Citations**: Persistence landscapes cite Bubenik's original JMLR/arXiv paper
 (`arXiv:1207.6437`); `arXiv:1501.00179` is the later Bubenik-Dlotko toolbox

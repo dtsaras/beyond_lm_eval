@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Engineering hygiene only: no source file under `src/` changes, so every number the library computes and every validation receipt is unchanged.
+
+- **`dionysus` is an optional extra.** It moves from the core dependencies to `blme[topology]` (with `ripser`), still pinned at 2.1.1. A new `blme[paper]` extra installs everything the paper-core tasks need beyond the core (`ripser`, `dionysus`, `nltk`); `test` and `all` include it, so CI still runs the zigzag tests. Without it, `topology_zigzag_persistence` returns an error naming dionysus and publishes no readout, as before; `tests/tasks/test_zigzag_optional_dependency.py` drives `blme.core.evaluate` with the import blocked, in every environment.
+- **CI split.** The per-commit workflow deselects `-m release`. A new release-check workflow (manual, and on every `v*` tag) runs `scripts/metric_status.py --check` and `pytest -m release`: the receipt freshness check, and a new version-hygiene test that fails when `src/` differs from the newest `v*` tag while `_version.py` still reports that tag's version (six commits between v0.2.5 and v0.2.6 would have failed it).
+- **Test markers.** `release`, `slow`, `gpu`, `golden`, `population_guard`, `parity`, `invariance` and `precision`, assigned by path in `tests/_plugins/blme_test_groups.py` so no receipt-pinned test file changes; `tests/test_test_groups.py` fails when a rule stops matching.
+- **Publishing** runs in the `pypi` GitHub environment, so an upload waits for its required reviewers. Tag pushes never publish.
+- **Ruff,** lint only: a `[tool.ruff]` configuration and a non-blocking CI job that reports findings. No file was reformatted or auto-fixed.
+
 ## 0.2.6 — 2026-11-21
 
 Two exploratory metrics from the study's research memo, and a loader fallback for multimodal checkpoints. Every existing task's numbers are unchanged.

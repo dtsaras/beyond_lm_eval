@@ -30,11 +30,8 @@ dependencies = [
     # Required, not optional: five paper-core tasks (both RepE probes,
     # mahalanobis, intrinsic_dim, categories) need it.
     "scikit-learn",
-    # Pinned. dionysus 2.1.1 bundles fast_zigzag (Dey-Hou) under BSD-3-Clause,
-    # which topology_zigzag_persistence needs for the paper's multi-layer
-    # barcode. On glibc 2.34-2.38 an unpinned install falls through to an
-    # sdist that fails to build against Boost 1.74.
-    "dionysus==2.1.1",
+    # dionysus is in the `topology` extra: only topology_zigzag_persistence
+    # uses it, and without it that task returns an error, never a substitute.
 ]
 
 [project.optional-dependencies]
@@ -52,6 +49,7 @@ test = [
     "nltk",          # diversity (Self-BLEU) tasks
     "vendi-score",   # geometry_vendi parity tests
     "nlpaug==1.1.11",  # geometry_dime augmentations
+    "dionysus==2.1.1",  # topology_zigzag_persistence (pinned as in `topology`)
 ]
 benchmarks = [
     "lm-eval",
@@ -61,9 +59,23 @@ probing = [
 ]
 topology = [
     "ripser",
+    # Pinned. dionysus 2.1.1 bundles fast_zigzag (Dey-Hou) under BSD-3-Clause,
+    # which topology_zigzag_persistence needs for the paper's multi-layer
+    # barcode. On glibc 2.34-2.38 an unpinned install falls through to an
+    # sdist that fails to build against Boost 1.74 (needs cmake + Boost).
+    "dionysus==2.1.1",
 ]
 diversity = [
     # exact Texygen-parity Self-BLEU (NLTK sentence_bleu + method1 smoothing)
+    "nltk",
+]
+paper = [
+    # Everything the paper-core tasks (tests/fixtures/paper_core_tasks.json)
+    # need beyond the core dependencies: `topology` + `diversity`.
+    # dynamics_generation_diversity also needs NLTK's punkt_tab data
+    # (python -m nltk.downloader punkt_tab) for Texygen's word_tokenize.
+    "ripser",
+    "dionysus==2.1.1",
     "nltk",
 ]
 sae = [
@@ -91,6 +103,7 @@ all = [
     "nltk",
     "vendi-score",
     "nlpaug==1.1.11",
+    "dionysus==2.1.1",
 ]
 
 [project.urls]
@@ -108,3 +121,41 @@ blme = [
 [project.scripts]
 blme = "blme.cli:main"
 beyond-eval = "blme.cli:main"
+
+[tool.pytest.ini_options]
+# Test-group markers are assigned by path in tests/_plugins/blme_test_groups.py,
+# because the validation receipts pin the test files themselves.
+pythonpath = ["tests/_plugins"]
+addopts = ["-p", "blme_test_groups"]
+markers = [
+    "release: release check; fails between a pinned-input change and its new receipt (CI: release workflow)",
+    "slow: long-running; deselect with -m 'not slow'",
+    "gpu: needs a CUDA device; skips without one",
+    "golden: golden-snapshot tooling (tests/golden/)",
+    "population_guard: one assertion swept over every task or call site",
+    "parity: parity with a released implementation or published values",
+    "invariance: invariance harness (transforms that must not move a readout)",
+    "precision: precision lifting and dtype restore",
+]
+
+[tool.ruff]
+# LINT ONLY. Do not run `ruff format` or `ruff check --fix`: the tasks are
+# bit-pinned against reference implementations, and every edit to a pinned
+# file invalidates its validation receipt (docs/validation/README.md).
+target-version = "py310"
+line-length = 120
+fix = false
+extend-exclude = ["results"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "E741",  # I, l, O: the papers' notation in numerical code
+    "B905",  # zip() without strict=: no defect signal here, and a code edit to satisfy
+]
+# `# noqa: WPS433` (wemake-python-styleguide) in tests/tasks/parity.
+external = ["WPS"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # re-exports
+"tests/**" = ["E402"]     # sys.path set-up before the imports it enables

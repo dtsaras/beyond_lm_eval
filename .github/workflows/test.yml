@@ -27,6 +27,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        # cmake + Boost build dionysus (the `topology` extra, included in
+        # `test`) where no wheel matches, so the zigzag tests run in CI.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake libboost-dev
@@ -50,11 +52,35 @@ jobs:
         env:
           HF_HUB_OFFLINE: "1"
           HF_DATASETS_OFFLINE: "1"
+        # `release` tests run in release-check.yml instead: the validation-
+        # receipt freshness check fails on every commit that changes a pinned
+        # input until a new receipt is recorded.
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short -m "not release"
 
       - name: Check imports
         run: |
           python -c "from blme.core import evaluate; print('Core OK')"
           python -c "from blme.cli import main; print('CLI OK')"
           python -c "from blme.cache import ModelOutputCache; print('Cache OK')"
+
+  lint:
+    # Non-blocking: reports ruff findings as annotations and never fails the
+    # run. Lint only, never `ruff format` or `--fix` (see [tool.ruff]).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install "ruff==0.14.4"
+
+      - name: Ruff (report only)
+        run: |
+          ruff check --no-fix --exit-zero --output-format=github .
+          ruff check --no-fix --exit-zero --statistics .

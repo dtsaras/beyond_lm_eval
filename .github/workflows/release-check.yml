@@ -1,0 +1,55 @@
+name: Release check
+
+# Checks that only make sense when cutting a release, kept out of the
+# per-commit run (test.yml) because they fail on every commit that changes a
+# pinned input until a new validation receipt is recorded:
+#   - scripts/metric_status.py --check: the receipts cover the current tree and
+#     docs/VALIDATION.md and docs/validation/READOUTS.md are up to date;
+#   - pytest -m release: the same freshness check as a test, plus the
+#     version-hygiene test (src/ changed since the newest v* tag => bump).
+# Run it by hand before tagging; it runs again on the tag push. It never
+# publishes: publish.yml runs only on a published GitHub release.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the version-hygiene test compares src/ with
+          # the newest v* tag reachable from HEAD (it skips in a shallow clone).
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake libboost-dev
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[test]"
+
+      - name: Validation tracker matches the tree
+        run: python scripts/metric_status.py --check
+
+      - name: Release-marked tests
+        run: python -m pytest tests/ -v --tb=short -m release -rs
