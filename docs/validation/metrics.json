@@ -2097,7 +2097,7 @@
   },
   "geometry_readout_dual_spectrum": {
     "evidence": "equation",
-    "next_check": "Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4). Record the conditioning of the two covariances (eigenvalue range, zeroed eigenvalues) in _meta_, as the blind review of 2026-11-21 suggests.",
+    "next_check": "Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4). The conditioning of the two covariances is recorded in _meta_cov_* since 0.2.7 (blind review of 2026-11-21, F3).",
     "receipt": "2026-11-21-v026",
     "scope": "BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. The invariance is exact in exact arithmetic; a blind review (2026-11-21) found dense re-basings held to about 1e-12 up to cond(A) of about 1e3 and drifting beyond about 1e4 (4% at 2e7), diagonal gains removed exactly at any scale, and the models' own bases far from that limit. Under a final softcap only D_J is exact and the kappa keys are first-order (gemma-2-2b coherence 0.274 against 0.661 at the logit level), so soft-capped models are excluded from comparisons of the kappa keys. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1; untrained or random vocabulary rows collapse the kappa keys.",
     "selectors": [

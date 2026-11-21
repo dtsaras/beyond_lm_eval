@@ -16,7 +16,16 @@ The pair (h, mu) transforms under the readout gauge ``(h, W, b) -> (A h + c,
 W A^-1, b - W A^-1 c)``, which leaves every prediction unchanged, as
 ``Cov(h) -> A Cov(h) A^T`` and ``Cov(mu) -> A^-T Cov(mu) A^-1``, so the dual
 spectrum ``kappa_i = sqrt(eig_i(Cov(h) Cov(mu)))`` is a property of the
-predictive function. ``sum kappa >= tr Cov(h, mu)`` (the Bures coupling bound),
+predictive function. That invariance is exact in exact arithmetic only.
+Computed from the two covariances, the kappa keys hold to about 1e-12 under
+well-conditioned dense re-basings (cond(A) up to about 1e3-1e4) and drift
+beyond (4% in sum kappa at cond(A) = 2e7; blind review, 2026-11-21); diagonal
+gains are removed exactly at any scale by the balancing in ``dual_spectrum``.
+``_meta_cov_h_*`` and ``_meta_cov_mu_*`` report the eigenvalue range,
+condition number and zeroed-eigenvalue count of the two balanced covariances
+the eigensolver reads, against ``_meta_cov_condition_limit`` = 1 / (d eps),
+the condition number at which the rank tolerance starts zeroing eigenvalues.
+``sum kappa >= tr Cov(h, mu)`` (the Bures coupling bound),
 with equality exactly when mu responds linearly to h; the dual coherence
 ``c = tr Cov(h, mu) / sum kappa`` is the share of the maximal coupling the
 softmax realises (1 at random initialisation). The shape of the spectrum is
@@ -212,18 +221,26 @@ class _Moments:
 
 # ── the dual spectrum ────────────────────────────────────────────────────
 
-def _psd_sqrt(S):
+def _psd_sqrt(S, info: Optional[Dict[str, Any]] = None):
     """Symmetric square root of a PSD matrix. Eigenvalues under the numerical
     rank tolerance (e_max * n * eps) are set to 0: an exactly singular
     covariance (a LayerNorm state lies on a hyperplane) otherwise keeps a
-    rounding-level eigenvalue whose square root is ~1e-8 of the scale."""
+    rounding-level eigenvalue whose square root is ~1e-8 of the scale.
+
+    ``info``, when given, receives the largest eigenvalue, the smallest one
+    kept and how many were set to 0 (read only; the root is unchanged)."""
     e, U = gpu_eigh(S)
     tol = float(e.max()) * S.shape[0] * float(torch.finfo(e.dtype).eps) if e.numel() else 0.0
+    if info is not None:
+        kept = e[e > tol]
+        info.update({"eig_max": float(e.max()) if e.numel() else float("nan"),
+                     "eig_min_kept": float(kept.min()) if kept.numel() else float("nan"),
+                     "n_zeroed": int(e.numel() - kept.numel())})
     e = torch.where(e > tol, e, torch.zeros_like(e))
     return (U * e.sqrt()) @ U.T
 
 
-def dual_spectrum(S_hh, S_mm) -> np.ndarray:
+def dual_spectrum(S_hh, S_mm, info: Optional[Dict[str, Any]] = None) -> np.ndarray:
     """``kappa = sqrt(eig(S_hh S_mm))``, descending, float64.
 
     The per-coordinate scales are balanced first (h_i -> g_i h_i, mu_i ->
@@ -231,6 +248,9 @@ def dual_spectrum(S_hh, S_mm) -> np.ndarray:
     move that equalises the two diagonals and keeps a few large final-norm
     gains from dominating the eigensolver; kappa are then the singular values
     of S_hh^(1/2) S_mm^(1/2), which avoids squaring them.
+
+    ``info``, when given, receives ``{"h": ..., "mu": ...}``: the eigenvalue
+    range and zeroed count of each balanced covariance (``_psd_sqrt``).
     """
     S_hh = torch.as_tensor(S_hh, dtype=torch.float64).cpu()
     S_mm = torch.as_tensor(S_mm, dtype=torch.float64).cpu()
@@ -241,7 +261,10 @@ def dual_spectrum(S_hh, S_mm) -> np.ndarray:
     G = torch.outer(g, g)
     A = S_hh * G
     B = S_mm / G
-    k = gpu_svdvals(_psd_sqrt(A) @ _psd_sqrt(B))
+    info_h = info_m = None
+    if info is not None:
+        info_h, info_m = info.setdefault("h", {}), info.setdefault("mu", {})
+    k = gpu_svdvals(_psd_sqrt(A, info_h) @ _psd_sqrt(B, info_m))
     return np.sort(k.cpu().numpy().astype(np.float64))[::-1]
 
 
@@ -275,13 +298,15 @@ def spectrum_summary(acc: "_Moments", d: int) -> Dict[str, Any]:
            "dual_coupling": nan, "dual_coherence": nan, "dual_effective_rank": nan,
            "dual_effective_rank_frac": nan, "dual_tail_exponent": nan,
            "euclidean_participation_ratio": nan, "kappa": [], "tail_ranks": None,
-           "n": int(acc.n)}
+           "n": int(acc.n), "conditioning": None}
     if acc.n < 2 or not (math.isfinite(dj_v) and math.isfinite(dj_d)):
         return out
     S_hh, S_mm = acc.covariances()
     if not (torch.isfinite(S_hh).all() and torch.isfinite(S_mm).all()):
         return out
-    kappa = dual_spectrum(S_hh, S_mm)
+    conditioning: Dict[str, Any] = {}
+    kappa = dual_spectrum(S_hh, S_mm, info=conditioning)
+    out["conditioning"] = conditioning
     sk = float(kappa.sum())
     er = effective_rank(kappa)
     alpha, ranks = tail_exponent(kappa)
@@ -297,6 +322,24 @@ def spectrum_summary(acc: "_Moments", d: int) -> Dict[str, Any]:
         "kappa": kappa,
         "tail_ranks": ranks,
     })
+    return out
+
+
+def conditioning_meta(conditioning: Optional[Dict[str, Any]], d: int) -> Dict[str, Any]:
+    """The ``_meta_cov_*`` keys: for each balanced covariance (``h``, ``mu``)
+    the eigenvalue range [smallest kept, largest], their ratio (the condition
+    number on the kept subspace) and the count of eigenvalues the rank
+    tolerance set to 0; and the limit 1 / (d eps) at which zeroing starts.
+    NaN (and None for the counts) when the spectrum was not computed."""
+    nan = float("nan")
+    out: Dict[str, Any] = {}
+    for side in ("h", "mu"):
+        c = (conditioning or {}).get(side) or {}
+        lo, hi = float(c.get("eig_min_kept", nan)), float(c.get("eig_max", nan))
+        out[f"_meta_cov_{side}_eig_range"] = [lo, hi]
+        out[f"_meta_cov_{side}_condition"] = (hi / lo) if lo > 0 and math.isfinite(hi) else nan
+        out[f"_meta_cov_{side}_eigs_zeroed"] = int(c["n_zeroed"]) if "n_zeroed" in c else None
+    out["_meta_cov_condition_limit"] = (1.0 / (d * float(np.finfo(np.float64).eps))) if d > 0 else nan
     return out
 
 
@@ -352,8 +395,10 @@ class ReadoutDualSpectrumTask(DiagnosticTask):
         "BLME construct: D_J = 1/2 E J(p_x, p_x') over distinct position pairs equals tr Cov(h, mu) "
         "exactly for an affine head, mu = s W^T p, and is computed in its logit form tr Cov(z, p), "
         "which is exact for any head, a final softcap included. The dual spectrum kappa = "
-        "sqrt(eig(Cov(h) Cov(mu))) is exactly invariant to every invertible affine re-basing of the "
-        "read state with the compensating head change; for a soft-capped head mu is the gradient of "
+        "sqrt(eig(Cov(h) Cov(mu))) is invariant to every invertible affine re-basing of the read "
+        "state with the compensating head change (exactly in exact arithmetic; numerically for "
+        "re-basings with cond up to about 1e3-1e4, with the covariance conditioning in "
+        "_meta_cov_*); for a soft-capped head mu is the gradient of "
         "the log-partition and the d-dimensional spectrum is a first-order approximation "
         "(_meta_d_space_exact false). The headline rows are word-final positions, which remove the "
         "mid-character byte positions that dominated the trace on Pythia, with position 0 and "
@@ -643,6 +688,7 @@ class ReadoutDualSpectrumTask(DiagnosticTask):
             "_meta_head_compute_dtype": str(cd).replace("torch.", ""),
             "_meta_moment_dtype": "float64",
         })
+        out.update(conditioning_meta(head_s.get("conditioning"), d))
         if offsets_reason:
             out["_meta_word_final_reason"] = offsets_reason
         for k in ("jeffreys_dispersion", "dual_coupling", "dual_coherence", "dual_effective_rank",
