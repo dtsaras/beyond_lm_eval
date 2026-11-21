@@ -58,15 +58,15 @@ def test_public_evaluate_reports_the_missing_dependency(monkeypatch, simulate):
     assert "dionysus" in result["error"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "0.2.6 message says 'pip install dionysus==2.1.1' (equivalent, still correct); naming the "
-    "extra needs an edit to src/blme/tasks/topology/zigzag.py, which is receipt-pinned"))
 def test_the_error_names_the_extra(monkeypatch):
+    """Since 0.2.7 the error names the extra that installs dionysus (0.2.6 said
+    'pip install dionysus==2.1.1', and this test was a strict xfail)."""
     from blme.tasks.topology.zigzag import ZigzagPersistenceTask
 
     _absent(monkeypatch)
     result = ZigzagPersistenceTask(CONFIG).evaluate(fd.tiny_llama(n_layers=3), fd.tokenizer(), fd.dataset())
-    assert "blme[topology]" in result["error"]
+    assert 'pip install "blme[topology]"' in result["error"]
+    assert "dionysus" in result["error"]
 
 
 def test_strict_mode_fails_on_the_missing_dependency(monkeypatch):

@@ -734,11 +734,13 @@ class ZigzagPersistenceTask(DiagnosticTask):
         logger.info("Running Zigzag Persistence (across-layer topology)...")
 
         if not HAS_RIPSER:
-            return {"error": "ripser not installed. Install with: pip install ripser"}
+            return {"error": ("ripser not installed. Install the topology extra: "
+                              "pip install \"blme[topology]\" (ripser and dionysus==2.1.1)")}
         dio_version = _dionysus_version()
         if dio_version is None:
             return {"error": ("topology_zigzag_persistence needs dionysus, which computes "
-                              "the paper's zigzag barcode (pip install dionysus==2.1.1); "
+                              "the paper's zigzag barcode. Install the topology extra: "
+                              "pip install \"blme[topology]\" (it pins dionysus==2.1.1); "
                               "there is no fallback construction.")}
 
         # Sec. 4.1: subsets of 500 prompts, mean over 16 subsets. num_samples is
