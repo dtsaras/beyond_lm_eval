@@ -233,10 +233,26 @@ def load_model_and_tokenizer(
     return model, tokenizer
 
 
+def _load_image_text_to_text(model_name: str, model_kwargs: Dict[str, Any]):
+    """The image-text-to-text model for a checkpoint registered there, else None."""
+    try:
+        from transformers import AutoConfig, AutoModelForImageTextToText
+        from transformers.models.auto.modeling_auto import MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES
+    except ImportError:
+        return None
+    config_kwargs = {k: model_kwargs[k] for k in ("revision", "trust_remote_code", "token") if k in model_kwargs}
+    config = AutoConfig.from_pretrained(model_name, **config_kwargs)
+    if getattr(config, "model_type", None) not in MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES:
+        return None
+    model = AutoModelForImageTextToText.from_pretrained(model_name, **model_kwargs)
+    logger.info("Loaded as AutoModelForImageTextToText (multimodal checkpoint; the text path is evaluated)")
+    return model
+
+
 def _load_model(model_name: str, model_kwargs: Dict[str, Any]):
     """
-    Try loading as CausalLM first (GPT2, LLaMA, etc.),
-    fall back to AutoModel (BERT, encoders).
+    Try loading as CausalLM first (GPT2, LLaMA, etc.); then, for a multimodal checkpoint the causal-LM
+    mapping does not cover, its image-text-to-text class; then AutoModel (BERT, encoders).
     """
     from transformers import AutoModelForCausalLM, AutoModel
 
@@ -246,6 +262,13 @@ def _load_model(model_name: str, model_kwargs: Dict[str, Any]):
         return model
     except (ValueError, OSError) as e:
         logger.info(f"CausalLM failed ({e}), trying AutoModel...")
+
+    # A multimodal checkpoint whose text model transformers does not register as a causal LM (Mistral 3 /
+    # Ministral 3 in transformers 5.10, unlike Gemma 3/4) loads through its image-text-to-text class, which
+    # carries the LM head; AutoModel would return the headless backbone (no logits, no generate).
+    model = _load_image_text_to_text(model_name, model_kwargs)
+    if model is not None:
+        return model
 
     model = AutoModel.from_pretrained(model_name, **model_kwargs)
     logger.info("Loaded as AutoModel (encoder-style)")
