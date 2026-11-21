@@ -19,6 +19,7 @@ import torch
 from transformers import AutoTokenizer
 
 from ..experts import ensure_runnable_experts
+from . import attention as _attn
 from . import dtype_contract as _dc
 
 logger = logging.getLogger("blme")
@@ -117,6 +118,9 @@ def load_model_and_tokenizer(
         max_memory           - per-device memory limit; separate devices with
                                ';' e.g. '0:20GiB;cpu:40GiB' (commas are consumed
                                by the model_args parser)
+        attn_score_dtype    - model | float32 (default: model). float32: eager
+                               attention, when it runs, computes q k^T in
+                               float32 (models/attention.py)
 
     Args:
         model_args_str: Comma-separated key=value string.
@@ -185,6 +189,13 @@ def load_model_and_tokenizer(
     if "attn_implementation" in args:
         model_kwargs["attn_implementation"] = args["attn_implementation"]
 
+    # float32 attention scores for eager attention (opt-in, models/attention.py)
+    score_dtype = _attn.parse_score_dtype(args.get(_attn.SCORE_DTYPE_ARG))
+    if args.get("attn_implementation") == _attn.FP32_SCORES:
+        score_dtype = "float32"
+    if score_dtype == "float32":
+        _attn.register()
+
     # device_map (takes priority over --device for placement)
     use_device_map = "device_map" in args
     if use_device_map:
@@ -222,6 +233,11 @@ def load_model_and_tokenizer(
 
     # MoE experts on a kernel this torch cannot run on CPU fall back to eager.
     ensure_runnable_experts(model)
+
+    if score_dtype == "float32" and getattr(getattr(model, "config", None), "_attn_implementation", None) == "eager":
+        model.set_attn_implementation(_attn.FP32_SCORES)
+        logger.info(f"Eager attention with float32 scores ({_attn.FP32_SCORES})")
+    record[_attn.SCORE_DTYPE_ARG] = score_dtype
 
     try:
         first_param = next(model.parameters())
@@ -313,7 +329,12 @@ def _load_with_dtype_contract(model_name: str, model_kwargs: Dict[str, Any], dty
         n = _dc.cast_violations(model, dtype)
         msg = (f"dtype contract: {n['parameters']} parameter(s) and {n['buffers']} buffer(s) in "
                f"{', '.join(found['dtypes'])} cast to {want}")
-        logger.warning(f"{cls}: {msg}; wider tensors kept.")
+        logger.warning(f"{cls}: {msg}; wider tensors and rotary buffers kept.")
+        if n["rotary_kept"]:
+            w = (f"{n['rotary_kept']} rotary buffer(s) arrived narrower than {want} and were left as "
+                 f"loaded (BLME never casts rotary buffers).")
+            logger.warning(f"{cls}: {w}")
+            record["warnings"].append(w)
         record["casts"].append(msg)
         record["cast_applied"] = True
         steps.append("cast")

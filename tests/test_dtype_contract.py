@@ -277,10 +277,46 @@ def test_integer_and_8bit_tensors_are_never_checked_or_cast():
     toy = _Toy([torch.bfloat16])
     if hasattr(torch, "float8_e4m3fn"):
         toy.f8 = torch.nn.Parameter(torch.zeros(4).to(torch.float8_e4m3fn), requires_grad=False)
-    assert dc.cast_violations(toy, torch.float32) == {"parameters": 1, "buffers": 0}
+    assert dc.cast_violations(toy, torch.float32) == {"parameters": 1, "buffers": 0, "rotary_kept": 0}
     assert toy.q.dtype == torch.int8 and toy.ids.dtype == torch.long
     if hasattr(torch, "float8_e4m3fn"):
         assert toy.f8.dtype == torch.float8_e4m3fn
+
+
+def test_rotary_buffers_are_never_cast():
+    """A blanket model.to(dtype) also casts RoPE inv_freq, which transformers keeps in
+    float32 and which moves predictions when rounded. The contract casts parameters
+    and other buffers only."""
+    toy = _Toy([torch.bfloat16], buffer_dtype=torch.bfloat16)        # inv_freq arrived narrowed
+    toy.register_buffer("scale", torch.ones(2, dtype=torch.bfloat16), persistent=False)
+    n = dc.cast_violations(toy, torch.float32)
+    assert n == {"parameters": 1, "buffers": 1, "rotary_kept": 1}
+    assert toy.inv_freq.dtype == torch.bfloat16 and toy.scale.dtype == torch.float32
+
+
+def test_contract_cast_keeps_inv_freq_through_the_loader(tmp_path, monkeypatch):
+    """A loader that returns the whole model cast to bfloat16 (inv_freq included) for a
+    float32 request: parameters come back to float32, inv_freq is left as loaded, and
+    the record says so. A loader that honours the request keeps inv_freq in float32."""
+    path = _tiny_llama_dir(tmp_path)
+    calls = []
+
+    def whole_model_cast(name, kw):
+        calls.append(dict(kw))
+        return transformers.AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32).to(torch.bfloat16)
+
+    monkeypatch.setattr(wrapper, "_load_model", whole_model_cast)
+    model, _ = wrapper.load_model_and_tokenizer(f"pretrained={path},dtype=float32", device="cpu")
+    assert len(calls) == 2 and _param_dtypes(model) == {"torch.float32"}
+    assert {str(b.dtype) for n, b in model.named_buffers() if "inv_freq" in n} == {"torch.bfloat16"}
+    rec = getattr(model, dc.PRECISION_ATTR)
+    assert rec["dtype_contract"] == "reloaded, then cast"
+    assert any("rotary buffer" in w for w in rec["warnings"])
+
+    monkeypatch.undo()
+    for dtype in ("bfloat16", "float16", "float32"):
+        model, _ = wrapper.load_model_and_tokenizer(f"pretrained={path},dtype={dtype}", device="cpu")
+        assert {str(b.dtype) for n, b in model.named_buffers() if "inv_freq" in n} == {"torch.float32"}
 
 
 def test_native_dtype_hints():

@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from .registry import get_task, list_tasks
 from .experts import FALLBACK_ATTR
+from .models.attention import eager_implementation
 from .models.dtype_contract import precision_provenance
 from .models.wrapper import load_model_and_tokenizer
 from .results import build_results_envelope, print_results_table, save_results
@@ -381,10 +382,13 @@ def evaluate(
                 effective_dtype = str(param_dtype).replace("torch.", "")
 
             try:
+                # "eager", or its float32-score variant when the model was
+                # loaded with attn_score_dtype=float32 (models/attention.py).
+                eager_name = eager_implementation(model)
                 if hasattr(model, "config"):
-                    model.config._attn_implementation = "eager"
+                    model.config._attn_implementation = eager_name
                 if hasattr(model, "set_attn_implementation"):
-                    model.set_attn_implementation("eager")
+                    model.set_attn_implementation(eager_name)
             except Exception as e:
                 logger.info(
                     f"Could not switch to eager attention: {e}. "

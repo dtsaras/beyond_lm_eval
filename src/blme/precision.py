@@ -177,6 +177,8 @@ def check(model_args: str, dtype: str = "bfloat16", threshold: float = DEFAULT_T
                 ids, bos = audit_rows(tokenizer, text)
                 rec["method"].update({"bos_prepended": bos, "tokens_per_row": int(ids.shape[1]),
                                       "predictions": int(ids.shape[0] * (ids.shape[1] - 1))})
+            # eager, or blme_eager_fp32_scores with attn_score_dtype=float32 in model_args
+            rec["method"]["attn_implementation"] = getattr(model.config, "_attn_implementation", None)
             nll, nonfinite, _ = mean_nll(model, ids)
             load = getattr(model, PRECISION_ATTR, {}) or {}
             rec[f"nll_{dt}"] = nll

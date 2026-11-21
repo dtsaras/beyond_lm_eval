@@ -165,29 +165,45 @@ def find_violations(model, requested: torch.dtype) -> Optional[Dict[str, Any]]:
     }
 
 
+def is_rotary_buffer(module, key: str) -> bool:
+    """A rotary-embedding buffer (``inv_freq``, ``original_inv_freq``, cos/sin
+    caches): transformers builds these in float32 whatever the model's dtype,
+    and casting them changes predictions (pythia-70m: top-1 changed at 32% of
+    positions with inv_freq in bfloat16)."""
+    return "inv_freq" in key or "rotary" in type(module).__name__.lower()
+
+
 def cast_violations(model, requested: torch.dtype) -> Dict[str, int]:
-    """Cast every parameter and buffer that is narrower than ``requested`` or in
-    the other 16-bit format to ``requested``, in place; wider tensors are kept.
+    """Cast every floating parameter, and every buffer transformers would have
+    built in the requested dtype, that is narrower than ``requested`` or in the
+    other 16-bit format, to ``requested``, in place. Wider tensors are kept, and
+    rotary buffers (``is_rotary_buffer``) are never cast: ``rotary_kept`` counts
+    any that are in a violating dtype, left as loaded.
 
     A parameter keeps its object (``.data`` is replaced), so tied weights stay
     tied; a buffer shared by several modules is replaced by one new tensor.
     """
-    n_param = n_buf = 0
+    n_param = n_buf = n_rotary = 0
     with torch.no_grad():
         for _, p in model.named_parameters():
             if _checked(p) and _violates(p.dtype, requested):
                 p.data = p.data.to(requested)
                 n_param += 1
         new: Dict[int, torch.Tensor] = {}
+        kept = set()
         for module in model.modules():
             for key, b in list(module._buffers.items()):
                 if b is None or not _checked(b) or not _violates(b.dtype, requested):
+                    continue
+                if is_rotary_buffer(module, key):
+                    kept.add(id(b))
                     continue
                 if id(b) not in new:
                     new[id(b)] = b.to(requested)
                     n_buf += 1
                 module._buffers[key] = new[id(b)]
-    return {"parameters": n_param, "buffers": n_buf}
+        n_rotary = len(kept)
+    return {"parameters": n_param, "buffers": n_buf, "rotary_kept": n_rotary}
 
 
 def pin_config_dtype(config, dtype: torch.dtype, _seen=None) -> None:
@@ -326,6 +342,8 @@ def precision_provenance(model, model_args: str, eager_cast: bool = False) -> Op
     if eager_cast:
         rec["casts"].append("eager attention: float16 parameters -> bfloat16 (buffers kept)")
         rec["cast_applied"] = True
+    rec.setdefault("attn_score_dtype", "model")
+    rec["attn_implementation"] = getattr(getattr(model, "config", None), "_attn_implementation", None)
     rec["effective_param_dtypes"] = floating_dtypes(model, "parameter")
     running = dtype_name(dominant_param_dtype(model))
     rec["effective_dtype"] = running
