@@ -164,6 +164,11 @@ _STATIC_ALLOW = {
     ("tasks/_precision.py", '"bfloat16"'): "docstring",
     ("tasks/geometry/isotropy.py", '"float32"'): "the model's precision for a disclosed threshold",
     ("tasks/geometry/utils.py", '"bfloat16"'): "offload serialisation tag",
+    # compute_dtype option names selecting fp32_compute (a promotion), never a cast
+    ("tasks/dynamics/context_influence.py", '"float32"'): "compute_dtype option name",
+    ("tasks/dynamics/context_influence.py", "'float32'"): "compute_dtype option name (error message)",
+    ("tasks/geometry/readout_dual_spectrum.py", '"float32"'): "compute_dtype option name",
+    ("tasks/geometry/readout_dual_spectrum.py", "'float32'"): "compute_dtype option name (error message)",
 }
 _STATIC = re.compile(r"""["'](?:float32|float16|bfloat16|f4|<f4|f2)["']"""
                      r"""|from (?:numpy|torch) import [^#\n]*\b(?:float32|float16|bfloat16|half|finfo)\b""")
