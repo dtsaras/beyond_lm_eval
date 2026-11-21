@@ -2,7 +2,7 @@
   "causality_ablation": {
     "evidence": "proxy",
     "next_check": "Repeat coordinate ablation across seeds and compare with targeted head and neuron interventions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Random coordinate mean-ablation in a middle band measures residual-stream robustness. It does not localize an individual neuron or head.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_causality_ablation*"
@@ -12,7 +12,7 @@
   "causality_attention_knockout": {
     "evidence": "fixture",
     "next_check": "Compare the direct head-ablation ranking with gradient importance on the same model and data.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Direct per-head changes in loss are compared with independent ablations and recorded GPT-2 values. Michel’s gradient-based importance is a different observable.",
     "selectors": [
       "tests/tasks/parity/test_attention_knockout_parity.py",
@@ -23,7 +23,7 @@
   "causality_circuit_quality": {
     "evidence": "proxy",
     "next_check": "Evaluate faithfulness against a known circuit with localized interventions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Layer-level mean ablations give a coarse score. Localized circuit identification and faithfulness to a known circuit remain open.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_causality_circuit_quality*"
@@ -33,7 +33,7 @@
   "causality_edge_attribution": {
     "evidence": "fixture",
     "next_check": "Compare layer scores with layer-level intervention effects across architectures.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -50,7 +50,7 @@
   "causality_knowledge_neurons": {
     "evidence": "proxy",
     "next_check": "Test whether interventions on high-saliency neurons change the target more than matched control interventions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -76,7 +76,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "llm_effective_depth@393e5c7: the release's own merge_io / get_future / effect_layer_score, test_effect's loop transcribed onto HF hooks (the nnsight script cannot run on transformers 5); matrices 1e-6, via evaluate(). Released components and a reimplemented hook loop agree on tested models. Layer skipping defines a different estimand from observational block influence.",
     "selectors": [
       "tests/tasks/parity/test_layer_skip_parity.py"
@@ -86,7 +86,7 @@
   "causality_tracing": {
     "evidence": "fixture",
     "next_check": "Repeat the released subject-localization experiment across prompts and model families.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Recorded outputs from the ROME release with shared perturbations pin the tested restoration effects. Subject localization, prompts and model family limit transfer.",
     "selectors": [
       "tests/tasks/parity/test_tracing_rome_parity.py"
@@ -96,7 +96,7 @@
   "consistency_bias_weat": {
     "evidence": "fixture",
     "next_check": "Repeat the permutation test on alternative word sets and contexts.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Two official sent-bias values are replayed. The stochastic permutation p-value and sensitivity to word sets and contexts require separate evidence.",
     "selectors": [
       "tests/tasks/parity/test_bias_weat_parity.py"
@@ -106,7 +106,7 @@
   "consistency_calibration": {
     "evidence": "independent",
     "next_check": "Check reliability diagrams and Brier conventions against observed outcomes on a held-out domain.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Equal-width ECE agrees with torchmetrics and analytic bins. The next-token event and top-label Brier convention define this adaptation. Treat it as a performance control.",
     "selectors": [
       "tests/tasks/test_reference_parity_formulas.py::test_calibration_ece*"
@@ -116,7 +116,7 @@
   "consistency_contamination": {
     "evidence": "equation",
     "next_check": "Evaluate discrimination on labelled contaminated and clean examples from matched sources.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Min-k probability aggregation follows the formula. Unlabelled scores cannot identify contaminated text. In-sample threshold calibration is marked separately.",
     "selectors": [
       "tests/tasks/test_reference_parity_formulas.py::test_min_k*",
@@ -127,7 +127,7 @@
   "consistency_contrastive": {
     "evidence": "proxy",
     "next_check": "Vary the distractors while holding the factual target and prompt fixed.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "A prompted factual target competes with a supplied alternative. This is a pairwise likelihood preference, conditional on the negative example.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_contrastive*"
@@ -137,7 +137,7 @@
   "consistency_format_robustness": {
     "evidence": "proxy",
     "next_check": "Measure transfer to previously unseen prompt formats.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The score measures sensitivity to the chosen prompt templates. General robustness would require independent held-out transformations.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_format_robustness*"
@@ -163,7 +163,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "formula only (no code): brute-force cross-entropy exact. The specified two-position NLL contrast is formula-based. Token positions differ in bytes across tokenizers. Use the byte-anchored twin as a sensitivity check.",
     "selectors": [
       "tests/tasks/test_icl_score.py"
@@ -173,7 +173,7 @@
   "consistency_icl_slope": {
     "evidence": "proxy",
     "next_check": "Vary demonstration order and contents at fixed token budget.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Likelihood slope over demonstration counts depends on the demonstration contents, order and token budget.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_icl_slope*"
@@ -183,7 +183,7 @@
   "consistency_knowledge_capacity": {
     "evidence": "proxy",
     "next_check": "Compare the readout against controlled facts with known exposure and recall.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Computes a likelihood ratio for exact phrasing and rephrasing. No storage-capacity interpretation follows from this comparison.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_knowledge_capacity*",
@@ -194,7 +194,7 @@
   "consistency_logical": {
     "evidence": "proxy",
     "next_check": "Measure entailment accuracy on truth-labelled examples controlling for conclusion likelihood.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Compares conditional and unconditional conclusion likelihood. Logical entailment requires truth conditions beyond this likelihood inequality.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_logical*"
@@ -204,7 +204,7 @@
   "consistency_membership_inference": {
     "evidence": "proxy",
     "next_check": "Use matched, known members and nonmembers with comparable domains and lengths.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Loss-based AUROC and gap are checked. Without genuinely comparable member/nonmember labels the default measures dataset separability.",
     "selectors": [
       "tests/tasks/parity/test_membership_inference_parity.py",
@@ -215,7 +215,7 @@
   "consistency_paraphrase": {
     "evidence": "proxy",
     "next_check": "Use meaning-changing negatives matched for lexical overlap and length.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Last-token distances on supplied pairs can reflect lexical overlap and length as well as shared meaning.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_paraphrase*"
@@ -225,7 +225,7 @@
   "consistency_position_sensitivity": {
     "evidence": "proxy",
     "next_check": "Compare the likelihood change with retrieval accuracy on matched positional manipulations.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Continuation NLL across positions measures the defined prompt manipulation. Retrieval accuracy and generic long-context competence need independent outcomes.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_consistency_position_sensitivity*"
@@ -236,7 +236,7 @@
     "application": "On all four tested versions, pretrained GPT-2 reports 34/128 first-token agreement and 2.902768 nats with either the plain tokenizer or an EOS-appending postprocessor. Regression tests inspect the exact generation input and attention mask, preserve literal EOS and leading BOS, and exclude template-only prompts.",
     "evidence": "proxy",
     "next_check": "Measure agreement across prompt samples and compare first-token stability with final-answer voting on complete reasoning paths.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -254,7 +254,7 @@
   "dynamics_coe": {
     "evidence": "release",
     "next_check": "Match both collectors on multi-token prompts and quantify the first-state contribution.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The released score.py is the comparator for supplied chains. BLME builds each chain from states emitting the generated tokens. The released collector indexes the first prompt position on its first step. Extraction protocols differ.",
     "selectors": [
       "tests/tasks/parity/test_coe_release_values.py",
@@ -324,7 +324,7 @@
   "dynamics_context_influence": {
     "evidence": "equation",
     "next_check": "Seed and item reliability on the zoo, and whether the far mass adds to bits per byte within training runs and on held-out models (memo V1-V2).",
-    "receipt": "",
+    "receipt": "2026-11-21-v026",
     "scope": "BLME construct. The Jensen-Shannon kernel is exactly 0 for identical rows and log 2 for disjoint ones. A sliding-window model gives exactly zero influence beyond its receptive field and positive influence within it. On a model whose response depends on position only, the end-of-window estimator gives a decay exponent near 0 where scoring every later position gives 1.1. Bins weight every lag equally, which removes the lean of log-uniform base lags towards a bin's lower lags. Predictions before the replaced position never move on CPU; a nonzero value is recorded and flagged, never raised. Runs are bit-identical, the seed moves every draw, sinks are never replaced and the global RNGs are untouched.",
     "selectors": [
       "tests/tasks/test_context_influence.py",
@@ -335,7 +335,7 @@
   "dynamics_entropy_calibration": {
     "evidence": "release",
     "next_check": "Compare both next-token indexing conventions against hand-aligned outcomes.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "entropy-calibration@d3f62e4 compute_logprobs: entropies 1e-4; log losses equal after fixing the release's one-position slice. BLME deliberately corrects a one-position offset in the released loss slice. Preserve the release value and aligned value when comparing protocols.",
     "selectors": [
       "tests/tasks/parity/test_entropy_calibration_parity.py"
@@ -345,7 +345,7 @@
   "dynamics_fractal": {
     "evidence": "release",
     "next_check": "Repeat across corpora, aggregation units and fitting scales.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The original notebook estimators are checked at matched scales and offsets. BLME pools long articles and corrects the Joseph accumulator across scales. Corpus and sequence-length sensitivity remain.",
     "selectors": [
       "tests/tasks/parity/test_fractal_pooled_parity.py"
@@ -423,7 +423,7 @@
     "application": "The November 19 fix reduces masked, processed scores in float64 at the retained token positions. Scripted quarter means meet 1e-12 nats, and the largest difference from SciPy on the three sampled GPT-2 summaries was 2.22e-16 nats on four Transformers versions. The six entropy cases passed at one, four and eight CPU threads per version.",
     "evidence": "independent",
     "next_check": "Quantify sampling variability across prompts and random seeds for the intended generation budget.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -527,7 +527,7 @@
   "dynamics_gradient_flow": {
     "evidence": "equation",
     "next_check": "Vary endpoint depth and verify gradient ratios across independent passage draws.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Autograd on known endpoints checks the gradient norm log ratio. Depth replaces time in the cited recurrent-network motivation.",
     "selectors": [
       "tests/tasks/parity/test_gradient_flow_log_ratio_values.py",
@@ -547,7 +547,7 @@
   "dynamics_interpolation": {
     "evidence": "equation",
     "next_check": "Vary layer pairs and sequence samples and quantify resulting changes in convexity gap.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Known midpoint entropies check the convexity gap. The reference for SLERP covers an interpolation primitive. The sampled layer readout and performance interpretation are study choices.",
     "selectors": [
       "tests/tasks/parity/test_interpolation_values.py",
@@ -568,7 +568,7 @@
     "application": "On pretrained Gemma-4-E2B, all 64 samples produced a relative log-growth of −2.437157 on both Transformers 5.10.2 and 5.23.0.",
     "evidence": "proxy",
     "next_check": "Repeat seeded perturbations over step sizes and known contracting and expanding dynamics.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -595,7 +595,7 @@
     "application": "All 13 historical GPU-memory failures were remeasured with the current estimator on the original 20-passage prefix. Five models fit one 140 GiB GPU, and eight used two GPUs. Each recovered cell has separate provenance.",
     "evidence": "release",
     "next_check": "Check stability across data batches, probes, parameter scopes and perturbation norms.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "PyHessian is compared on the same start and probes. SAM and ASAM have quadratic anchors. With identical Gemma-4 weights and 64 passages, the trace estimate on four RTX 3090s was 5.34% above the L20X estimate. The stopping rule used 27 and 23 probes, with estimated relative standard errors of 6.49% and 7.18%. All nine headlines repeated on the four-card layout within 2.31e-9 relative difference.",
     "selectors": [
       "tests/tasks/parity/test_sharpness_parity.py",
@@ -661,7 +661,7 @@
   "dynamics_stability": {
     "evidence": "proxy",
     "next_check": "Compare local perturbation overlap with overlap across independently trained embeddings.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Jaccard overlap on perturbed embeddings tests local sensitivity within one model. Retraining embeddings on different corpora would measure a different stability construct.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_dynamics_stability*"
@@ -696,7 +696,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "reptrix@dbf53c5: spectrum, fit, RankMe ≤1e-9, via evaluate(). Fixed spectral fit window and last-token cloud define this use of alpha-ReQ.",
     "selectors": [
       "tests/tasks/parity/test_alpha_req_parity.py"
@@ -706,7 +706,7 @@
   "geometry_categories": {
     "evidence": "proxy",
     "next_check": "Repeat with held-out categories and multi-token forms across tokenizers.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Within-category distances and retrieval statistics use curated single-token lists. Tokenization and the choice of categories govern what generalizes.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_geometry_categories*"
@@ -717,7 +717,7 @@
     "application": "A displacement ratio derived from CKA missed its held-out-lab improvement rule on archived measurements.",
     "evidence": "release",
     "next_check": "Check out-of-lab incremental value with finite-sample controls and independent text draws.",
-    "receipt": "2026-11-21-cka-gpu-v025",
+    "receipt": "2026-11-21-cka-gpu-v026",
     "scope": "Biased and debiased CKA are checked against the original Demo.ipynb on the same observations. Token sample, centering, layer convention and finite-sample baseline govern comparisons. The receipt runs with one GPU visible, so evaluate() takes the GPU path the study runs; the CPU path is checked by forcing BLME_CPU_LINALG.",
     "selectors": [
       "tests/tasks/parity/test_cka_hsic_demo_parity.py::test_cka_evaluate*",
@@ -788,7 +788,7 @@
   "geometry_cknna": {
     "evidence": "fixture",
     "next_check": "Vary neighbourhood size and compare the across-depth use with the released cross-model use.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Mutual neighbourhood kernel is transcribed from platonic-rep with official fixture values. Within-model across-depth usage and the selected neighbourhood size are additional protocol decisions.",
     "selectors": [
       "tests/tasks/parity/test_cknna_parity.py"
@@ -881,7 +881,7 @@
   "geometry_collapse": {
     "evidence": "equation",
     "next_check": "Test whether induced rank loss changes a separately measured behavioural outcome.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Roy–Vetterli effective rank uses normalized singular values. Loss of numerical rank does not identify its semantic cause.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_geometry_collapse*",
@@ -923,7 +923,7 @@
   "geometry_contextualization": {
     "evidence": "independent",
     "next_check": "Run the original contextual extraction pipeline on exactly the same sentences and token pools.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Shared pools pin the MEV and anisotropy conventions using sklearn PCA and TruncatedSVD. A full run of the original contextual extraction pipeline on identical sentences is outstanding.",
     "selectors": [
       "tests/tasks/parity/test_contextualization_mev_baselines.py",
@@ -1002,7 +1002,7 @@
     "application": "The previously failed Pythia-70M archive case produced a finite estimate of 10.77358 on the historical corpus with the current estimator.",
     "evidence": "equation",
     "next_check": "Vary the fit interval, sample count and density on known-dimensional clouds.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Known-dimensional clouds and an independently computed correlation integral anchor the log-log slope. The fixed fitting window, sample size and density can change the estimated dimension.",
     "selectors": [
       "tests/tasks/parity/test_correlation_dimension_parity.py",
@@ -1032,7 +1032,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "HypLoRA@c888e16 delta_hyp / get_delta exact. The released base-point and normalization convention are tested. The task also extends the readout from input embeddings to hidden layers.",
     "selectors": [
       "tests/tasks/parity/test_delta_hyperbolicity_parity.py"
@@ -1042,7 +1042,7 @@
   "geometry_dime": {
     "evidence": "release",
     "next_check": "Report both permutation rules across the sample-count/feature-width boundary.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "information_flow@dde387a + representation-itl@e5d8a12: entropies, doe, compute_dime ≤2e-15, augmentations identical. BLME’s headline permutes observations on N-by-N Grams. When N exceeds width, the release permutes feature coordinates on a D-by-D covariance. The release twin follows that branch. The augmentations may change meaning.",
     "selectors": [
       "tests/tasks/parity/test_dime_parity.py"
@@ -1062,7 +1062,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -1081,7 +1081,7 @@
   "geometry_effective_depth": {
     "evidence": "release",
     "next_check": "Compare document weighting and threshold choices on variable-length passages.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "ShortGPT block influence and Csordás release expressions agree on matched, equal-length inputs. Unequal-document weighting and the BLME effective-depth threshold require distinct interpretation.",
     "selectors": [
       "tests/tasks/parity/test_effective_depth_release_parity.py"
@@ -1132,7 +1132,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "FARMS@e0a2ded: window eigenvalues, alpha ≤6.3e-7 and the same xmin index; whole tiny models 1e-5; real Qwen3-8B q_proj (450k eigenvalues) same xmin. Threshold and window selection are part of the estimator. Some release matrix types and degenerate spectra have special behaviour.",
     "selectors": [
       "tests/tasks/parity/test_farms_parity.py"
@@ -1151,7 +1151,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "no code released: Table 1 formulas, analytic spectra, the hooked down-projection input recomputed through evaluate(). The audited source documents no released code. Analytic spectra and hooked FFN projections support the formulas. Spectrum estimation depends on token count versus width.",
     "selectors": [
       "tests/tasks/test_ffn_spectral_utilization.py"
@@ -1161,7 +1161,7 @@
   "geometry_gride": {
     "evidence": "release",
     "next_check": "Compare fixed and model-specific neighbourhood scales on independent document samples.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "DADApy@d729b88 (side-installed) 1e-6, via evaluate(). The study fixes its neighbour scale. The paper chose scale per model. Cross-scale stability remains relevant.",
     "selectors": [
       "tests/tasks/parity/test_gride_parity.py::test_gride_*",
@@ -1202,7 +1202,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Biased and debiased normalized linear HSIC are compared on shared inputs with the authors’ notebook. The normalized linear construction overlaps CKA. Counting both as independent signals would inflate evidence.",
     "selectors": [
       "tests/tasks/parity/test_cka_hsic_demo_parity.py::test_hsic_evaluate*"
@@ -1212,7 +1212,7 @@
   "geometry_hubness": {
     "evidence": "independent",
     "next_check": "Vary k and duplicate frequency with self-neighbours explicitly controlled.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Self-free k-NN graph agrees with scikit-hubness. The library’s default self-query includes its own neighbour, which changes the population. Width, k and duplicate handling matter.",
     "selectors": [
       "tests/tasks/parity/test_hubness_parity.py",
@@ -1343,7 +1343,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "DADApy exact, via evaluate(). Directional rank comparison is sensitive to the point population, ties and chosen k.",
     "selectors": [
       "tests/tasks/parity/test_gride_parity.py::test_information_imbalance*",
@@ -1354,7 +1354,7 @@
   "geometry_intrinsic_dim": {
     "evidence": "published",
     "next_check": "Report sampling uncertainty when comparing close checkpoints. Generalization of the 1,000-article stability result beyond these three checkpoints is untested.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The static estimator recovers the released 2,500-point Swiss roll within the published-data tolerance. Across five article-disjoint 200-passage validation panels on GPT-2, Pythia-160M and SmolLM2-1.7B, first-layer variation was 32–36% of each model’s mean. On five independent training-split panels with one passage per article, increasing the budget from 200 to 1,000 articles reduced first-layer variation from 17–29% to 3.2–7.3%. Some model rankings still changed between draws.",
     "selectors": [
       "tests/tasks/parity/test_twonn_facco_benchmarks.py",
@@ -1390,7 +1390,7 @@
   "geometry_isoscore": {
     "evidence": "release",
     "next_check": "Repeat published subspace and LM profiles across widths and document populations.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The released IsoScore implementation agrees on the readout and on published Table 2 synthetic subspaces. The result concerns dispersion across axes; token population and scaling are consequential.",
     "selectors": [
       "tests/tasks/parity/test_isoscore_release_parity.py"
@@ -1416,7 +1416,7 @@
   "geometry_lid": {
     "evidence": "release",
     "next_check": "Report finite-k sensitivity and the effect of tied or duplicate distances.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Authors’ mle_batch runs on shared neighbour distances including duplicates. Uses the Ma minus-k convention. Levina–Bickel uses a different finite-k factor.",
     "selectors": [
       "tests/tasks/parity/test_lid_mle_batch_parity.py",
@@ -1472,7 +1472,7 @@
   "geometry_lipschitz": {
     "evidence": "proxy",
     "next_check": "For an operator-bound claim, compare against an actual bound on a model with known gain.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Computes observed relative residual change and path summaries. An operator Lipschitz bound needs a supremum over input pairs. Spectral-norm helper tests do not establish that claim for this task.",
     "selectors": [
       "tests/tasks/parity/test_lipschitz_depth_additive_values.py",
@@ -1522,7 +1522,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "heavytail@80f7f80 bfe_w / compute_free_energy 1e-12 on the release's float32 spectrum. The weight-spectrum quantity is defined for the selected output rows and eigenvalue convention. Establish rank-deficient and model-family policies before pooling.",
     "selectors": [
       "tests/tasks/parity/test_lm_head_free_energy_parity.py"
@@ -1532,7 +1532,7 @@
   "geometry_magnitude": {
     "evidence": "release",
     "next_check": "Check convergence across point counts and distance scales on independent passages.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Live magnipy agrees on the shared point cloud and scale protocol including duplicates. Distance metric, scale and number of sampled passages condition magnitude.",
     "selectors": [
       "tests/tasks/parity/test_magnitude_parity.py",
@@ -1559,7 +1559,7 @@
   "geometry_mahalanobis": {
     "evidence": "independent",
     "next_check": "Compare the pooled clean/shuffled readout with a class-conditional detector on labelled OOD data.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "A separate sklearn Ledoit–Wolf refit reproduces BLME’s pooled clean/shuffled distances. Whole articles go to the fit or the held-out half (a passage-level split leaked sibling passages into the fit and inflated AUROC by up to 0.18 on 8 models), and a failing MRRR eigensolver falls back to divide-and-conquer instead of dropping the split. Lee’s class-conditional Gaussian detector has different classes, covariance and evaluation inputs.",
     "selectors": [
       "tests/tasks/parity/test_mahalanobis_values.py",
@@ -1607,7 +1607,7 @@
   "geometry_matrix_entropy": {
     "evidence": "fixture",
     "next_check": "Repeat the paper's full-table setting with identical text windows and preprocessing.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The normalized Gram-spectrum entropy is checked against a NumPy transcription of the Diff-eRank kernel and analytic spectra. A common-input full published table replication is outstanding.",
     "selectors": [
       "tests/tasks/parity/test_matrix_entropy_parity.py"
@@ -1635,7 +1635,7 @@
   "geometry_mp_bulk_deviation": {
     "evidence": "equation",
     "next_check": "Calibrate the finite-sample null with matched token dependence and aspect ratio.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Planted equicorrelation and Marchenko–Pastur edges anchor spectral counts. Finite samples and dependence in token rows affect using this null on language.",
     "selectors": [
       "tests/tasks/parity/test_mp_bulk_values.py"
@@ -1740,7 +1740,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "DADApy exact, via evaluate(). Matched DADApy neighbourhoods on common points. k, ties and the token population affect interpretation.",
     "selectors": [
       "tests/tasks/parity/test_gride_parity.py::test_neighbourhood_overlap*"
@@ -1750,7 +1750,7 @@
   "geometry_neural_collapse": {
     "evidence": "equation",
     "next_check": "Compare CDNV with other collapse criteria on matched features and class definitions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Next-token class and Galanti CDNV checks target the headline. NC1 trace comparison covers a separate quantity. Full classical neural collapse has several distinct conditions.",
     "selectors": [
       "tests/tasks/invariance/test_neural_collapse.py::test_next_token_classes_and_cdnv*",
@@ -1781,7 +1781,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -1811,7 +1811,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Teacher-forced loss, frequency buckets and scored UTF-8 bytes are independently checked. When an inserted BOS alone is unscored, exact suffix decoding can establish the whole-text denominator even for shared character offsets.",
     "selectors": [
       "tests/tasks/parity/test_perplexity_parity.py",
@@ -1825,7 +1825,7 @@
   "geometry_phd_dimension": {
     "evidence": "release",
     "next_check": "Estimate convergence over text length, point budget and repeated subsampling.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "GPTID’s PHD and Prim kernels run on the same subsamples and RNG stream. The dimension estimate remains dependent on text length and point count.",
     "selectors": [
       "tests/tasks/parity/test_phd_dimension_parity.py"
@@ -1854,7 +1854,7 @@
     "application": "On 2,024 causal rows with ties, the batched Spearman correlations agreed with the scalar SciPy calculation to 2.22e−16. Two CPU timings showed 90× and 91× speedups for this rank calculation.",
     "evidence": "equation",
     "next_check": "Repeat the write-weighted attention profile across corpora and context lengths.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -1882,7 +1882,7 @@
   "geometry_prediction_alignment": {
     "evidence": "equation",
     "next_check": "Test incremental prediction beyond next-token likelihood on held-out labs.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Supplied logits anchor the margin mean and spread. A model’s own next-token ranking is used. Treat shared readout signal with likelihood baselines explicitly.",
     "selectors": [
       "tests/tasks/parity/test_prediction_alignment_values.py"
@@ -1908,7 +1908,7 @@
   "geometry_predictive_information": {
     "evidence": "release",
     "next_check": "Vary ridge strength and batches and test held-out information estimates.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "InfoRidge@2cde643 utils / analyze_batch, via evaluate() 1e-3. Ridge-based information estimates use the configured batches and readout. Label-free predictive information about activations is distinct from benchmark prediction.",
     "selectors": [
       "tests/tasks/parity/test_predictive_information_parity.py"
@@ -1930,7 +1930,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "required_stacks": [
       "5.2.0",
       "5.10.2",
@@ -2088,7 +2088,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "token_geometry@0214897 extract_id.py pipeline + DADApy GRIDE: profile and Pearson 1e-9 (fp64), 1e-4 (fp32), via evaluate(). The release’s single-prompt GRIDE and surprisal association are checked. Token count and tokenizer determine each cloud.",
     "selectors": [
       "tests/tasks/parity/test_prompt_id_parity.py"
@@ -2098,7 +2098,7 @@
   "geometry_readout_dual_spectrum": {
     "evidence": "equation",
     "next_check": "Seed and item reliability on the zoo, the lineage share of D_J and coherence against their Euclidean twins (memo P1-P3), and iso-loss agreement on checkpoints (P4).",
-    "receipt": "",
+    "receipt": "2026-11-21-v026",
     "scope": "BLME construct. D_J equals half the mean pairwise Jeffreys divergence computed directly, for affine, scaled and soft-capped heads. The dual spectrum is invariant to an affine re-basing of the read state, with bias, rotation, log-normal gains, offset and wider width, to 1e-10 through evaluate() on float64 models. Streamed sink removal matches a brute-force computation. Random initialisation gives coherence near 1.",
     "selectors": [
       "tests/tasks/test_readout_dual_spectrum.py",
@@ -2118,7 +2118,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "rep_dispersion@dae432d (side-installed) run end to end: exact equality. Released readout is exercised end to end on tested inputs. Fixed token chunks need not contain equal amounts of text across tokenizers.",
     "selectors": [
       "tests/tasks/parity/test_dispersion_parity.py"
@@ -2128,7 +2128,7 @@
   "geometry_representation_sensitivity": {
     "evidence": "equation",
     "next_check": "Check the local linear approximation against actual perturbations over several radii.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The normalized true-next-token log-probability gradient agrees with autograd for affine and tanh-softcapped heads. The head reconstruction and final-norm gain checks determine whether a checkpoint can be scored.",
     "selectors": [
       "tests/tasks/parity/test_representation_sensitivity_s_unit_values.py",
@@ -2150,7 +2150,7 @@
   "geometry_rogue_dimensions": {
     "evidence": "release",
     "next_check": "Repeat the GPT-2 profile with independent samples and report sampling variation.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "rogue-dimensions@84f4009 notebook cos_contrib over every pair 1e-12; exact all-pairs CC replaces the 500k-pair Monte Carlo. Exact all-pair coordinate contributions replace sampled pairs. A GPT-2 Table 4 check exists. Coordinate changes can change this statistic.",
     "selectors": [
       "tests/tasks/parity/test_rogue_dimensions_parity.py"
@@ -2160,7 +2160,7 @@
   "geometry_rsa": {
     "evidence": "independent",
     "next_check": "Repeat with alternative representational distances and independent documents.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Live rsatoolbox verifies correlation-distance RDMs on the task’s token subsample. Layer comparisons then correlate the RDMs. Corpus and chosen dissimilarity still set the question.",
     "selectors": [
       "tests/tasks/parity/test_rsa_corrdist_parity.py",
@@ -2187,7 +2187,7 @@
   "geometry_schatten": {
     "evidence": "equation",
     "next_check": "Vary sequence length and verify that each normalization retains its stated interpretation.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Known singular spectra and the paper’s sequence-length normalization are asserted. This run anchors the formulas. The three statistics use different singular-value weightings.",
     "selectors": [
       "tests/tasks/test_reference_parity_formulas.py::test_schatten_and_rankme*",
@@ -2231,7 +2231,7 @@
   "geometry_spectral": {
     "evidence": "release",
     "next_check": "Compare exponent estimates across fit windows and alternative tail estimators.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "WeightWatcher checks the Clauset-based weighted exponent on common matrices. Alternative Hill fits and choices of xmin are different estimators.",
     "selectors": [
       "tests/tasks/parity/test_spectral_sharpness_values.py::test_avg_alpha_hat*",
@@ -2284,7 +2284,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Spectral_Signature@d04eacd: names + alphas 1e-12. Matrix selection and fused-QKV/packed-expert splitting inherit release conventions. Compare supported architectures explicitly.",
     "selectors": [
       "tests/tasks/parity/test_spectral_signature_parity.py"
@@ -2294,7 +2294,7 @@
   "geometry_superposition_strength": {
     "evidence": "release",
     "next_check": "Test the connection between geometric packing and independently identified semantic features.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Original overlap loop and a Welch-bound anchor, including the Pythia-70M unembedding. This quantifies geometric packing of output rows. Semantic feature superposition is a broader interpretation.",
     "selectors": [
       "tests/tasks/parity/test_superposition_strength_values.py",
@@ -2349,7 +2349,7 @@
   "geometry_svd": {
     "evidence": "release",
     "next_check": "Repeat the GPT-2 profile and SVD summaries across independent token samples.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The authors’ estimator and released GPT-2 anisotropy profile are compared, with sampling tolerance. Effective rank and participation ratio have separate formula anchors.",
     "selectors": [
       "tests/tasks/parity/test_svd_ethayarajh_release_parity.py",
@@ -2406,7 +2406,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Fertility uses whitespace word counts on the supplied corpus. A language’s segmentation conventions affect the denominator.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_geometry_tokenizer_efficiency*"
@@ -2416,7 +2416,7 @@
   "geometry_trajectory_curvature": {
     "evidence": "fixture",
     "next_check": "Compare tokenization and sentence-length matched estimates on fresh sentences.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "A transcription and analytic turning paths test mean angles and per-sentence aggregation. Tokenization and sentence lengths affect a pooled LM comparison.",
     "selectors": [
       "tests/tasks/parity/test_trajectory_curvature_parity.py",
@@ -2454,7 +2454,7 @@
   "geometry_unembedding": {
     "evidence": "equation",
     "next_check": "Check sensitivity to row selection, centering and width on held-out checkpoints.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Independent spectral recomputation pins raw and centered unembedding statistics on emittable rows. These describe the output matrix.",
     "selectors": [
       "tests/tasks/parity/test_unembedding_values.py"
@@ -2480,7 +2480,7 @@
   "geometry_vendi_score": {
     "evidence": "release",
     "next_check": "Test redundancy with matrix entropy on identical rows, normalization and kernels.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The released Vendi score_K and score_X agree for the tested kernels. With normalized rows and a linear kernel it is the exponential of a matrix entropy, so those metrics are related.",
     "selectors": [
       "tests/tasks/parity/test_vendi_parity.py",
@@ -2525,7 +2525,7 @@
   "geometry_weight_norms": {
     "evidence": "release",
     "next_check": "Verify that matrix populations and per-block aggregation match across dense and MoE families.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "WeightWatcher norm metrics are compared on the task’s selected matrices. Per-block aggregation and MoE matrix populations are separate choices.",
     "selectors": [
       "tests/tasks/parity/test_weight_norms_ww_parity.py"
@@ -2595,7 +2595,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "WeightWatcher@a5940f7 (clone): every function and per-matrix column exact. Released and numerically stabilized variants can diverge on underflow. Name the variant and report matrix exclusions.",
     "selectors": [
       "tests/tasks/parity/test_ww_randomized_parity.py"
@@ -2605,7 +2605,7 @@
   "geometry_zipfian_symmetry": {
     "evidence": "release",
     "next_check": "Repeat with independent frequency tables and tokenizer-matched vocabularies.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "zipfian-whitening@fa44d29 scores ≤8e-9 (the release's log d is float32). The estimator and source frequency weighting agree on common inputs. The corpus used for unigram frequencies matters.",
     "selectors": [
       "tests/tasks/parity/test_zipfian_symmetry_parity.py"
@@ -2615,7 +2615,7 @@
   "interpretability_activation_kurtosis": {
     "evidence": "independent",
     "next_check": "Evaluate whether measured kurtosis predicts an actual quantization error at fixed bit width.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Fisher excess kurtosis is checked with SciPy. Heavy tails alone do not demonstrate a quantization performance penalty.",
     "selectors": [
       "tests/tasks/parity/test_activation_kurtosis_parity.py"
@@ -2625,7 +2625,7 @@
   "interpretability_activation_sinks": {
     "evidence": "equation",
     "next_check": "Vary sequence length and position and evaluate each of the three readouts separately.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Toy anchors cover sink mass, massive activations and readout summaries. A shared forward pass does not make these three constructs interchangeable.",
     "selectors": [
       "tests/tasks/test_activation_sinks_task.py",
@@ -2636,7 +2636,7 @@
   "interpretability_attention_effective_rank": {
     "evidence": "equation",
     "next_check": "Compare aggregate rank with per-head interventions on identical sequences.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Measures SVD entropy of the combined attention output over tokens. This aggregate readout cannot resolve individual heads’ functions.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_effective_rank*"
@@ -2646,7 +2646,7 @@
   "interpretability_attention_entropy": {
     "evidence": "independent",
     "next_check": "Stratify by causal position and attainable support on fresh passages.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Per-row Shannon entropy is tested against known distributions and an independent entropy calculation. The allowed support varies by causal position.",
     "selectors": [
       "tests/tasks/test_reference_parity_formulas.py::test_attention_entropy*"
@@ -2656,7 +2656,7 @@
   "interpretability_attention_graph": {
     "evidence": "independent",
     "next_check": "Test PageRank sensitivity to edge construction, aggregation and document sample.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "PageRank on an attention graph agrees with NetworkX. Across-layer attention rollout is a different operation and has a separate task.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_attention_graph*",
@@ -2667,7 +2667,7 @@
   "interpretability_attention_rank": {
     "evidence": "equation",
     "next_check": "Compare rank with the causal performance effect of removing the same heads.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Known singular values anchor per-head effective rank. Inferring functional redundancy from matrix rank requires intervention.",
     "selectors": [
       "tests/tasks/parity/test_attention_rank_parity.py",
@@ -2678,7 +2678,7 @@
   "interpretability_attention_rollout": {
     "evidence": "fixture",
     "next_check": "Compare rollout with controlled contribution or intervention measurements.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The released residual-augmented matrix product is transcribed and anchored. Attention-derived paths do not on their own establish causal contribution.",
     "selectors": [
       "tests/tasks/parity/test_attention_rollout_parity.py"
@@ -2688,7 +2688,7 @@
   "interpretability_attribution": {
     "evidence": "independent",
     "next_check": "Repeat across attribution targets and baselines with perturbation controls.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Captum InputXGradient agrees on shared inputs for BLME’s next-token CE target. Changing target or attribution baseline changes the interpretation.",
     "selectors": [
       "tests/tasks/parity/test_attribution_parity.py"
@@ -2698,7 +2698,7 @@
   "interpretability_head_roles": {
     "evidence": "fixture",
     "next_check": "Validate each assigned head role with a task-specific fixture and intervention.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The previous-token stripe matches recorded TransformerLens scores. Duplicate-token and other assigned roles have different levels of evidence.",
     "selectors": [
       "tests/tasks/parity/test_head_roles_parity.py"
@@ -2724,7 +2724,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "inactive-heads@9dd884c HONOR scores ≤3.6e-7, masks identical, via evaluate(). Output-norm masks match at the release’s chosen threshold. Functional redundancy would also require an intervention.",
     "selectors": [
       "tests/tasks/parity/test_inactive_heads_parity.py"
@@ -2734,7 +2734,7 @@
   "interpretability_induction_heads": {
     "evidence": "fixture",
     "next_check": "Intervene on stripe-selected heads and compare with induction behaviour on held-out sequences.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The prefix-matching stripe on repeated sequences has a TransformerLens fixture and a formula check. Each reported auxiliary readout needs its own interpretation.",
     "selectors": [
       "tests/tasks/parity/test_induction_heads_parity.py"
@@ -2744,7 +2744,7 @@
   "interpretability_logit_lens": {
     "evidence": "fixture",
     "next_check": "Compare layer readouts across decoding conventions and held-out prompts.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "A transcribed tuned-lens library readout and recorded fixture check the untrained lens. Equality at the last layer is an additional analytic anchor.",
     "selectors": [
       "tests/tasks/parity/test_logit_lens_parity.py"
@@ -2777,7 +2777,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "model-human-processing@69e405c lens and summaries; KL ≤3e-8 via evaluate(). Release agreement on matched decoding plus an explicit final-logit softcap correction on affected architectures.",
     "selectors": [
       "tests/tasks/parity/test_logit_lens_kl_parity.py"
@@ -2787,7 +2787,7 @@
   "interpretability_prediction_entropy": {
     "evidence": "equation",
     "next_check": "Compare with realised accuracy and calibration on independent outcomes.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Shannon entropy measures dispersion of the predictive distribution. Calibration also needs observed outcomes.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_prediction_entropy*"
@@ -2797,7 +2797,7 @@
   "interpretability_probing": {
     "evidence": "independent",
     "next_check": "Repeat with held-out token identities and control labels.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "An independent linear probe reproduces the tested classification pipeline. Decodability depends on split, label set and controls for token identity.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_probing*"
@@ -2807,7 +2807,7 @@
   "interpretability_sae_features": {
     "evidence": "fixture",
     "next_check": "Check layer coverage and reconstruction quality for each SAE and model pair.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "A recorded SAELens comparison anchors sparsity/density computations. Interpretation depends on which pretrained SAE, layer and tokenizer actually cover a model.",
     "selectors": [
       "tests/tasks/parity/test_sae_features_parity.py"
@@ -2817,7 +2817,7 @@
   "interpretability_sparsity": {
     "evidence": "equation",
     "next_check": "Test whether measured activity predicts actual compute savings at fixed quality.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "An independent count and kurtosis calculation check measured MLP activity. Conditional inference speedups require a separate experiment.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_sparsity*"
@@ -2827,7 +2827,7 @@
   "interpretability_superposition": {
     "evidence": "proxy",
     "next_check": "Compare the proxy with labelled semantic features and controlled interventions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Activation multimodality and correlation are descriptive proxies. Independent semantic feature labels or interventions would be needed for a polysemanticity claim.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_superposition*"
@@ -2837,7 +2837,7 @@
   "interpretability_waa": {
     "evidence": "proxy",
     "next_check": "Evaluate invariant subspaces at tied spectra and compare alignment with causal interventions.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Compares weight singular vectors with activation PCA. Near-tied spectra can make individual bases non-identifiable. Direct causal evidence is outstanding.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_interpretability_waa*"
@@ -2847,7 +2847,7 @@
   "repe_concept_separability": {
     "evidence": "release",
     "next_check": "Repeat with unseen concepts, prompt templates and matched negative pairs.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The released PCA reader and held-out direction/choice checks cover a reading vector. What counts as a concept depends on the positive and negative pairs.",
     "selectors": [
       "tests/tasks/parity/test_repe_concept_separability_lat_parity.py",
@@ -2881,7 +2881,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Released direction selection and prompt format are checked in the tested cases. A direction on a dataset does not establish universal behaviour across prompts or models.",
     "selectors": [
       "tests/tasks/parity/test_repe_refusal_direction_arditi_parity.py",
@@ -2892,7 +2892,7 @@
   "repe_steering_effectiveness": {
     "evidence": "proxy",
     "next_check": "Evaluate held-out behavioural targets and side effects over intervention strengths.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Checks the intervention/readout used by BLME. The study’s summary and control prompts determine the scope of its behavioural claim.",
     "selectors": [
       "tests/tasks/test_comprehensive_parity.py::test_repe_steering_effectiveness*",
@@ -2926,7 +2926,7 @@
         ]
       }
     },
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "The tested object is a difference-of-means activation direction with study-specific norm/consensus summaries. Other papers use function vectors or parameter-space task vectors.",
     "selectors": [
       "tests/tasks/parity/test_repe_task_vectors_parity.py"
@@ -2936,7 +2936,7 @@
   "topology_betti_curve": {
     "evidence": "equation",
     "next_check": "Compare the Julia implementation and repeat across point budgets.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Analytic and independently computed Betti-curve summaries support the statistic. The original Julia comparison and the adequacy of the study’s point budget are separate checks.",
     "selectors": [
       "tests/test_replacement_candidates.py::test_betti_1_curve_mean*",
@@ -2958,7 +2958,7 @@
   "topology_homology": {
     "evidence": "independent",
     "next_check": "Check sampling convergence across filtrations and treatment of infinite bars.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Rips persistence and headline summaries agree with GUDHI on the test clouds. Filtration, distances, sampling and treatment of infinite bars specify the result.",
     "selectors": [
       "tests/tasks/parity/test_homology_entropy_gudhi_parity.py::test_homology_evaluate*",
@@ -3055,7 +3055,7 @@
   "topology_persistence_entropy": {
     "evidence": "independent",
     "next_check": "Run the giotto-tda release on identical diagrams and vary the point budget.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Shannon entropy of finite lifetimes is cross-checked with independent topology and entropy implementations. A release-to-release giotto-tda run was not part of this audit.",
     "selectors": [
       "tests/tasks/parity/test_homology_entropy_gudhi_parity.py::test_persistence_entropy*",
@@ -3111,7 +3111,7 @@
   "topology_persistence_landscape": {
     "evidence": "independent",
     "next_check": "Measure precision on independent point draws beyond the 50-point study setting.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Exact persim landscapes and analytic tent areas agree on fixtures. Number of points, filtration truncation and integration conventions govern the experimental values.",
     "selectors": [
       "tests/tasks/parity/test_persistence_landscape_values.py",
@@ -3196,7 +3196,7 @@
   "topology_zigzag_persistence": {
     "evidence": "release",
     "next_check": "Repeat barcode construction across larger point budgets than the study's 40.",
-    "receipt": "2026-11-21-v025",
+    "receipt": "2026-11-21-v026",
     "scope": "Release postprocessing runs on raw pairs. The barcode construction is checked against a transcription and independent topology calculations. The study’s default small cloud needs reliability testing.",
     "selectors": [
       "tests/tasks/parity/test_zigzag_scalars_release.py",

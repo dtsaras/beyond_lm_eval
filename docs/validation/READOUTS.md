@@ -223,6 +223,9 @@ Each declared key or template outside the frozen study set appears here. A task-
 | `causality_layer_skip.skip_output_effect_total` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `consistency_icl_score.icl_score` [1](../../tests/tasks/test_icl_score.py) | analytic | 2/2 | 2/2 | 2/2 | 2/2 | Brute-force next-token cross-entropy at the selected token or byte-anchored positions. |
 | `consistency_icl_score.icl_score_byte_anchored` [1](../../tests/tasks/test_icl_score.py) | analytic | 2/2 | 2/2 | 2/2 | 2/2 | Brute-force next-token cross-entropy at the selected token or byte-anchored positions. |
+| `dynamics_context_influence.influence_decay_exponent` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `dynamics_context_influence.influence_far_mass` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `dynamics_context_influence.influence_horizon_bytes` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `dynamics_entropy_calibration.entropy_calibration_error` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `dynamics_entropy_calibration.entropy_calibration_ratio` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `dynamics_sharpness.baseline_loss` | Task-level only | — | — | — | — | Key-specific comparison pending. |
@@ -269,6 +272,12 @@ Each declared key or template outside the frozen study set appears here. A task-
 | `geometry_procrustes_linearity.procrustes_linearity_heldout_r2_mean` [1](../../tests/tasks/test_metric_repairs.py) [2](../../tests/tasks/parity/test_procrustes_heldout_rank.py) | independent formula and end-to-end controls | 26/26 | 26/26 | 26/26 | 26/26 | An inner document split selects each truncated-SVD cutoff above the float32 covariance floor. Independent NumPy fits check learned ranks, null directions, repeated rows and refitting on all outer training documents. Changing the outer targets leaves the selected ranks unchanged. Grouped-document public evaluations check native and NumPy parent IDs. A separate 100-passage study replay on Transformers 5.23.0 verified both splits against the original articles through the sweep and repair CLIs. The opt-in float64 Gram solver is compared with direct SVD on tall, wide, weak-rank and repeated-row inputs and two GPU checkpoint replays. |
 | `geometry_prompt_id.prompt_id_last_layer` [1](../../tests/tasks/parity/test_prompt_id_parity.py) | reference | 2/2 | 2/2 | 2/2 | 2/2 | The endpoint or maximum of the released per-prompt GRIDE profile on matched inputs. |
 | `geometry_prompt_id.prompt_id_peak` [1](../../tests/tasks/parity/test_prompt_id_parity.py) | reference | 2/2 | 2/2 | 2/2 | 2/2 | The endpoint or maximum of the released per-prompt GRIDE profile on matched inputs. |
+| `geometry_readout_dual_spectrum.dual_coherence` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `geometry_readout_dual_spectrum.dual_coupling` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `geometry_readout_dual_spectrum.dual_effective_rank` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `geometry_readout_dual_spectrum.dual_effective_rank_frac` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `geometry_readout_dual_spectrum.dual_tail_exponent` | Task-level only | — | — | — | — | Key-specific comparison pending. |
+| `geometry_readout_dual_spectrum.jeffreys_dispersion` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `geometry_representation_dispersion.representation_dispersion` [1](../../tests/tasks/parity/test_dispersion_parity.py) | reference | 1/1 | 1/1 | 1/1 | 1/1 | Exact scalar agreement with the released evaluation on the same samples. |
 | `geometry_rogue_dimensions.rogue_top1_share_last` | Task-level only | — | — | — | — | Key-specific comparison pending. |
 | `geometry_rogue_dimensions.rogue_top1_share_max` | Task-level only | — | — | — | — | Key-specific comparison pending. |
