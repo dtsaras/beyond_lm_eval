@@ -120,6 +120,10 @@ NOT_STATE_DRIVABLE: Dict[str, str] = {
         "dynamics_stability", "dynamics_entropy_calibration",
     )},
     "geometry_tokenizer_efficiency": "measures the tokenizer, not hidden states",
+    "geometry_readout_dual_spectrum": (
+        "captures the head's input and recomputes the head in its own forward passes; "
+        "the cache holds neither the head input nor the logits per passage"),
+    "dynamics_context_influence": "measures the change of predictions under token replacement",
 }
 # Every other registered task (consistency_*, causality_*, the remaining
 # interpretability_*) tokenises prompts and runs the model itself.

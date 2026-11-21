@@ -9,3 +9,5 @@ from .fractal import FractalLikelihoodTask
 from .perturbation_growth import PerturbationGrowthTask
 # 2026-11 additions (missed-metrics surveys, beyond_benchmarks docs/2026-11-01-*)
 from .entropy_calibration import EntropyCalibrationTask
+# Exploratory additions (2026-11-21 research memo, section 4: M2)
+from .context_influence import ContextInfluenceTask

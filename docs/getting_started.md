@@ -79,14 +79,14 @@ print(results["results"]["geometry_svd"]["effective_rank"])
 
 ## Module Overview
 
-BLME organizes **109 diagnostic tasks** across 7 categories:
+BLME organizes **111 diagnostic tasks** across 7 categories:
 
-- **[Geometry](tasks_geometry.md)** (52 tasks): Manifold structure — isotropy, intrinsic dimension (Two-NN, LID, PHD), CKA/CKNNA, Schatten/MNN spectra, collapse, Lipschitz constants, trajectory curvature, Vendi score, metric magnitude, Procrustes layer-linearity, superposition strength, effective depth
+- **[Geometry](tasks_geometry.md)** (53 tasks): Manifold structure — isotropy, intrinsic dimension (Two-NN, LID, PHD), CKA/CKNNA, Schatten/MNN spectra, collapse, Lipschitz constants, trajectory curvature, Vendi score, metric magnitude, Procrustes layer-linearity, superposition strength, effective depth, readout dual spectrum
 - **[Interpretability](tasks_interpretability.md)** (19 tasks): Internal mechanisms — logit lens, attention entropy/rollout, activation sinks/kurtosis, probing, sparsity, superposition index
 - **[Topology](tasks_topology.md)** (5 tasks): Manifold shape — persistent homology, Betti curves, persistence entropy/landscapes, zigzag persistence
 - **[Causality](tasks_causality.md)** (7 tasks): Information flow — causal tracing, ablation robustness, attention knockout, circuit quality, layer skip
 - **[Consistency](tasks_consistency.md)** (13 tasks): Output reliability — calibration, paraphrase invariance, logical consistency, contamination detection, ICL slope and score
-- **[Dynamics](tasks_dynamics.md)** (9 tasks): Temporal behavior — stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood structure, layer perturbation growth
+- **[Dynamics](tasks_dynamics.md)** (10 tasks): Temporal behavior — stability, interpolation, chain-of-embedding, generation diversity, fractal likelihood structure, layer perturbation growth, context influence
 - **[Representation Engineering](tasks_representation_engineering.md)** (4 tasks): Concept encoding — task vectors, concept separability, steering effectiveness, refusal direction
 
 ## Shared Cache
